@@ -23,6 +23,31 @@
       "reason": "completed"
     }
   ],
+  "evidence": {
+    "execution_id": "run-root-transcript",
+    "flight_recording": null,
+    "gaps": [],
+    "schema_version": 1,
+    "trace_spans": [
+      {
+        "duration_ms": 3000,
+        "kind": "llm_call",
+        "links": [],
+        "metadata": {
+          "cost_usd": 0.02,
+          "input_tokens": 12,
+          "model": "fixture-model",
+          "output_tokens": 8,
+          "provider": "fixture-provider"
+        },
+        "name": "fixture completion",
+        "parent_span_id": null,
+        "span_id": 0,
+        "start_ms": 0,
+        "trace_id": ""
+      }
+    ]
+  },
   "failure": null,
   "metadata": {
     "artifact_count": 1,
@@ -49,8 +74,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:86573296d365741b784f5dcf31a79a60426ab3d09238cd9873fd0cd73c3d2437",
-    "projection_id": "run_view:run_root_transcript:86573296d365"
+    "projection_hash": "sha256:a1b0c526ba2e87938931f3fc3d8e0bbc9fd93501a7ac64d1bd7766cfebd77860",
+    "projection_id": "run_view:run_root_transcript:a1b0c526ba2e"
   },
   "providers": [
     {

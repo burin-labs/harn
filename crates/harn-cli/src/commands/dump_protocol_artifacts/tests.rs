@@ -1037,6 +1037,14 @@ fn acp_prompt_error_schema_matches_runtime_terminal_classes() {
         schema["$defs"]["AgentTerminalOutcome"]["properties"]["owner"]["enum"],
         json!(agent_terminal_owner_values())
     );
+    assert_eq!(
+        schema["$defs"]["AgentTerminalOutcome"]["properties"]["message"]["type"],
+        "string"
+    );
+    assert_eq!(
+        schema["$defs"]["AgentTerminalOutcome"]["properties"]["detail"]["type"],
+        "string"
+    );
 }
 
 #[test]

@@ -28,7 +28,7 @@ type HarnJsonEnvelope = {ok: bool, data?: any}
 // Pinned digest in the docs page — bump both together if the canonical
 // graph encoding intentionally changes.
 const EXPECTED_MIN_DIGEST =
-  "sha256:05f87e11ced69db8f8806608b5c0a99aa4451932ce5fae623ae53f01aa214c2c"
+  "sha256:4eccd4902bd587b1bc0f9a6d03b699ba0c957917b3e4069a009d769f0f059782"
 
 /**
  * Navigate a dotted JSON path with optional `[idx]` suffixes (the shape

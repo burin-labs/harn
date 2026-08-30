@@ -55,13 +55,20 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:9286ca0f82e2c1a34391c3860ed3c452c418e0d08d7868364d06f44f96470fe7",
-    "projection_id": "session_view:session_lineage:9286ca0f82e2"
+    "projection_hash": "sha256:5e3a64ebccbc835d367d5152010a8d8a7943ad8e8e05360b8f9c49d6de53cb53",
+    "projection_id": "session_view:session_lineage:5e3a64ebccbc"
   },
   "runs": [
     {
       "artifacts": [],
       "checkpoints": [],
+      "evidence": {
+        "execution_id": null,
+        "flight_recording": null,
+        "gaps": [],
+        "schema_version": 0,
+        "trace_spans": []
+      },
       "failure": null,
       "metadata": {
         "artifact_count": 0,
@@ -98,8 +105,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:4eec19ec770f81fe1ad7f57bf8967f2267fed1848a811cc4168b66ff641222be",
-        "projection_id": "run_view:run_lineage_root:4eec19ec770f"
+        "projection_hash": "sha256:67e1b015c86701e5503238e3cf435dfeb4cda4db78cc3cb244c4f34230c3bb92",
+        "projection_id": "run_view:run_lineage_root:67e1b015c867"
       },
       "providers": [],
       "run": {
@@ -186,6 +193,13 @@
     {
       "artifacts": [],
       "checkpoints": [],
+      "evidence": {
+        "execution_id": null,
+        "flight_recording": null,
+        "gaps": [],
+        "schema_version": 0,
+        "trace_spans": []
+      },
       "failure": {
         "message": "{\"code\":\"fixture_error\",\"message\":\"fixture validation failed\"}",
         "node_id": "child_check",
@@ -218,8 +232,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:b4657830480a2b1fbec035a8dc8d772c694c610ec505313c7b9fcbb91ced6087",
-        "projection_id": "run_view:run_lineage_child:b4657830480a"
+        "projection_hash": "sha256:0c188319e01349ed1f9215b88bdc62d489e403d5ff78c5398dfde345d3ffc5ff",
+        "projection_id": "run_view:run_lineage_child:0c188319e013"
       },
       "providers": [],
       "run": {

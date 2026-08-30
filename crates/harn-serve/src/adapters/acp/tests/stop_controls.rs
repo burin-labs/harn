@@ -488,7 +488,7 @@ pipeline default(harness: Harness, task: unknown) {{
 /// otherwise every background spawn dies with "guardian exited before payload
 /// startup" and the kill test below would fail for a reason that has nothing to
 /// do with cancel.
-#[cfg(feature = "hostlib")]
+#[cfg(all(feature = "hostlib", unix))]
 #[test]
 fn stop_controls_owner_death_guardian_fixture() {
     if !harn_hostlib::process::owner_death::guardian_requested() {
@@ -508,7 +508,7 @@ fn stop_controls_owner_death_guardian_fixture() {
 ///
 /// The second session is the scope control: without it this test would pass
 /// just as happily if a cancel killed every background child on the host.
-#[cfg(feature = "hostlib")]
+#[cfg(all(feature = "hostlib", unix))]
 #[test]
 fn accepted_cancel_kills_only_the_cancelled_sessions_background_children() {
     use std::collections::BTreeMap;

@@ -62,7 +62,7 @@ impl ObservabilityGuard {
 
         #[cfg(feature = "otel")]
         {
-            if let Some(provider) = build_tracer_provider_from_env()? {
+            if let Some(provider) = build_tracer_provider_from_env("harn-orchestrator")? {
                 use opentelemetry::trace::TracerProvider as _;
 
                 let writer = log_writer(&config)?;
@@ -528,7 +528,8 @@ pub fn set_span_parent_from_headers(
 }
 
 #[cfg(feature = "otel")]
-fn build_tracer_provider_from_env(
+pub(crate) fn build_tracer_provider_from_env(
+    default_service_name: &str,
 ) -> Result<Option<opentelemetry_sdk::trace::SdkTracerProvider>, String> {
     use opentelemetry::global;
     use opentelemetry_otlp::{Protocol, WithExportConfig as _, WithHttpConfig as _};
@@ -537,21 +538,17 @@ fn build_tracer_provider_from_env(
     use opentelemetry_sdk::trace::{Sampler, SimpleSpanProcessor};
     use opentelemetry_sdk::Resource;
 
-    let Some(raw_endpoint) = std::env::var("HARN_OTEL_ENDPOINT")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(raw_endpoint) = otel_endpoint_from_env() else {
         return Ok(None);
     };
 
     let endpoint = normalize_otlp_traces_endpoint(&raw_endpoint);
-    let service_name = std::env::var("HARN_OTEL_SERVICE_NAME")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "harn-orchestrator".to_string());
-    let headers = parse_headers(&std::env::var("HARN_OTEL_HEADERS").unwrap_or_default());
+    let service_name = first_nonempty_env(&["HARN_OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"])
+        .unwrap_or_else(|| default_service_name.to_string());
+    let headers = parse_headers(
+        &first_nonempty_env(&["HARN_OTEL_HEADERS", "OTEL_EXPORTER_OTLP_HEADERS"])
+            .unwrap_or_default(),
+    );
     let processor_kind = parse_span_processor_kind(
         std::env::var("HARN_OTEL_SPAN_PROCESSOR")
             .ok()
@@ -596,6 +593,21 @@ fn build_tracer_provider_from_env(
     let provider = builder.build();
     global::set_tracer_provider(provider.clone());
     Ok(Some(provider))
+}
+
+#[cfg(feature = "otel")]
+pub(crate) fn otel_endpoint_from_env() -> Option<String> {
+    first_nonempty_env(&["HARN_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"])
+}
+
+#[cfg(feature = "otel")]
+fn first_nonempty_env(names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 #[cfg(feature = "otel")]

@@ -19,22 +19,16 @@
 //! never falls back to a default owner.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 thread_local! {
     static ACTIVE_EXECUTION_SCOPE_STACK: RefCell<Vec<Arc<str>>> = const { RefCell::new(Vec::new()) };
 }
 
-static SCOPE_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-/// Mint a fresh, process-unique, immutable execution-scope id. The `pid`
-/// prefix keeps ids from colliding across processes that share the (in-process)
-/// result store's namespace; the monotonic counter keeps them distinct within
-/// one process. Callers push the returned id via [`enter_execution_scope`].
+/// Mint a fresh, durable execution id. UUIDv7 keeps identifiers unique across
+/// processes and hosts while preserving useful creation-time ordering.
 pub fn mint_execution_scope() -> Arc<str> {
-    let n = SCOPE_COUNTER.fetch_add(1, Ordering::SeqCst);
-    Arc::from(format!("hxs-{:x}-{n}", std::process::id()).as_str())
+    Arc::from(format!("hxe-{}", uuid::Uuid::now_v7()))
 }
 
 /// RAII guard returned by [`enter_execution_scope`]. Popping the stack on drop

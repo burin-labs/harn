@@ -86,6 +86,14 @@ pub enum RunEvent {
         fallback_reason: Option<String>,
         artifact_decode_ms: u64,
     },
+    /// Durable evidence became readable for this execution. This is a
+    /// projection of the saved run record, not a second lifecycle owner.
+    EvidencePersisted {
+        execution_id: String,
+        run_record_path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
+    },
 }
 
 /// Receiver of [`RunEvent`]s. Implementations must be cheap (the VM
@@ -151,7 +159,8 @@ fn redact_run_event(mut event: RunEvent) -> RunEvent {
         RunEvent::Stdout { .. }
         | RunEvent::Stderr { .. }
         | RunEvent::PersonaStage { .. }
-        | RunEvent::PackRun { .. } => return event,
+        | RunEvent::PackRun { .. }
+        | RunEvent::EvidencePersisted { .. } => return event,
     };
     crate::redact::current_policy().redact_json_in_place(payload);
     event

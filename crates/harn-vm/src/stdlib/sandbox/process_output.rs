@@ -34,8 +34,13 @@ pub(super) fn apply_process_config(
     if let Some(proxy) = policy.and_then(|policy| policy.process_network_proxy) {
         apply_managed_proxy_env(command, proxy);
     }
-    if config.stdin_null {
-        command.stdin(Stdio::null());
+    match &config.stdin {
+        super::ProcessStdin::Null => {
+            command.stdin(Stdio::null());
+        }
+        super::ProcessStdin::Bytes(_) => {
+            command.stdin(Stdio::piped());
+        }
     }
 }
 
@@ -178,6 +183,17 @@ pub(crate) async fn windows_command_output(
         config
     };
     let config = super::sandboxed_process_config(&config, &policy)?;
+    // Captured before the move: the worker takes ownership of `program`,
+    // `args`, and `config`, and a refusal record built afterwards would not
+    // compile.
+    let refusal_command: Vec<String> = std::iter::once(program.to_string())
+        .chain(args.iter().cloned())
+        .collect();
+    let refusal_cwd = config
+        .cwd
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
     let output = tokio::task::spawn_blocking(move || {
         <super::ActiveBackend as super::SandboxBackend>::run_to_output(
             &program, &args, &config, &policy, profile,
@@ -187,7 +203,7 @@ pub(crate) async fn windows_command_output(
     .map_err(|error| {
         crate::value::VmError::Runtime(format!("Windows process worker failed: {error}"))
     })??;
-    if let Some(error) = super::process_violation_error(&output) {
+    if let Some(error) = super::process_violation_error(&output, &refusal_command, &refusal_cwd) {
         return Err(error);
     }
     Ok(output)

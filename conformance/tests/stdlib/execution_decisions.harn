@@ -1,0 +1,43 @@
+import { abstain, decision_commit, escalate, evidence_ref, proceed } from "std/execution"
+
+pipeline default(harness: Harness) {
+  const source = evidence_ref("source", "main.harn:4", {hash: "blake3:example"})
+  const accepted = decision_commit(
+    harness.channels,
+    proceed("route-1", "verified", [source]),
+    {scope: "session", session_id: "execution-decision-test"},
+  )
+  const replayed = decision_commit(
+    harness.channels,
+    escalate("route-1", "changed_on_replay", "operator"),
+    {scope: "session", session_id: "execution-decision-test"},
+  )
+  const incomplete = abstain("route-2", "missing_verification", ["test_receipt"])
+  const escalated = escalate("route-3", "approval_required", "release_manager", [source])
+  const unsupported = try {
+    proceed("route-4", "unsupported")
+    false
+  } catch (error) {
+    to_string(error).contains("requires at least one evidence ref")
+  }
+  const false_abstention = try {
+    abstain("route-5", "missing_unspecified", [])
+    false
+  } catch (error) {
+    to_string(error).contains("requires at least one missing evidence name")
+  }
+  harness.stdio.println(accepted.schema)
+  harness.stdio.println(accepted.decision.outcome)
+  harness.stdio.println(accepted.decision.evidence[0]?.ref ?? "missing")
+  harness.stdio.println(accepted.duplicate)
+  harness.stdio.println((accepted.execution_id ?? "").starts_with("hxe-"))
+  harness.stdio.println(replayed.duplicate)
+  harness.stdio.println(replayed.event_id == accepted.event_id)
+  harness.stdio.println(replayed.decision.outcome)
+  harness.stdio.println(incomplete.outcome)
+  harness.stdio.println(incomplete.missing[0])
+  harness.stdio.println(escalated.outcome)
+  harness.stdio.println(escalated.target)
+  harness.stdio.println(unsupported)
+  harness.stdio.println(false_abstention)
+}

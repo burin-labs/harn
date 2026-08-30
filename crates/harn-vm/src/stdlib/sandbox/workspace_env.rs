@@ -94,8 +94,28 @@ fn workspace_toolchain_env_with_package_cache(
         inherited_workspace_cache_path(policy, key)
             .unwrap_or_else(|| root.join(suffix).display().to_string())
     };
+    // HOME and PYTHONUSERBASE are deliberately NOT relocated.
+    //
+    // Relocating them was hermetic but wrong for an agent: it moved the user's
+    // installed toolchain out from under every command the agent ran. A
+    // `pip install --user` package lives at `$HOME/.local/lib/...` and is found
+    // through `site.getusersitepackages()`, which follows PYTHONUSERBASE — so
+    // with both moved, `python3 -m pytest` reported "No module named pytest"
+    // for a pytest that was installed, readable, and working in the user's own
+    // terminal. Nothing was refused; the interpreter simply never looked. The
+    // agent had no way to learn that, and retried the same command twenty
+    // times.
+    //
+    // The rule is that the agent should see what works in the user's terminal.
+    // PURE CACHES stay relocated below — those are derived, reproducible, and
+    // writable, so confining them keeps a run from polluting the user's real
+    // caches without hiding anything the user installed. Identity and install
+    // roots do not move.
+    //
+    // Read confinement of `$HOME` is a separate axis and still applies: the
+    // credential denylist (`ProcessSandboxPolicy::read_deny_roots`) refuses
+    // `~/.ssh`, `~/.aws`, and friends whether or not HOME points there.
     let mut env = vec![
-        ("HOME".to_string(), root.display().to_string()),
         (
             "XDG_CACHE_HOME".to_string(),
             root.join("xdg-cache").display().to_string(),
@@ -118,9 +138,15 @@ fn workspace_toolchain_env_with_package_cache(
             path("YARN_CACHE_FOLDER", "yarn"),
         ),
         ("PNPM_HOME".to_string(), path("PNPM_HOME", "pnpm/home")),
+        // ccache is a pure cache like the rest, but its TEMPDIR is the one that
+        // actually breaks builds: it defaults to XDG_RUNTIME_DIR
+        // (`/run/user/<uid>`), which no workspace write root covers, so a cgo
+        // build fails "Permission denied" before compiling anything. Both are
+        // relocated for the same reason the other caches are.
+        ("CCACHE_DIR".to_string(), path("CCACHE_DIR", "ccache")),
         (
-            "PYTHONUSERBASE".to_string(),
-            root.join("python-user").display().to_string(),
+            "CCACHE_TEMPDIR".to_string(),
+            path("CCACHE_TEMPDIR", "ccache-tmp"),
         ),
     ];
 
@@ -134,9 +160,9 @@ fn workspace_toolchain_env_with_package_cache(
         ));
     }
 
-    // HOME is intentionally relocated, but immutable user toolchains and
-    // package-manager configuration still resolve through their existing
-    // process-only preset roots. Cargo's mutable registry/git cache already
+    // HOME is no longer relocated (see above), but these keys are still set
+    // explicitly so a child that inherits a relocated-looking environment from
+    // an outer harness still resolves the user's real toolchains. Cargo's mutable registry/git cache already
     // has the narrowly scoped write grants added in #5170; keeping CARGO_HOME
     // there also preserves private-registry configuration without copying
     // credentials into the workspace.
@@ -227,8 +253,9 @@ mod tests {
         let workspace = workspace.path().canonicalize().unwrap();
         let cache = workspace.join(WORKSPACE_TOOLCHAIN_CACHE_NAME);
         let tmp = workspace.join(WORKSPACE_TMPDIR_NAME);
+        // PURE CACHES relocate. These are derived and reproducible, so
+        // confining them keeps a run from polluting the user's real caches.
         for key in [
-            "HOME",
             "XDG_CACHE_HOME",
             "GOCACHE",
             "GOMODCACHE",
@@ -239,10 +266,24 @@ mod tests {
             "NPM_CONFIG_CACHE",
             "YARN_CACHE_FOLDER",
             "PNPM_HOME",
-            "PYTHONUSERBASE",
+            "CCACHE_DIR",
+            "CCACHE_TEMPDIR",
         ] {
             let value = PathBuf::from(env.get(key).unwrap());
             assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");
+        }
+        // IDENTITY AND INSTALL ROOTS DO NOT. Relocating these moved the user's
+        // installed toolchain out from under the agent: a `pip install --user`
+        // package lives under $HOME and is found through PYTHONUSERBASE, so
+        // moving both made `python3 -m pytest` report "No module named pytest"
+        // for a pytest that worked in the user's own terminal. Nothing was
+        // refused; the interpreter never looked. The agent should see what the
+        // user's terminal sees.
+        for key in ["HOME", "PYTHONUSERBASE"] {
+            assert!(
+                !env.contains_key(key),
+                "{key} must NOT be relocated; the child inherits the real one"
+            );
         }
         assert!(
             !env.contains_key("NPM_CONFIG_STORE_DIR"),

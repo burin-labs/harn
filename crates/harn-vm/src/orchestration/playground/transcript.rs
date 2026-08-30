@@ -44,6 +44,7 @@ pub fn synthesize_sweep(
         index,
         emitted_at_ms: at,
         frame_depth: Some(0),
+        execution_id: None,
         event,
     };
 

@@ -4,28 +4,69 @@ Harn persists the projections it computes while an agent runs. Observability
 consumers should read these fields instead of parsing assistant text or
 reconstructing spans from cumulative usage totals.
 
-## Span tree
+## Execution evidence
 
-Workflow run records expose completed spans in `trace_spans`. Each span has a
-stable `span_id` and optional `parent_span_id`; joining those fields produces
-the authoritative tree. LLM spans also expose `ttft_ms` when Harn observed a
-first response token.
+Each run record carries one `evidence` object:
 
 ```json
 {
-  "trace_spans": [
-    {
-      "trace_id": "trace_...",
-      "span_id": 8,
-      "parent_span_id": 3,
-      "kind": "llm_call",
-      "name": "llm_call",
-      "start_ms": 120,
-      "duration_ms": 900,
-      "ttft_ms": 125,
-      "metadata": {}
-    }
-  ]
+  "evidence": {
+    "schema_version": 1,
+    "execution_id": "hxe-0199...",
+    "trace_spans": [],
+    "flight_recording": null,
+    "gaps": []
+  }
+}
+```
+
+`execution_id` is the owner used by the run record, local spans,
+OpenTelemetry, and an optional flight artifact. `gaps` names requested evidence
+that Harn couldn't persist. Consumers must treat a non-empty list as partial
+evidence rather than silently accepting the record as complete.
+
+Historical records and session-only projections can carry `execution_id: null`.
+They include an `execution_identity` gap explaining why the VM owner cannot be
+recovered; Harn does not relabel a run or session ID as an execution ID.
+
+Plain `harn run` executions use the same execution identity for the record id.
+Workflow records retain their workflow identity and carry the execution owner
+inside `evidence.execution_id`.
+
+## Durable agent-event correlation
+
+Agent events written inside a VM execution carry the same `execution_id`.
+JSONL tapes store it on each event envelope. SQLite event-log records store it
+in both the payload and the indexed headers, so readers can join by the typed
+field without parsing event bodies. Events emitted outside a VM scope use
+`null`; Harn does not substitute a session ID.
+
+## Span tree
+
+Workflow run records expose completed spans in `evidence.trace_spans`. Keeping
+the span tree inside the same evidence object as its execution identity,
+flight artifact, and gaps prevents independent observability schemas from
+drifting. Each span has a stable `span_id` and optional `parent_span_id`;
+joining those fields produces the authoritative tree. LLM spans also expose
+`ttft_ms` when Harn observed a first response token.
+
+```json
+{
+  "evidence": {
+    "trace_spans": [
+      {
+        "trace_id": "trace_...",
+        "span_id": 8,
+        "parent_span_id": 3,
+        "kind": "llm_call",
+        "name": "llm_call",
+        "start_ms": 120,
+        "duration_ms": 900,
+        "ttft_ms": 125,
+        "metadata": {"harn.execution.id": "hxe-0199..."}
+      }
+    ]
+  }
 }
 ```
 

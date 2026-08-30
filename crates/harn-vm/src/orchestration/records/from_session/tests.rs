@@ -584,8 +584,11 @@ async fn the_unrecoverable_field_list_matches_what_the_projector_actually_leaves
         // constructor, so this stays a statement about the projector leaving
         // the field untouched even if the policy default itself changes.
         (
-            "trace_spans[].duration_ms",
-            run.trace_spans.iter().all(|span| span.duration_ms == 0),
+            "evidence.trace_spans[].duration_ms",
+            run.evidence
+                .trace_spans
+                .iter()
+                .all(|span| span.duration_ms == 0),
         ),
         ("policy", run.policy == RunRecord::default().policy),
         ("replay_fixture", run.replay_fixture.is_none()),
@@ -976,7 +979,10 @@ async fn a_reused_session_projects_only_its_latest_run_invocation() {
     assert_eq!(run.usage.as_ref().expect("usage").input_tokens, 3);
     assert_eq!(run.tool_recordings.len(), 1);
     assert_eq!(run.tool_recordings[0].tool_name, "current-tool");
-    assert_eq!(run.trace_spans.len(), 1);
+    assert_eq!(run.evidence.trace_spans.len(), 1);
+    assert!(run.evidence.execution_id.is_none());
+    assert_eq!(run.evidence.gaps[0].component, "execution_identity");
+    assert_eq!(run.evidence.gaps[0].code, "session_projection_unavailable");
 }
 
 #[tokio::test]
@@ -1163,6 +1169,7 @@ async fn every_recorded_provider_call_becomes_an_llm_call_span() {
         .expect("project");
 
     let spans: Vec<_> = run
+        .evidence
         .trace_spans
         .iter()
         .filter(|span| span.kind == "llm_call")
@@ -1200,7 +1207,12 @@ async fn a_projected_span_declares_that_its_duration_is_not_a_measurement() {
         .await
         .expect("project");
 
-    for span in run.trace_spans.iter().filter(|s| s.kind == "llm_call") {
+    for span in run
+        .evidence
+        .trace_spans
+        .iter()
+        .filter(|s| s.kind == "llm_call")
+    {
         assert_eq!(span.duration_ms, 0);
         assert_eq!(
             span.metadata
@@ -1244,6 +1256,7 @@ async fn the_cost_aggregate_is_exact_rather_than_float_accumulated() {
     // The aggregate and the per-call view must agree, or a reader reconciling
     // one against the other finds a phantom discrepancy.
     let span_total: f64 = run
+        .evidence
         .trace_spans
         .iter()
         .filter_map(|span| span.cost_usd)

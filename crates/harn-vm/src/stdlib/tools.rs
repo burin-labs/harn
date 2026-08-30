@@ -223,17 +223,26 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_registry() -> {_type: \"tool_registry\", tools: list}",
+    sig = "tool_registry(info?: {name: string, version?: string, description?: string}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}}",
     category = "tools"
 )]
-fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", "tool_registry");
     registry.insert(
         crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
-    Ok(VmValue::dict(registry))
+    if let Some(info) = args.first().filter(|value| !matches!(value, VmValue::Nil)) {
+        registry.insert(crate::value::intern_key("info"), info.clone());
+    }
+    let registry = VmValue::dict(registry);
+    crate::tool_registry::tool_registry_catalog(&registry).map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "tool_registry: {error}"
+        ))))
+    })?;
+    Ok(registry)
 }
 
 #[harn_builtin(
@@ -484,73 +493,30 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> dict",
+    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> ToolCatalog",
     category = "tools"
 )]
 fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let registry = match args.first() {
-        Some(VmValue::Dict(map)) => {
-            vm_validate_registry("tool_schema", map)?;
-            map
-        }
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "tool_schema: requires a tool registry",
-            ))));
-        }
-    };
-
-    let components = args.get(1).and_then(|v| v.as_dict()).cloned();
-
-    let tools = match registry.get("tools") {
-        Some(VmValue::List(list)) => list,
-        _ => return Ok(VmValue::dict(vm_build_empty_schema())),
-    };
-
-    let mut tool_schemas = Vec::new();
-    for tool in tools.iter() {
-        if let VmValue::Dict(entry) = tool {
-            let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
-            let description = entry
-                .get("description")
-                .map(|v| v.display())
-                .unwrap_or_default();
-
-            let input_schema = vm_build_input_schema(entry.get("parameters"), components.as_ref());
-            let output_schema =
-                vm_build_output_schema(entry.get("outputSchema"), components.as_ref());
-
-            let mut tool_def = crate::value::DictMap::new();
-            tool_def.put_str("name", name);
-            tool_def.put_str("description", description);
-            tool_def.insert(crate::value::intern_key("inputSchema"), input_schema);
-            if let Some(output_schema) = output_schema {
-                tool_def.insert(crate::value::intern_key("outputSchema"), output_schema);
-            }
-            tool_schemas.push(VmValue::dict(tool_def));
-        }
+    let registry = args.first().ok_or_else(|| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "tool_schema: requires a tool registry",
+        )))
+    })?;
+    let catalog = crate::tool_registry::tool_registry_catalog(registry)?;
+    let mut schema = serde_json::to_value(catalog)
+        .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
+    if let Some(components) = args.get(1).and_then(VmValue::as_dict) {
+        let components = crate::tool_registry::result_to_json(&VmValue::dict(components.clone()))
+            .map_err(|error| {
+            VmError::Runtime(format!(
+                "tool_schema: components are not portable JSON: {error}"
+            ))
+        })?;
+        schema["components"] = serde_json::json!({
+            "schemas": components
+        });
     }
-
-    let mut schema = crate::value::DictMap::new();
-    schema.put_str("schema_version", "harn-tools/1.0");
-
-    if let Some(comps) = &components {
-        let mut comp_wrapper = crate::value::DictMap::new();
-        comp_wrapper.insert(
-            crate::value::intern_key("schemas"),
-            VmValue::dict(comps.clone()),
-        );
-        schema.insert(
-            crate::value::intern_key("components"),
-            VmValue::dict(comp_wrapper),
-        );
-    }
-
-    schema.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(tool_schemas)),
-    );
-    Ok(VmValue::dict(schema))
+    Ok(crate::schema::json_to_vm_value(&schema))
 }
 
 // Unknown config keys (beyond parameters/handler/returns/annotations) are
@@ -791,7 +757,11 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .get("parameters")
         .cloned()
         .unwrap_or(VmValue::dict(crate::value::DictMap::new()));
-    let output_schema = config.get("returns").cloned().unwrap_or(VmValue::Nil);
+    let output_schema = config
+        .get("returns")
+        .or_else(|| config.get("output_schema"))
+        .cloned()
+        .unwrap_or(VmValue::Nil);
 
     let mut tool_entry = crate::value::DictMap::new();
     tool_entry.put_str("name", name.as_str());
@@ -805,14 +775,28 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         tool_entry.insert(crate::value::intern_key("outputSchema"), output_schema);
     }
 
-    if let Some(annotations) = config.get("annotations") {
+    if let Some(policy @ VmValue::Dict(_)) = config.get("execution_policy") {
+        let mut merged = match policy {
+            VmValue::Dict(policy) => (**policy).clone(),
+            _ => unreachable!(),
+        };
+        if let Some(VmValue::Dict(annotations)) = config.get("annotations") {
+            for (key, value) in annotations.iter() {
+                merged.insert(key.clone(), value.clone());
+            }
+        }
+        tool_entry.insert(
+            crate::value::intern_key("annotations"),
+            VmValue::dict(merged),
+        );
+    } else if let Some(annotations) = config.get("annotations") {
         tool_entry.insert(crate::value::intern_key("annotations"), annotations.clone());
     }
 
     for (key, value) in config.iter() {
         if matches!(
             key.as_str(),
-            "handler" | "parameters" | "returns" | "annotations" | "executor"
+            "handler" | "parameters" | "returns" | "output_schema" | "annotations" | "executor"
         ) {
             continue;
         }
@@ -833,7 +817,9 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             .collect(),
         _ => Vec::new(),
     };
-    tools.push(VmValue::dict(tool_entry));
+    let tool_entry = VmValue::dict(tool_entry);
+    crate::tool_registry::validate_tool_entry(&tool_entry)?;
+    tools.push(tool_entry);
 
     let mut new_registry = registry;
     new_registry.insert(
@@ -1629,105 +1615,5 @@ fn vm_format_schema(schema: Option<&VmValue>) -> String {
                 .join(", ")
         }
         _ => String::new(),
-    }
-}
-
-fn vm_build_empty_schema() -> crate::value::DictMap {
-    let mut schema = crate::value::DictMap::new();
-    schema.put_str("schema_version", "harn-tools/1.0");
-    schema.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
-    schema
-}
-
-fn vm_build_input_schema(
-    params: Option<&VmValue>,
-    components: Option<&crate::value::DictMap>,
-) -> VmValue {
-    let mut schema = crate::value::DictMap::new();
-    schema.put_str("type", "object");
-
-    let params_map = match params {
-        Some(VmValue::Dict(map)) if !map.is_empty() => map,
-        _ => {
-            schema.insert(
-                crate::value::intern_key("properties"),
-                VmValue::dict(crate::value::DictMap::new()),
-            );
-            return VmValue::dict(schema);
-        }
-    };
-
-    let mut properties = crate::value::DictMap::new();
-    let mut required = Vec::new();
-
-    for (key, val) in params_map.iter() {
-        let prop = vm_resolve_param_type(val, components);
-        properties.insert(key.clone(), prop);
-        required.push(VmValue::String(arcstr::ArcStr::from(key.as_str())));
-    }
-
-    schema.insert(
-        crate::value::intern_key("properties"),
-        VmValue::dict(properties),
-    );
-    if !required.is_empty() {
-        required.sort_by_key(|a| a.display());
-        schema.insert(
-            crate::value::intern_key("required"),
-            VmValue::List(std::sync::Arc::new(required)),
-        );
-    }
-
-    VmValue::dict(schema)
-}
-
-fn vm_build_output_schema(
-    schema: Option<&VmValue>,
-    components: Option<&crate::value::DictMap>,
-) -> Option<VmValue> {
-    schema.map(|value| vm_resolve_param_type(value, components))
-}
-
-fn vm_resolve_param_type(val: &VmValue, components: Option<&crate::value::DictMap>) -> VmValue {
-    match val {
-        VmValue::String(type_name) => {
-            let json_type = vm_harn_type_to_json_schema(type_name);
-            let mut prop = crate::value::DictMap::new();
-            prop.put_str("type", json_type);
-            VmValue::dict(prop)
-        }
-        VmValue::Dict(map) => {
-            if let Some(VmValue::String(ref_name)) = map.get("$ref") {
-                if let Some(comps) = components {
-                    if let Some(resolved) = comps.get(&**ref_name) {
-                        return resolved.clone();
-                    }
-                }
-                let mut prop = crate::value::DictMap::new();
-                prop.put_str("$ref", format!("#/components/schemas/{ref_name}").as_str());
-                VmValue::dict(prop)
-            } else {
-                VmValue::dict((**map).clone())
-            }
-        }
-        _ => {
-            let mut prop = crate::value::DictMap::new();
-            prop.put_str("type", "string");
-            VmValue::dict(prop)
-        }
-    }
-}
-
-fn vm_harn_type_to_json_schema(harn_type: &str) -> &str {
-    match harn_type {
-        "int" => "integer",
-        "float" => "number",
-        "bool" | "boolean" => "boolean",
-        "list" | "array" => "array",
-        "dict" | "object" => "object",
-        _ => "string",
     }
 }

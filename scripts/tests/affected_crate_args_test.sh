@@ -111,7 +111,11 @@ run_case() {
   git add .
   git commit -qm "$name"
   local actual
-  actual="$("$script" --base "$base_commit" 2>"$tmpdir/$name.err")"
+  if ! actual="$("$script" --base "$base_commit" 2>"$tmpdir/$name.err")"; then
+    echo "case $name failed to compute affected crate args" >&2
+    cat "$tmpdir/$name.err" >&2
+    exit 1
+  fi
   if [[ "$actual" != "$expected" ]]; then
     echo "case $name expected args: $expected" >&2
     echo "case $name actual args:   $actual" >&2

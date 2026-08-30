@@ -1,5 +1,5 @@
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::process::ExitStatusExt;
@@ -153,10 +153,22 @@ pub(super) fn sandboxed_output(
 
     let stdout_pipe = InheritablePipe::new()?;
     let stderr_pipe = InheritablePipe::new()?;
-    let stdin = OwnedHandle::nul_read()?;
+    let mut stdin_pipe = match &config.stdin {
+        super::ProcessStdin::Null => None,
+        super::ProcessStdin::Bytes(_) => Some(InheritableStdinPipe::new()?),
+    };
+    let stdin_null = if stdin_pipe.is_none() {
+        Some(OwnedHandle::nul_read()?)
+    } else {
+        None
+    };
+    let stdin_handle = stdin_pipe.as_ref().map_or_else(
+        || stdin_null.as_ref().expect("null stdin exists").raw(),
+        InheritableStdinPipe::child_read_handle,
+    );
     sandbox_trace(&trace_label, "stdio handles prepared");
     let inherited_handles = [
-        stdin.raw(),
+        stdin_handle,
         stdout_pipe.write.raw(),
         stderr_pipe.write.raw(),
     ];
@@ -181,7 +193,7 @@ pub(super) fn sandboxed_output(
     let mut startup = STARTUPINFOEXW::default();
     startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = stdin.raw();
+    startup.StartupInfo.hStdInput = stdin_handle;
     startup.StartupInfo.hStdOutput = stdout_reader.child_write_handle();
     startup.StartupInfo.hStdError = stderr_reader.child_write_handle();
     startup.lpAttributeList = attributes.as_mut_ptr();
@@ -242,12 +254,20 @@ pub(super) fn sandboxed_output(
     sandbox_trace(&trace_label, "job assigned");
     stdout_reader.close_child_write();
     stderr_reader.close_child_write();
+    if let Some(pipe) = stdin_pipe.as_mut() {
+        pipe.close_child_read();
+    }
     sandbox_trace(&trace_label, "parent child-write handles closed");
 
     if unsafe { ResumeThread(thread.raw()) } == u32::MAX {
         return Err(io::Error::last_os_error());
     }
     sandbox_trace(&trace_label, "process resumed");
+
+    let stdin_writer = stdin_pipe.map(|pipe| match &config.stdin {
+        super::ProcessStdin::Bytes(input) => pipe.write_async(input.clone()),
+        super::ProcessStdin::Null => unreachable!("null stdin does not create a pipe"),
+    });
 
     let stdout = stdout_reader.read_async();
     let stderr = stderr_reader.read_async();
@@ -268,6 +288,11 @@ pub(super) fn sandboxed_output(
     let stdout = join_reader(stdout)?;
     sandbox_trace(&trace_label, "joining stderr reader");
     let stderr = join_reader(stderr)?;
+    if let Some(stdin_writer) = stdin_writer {
+        stdin_writer
+            .join()
+            .map_err(|_| io::Error::other("stdin writer thread panicked"))??;
+    }
     sandbox_trace(&trace_label, "complete");
     Ok(Output {
         status: ExitStatus::from_raw(code),
@@ -625,6 +650,55 @@ impl InheritablePipe {
             read: Some(self.read),
             child_write: Some(self.write),
         }
+    }
+}
+
+struct InheritableStdinPipe {
+    child_read: Option<OwnedHandle>,
+    write: Option<OwnedHandle>,
+}
+
+impl InheritableStdinPipe {
+    fn new() -> io::Result<Self> {
+        let mut sa = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: 1,
+        };
+        let mut read = std::ptr::null_mut();
+        let mut write = std::ptr::null_mut();
+        if unsafe { CreatePipe(&mut read, &mut write, &mut sa, 0) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if unsafe { SetHandleInformation(write, HANDLE_FLAG_INHERIT, 0) } == 0 {
+            unsafe {
+                CloseHandle(read);
+                CloseHandle(write);
+            }
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            child_read: Some(OwnedHandle::new(read)),
+            write: Some(OwnedHandle::new(write)),
+        })
+    }
+
+    fn child_read_handle(&self) -> HANDLE {
+        self.child_read
+            .as_ref()
+            .map_or(std::ptr::null_mut(), OwnedHandle::raw)
+    }
+
+    fn close_child_read(&mut self) {
+        self.child_read.take();
+    }
+
+    fn write_async(mut self, input: Vec<u8>) -> std::thread::JoinHandle<io::Result<()>> {
+        let handle = self.write.take().expect("stdin writer already consumed");
+        std::thread::spawn(move || {
+            let mut file = unsafe { std::fs::File::from_raw_handle(handle.into_raw().cast()) };
+            file.write_all(&input)
+        })
     }
 }
 
