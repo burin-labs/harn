@@ -515,7 +515,23 @@ fn push_rule_exact(
                     io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
                 ) =>
         {
-            return Ok(())
+            // A root that EXISTS but cannot be opened is dropped silently
+            // otherwise, and a silently narrower sandbox is the shape that
+            // reads as success: the agent loses reach with nothing in the
+            // transcript to explain it. Missing roots stay quiet, because an
+            // absent optional root is the normal case and saying so every time
+            // would bury this.
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                super::warn_once(
+                    &format!("sandbox_unreadable_root:{}", path.display()),
+                    &format!(
+                        "sandbox root '{}' exists but could not be opened ({error}); it was NOT \
+                         granted. The child runs with less reach, not more.",
+                        path.display()
+                    ),
+                );
+            }
+            return Ok(());
         }
         Err(error) => {
             return Err(sandbox_rejection(format!(

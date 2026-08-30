@@ -850,3 +850,74 @@ fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
         "an unreadable REQUIRED root must still fail closed; something asked for it by name"
     );
 }
+
+/// The `/root`-under-hardened control, beside the `~/.kube` one.
+///
+/// Third instance of one class. Each time, a path the setup could not read
+/// refused the whole spawn instead of ending that branch:
+///
+/// | shape | before | now |
+/// |--------------------------------------|---------------|------------------|
+/// | denial under a MISSING dir (`~/.kube`) | refused spawn | ends the walk    |
+/// | denial under an UNLISTABLE dir (`$HOME`)| refused spawn | ends the walk    |
+/// | optional root that cannot be OPENED    | refused spawn | skipped, logged  |
+///
+/// The live shape: a runtime whose `$HOME` is not its own (`HOME=/root` under a
+/// non-root uid) has preset roots such as `~/.asdf` that exist and cannot be
+/// opened. Every confined command died. This spawns a real child under exactly
+/// that arrangement and requires it to run.
+#[test]
+fn a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read() {
+    use std::os::unix::fs::PermissionsExt;
+    if landlock_abi_version() == 0 {
+        eprintln!("[unreadable-root] SKIPPED: no Landlock on this kernel");
+        return;
+    }
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let home = tempfile::TempDir::new().expect("temp home");
+    let home_path = home.path().canonicalize().expect("canonical");
+    // `.asdf` is a real DeveloperToolchains preset root, so this reproduces the
+    // production shape rather than a synthetic one.
+    let unreadable = home_path.join(".asdf");
+    std::fs::create_dir_all(unreadable.join("shims")).expect("mkdir");
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).expect("lock");
+
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home_path);
+
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![home_path.display().to_string()],
+        sandbox_profile: SandboxProfile::Worktree,
+        ..CapabilityPolicy::default()
+    };
+    crate::orchestration::push_execution_policy(policy);
+    let output = crate::stdlib::sandbox::command_output(
+        "/bin/echo",
+        &["UNREADABLE-ROOT-PROBE-ALIVE".to_string()],
+        &crate::stdlib::sandbox::ProcessCommandConfig::default(),
+    );
+    crate::orchestration::pop_execution_policy();
+
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o755)).expect("unlock");
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    let output = output.expect(
+        "an unreadable preset root must not refuse the spawn; this is the /root-under-hardened \
+         control and its failure is the exact outage it exists to catch",
+    );
+    assert!(
+        output.status.success(),
+        "the confined child must run: {output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("UNREADABLE-ROOT-PROBE-ALIVE"),
+        "the child must actually have executed, not merely exited zero"
+    );
+    eprintln!("[unreadable-root] confined child ran with an unreadable preset root present");
+}
