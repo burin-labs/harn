@@ -36,7 +36,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           done_sentinel: "##DONE##",
-          done_judge: nil,
+          turn_end_condition: nil,
           max_iterations: 4,
           max_nudges: 2,
         },

@@ -2562,26 +2562,26 @@ Use `agent_input_guardrail_check(task, classifier?, options?)` when a script
 wants an explicit `{tripwire, reason, label, confidence}` preflight verdict
 instead of composing with `agent_loop`.
 
-Pass `done_judge: true` or `done_judge: {...}` to run a structured
+Pass `turn_end_condition: true` or `turn_end_condition: {...}` to run a structured
 completion judge after a native-tool loop naturally completes or after
 the model emits `##DONE##` in a sentinel loop.
 The judge returns exactly `{verdict: "done" | "continue", detail}`. On
 `done`, `detail` names the strongest supporting evidence. On `continue`, it
 names the single most important gap and next action. The loop injects that
-detail and continues until the judge accepts, `done_judge.max_invocations` is
+detail and continues until the judge accepts, `turn_end_condition.max_invocations` is
 reached, or `max_verify_attempts` is exhausted. Each judge call emits a
 `JudgeDecision` agent event with optional `trigger`.
 Use
 `verify_completion_judge` instead when every natural stop should be
 judged.
 
-Set top-level `done_judge.max_invocations` to a positive integer to cap repeated
+Set top-level `turn_end_condition.max_invocations` to a positive integer to cap repeated
 vetoes. Once reached, the loop stops with `status: "completion_unverified"` and
-`stop_reason: "done_judge_cap_reached"`; the
-result carries structured `done_judge` counters. Set it to `0` to disable the
+`stop_reason: "turn_end_judge_cap_reached"`; the
+result carries structured `turn_end_condition` counters. Set it to `0` to disable the
 terminal cap.
 
-Use `done_judge.cadence` when completion checks should be signal-gated
+Use `turn_end_condition.cadence` when completion checks should be signal-gated
 instead of firing on every completion candidate:
 
 ```harn
@@ -2589,7 +2589,7 @@ import { AgentSpec } from "std/agent/options"
 
 const cadence_opts: AgentSpec = {
   loop_until_done: true,
-  done_judge: {
+  turn_end_condition: {
     cadence: {
       every: 5,                         // judge turns 5, 10, 15, ...
       // or "stalled" / { state -> bool }
@@ -2604,7 +2604,7 @@ agent_loop(harness, task, system, cadence_opts)
 
 With `when: "stalled"`, stall diagnostics run the judge when
 `agent_loop_stall_warning` fires. `accept` stops the loop with
-`stalled_done_judge`; `continue` keeps the normal stall feedback fallback. The
+`stalled_turn_end_judge`; `continue` keeps the normal stall feedback fallback. The
 judge event includes `trigger: "stalled"`.
 
 Omitting `cadence` preserves the default behavior: every completion
@@ -2615,7 +2615,7 @@ instead of fixed "are you done?" prompting.
 Fixed-cadence completion prompts are not recommended: Huang et al.'s
 [AutoGPT/agent benchmark study](https://arxiv.org/abs/2310.01798) found that
 periodic "are you done?" checks can distort behavior. Prefer explicit progress
-signals and `done_judge.cadence.when: "stalled"` when the loop is actually
+signals and `turn_end_condition.cadence.when: "stalled"` when the loop is actually
 showing stall symptoms.
 
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
@@ -3160,7 +3160,7 @@ captured `harness.stdio.log()` output flows back to the parent VM unchanged. The
 callback is awaited synchronously per turn, so it can be a heavy LLM call
 without races. Keep broad review strategies in
 `post_turn_callback` when the policy needs custom timing, branching, or
-multiple competing judges; use `done_judge` for the built-in
+multiple competing judges; use `turn_end_condition` for the built-in
 sentinel-only completion gate.
 
 ### Resume conditions

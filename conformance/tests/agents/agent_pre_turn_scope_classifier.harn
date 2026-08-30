@@ -82,7 +82,7 @@ pipeline default(harness: Harness) {
           provider: "mock",
           session_id: out_session,
           max_iterations: 1,
-          done_judge: false,
+          turn_end_condition: false,
           pre_turn_scope_classifier: out_classifier,
           llm_caller: { _call ->
             throw "main llm should have been skipped"
@@ -126,7 +126,7 @@ pipeline default(harness: Harness) {
           provider: "mock",
           session_id: in_session,
           max_iterations: 1,
-          done_judge: false,
+          turn_end_condition: false,
           pre_turn_scope_classifier: in_classifier,
           llm_caller: heavy_caller("heavy model reached"),
         },
@@ -161,7 +161,7 @@ pipeline default(harness: Harness) {
           provider: "mock",
           session_id: low_session,
           max_iterations: 1,
-          done_judge: false,
+          turn_end_condition: false,
           pre_turn_scope_classifier: low_classifier,
           llm_caller: heavy_caller("escalated to heavy model"),
         },

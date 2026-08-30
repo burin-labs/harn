@@ -199,7 +199,7 @@ pub type CompletionRequirement = {
 pub type CompletionRequirementContract = {requirements: list<CompletionRequirement>}
 
 /**
- * Structured judge config accepted by `done_judge:` and
+ * Structured judge config accepted by `turn_end_condition:` and
  * `verify_completion_judge:`. Validated by the judge option validators
  * below; judge execution lives in `std/agent/judge`.
  *
@@ -345,7 +345,7 @@ pub type AgentExecutionSpec = {
   deadline_ms?: int,
   verify_completion?: any,
   verify_completion_judge?: bool | JudgeConfig,
-  done_judge?: bool | JudgeConfig,
+  turn_end_condition?: bool | JudgeConfig,
   step_judge?: dict,
   retry?: bool | AgentLoopRetryOptions,
   llm_retry?: AgentLoopRetryOptions,

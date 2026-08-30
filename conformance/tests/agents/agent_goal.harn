@@ -1,5 +1,5 @@
 // Goal object (std/agent/goal): normalization, the machine-checkable success
-// criteria floor (host-fact callbacks, closures AND named fns), done-judge
+// criteria floor (host-fact callbacks, closures AND named fns), turn-end-judge
 // composition, and the bounded re-loop expressed as a verify-gated workflow
 // stage retry_policy (no hand-written loop). The live convergence proof lives in
 // agent_goal_reloop.harn.
@@ -49,7 +49,7 @@ pipeline test(harness: Harness) {
   )
   assert(!goal_check(g_named, {ci_green: false}).done, "named-fn criterion can report unmet")
   assert(goal_check(g_named, {ci_green: true}).checkable == 1, "named fn counts as checkable")
-  // Done-judge composition through the core done_judge agent_loop seam.
+  // Turn-end-judge composition through the core turn_end_condition agent_loop seam.
   const judge = goal_judge(g)
   const judge_system = judge.system ?? ""
   assert(!contains(judge.keys(), "enabled"), "judge uses the outer false value to disable")
@@ -62,7 +62,7 @@ pipeline test(harness: Harness) {
     !contains(judge.keys(), "fail_open_on_error"),
     "goal judge has no configurable fail-open path",
   )
-  assert(judge.max_invocations == 3, "bounded done-judge veto cap")
+  assert(judge.max_invocations == 3, "bounded turn-end-judge veto cap")
   // Rendering + pin bridge.
   assert(goal_text(g).contains("## Goal"), "renders the goal block")
   assert(goal_pin(harness.random, g).kind == "goal", "goal lowers to a goal pin")

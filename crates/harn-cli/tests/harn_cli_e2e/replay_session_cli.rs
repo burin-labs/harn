@@ -767,7 +767,7 @@ fn main(harness: Harness) {
     tool_format: "native",
     loop_until_done: true,
     max_iterations: 6,
-    done_judge: nil,
+    turn_end_condition: nil,
   })
 }
 "#,

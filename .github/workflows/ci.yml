@@ -1318,6 +1318,10 @@ jobs:
       - run: make check-tree-sitter-keywords
       - run: make check-grammar-fitness
       - run: make check-vm-exposures
+      # Product turn-end check vs measurement surfaces: the seam is structural,
+      # so a grading concern cannot drift into the live loop and an eval module
+      # cannot depend on loop internals.
+      - run: make check-turn-end-boundary
       - run: make check-generated-registry
       # Workflow-file contracts. These are registered in `make all` but were
       # never invoked by any workflow, so they only ran on a developer's

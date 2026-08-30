@@ -20,7 +20,7 @@ completion rule and requires the agent to keep working until the task is done.
 
 ## Completion judges
 
-`done_judge` adds a second gate after completion is detected. The loop projects
+`turn_end_condition` adds a second gate after completion is detected. The loop projects
 the lossless transcript into bounded effect and verification evidence, then
 expects one strict object: `{verdict: "done" | "continue", detail}`. The
 `detail` is limited to 240 characters. It records the strongest supporting
@@ -38,26 +38,26 @@ veto except by having the model repeat a token it has already declined to
 emit.
 
 A veto injects runtime feedback and the loop continues until the judge accepts,
-`done_judge.max_invocations` is reached, or `max_verify_attempts` is exhausted.
+`turn_end_condition.max_invocations` is reached, or `max_verify_attempts` is exhausted.
 Every judge call emits `JudgeDecision` with `session_id`, `iteration`,
 `verdict`, `reasoning`, `next_step`, and `judge_duration_ms`, plus optional
 `trigger`.
 
-Set top-level `done_judge.max_invocations` to a positive integer to cap repeated
-done-judge vetoes. Once reached, the loop stops with
+Set top-level `turn_end_condition.max_invocations` to a positive integer to cap repeated
+turn-end-judge vetoes. Once reached, the loop stops with
 `status: "completion_unverified"` and
-`stop_reason: "done_judge_cap_reached"`. The result carries
-`{done_judge: {invocations, vetoes, max_invocations, cap_reached}}`. Set it to
+`stop_reason: "turn_end_judge_cap_reached"`. The result carries
+`{turn_end_condition: {invocations, vetoes, max_invocations, cap_reached}}`. Set it to
 `0` to disable the terminal cap.
 
-Use `done_judge.cadence` to gate the judge. Omit it to judge every completion
+Use `turn_end_condition.cadence` to gate the judge. Omit it to judge every completion
 candidate. `every: N` judges turns `N`, `2N`, and so on;
 `min_iterations_before_first` skips the first K turns; and `when` accepts
 `"always"`, `"stalled"`, or a closure receiving the same loop-state shape as
 `loop_control`.
 
 With `when: "stalled"`, a stall warning can fire the judge directly. An
-`accept` action stops the loop with `stalled_done_judge` before the repeated
+`accept` action stops the loop with `stalled_turn_end_judge` before the repeated
 tool call dispatches. A `continue` action also skips that pending call and
 starts the next turn with the judge recovery. Generic stall feedback is used
 only when the judge returned no recovery text. The corresponding
@@ -68,7 +68,7 @@ import { AgentSpec } from "std/agent/options"
 
 const judged_opts: AgentSpec = {
   loop_until_done: true,
-  done_judge: {
+  turn_end_condition: {
     cadence: {every: 5, when: "always", max_invocations: 3},
   },
 }

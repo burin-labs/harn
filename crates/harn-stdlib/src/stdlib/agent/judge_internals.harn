@@ -1,5 +1,5 @@
 // std/agent/judge_internals — private helpers shared by `std/agent/judge`
-// (verify_completion + done_judge) and `std/agent/step_judge`. NOT
+// (verify_completion + turn_end_condition) and `std/agent/step_judge`. NOT
 // intended as a public surface: every export is prefixed `__judge_` and
 // the file is excluded from the docs sweep. Keep shared judge plumbing here:
 // LLM-option overrides, structured-output schema field names, the shared

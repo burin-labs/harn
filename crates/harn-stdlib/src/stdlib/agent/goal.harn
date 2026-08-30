@@ -3,7 +3,7 @@ import { JudgeConfig } from "std/agent/options_types"
 // bundles an `objective`, machine-checkable `success_criteria`, `constraints`,
 // and a `budget`. It renders into the outbound prompt through the existing
 // per-turn context-profile fragment harness.runtime.channel(#2631) — NO new hook surface —
-// composes a done-judge via the core `done_judge` agent_loop seam
+// composes a turn-end-judge via the core `turn_end_condition` agent_loop seam
 // (`std/agent/judge`), and re-loops on "not yet met" by reusing agent_loop's own
 // bounded completion loop (`verify_completion` veto -> feedback -> re-run),
 // never a hand-written loop. Generalizes the legacy `session_goal` +
@@ -259,10 +259,10 @@ fn __goal_judge_system(g: any) {
 }
 
 /**
- * goal_judge(goal, opts?) returns a `done_judge` JudgeConfig (see
+ * goal_judge(goal, opts?) returns a `turn_end_condition` JudgeConfig (see
  * `std/agent/judge`) whose system prompt embeds the goal. Spread it into
- * agent_loop options as `done_judge:` — it composes with the existing
- * `agent_evaluate_completion` done-judge seam (the semantic ceiling). Pair with
+ * agent_loop options as `turn_end_condition:` — it composes with the existing
+ * `agent_evaluate_completion` turn-end-judge seam (the semantic ceiling). Pair with
  * `goal_check` host-fact callbacks for the deterministic floor. `opts` may carry
  * `model`, `provider`, and `max_invocations`. Completion judges always fail
  * closed when their model call is unavailable or invalid.
@@ -270,7 +270,7 @@ fn __goal_judge_system(g: any) {
  * @effects: []
  * @errors: []
  * @api_stability: stable
- * @example: agent_loop(harness, task, nil, {done_judge: goal_judge(g), loop_until_done: true})
+ * @example: agent_loop(harness, task, nil, {turn_end_condition: goal_judge(g), loop_until_done: true})
  */
 pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
   const o = opts ?? {}
@@ -371,7 +371,7 @@ pub fn goal_reloop(g: any, opts: any = nil) {
     verify_completion: verify_completion,
   }
   if o?.judge == true {
-    base = base + {done_judge: goal_judge(g, o)}
+    base = base + {turn_end_condition: goal_judge(g, o)}
   }
   return with_goal(base + __dict_omit(o, __GOAL_RELOOP_CONTROL_KEYS), g)
 }

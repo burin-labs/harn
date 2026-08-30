@@ -53,7 +53,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/skills.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/stall_observation.harn
-# count    2  crates/harn-stdlib/src/stdlib/agent/stall_verification.harn
+# count    1  crates/harn-stdlib/src/stdlib/agent/stall_verification.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/stance.harn
 # count   28  crates/harn-stdlib/src/stdlib/agent/state.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/step_judge.harn
@@ -439,7 +439,6 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__tool_surface_aggr
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__tool_surface_safe_defaults
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_agent_loop_callback_options
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_agent_loop_completion_options
-crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_done_judge_cadence
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_done_sentinel
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_input_guardrail
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_judge_cadence
@@ -461,6 +460,7 @@ crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_tool_cal
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_tool_surface_mode
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_tool_surface_unknown_policy
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_transcript_projection
+crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_turn_end_judge_cadence
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__validate_verify_completion
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__with_project_context_profile
 crates/harn-stdlib/src/stdlib/agent/options_validation.harn::__with_resolved_tool_format
@@ -554,7 +554,6 @@ crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_clip_head_ta
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_delta_previous
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_maybe_emit
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_turn_result
-crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::__agent_done_judge_stall_cadence
 crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::agent_stall_current_failure
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_apply
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_default_consent_check

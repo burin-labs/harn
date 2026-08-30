@@ -34,7 +34,7 @@ pipeline default(harness: Harness) {
         provider: "mock",
         session_id: blocked_session,
         max_iterations: 1,
-        done_judge: false,
+        turn_end_condition: false,
         llm_caller: { _call ->
           throw "main llm should have been skipped"
         },
@@ -74,7 +74,7 @@ pipeline default(harness: Harness) {
         provider: "mock",
         session_id: allowed_session,
         max_iterations: 1,
-        done_judge: false,
+        turn_end_condition: false,
         llm_caller: main_caller("main model reached"),
       }
         + agent_input_guardrail(

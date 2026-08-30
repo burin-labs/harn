@@ -20,7 +20,7 @@ pipeline default(harness: Harness) {
       llm_text("{\"verdict\":\"done\",\"detail\":\"The fourth candidate is complete.\"}"),
     ],
     { ->
-      const session = "done-judge-cadence-" + harness.random.uuid()
+      const session = "turn-end-judge-cadence-" + harness.random.uuid()
       const captured = agent_capture_events(
         harness.agent,
         session,
@@ -34,13 +34,13 @@ pipeline default(harness: Harness) {
             max_iterations: 5,
             max_nudges: 10,
             session_id: session,
-            done_judge: {cadence: {every: 2}},
+            turn_end_condition: {cadence: {every: 2}},
           },
         ) },
       )
       const judges = judge_events(captured.events)
       require len(judges) == 2,
-        "done_judge cadence should fire on every second completion candidate"
+        "turn_end_condition cadence should fire on every second completion candidate"
       harness.stdio.println(captured.result.status)
       harness.stdio.println(captured.result.visible_text)
       harness.stdio.println(captured.result.llm.iterations)

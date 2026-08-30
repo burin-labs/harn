@@ -24,7 +24,7 @@ import { llm_text, with_llm_script } from "std/testing"
  *  5. A completion judge owns terminal intent and bypasses this classifier.
  *  6. A repair claim is published as a typed fact on the next turn, so a
  *     host control policy can observe it instead of racing it.
- *  7. `done_judge: false` is not a judge, and the loop must not gate on it as
+ *  7. `turn_end_condition: false` is not a judge, and the loop must not gate on it as
  *     though it were.
  *  8. A non-stopping host advisory cannot consume a repair opportunity.
  */
@@ -46,7 +46,7 @@ fn edit_tools() {
 
 /**
  * Scan EVERY call for a marker. The indexed helper below is only valid when
- * both sides of a comparison share a loop shape; installing a `done_judge`
+ * both sides of a comparison share a loop shape; installing a `turn_end_condition`
  * changes the call count, so the judge cases must not assert on a position.
  */
 fn injected_anywhere(calls: list?, marker: string) {
@@ -325,7 +325,7 @@ pipeline default(harness: Harness) {
           max_iterations: 2,
           max_nudges: 4,
           tools: edit_tools(),
-          done_judge: true,
+          turn_end_condition: true,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
@@ -364,7 +364,7 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
-          done_judge: false,
+          turn_end_condition: false,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
           post_turn_callback: { info ->
             if info?.iteration == 0 {
@@ -389,7 +389,7 @@ pipeline default(harness: Harness) {
       )
     },
   )
-  // 7. `done_judge: false` means no judge. Pinning the normalized notion of
+  // 7. `turn_end_condition: false` means no judge. Pinning the normalized notion of
   //    judge presence: the loop must not treat a disabled judge as an installed
   //    one and gate behavior on it. This holds today through a normalization
   //    step upstream of the consumers, so it pins an invariant rather than
@@ -413,7 +413,7 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
-          done_judge: false,
+          turn_end_condition: false,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
@@ -450,7 +450,7 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
-          done_judge: false,
+          turn_end_condition: false,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
           post_turn_callback: { _info -> {message: "Keep making progress."} },
         },
@@ -491,7 +491,7 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
-          done_judge: true,
+          turn_end_condition: true,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
           post_turn_callback: { _info -> {stop: true, stop_reason: "host_said_stop"} },
         },
@@ -551,7 +551,7 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
-          done_judge: false,
+          turn_end_condition: false,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )

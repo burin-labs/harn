@@ -92,7 +92,7 @@ pipeline default(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           done_sentinel: "##DONE##",
-          done_judge: nil,
+          turn_end_condition: nil,
           max_iterations: 3,
           max_nudges: 3,
           tools: note_tools(),

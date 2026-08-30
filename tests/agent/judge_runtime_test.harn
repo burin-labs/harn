@@ -609,7 +609,7 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
               operation_timeout_ms: 100,
               deadline_reserve_ms: 0,
             },
-            done_judge: {provider: "mock", max_invocations: 1},
+            turn_end_condition: {provider: "mock", max_invocations: 1},
           },
         ) },
       )
@@ -786,7 +786,7 @@ pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, t
             max_iterations: 1,
             verify_completion: { _payload -> "deterministic repair" },
             verify_completion_judge: {provider: "mock", max_invocations: 1},
-            done_judge: {provider: "mock", max_invocations: 1},
+            turn_end_condition: {provider: "mock", max_invocations: 1},
           },
         ) },
       )
@@ -795,7 +795,7 @@ pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, t
       assert_eq(len(receipts), 1)
       assert(receipts[0].invoked.deterministic)
       assert(!receipts[0].invoked.verify_completion_judge)
-      assert(!receipts[0].invoked.done_judge)
+      assert(!receipts[0].invoked.turn_end_condition)
     },
   )
 }

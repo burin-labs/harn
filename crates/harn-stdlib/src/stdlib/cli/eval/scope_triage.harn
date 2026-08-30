@@ -200,7 +200,7 @@ fn __run_case(harness: Harness, case: dict, classifier: any) {
           model: "mock-heavy",
           session_id: session,
           max_iterations: 1,
-          done_judge: false,
+          turn_end_condition: false,
           pre_turn_scope_classifier: classifier,
           llm_caller: { call ->
             return {

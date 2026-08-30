@@ -15,7 +15,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>healthy three</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      const stalled_session = "done-judge-stalled-" + harness.random.uuid()
+      const stalled_session = "turn-end-judge-stalled-" + harness.random.uuid()
       const stalled = agent_capture_events(
         harness.agent,
         stalled_session,
@@ -29,7 +29,7 @@ pipeline default(harness: Harness) {
             max_iterations: 3,
             max_nudges: 10,
             session_id: stalled_session,
-            done_judge: {cadence: {when: "stalled"}},
+            turn_end_condition: {cadence: {when: "stalled"}},
           },
         ) },
       )
@@ -51,7 +51,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>capped four</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      const capped_session = "done-judge-cap-" + harness.random.uuid()
+      const capped_session = "turn-end-judge-cap-" + harness.random.uuid()
       const capped = agent_capture_events(
         harness.agent,
         capped_session,
@@ -65,7 +65,7 @@ pipeline default(harness: Harness) {
             max_iterations: 4,
             max_nudges: 10,
             session_id: capped_session,
-            done_judge: {cadence: {every: 1, max_invocations: 1}},
+            turn_end_condition: {cadence: {every: 1, max_invocations: 1}},
           },
         ) },
       )
@@ -83,7 +83,7 @@ pipeline default(harness: Harness) {
       llm_text("{\"verdict\":\"done\",\"detail\":\"The closure is complete on turn two.\"}"),
     ],
     { ->
-      const closure_session = "done-judge-closure-" + harness.random.uuid()
+      const closure_session = "turn-end-judge-closure-" + harness.random.uuid()
       const closure = agent_capture_events(
         harness.agent,
         closure_session,
@@ -97,7 +97,7 @@ pipeline default(harness: Harness) {
             max_iterations: 3,
             max_nudges: 10,
             session_id: closure_session,
-            done_judge: {cadence: {when: { state -> state.iteration == 2 }}},
+            turn_end_condition: {cadence: {when: { state -> state.iteration == 2 }}},
           },
         ) },
       )

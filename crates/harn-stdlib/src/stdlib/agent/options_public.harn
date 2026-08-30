@@ -269,13 +269,13 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
   } else {
     nil
   }
-  const has_done_judge = __has_key(opts, "done_judge")
-  const done_judge = if has_done_judge {
-    __normalize_completion_judge_config(harness.fs, opts?.done_judge, opts)
+  const has_turn_end_condition = __has_key(opts, "turn_end_condition")
+  const turn_end_condition = if has_turn_end_condition {
+    __normalize_completion_judge_config(harness.fs, opts?.turn_end_condition, opts)
   } else {
     nil
   }
-  if done_judge != nil
+  if turn_end_condition != nil
     && !__has_key(opts, "done_sentinel")
     && !__native_tools_complete_naturally(opts) {
     opts = opts + {done_sentinel: "##DONE##"}
@@ -283,8 +283,8 @@ pub fn agent_loop_options(harness: Harness, options: any = nil) {
   if has_verify_completion_judge {
     opts = opts + {verify_completion_judge: verify_completion_judge}
   }
-  if has_done_judge {
-    opts = opts + {done_judge: done_judge}
+  if has_turn_end_condition {
+    opts = opts + {turn_end_condition: turn_end_condition}
   }
   opts = __with_task_ledger_shorthand(opts)
   const budget = __normalize_iteration_budget(opts)

@@ -15,7 +15,7 @@ pipeline default(harness: Harness) {
       llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
     ],
     { ->
-      const session = "done-judge-isolation-" + harness.random.uuid()
+      const session = "turn-end-judge-isolation-" + harness.random.uuid()
       const captured = agent_capture_events(
         harness.agent,
         session,
@@ -30,14 +30,14 @@ pipeline default(harness: Harness) {
             loop_until_done: true,
             max_iterations: 2,
             session_id: session,
-            done_judge: true,
+            turn_end_condition: true,
           },
         ) },
       )
       const messages = agent_session_messages(harness.agent, session)
       const encoded = json_stringify(messages)
       const judges = judge_events(captured.events)
-      require len(judges) == 1, "done_judge should emit one decision"
+      require len(judges) == 1, "turn_end_condition should emit one decision"
       harness.stdio.println(captured.result.status)
       harness.stdio.println(len(messages))
       harness.stdio.println(contains(encoded, "isolated final answer"))

@@ -448,13 +448,13 @@ fn __summary_defaults(opts: unknown) {
     profile: "completer",
     loop_until_done: false,
     done_sentinel: nil,
-    done_judge: nil,
+    turn_end_condition: nil,
     max_nudges: 0,
   }
 }
 
 fn __verify_defaults() {
-  return {profile: "verifier", loop_until_done: false, max_nudges: 0, done_judge: true}
+  return {profile: "verifier", loop_until_done: false, max_nudges: 0, turn_end_condition: true}
 }
 
 fn __tool_using_defaults(kind: string) {
@@ -473,7 +473,7 @@ fn __tool_using_defaults(kind: string) {
   return {
     profile: profile,
     loop_until_done: true,
-    done_judge: nil,
+    turn_end_condition: nil,
     native_tool_fallback: "allow_once",
     max_nudges: max_nudges,
     // The repair knobs ride inside `stall_diagnostics` (where
