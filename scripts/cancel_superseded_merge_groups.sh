@@ -70,26 +70,43 @@ if ! gh api graphql -F owner="$owner" -F name="$name" -f query="$queue_query" > 
 fi
 
 if ! jq -e '
-    ((.errors? // []) | length == 0)
+    ((has("errors") | not) or .errors == null or ((.errors | type) == "array" and (.errors | length) == 0))
     and (.data.repository | type == "object")
     and (.data.repository | has("mergeQueue"))
     and (
       .data.repository.mergeQueue == null
       or (
-        .data.repository.mergeQueue.entries.pageInfo.hasNextPage == false
+        (.data.repository.mergeQueue | type) == "object"
+        and (.data.repository.mergeQueue | has("entries"))
+        and (.data.repository.mergeQueue.entries | type) == "object"
+        and (.data.repository.mergeQueue.entries | has("pageInfo"))
+        and (.data.repository.mergeQueue.entries.pageInfo | type) == "object"
+        and (.data.repository.mergeQueue.entries.pageInfo | has("hasNextPage"))
+        and .data.repository.mergeQueue.entries.pageInfo.hasNextPage == false
+        and (.data.repository.mergeQueue.entries | has("nodes"))
         and (.data.repository.mergeQueue.entries.nodes | type == "array")
         and all(
           .data.repository.mergeQueue.entries.nodes[];
-          .headCommit == null
+          (type == "object")
+          and has("headCommit")
+          and (.headCommit == null
             or (
-              (.headCommit.oid | type == "string")
+              (.headCommit | type) == "object"
+              and (.headCommit | has("oid"))
+              and (.headCommit.oid | type == "string")
               and (.headCommit.oid | test("^[0-9a-fA-F]{40}$"))
-            )
+            ))
         )
       )
     )
   ' "$queue_json" >/dev/null; then
   die "merge-queue response was missing, paginated, or invalid; no runs were canceled"
+fi
+
+if jq -e '.data.repository.mergeQueue == null' "$queue_json" >/dev/null; then
+  printf 'summary queue_state=disabled active_runs=not_queried action=none reason=nothing_to_supersede apply=%s\n' \
+    "$apply"
+  exit 0
 fi
 
 if ! jq -r '
@@ -202,6 +219,7 @@ while IFS=$'\t' read -r run_id head_sha run_status workflow_name created_epoch; 
   failed_count=$((failed_count + 1))
 done < "$runs"
 
-printf 'summary current_heads=%s stale_runs=%s cancelled=%s zombies=%s apply=%s\n' \
-  "$current_count" "$stale_count" "$cancelled_count" "$zombie_count" "$apply"
+printf 'summary queue_state=configured current_heads=%s active_runs=%s stale_runs=%s cancelled=%s zombies=%s apply=%s\n' \
+  "$current_count" "$(wc -l < "$runs" | tr -d ' ')" "$stale_count" \
+  "$cancelled_count" "$zombie_count" "$apply"
 [[ "$failed_count" -eq 0 ]] || exit 1
