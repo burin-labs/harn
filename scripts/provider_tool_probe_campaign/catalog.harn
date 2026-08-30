@@ -172,7 +172,7 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
     || (type_of(raw_revision) == "string"
       && trim(raw_revision)
         != "")
-  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == ""
+  if parsed?.schemaVersion != 2 || parsed?.ok != true || name != "harn-cli" || version == ""
     || !revision_valid {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
