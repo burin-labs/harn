@@ -11,40 +11,10 @@
  * The banner and JSON envelope shapes are pinned by
  * crates/harn-cli/tests/harn_cli_e2e/version_dispatch.rs.
  */
-import { get_typed_value } from "std/schema"
-
-type RuntimeBuildFeatures = {
-  default: bool,
-  full: bool,
-  llm_bench_internals: bool,
-  vm_bench_internals: bool,
-  content: bool,
-  compression: bool,
-  http_compression: bool,
-  cloud_aws: bool,
-  native_keyring: bool,
-  postgres: bool,
-  sqlite: bool,
-  otel: bool,
-  testbench_wasi: bool,
-}
-
-type RuntimeCompatibilityFingerprint = {
-  codegen_fingerprint: string,
-  bytecode_schema_version: int,
-  linked_program_schema_version: int,
-  linker_algorithm_version: int,
-  build_features: RuntimeBuildFeatures,
-}
-
-type RuntimeContentFingerprint = {
-  schema: string,
-  content_sha256: string,
-  harn_version: string,
-  embedded_stdlib_sha256: string,
-  compatibility: RuntimeCompatibilityFingerprint,
-  source_revision: string?,
-}
+import {
+  RuntimeContentFingerprint,
+  runtime_content_fingerprint_value,
+} from "std/runtime/content_fingerprint"
 
 fn render_banner(version: string) -> string {
   return "\n ╱▔▔╲\n ╱    ╲    harn v" + version
@@ -86,9 +56,8 @@ fn main(harness: Harness) {
     } else {
       raw_revision
     }
-    const runtime_content_fingerprint: RuntimeContentFingerprint = get_typed_value(
+    const runtime_content_fingerprint = runtime_content_fingerprint_value(
       json_parse(harness.env.get_or("HARN_RUNTIME_CONTENT_FINGERPRINT", "{}")),
-      schema_of(RuntimeContentFingerprint),
     )
     harness.stdio.println(
       render_json(name, version, description, source_revision, runtime_content_fingerprint),

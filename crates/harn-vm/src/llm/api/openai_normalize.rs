@@ -109,6 +109,181 @@ pub(super) fn append_paragraph(target: &mut String, text: &str) {
     target.push_str(text.trim());
 }
 
+fn normalize_top_logprobs(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .filter_map(|item| {
+                    let logprob = item.get("logprob").and_then(|value| value.as_f64())?;
+                    Some(serde_json::json!({
+                        "token": item.get("token").and_then(|value| value.as_str()).unwrap_or(""),
+                        "logprob": logprob,
+                        "bytes": item.get("bytes").cloned().unwrap_or(serde_json::Value::Null),
+                    }))
+                })
+                .collect(),
+        ),
+        serde_json::Value::Object(object) => serde_json::Value::Array(
+            object
+                .iter()
+                .filter_map(|(token, item)| {
+                    let logprob = if let Some(logprob) = item.as_f64() {
+                        logprob
+                    } else {
+                        item.get("logprob").and_then(|value| value.as_f64())?
+                    };
+                    let bytes = item
+                        .get("bytes")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    Some(serde_json::json!({
+                        "token": token,
+                        "logprob": logprob,
+                        "bytes": bytes,
+                    }))
+                })
+                .collect(),
+        ),
+        _ => serde_json::Value::Array(Vec::new()),
+    }
+}
+
+fn normalize_logprob_entry(
+    token: &str,
+    logprob: f64,
+    bytes: serde_json::Value,
+    top_logprobs: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "token": token,
+        "logprob": logprob,
+        "bytes": bytes,
+        "top_logprobs": top_logprobs,
+    })
+}
+
+pub(super) fn extract_openai_choice_logprobs(choice: &serde_json::Value) -> Vec<serde_json::Value> {
+    if let Some(content) = choice
+        .get("logprobs")
+        .and_then(|value| value.get("content"))
+        .and_then(|value| value.as_array())
+    {
+        return content
+            .iter()
+            .filter_map(|item| {
+                let logprob = item.get("logprob").and_then(|value| value.as_f64())?;
+                let token = item
+                    .get("token")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                Some(normalize_logprob_entry(
+                    token,
+                    logprob,
+                    item.get("bytes")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    normalize_top_logprobs(
+                        item.get("top_logprobs").unwrap_or(&serde_json::Value::Null),
+                    ),
+                ))
+            })
+            .collect();
+    }
+
+    let Some(logprobs) = choice.get("logprobs") else {
+        return Vec::new();
+    };
+    let Some(tokens) = logprobs.get("tokens").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    let token_logprobs = logprobs
+        .get("token_logprobs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let top_logprobs = logprobs
+        .get("top_logprobs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, token)| {
+            let token = token.as_str().unwrap_or("");
+            let logprob = token_logprobs.get(idx).and_then(|value| value.as_f64())?;
+            Some(normalize_logprob_entry(
+                token,
+                logprob,
+                serde_json::Value::Null,
+                normalize_top_logprobs(
+                    top_logprobs
+                        .get(idx)
+                        .unwrap_or(&serde_json::Value::Array(Vec::new())),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// Char-boundary-safe preview of the first `max_chars` characters of `s`.
+///
+/// `&s[..s.len().min(N)]` panics when byte index `N` lands mid-UTF8-codepoint
+/// — which happens whenever a model emits malformed tool-argument JSON that
+/// contains multibyte characters straddling the cut. These previews only feed a
+/// `__parse_error` message, so a panic here would crash response parsing for an
+/// otherwise-recoverable error. Slicing by chars is always boundary-safe.
+pub(super) fn preview_chars(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+pub(super) fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Value {
+    match arguments {
+        Some(serde_json::Value::String(text)) => serde_json::from_str(text).unwrap_or_else(|err| {
+            serde_json::json!({
+                "__parse_error": format!(
+                    "Could not parse tool arguments as JSON: {}. Raw input: {}",
+                    err,
+                    preview_chars(text, 200)
+                )
+            })
+        }),
+        Some(value) => value.clone(),
+        None => serde_json::json!({}),
+    }
+}
+
+pub(super) fn parse_openai_tool_argument_json_values(
+    args_str: &str,
+) -> Result<Vec<serde_json::Value>, serde_json::Error> {
+    match serde_json::from_str::<serde_json::Value>(args_str) {
+        Ok(value) => Ok(vec![value]),
+        Err(first_error) => {
+            let mut values = Vec::new();
+            for parsed in
+                serde_json::Deserializer::from_str(args_str).into_iter::<serde_json::Value>()
+            {
+                match parsed {
+                    Ok(value) => values.push(value),
+                    Err(_) => {
+                        return Err(first_error);
+                    }
+                }
+            }
+            if values.len() > 1
+                && values
+                    .iter()
+                    .all(|value| matches!(value, serde_json::Value::Object(_)))
+            {
+                return Ok(values);
+            }
+            Err(first_error)
+        }
+    }
+}
+
 /// Extract a streaming-delta field as a raw `&str` without trimming or
 /// paragraph-joining. Use this for the per-chunk path where deltas are
 /// fragments that must concatenate verbatim (`"Here"`, `"'s"`, `" a"`)
