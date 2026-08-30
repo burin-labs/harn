@@ -36,6 +36,12 @@ fn __options(namespace: string, fallback: Summary, threshold: int = 1) {
   }
 }
 
+fn __expect(condition: bool, message: string) {
+  if !condition {
+    throw message
+  }
+}
+
 pipeline test_small_response_stays_exact_without_summarizer(harness: Harness, task: unknown) {
   const calls = harness.runtime.atomic(0)
   const exact: ExactResponse = {text: "ok", facts: ["fact-a"]}
@@ -222,6 +228,107 @@ pipeline test_concurrent_identical_misses_share_one_summary_call(harness: Harnes
     assert_eq(retained.state, "found")
     assert_eq(retained.value, exact)
   }
+}
+
+fn __assert_concurrent_terminal_failure(
+  harness: Harness,
+  namespace: string,
+  raw_failure: unknown,
+  expected_cause: string,
+  expected_category: string,
+) {
+  const calls = harness.runtime.atomic(0)
+  const entered = harness.runtime.channel(namespace + "-entered", 1)
+  const waiting = harness.runtime.channel(namespace + "-waiting", 1)
+  const release = harness.runtime.channel(namespace + "-release", 1)
+  const exact: ExactResponse = {text: "large response ".repeat(40), facts: ["keep"]}
+  const fallback: Summary = {summary: "deterministic", critical_facts: ["unknown"]}
+  const options = __options(namespace, fallback)
+  const summarize = { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
+    const prior_calls = harness.runtime.atomic_add(calls, 1)
+    if prior_calls == 0 {
+      harness.runtime.send(entered, true)
+      harness.runtime.receive(release)
+    }
+    return raw_failure
+  }
+  const observe_wait = { ->
+    harness.runtime.send(waiting, true)
+    return nil
+  }
+  const leader_handle = spawn {
+    __response_compact_with_caller(
+      __caps(harness),
+      exact,
+      schema_of(ExactResponse),
+      schema_of(Summary),
+      options,
+      summarize,
+      observe_wait,
+    )
+  }
+  harness.runtime.receive(entered)
+  const follower_handle = spawn {
+    __response_compact_with_caller(
+      __caps(harness),
+      exact,
+      schema_of(ExactResponse),
+      schema_of(Summary),
+      options,
+      summarize,
+      observe_wait,
+    )
+  }
+  harness.runtime.receive(waiting)
+  harness.runtime.send(release, true)
+  const leader = await(leader_handle)
+  const follower = await(follower_handle)
+  __expect(harness.runtime.atomic_get(calls) == 1, "concurrent failures must share one call")
+  __expect(leader.output.kind == "fallback", "leader must return fallback")
+  __expect(leader.output.value == fallback, "leader must use the typed fallback")
+  __expect(leader.receipt.summary_call_count == 1, "leader must report one call")
+  __expect(!leader.receipt.summary_cache_hit, "leader must report a cache miss")
+  __expect(follower.output.kind == "fallback", "follower must return fallback")
+  __expect(follower.output.value == fallback, "follower must use its typed fallback")
+  __expect(follower.receipt.summary_call_count == 0, "follower must report zero calls")
+  __expect(follower.receipt.summary_cache_hit, "follower must report the terminal cache hit")
+  __expect(follower.receipt.summary_waited, "follower must report its lease wait")
+  __expect(follower.receipt.fallback_cause == expected_cause, "fallback cause must survive")
+  __expect(follower.receipt.error_category == expected_category, "failure category must survive")
+  __expect(follower.receipt.exact_ref == leader.receipt.exact_ref, "exact refs must match")
+  const retained = response_compaction_read_exact(
+    __caps(harness),
+    follower.receipt.exact_ref,
+    schema_of(ExactResponse),
+  )
+  __expect(retained.state == "found", "follower exact reference must remain readable")
+  __expect(retained.value == exact, "follower exact readback must remain lossless")
+}
+
+pipeline test_concurrent_model_error_is_shared_without_a_duplicate_call(
+  harness: Harness,
+  task: unknown,
+) {
+  __assert_concurrent_terminal_failure(
+    harness,
+    "response-compaction-model-error-flight-" + harness.random.uuid(),
+    {ok: false, cause: "model_error", error_category: "timeout"},
+    "model_error",
+    "timeout",
+  )
+}
+
+pipeline test_concurrent_invalid_summary_is_shared_without_a_duplicate_call(
+  harness: Harness,
+  task: unknown,
+) {
+  __assert_concurrent_terminal_failure(
+    harness,
+    "response-compaction-invalid-flight-" + harness.random.uuid(),
+    {ok: true, data: {summary: 7}},
+    "summary_invalid",
+    "schema_validation",
+  )
 }
 
 pipeline test_single_flight_wait_is_bounded_without_a_duplicate_call(
@@ -622,6 +729,69 @@ pipeline test_schema_valid_exact_content_tamper_fails_digest_verification(
   const read = response_compaction_read_exact(__caps(harness), ref, schema_of(ExactResponse))
   assert_eq(read.state, "broken")
   assert_eq(read.detail, "exact retained content failed digest verification")
+}
+
+pipeline test_summary_cache_rejects_tampered_key_and_exact_digest(harness: Harness, task: unknown) {
+  const calls = harness.runtime.atomic(0)
+  const namespace = "response-compaction-summary-binding-" + harness.random.uuid()
+  const exact: ExactResponse = {text: "large ".repeat(40), facts: ["keep"]}
+  const options = __options(namespace, {summary: "fallback", critical_facts: []})
+  const summarize = { _prompt, _schema, _ladder, _max_tokens, _timeout_ms ->
+    const prior_calls = harness.runtime.atomic_add(calls, 1)
+    return {
+      ok: true,
+      data: {summary: "fresh-" + to_string(prior_calls + 1), critical_facts: ["keep"]},
+    }
+  }
+  const first = __response_compact_with_caller(
+    __caps(harness),
+    exact,
+    schema_of(ExactResponse),
+    schema_of(Summary),
+    options,
+    summarize,
+  )
+  const store = fs_cache(
+    path_join(harness.fs.workspace_temp_dir(), "harn-response-compaction"),
+    {namespace: namespace + "-summary", ttl_seconds: 3600, max_entries: 32},
+  )
+  const tampered_bindings = [
+    {
+      summary_key: first.receipt.summary_cache_key + "-forged",
+      exact_sha256: first.receipt.exact_sha256,
+    },
+    {summary_key: first.receipt.summary_cache_key, exact_sha256: "0".repeat(64)},
+  ]
+  let expected_calls = 1
+  for binding in tampered_bindings {
+    cache_put(
+      harness.llm,
+      first.receipt.summary_cache_key,
+      {
+        schema: "harn.response_compaction.summary_cache.v1",
+        summary_key: binding.summary_key,
+        exact_sha256: binding.exact_sha256,
+        outcome: "summarized",
+        summary: {summary: "forged", critical_facts: ["wrong"]},
+        route: {ladder: "agent_cheap"},
+      },
+      {store: store},
+    )
+    const result = __response_compact_with_caller(
+      __caps(harness),
+      exact,
+      schema_of(ExactResponse),
+      schema_of(Summary),
+      options,
+      summarize,
+    )
+    expected_calls = expected_calls + 1
+    assert_eq(harness.runtime.atomic_get(calls), expected_calls)
+    assert_eq(result.output.kind, "summarized")
+    assert_eq(result.output.value.summary, "fresh-" + to_string(expected_calls))
+    assert_eq(result.receipt.summary_cache_hit, false)
+    assert_eq(result.receipt.summary_call_count, 1)
+  }
 }
 
 pipeline test_public_response_compact_returns_scripted_structured_summary(

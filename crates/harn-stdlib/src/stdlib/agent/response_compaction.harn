@@ -95,13 +95,34 @@ type ResponseSummaryCaller<S> = fn(string, Schema<S>, string, int, int) -> unkno
 
 type ResponseSummaryWaitObserver = fn() -> nil
 
-type ResponseSummaryCached<S> = {
+type ResponseSummaryTerminal<S> = {
+  kind: "summarized",
   summary: S,
+  route: ResponseCompactionRoute,
+  usage?: ResponseCompactionUsage,
+} \
+  | {
+  kind: "fallback",
+  cause: ResponseCompactionFallbackCause,
+  error_category: string,
   route: ResponseCompactionRoute,
   usage?: ResponseCompactionUsage,
 }
 
 type ResponseSummaryCacheLookup = {hit: bool, value?: unknown}
+
+type ResponseSummaryCacheRecord = {
+  schema: "harn.response_compaction.summary_cache.v1",
+  summary_key: string,
+  exact_sha256: string,
+  outcome: "summarized" | "fallback",
+  summary?: unknown,
+  route: ResponseCompactionRoute,
+  usage?: ResponseCompactionUsage,
+  fallback_cause?: ResponseCompactionFallbackCause,
+  error_category?: string,
+  failure_expires_at_ms?: int,
+}
 
 type ResponseSummaryLease = {acquired: bool, lock_path: string, token: string}
 
@@ -120,6 +141,8 @@ type ResponseCompactionConfig<S> = {
 const __RESPONSE_COMPACTION_VERSION = "harn.response_compaction.v1"
 
 const __RESPONSE_COMPACTION_EXACT_REF_SCHEMA = "harn.response_compaction.exact_ref.v1"
+
+const __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA = "harn.response_compaction.summary_cache.v1"
 
 fn __response_compaction_config<S>(
   summary_schema: Schema<S>,
@@ -426,41 +449,80 @@ fn __response_compaction_receipt(
   return receipt
 }
 
-fn __response_summary_cached<S>(
-  raw: unknown,
-  summary_schema: Schema<S>,
+fn __response_summary_usage_valid(usage: ResponseCompactionUsage?) -> bool {
+  return (usage?.input_tokens == nil || usage.input_tokens >= 0)
+    && (usage?.output_tokens == nil || usage.output_tokens >= 0)
+}
+
+fn __response_summary_record_bound(
+  record: ResponseSummaryCacheRecord,
+  summary_key: string,
+  exact_digest: string,
   ladder: string,
-) -> ResponseSummaryCached<S>? {
-  if type_of(raw) != "dict" {
+) -> bool {
+  return record.schema == __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA
+    && record.summary_key == summary_key
+    && record.exact_sha256 == exact_digest
+    && record.route.ladder == ladder
+    && (record.route.provider == nil || trim(record.route.provider) != "")
+    && (record.route.model == nil || trim(record.route.model) != "")
+    && __response_summary_usage_valid(record.usage)
+}
+
+fn __response_summary_terminal<S>(
+  record: ResponseSummaryCacheRecord,
+  summary_schema: Schema<S>,
+  now_ms: int,
+) -> ResponseSummaryTerminal<S>? {
+  if record.outcome == "summarized" {
+    if record.fallback_cause != nil
+      || record.error_category != nil
+      || record.failure_expires_at_ms != nil {
+      return nil
+    }
+    const summary = get_typed_result(record.summary, summary_schema)
+    if !is_ok(summary) {
+      return nil
+    }
+    let terminal: ResponseSummaryTerminal<S> = {
+      kind: "summarized",
+      summary: unwrap(summary),
+      route: record.route,
+    }
+    if record.usage != nil {
+      terminal = terminal + {usage: record.usage}
+    }
+    return terminal
+  }
+  if record.outcome != "fallback"
+    || record.summary != nil
+    || record.fallback_cause == nil
+    || record.error_category == nil
+    || record.failure_expires_at_ms == nil
+    || record.failure_expires_at_ms <= now_ms {
     return nil
   }
-  const summary = get_typed_result(raw?.summary, summary_schema)
-  if !is_ok(summary) {
-    return nil
+  let terminal: ResponseSummaryTerminal<S> = {
+    kind: "fallback",
+    cause: record.fallback_cause,
+    error_category: record.error_category,
+    route: record.route,
   }
-  let route: ResponseCompactionRoute = {ladder: ladder}
-  if type_of(raw?.provider) == "string" && raw.provider != "" {
-    route = route + {provider: raw.provider}
+  if record.usage != nil {
+    terminal = terminal + {usage: record.usage}
   }
-  if type_of(raw?.model) == "string" && raw.model != "" {
-    route = route + {model: raw.model}
-  }
-  let cached: ResponseSummaryCached<S> = {summary: unwrap(summary), route: route}
-  const usage = __response_compaction_usage(raw?.usage)
-  if usage != nil {
-    cached = cached + {usage: usage}
-  }
-  return cached
+  return terminal
 }
 
 fn __response_summary_cache_read<S>(
-  llm: HarnessLlm,
+  capabilities: ResponseCompactionCapabilities,
   key: string,
+  exact_digest: string,
   store: dict,
   summary_schema: Schema<S>,
   ladder: string,
-) -> ResponseSummaryCached<S>? {
-  const raw_lookup = cache_get(llm, key, {store: store})
+) -> ResponseSummaryTerminal<S>? {
+  const raw_lookup = cache_get(capabilities.llm, key, {store: store})
   let projected_lookup = {hit: raw_lookup?.hit}
   if raw_lookup?.value != nil {
     projected_lookup = projected_lookup + {value: raw_lookup.value}
@@ -469,11 +531,20 @@ fn __response_summary_cache_read<S>(
   if !lookup.hit {
     return nil
   }
-  return __response_summary_cached(lookup.value, summary_schema, ladder)
+  const validated_record = get_typed_result(lookup.value, schema_of(ResponseSummaryCacheRecord))
+  if !is_ok(validated_record) {
+    return nil
+  }
+  const record = unwrap(validated_record)
+  if !__response_summary_record_bound(record, key, exact_digest, ladder) {
+    return nil
+  }
+  return __response_summary_terminal(record, summary_schema, capabilities.clock.now_ms())
 }
 
-fn __response_summary_cached_result<T, S>(
-  cached: ResponseSummaryCached<S>,
+fn __response_summary_terminal_result<T, S>(
+  terminal: ResponseSummaryTerminal<S>,
+  fallback: S,
   _retained: T,
   exact_ref: ResponseCompactionExactRef,
   exact_digest: string,
@@ -483,22 +554,43 @@ fn __response_summary_cached_result<T, S>(
   wait_ms: int,
   timeout_ms: int,
 ) -> ResponseCompactionResult<T, S> {
-  return {
-    output: {kind: "summarized", value: cached.summary},
-    receipt: __response_compaction_receipt(
-      "summarized",
-      exact_ref,
-      exact_digest,
-      exact_bytes,
-      summary_key,
-      true,
-      0,
-      waited,
-      wait_ms,
-      timeout_ms,
-      cached.route,
-      cached.usage,
-    ),
+  match terminal.kind {
+    "summarized" -> { return {
+      output: {kind: "summarized", value: terminal.summary},
+      receipt: __response_compaction_receipt(
+        "summarized",
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        true,
+        0,
+        waited,
+        wait_ms,
+        timeout_ms,
+        terminal.route,
+        terminal.usage,
+      ),
+    } }
+    "fallback" -> { return {
+      output: {kind: "fallback", value: fallback, cause: terminal.cause},
+      receipt: __response_compaction_receipt(
+        "fallback",
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        true,
+        0,
+        waited,
+        wait_ms,
+        timeout_ms,
+        terminal.route,
+        terminal.usage,
+        terminal.cause,
+        terminal.error_category,
+      ),
+    } }
   }
 }
 
@@ -563,16 +655,18 @@ pub fn __response_compact_with_caller<T, S>(
       max_entries: config.max_entries,
     },
   )
-  const initial_summary = __response_summary_cache_read(
-    capabilities.llm,
+  const initial_terminal = __response_summary_cache_read(
+    capabilities,
     summary_key,
+    exact_digest,
     summary_store,
     summary_schema,
     config.ladder,
   )
-  if initial_summary != nil {
-    return __response_summary_cached_result(
-      initial_summary,
+  if initial_terminal != nil {
+    return __response_summary_terminal_result(
+      initial_terminal,
+      config.fallback,
       retained,
       exact_ref,
       exact_digest,
@@ -617,17 +711,19 @@ pub fn __response_compact_with_caller<T, S>(
       observe_wait()
     }
     waited = true
-    const refreshed_summary = __response_summary_cache_read(
-      capabilities.llm,
+    const refreshed_terminal = __response_summary_cache_read(
+      capabilities,
       summary_key,
+      exact_digest,
       summary_store,
       summary_schema,
       config.ladder,
     )
     const elapsed_ms = capabilities.clock.monotonic_ms() - wait_started_ms
-    if refreshed_summary != nil {
-      return __response_summary_cached_result(
-        refreshed_summary,
+    if refreshed_terminal != nil {
+      return __response_summary_terminal_result(
+        refreshed_terminal,
+        config.fallback,
         retained,
         exact_ref,
         exact_digest,
@@ -663,17 +759,19 @@ pub fn __response_compact_with_caller<T, S>(
   }
   const wait_ms = waited ? capabilities.clock.monotonic_ms() - wait_started_ms : 0
   try {
-    const refreshed_summary = __response_summary_cache_read(
-      capabilities.llm,
+    const refreshed_terminal = __response_summary_cache_read(
+      capabilities,
       summary_key,
+      exact_digest,
       summary_store,
       summary_schema,
       config.ladder,
     )
-    if refreshed_summary != nil {
+    if refreshed_terminal != nil {
       coord_release_dir_lock(capabilities.fs, capabilities.clock, lock)
-      return __response_summary_cached_result(
-        refreshed_summary,
+      return __response_summary_terminal_result(
+        refreshed_terminal,
+        config.fallback,
         retained,
         exact_ref,
         exact_digest,
@@ -696,15 +794,20 @@ pub fn __response_compact_with_caller<T, S>(
     )
     match attempt.kind {
       "success" -> {
-        let cache_record = {summary: attempt.data}
         let resolved_route: ResponseCompactionRoute = {ladder: config.ladder}
         if attempt.provider != nil {
-          cache_record = cache_record + {provider: attempt.provider}
           resolved_route = resolved_route + {provider: attempt.provider}
         }
         if attempt.model != nil {
-          cache_record = cache_record + {model: attempt.model}
           resolved_route = resolved_route + {model: attempt.model}
+        }
+        let cache_record: ResponseSummaryCacheRecord = {
+          schema: __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA,
+          summary_key: summary_key,
+          exact_sha256: exact_digest,
+          outcome: "summarized",
+          summary: attempt.data,
+          route: resolved_route,
         }
         if attempt.usage != nil {
           cache_record = cache_record + {usage: attempt.usage}
@@ -731,6 +834,20 @@ pub fn __response_compact_with_caller<T, S>(
         return result
       }
       "failure" -> {
+        let cache_record: ResponseSummaryCacheRecord = {
+          schema: __RESPONSE_COMPACTION_SUMMARY_CACHE_SCHEMA,
+          summary_key: summary_key,
+          exact_sha256: exact_digest,
+          outcome: "fallback",
+          route: route,
+          fallback_cause: attempt.cause,
+          error_category: attempt.error_category,
+          failure_expires_at_ms: capabilities.clock.now_ms() + config.timeout_ms,
+        }
+        if attempt.usage != nil {
+          cache_record = cache_record + {usage: attempt.usage}
+        }
+        cache_put(capabilities.llm, summary_key, cache_record, {store: summary_store})
         const result: ResponseCompactionResult<T, S> = {
           output: {kind: "fallback", value: config.fallback, cause: attempt.cause},
           receipt: __response_compaction_receipt(

@@ -640,6 +640,53 @@ pub(super) fn dump_llm_response(
     append_llm_transcript_entry(&event);
 }
 
+/// Retain a completed but unusable provider response before its paired error
+/// record. Parsers carry only provider facts; this boundary adds the call
+/// identity and ordering owned by the observed-call transcript.
+pub(super) fn dump_empty_generation_response(
+    iteration: usize,
+    call_id: &str,
+    provider: &str,
+    model: &str,
+    response: &super::api::ProviderResponseEnvelope,
+    response_ms: u64,
+    structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
+    call_stage: Option<&str>,
+) {
+    let structural_experiment = structural_experiment
+        .map(serde_json::to_value)
+        .transpose()
+        .unwrap_or(None)
+        .unwrap_or(serde_json::Value::Null);
+    let mut event = serde_json::json!({
+        "type": "provider_call_response",
+        "iteration": iteration,
+        "call_id": call_id,
+        "span_id": crate::tracing::current_span_id(),
+        "timestamp": chrono_now(),
+        "provider": provider,
+        "model": model,
+        "response_id": response.response_id(),
+        "stop_reason": response.stop_reason(),
+        "content_blocks": {
+            "count": response.content_block_count(),
+            "types": response.content_block_types(),
+        },
+        "text": "",
+        "tool_calls": [],
+        "thinking": null,
+        "thinking_summary": null,
+        "response_ms": response_ms,
+        "provider_telemetry": null,
+        "structural_experiment": structural_experiment,
+    });
+    project_call_stage(&mut event, call_stage);
+    crate::llm::response_tool_calls::project_onto_response(&mut event, &[], Vec::new());
+    crate::llm::usage::LlmUsage::from_provider_error_receipt(provider, model, response.usage())
+        .project_onto_event(&mut event);
+    append_llm_transcript_entry(&event);
+}
+
 pub(super) fn project_call_stage(event: &mut serde_json::Value, call_stage: Option<&str>) {
     let Some(stage) = call_stage.map(str::trim).filter(|stage| !stage.is_empty()) else {
         return;
