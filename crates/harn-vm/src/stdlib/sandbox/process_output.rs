@@ -34,8 +34,13 @@ pub(super) fn apply_process_config(
     if let Some(proxy) = policy.and_then(|policy| policy.process_network_proxy) {
         apply_managed_proxy_env(command, proxy);
     }
-    if config.stdin_null {
-        command.stdin(Stdio::null());
+    match &config.stdin {
+        super::ProcessStdin::Null => {
+            command.stdin(Stdio::null());
+        }
+        super::ProcessStdin::Bytes(_) => {
+            command.stdin(Stdio::piped());
+        }
     }
 }
 

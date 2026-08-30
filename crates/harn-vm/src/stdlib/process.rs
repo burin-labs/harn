@@ -1086,10 +1086,7 @@ fn exec_shell_args(
 fn process_command_config(
     dir: Option<&str>,
 ) -> Result<crate::stdlib::sandbox::ProcessCommandConfig, VmError> {
-    let mut config = crate::stdlib::sandbox::ProcessCommandConfig {
-        stdin_null: true,
-        ..Default::default()
-    };
+    let mut config = crate::stdlib::sandbox::ProcessCommandConfig::default();
     if let Some(dir) = dir {
         let resolved = resolve_command_dir(dir);
         crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
