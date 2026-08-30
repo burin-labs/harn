@@ -279,7 +279,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             opts,
           )
         }
-        const llm_opts = if one_shot_prefill != "" {
+        // Both prefill sources converge here -- the monologue call-opener and a
+        // caller-supplied `prefill` option -- so the capability read belongs
+        // here rather than on either branch. The monologue path already
+        // consults `supports_assistant_prefill` when it decides whether to
+        // actuate; the caller-supplied path had no such check, and a provider
+        // that forbids a trailing assistant message rejects the whole request
+        // as a terminal invalid_request, losing the run.
+        const llm_opts = if one_shot_prefill != ""
+          && agent_prefill_supported(harness.llm, base_llm_opts) {
           llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)
         } else {
           base_llm_opts

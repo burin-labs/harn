@@ -38,3 +38,29 @@ pub fn agent_take_one_shot_prefill(options: any = nil) -> AgentOneShotPrefill {
   }
   return {options: cleaned, prefill: value ?? ""}
 }
+
+/**
+ * Whether this provider and model accept an assistant prefill.
+ *
+ * A prefill is a trailing assistant message, and a provider that forbids one
+ * rejects the entire request rather than ignoring the field, so an unsupported
+ * prefill costs the run and not just the turn. The capability is already
+ * declared per model; this is the read.
+ *
+ * Fail-closed on purpose: an unreadable capability record answers `false`,
+ * matching the monologue-actuation route gate next door. Not prefilling is
+ * always serviceable; prefilling where it is refused is not.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_prefill_supported(llm: HarnessLlm, options: any = nil) -> bool {
+  const capabilities = try {
+    llm.provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
+  }
+  if is_err(capabilities) || type_of(unwrap(capabilities)) != "dict" {
+    return false
+  }
+  return unwrap(capabilities)?.supports_assistant_prefill ?? false
+}

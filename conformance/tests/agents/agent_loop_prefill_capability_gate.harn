@@ -1,0 +1,64 @@
+// A caller-supplied `prefill` must not reach a model that declares
+// `supports_assistant_prefill = false`.
+//
+// A prefill is a trailing assistant message. A provider that forbids one
+// rejects the whole request as a terminal `invalid_request`, so an unsupported
+// prefill costs the run rather than degrading the turn. The monologue
+// call-opener already consults the capability before it actuates; a prefill
+// passed in the loop options did not, and both converge on the same arming
+// site.
+//
+// The pair is the test. The negative arm alone would also pass if the loop had
+// simply stopped prefilling altogether, so the control arm pins that a model
+// which DOES declare support still gets its prefill on the wire.
+import { agent_loop } from "std/agent/loop"
+import { assert_eq, llm_text, with_llm_script } from "std/testing"
+
+fn options(session: string, model: string) {
+  return {
+    provider: "mock",
+    model: model,
+    tools: tool_registry(),
+    tool_format: "text",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    turn_end_condition: nil,
+    final_wrapup: false,
+    max_iterations: 4,
+    max_nudges: 4,
+    session_id: session,
+    prefill: "I will start by",
+  }
+}
+
+fn first_call_prefill(harness: Harness, session: string, model: string) {
+  return with_llm_script(
+    harness.llm,
+    [llm_text("done ##DONE##")],
+    { ->
+      const _ = agent_loop(harness, "Inspect app.txt.", nil, options(session, model))
+      const calls = harness.llm.mock_calls()
+      return calls[0].prefill
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  // FALSIFIER: `claude-sonnet-5` declares supports_assistant_prefill = false.
+  // Before the gate this put "I will start by" on the wire as a trailing
+  // assistant message and the provider refused the request outright.
+  assert_eq(
+    first_call_prefill(harness, "prefill-gate-unsupported", "claude-sonnet-5"),
+    nil,
+    "a model that forbids assistant prefill must receive no prefill",
+  )
+  // CONTROL: `claude-opus-3-5` declares supports_assistant_prefill = true, so
+  // the existing behavior must survive. Without this arm the assertion above
+  // would also pass if the loop had stopped prefilling entirely.
+  assert_eq(
+    first_call_prefill(harness, "prefill-gate-supported", "claude-opus-3-5"),
+    "I will start by",
+    "a model that allows assistant prefill must still receive it",
+  )
+  harness.stdio.println("prefill capability gate ok")
+}
