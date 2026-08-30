@@ -248,7 +248,7 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
  */
 pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> dict {
   const category = trim(to_string(request?.category ?? ""))
-  if contains(policy?.floor?.never_grant ?? [], category) {
+  if approval_review_is_floor(policy, category) {
     return {
       schema: APPROVAL_REVIEW_DECISION_SCHEMA,
       approved: false,
@@ -409,4 +409,76 @@ fn __reviewer_command(request: any) -> string {
     return tool_name
   }
   return tool_name + " " + json_stringify(args)
+}
+
+/**
+ * Whether a category can never be granted, whatever any reviewer decides.
+ *
+ * Public because the floor is not the LLM reviewer's private business: the
+ * unconditional `allow_all` resolver has to consult exactly the same list, and
+ * a second copy of it is how the two would drift apart.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
+  return contains(policy?.floor?.never_grant ?? [], trim(to_string(category ?? "")))
+}
+
+/**
+ * The `allow_all` resolver, as a reviewer.
+ *
+ * Yolo is not a separate code path. It is this seam with a reviewer that says
+ * yes -- which means it inherits the floor, the receipt, and the activity
+ * record for free, and there is exactly one place where a refusal can be
+ * lifted. A parallel "skip the gate entirely" branch would be a second owner of
+ * the same decision, and the one that quietly stopped honoring the floor.
+ *
+ * It costs nothing and calls no model: every field is decided locally.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn approval_allow_all_reviewer(policy: dict) -> any {
+  return { request ->
+    const category = trim(to_string(request?.category ?? request?.tool ?? ""))
+    if approval_review_is_floor(policy, category) {
+      // The floor stands even here. This is the whole reason allow_all routes
+      // through the reviewer seam instead of around it.
+      {
+        schema: APPROVAL_REVIEW_DECISION_SCHEMA,
+        approved: false,
+        outcome: "denied",
+        risk: "critical",
+        authorization: "unknown",
+        rationale: "category '" + category + "' is below the floor; allow_all does not lift it",
+        reviewer_answered: true,
+        unavailable_reason: nil,
+        detail: "",
+        site: request?.site,
+        category: category,
+        // A real zero: no model was called, so nothing was spent.
+        cost_usd: 0.0,
+        accounting_status: "reported",
+        unpriced_calls: 0,
+      }
+    } else {
+      {
+        schema: APPROVAL_REVIEW_DECISION_SCHEMA,
+        approved: true,
+        outcome: "approved",
+        risk: "unknown",
+        authorization: "operator",
+        rationale: "allow_all resolver: the operator authorized every gated action for this run",
+        reviewer_answered: true,
+        unavailable_reason: nil,
+        detail: "",
+        site: request?.site,
+        category: category,
+        cost_usd: 0.0,
+        accounting_status: "reported",
+        unpriced_calls: 0,
+      }
+    }
+  }
 }

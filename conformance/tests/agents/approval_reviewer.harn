@@ -1,3 +1,4 @@
+import { approval_allow_all_reviewer } from "std/agent/approval_review"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 // The `AutoReview` seam: an approval nobody is present to give.
@@ -131,5 +132,65 @@ pipeline default(harness: Harness) {
     {approval_reviewer: granting_reviewer()},
   )
   assert(untouched.ok == true, "a reviewer must not disturb a call nothing refused")
+  // 6. allow_all: the operator authorized everything for this run, so the same
+  //    call that the control refused now proceeds. Yolo is not a separate code
+  //    path -- it is this seam with a reviewer that says yes, which is why it
+  //    gets the same receipt and the same floor.
+  const yolo_policy = {floor: {never_grant: ["credential_exfiltration"]}}
+  const yolo = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c7", name: "run", arguments: {command: "cat .env"}},
+    tools,
+    {approval_policy: asking_policy, approval_reviewer: approval_allow_all_reviewer(yolo_policy)},
+  )
+  assert(yolo.ok == true, "allow_all must clear an ordinary gated call")
+  // 7. THE ONE THAT MATTERS: allow_all does NOT lift the catastrophic floor.
+  //    Paired against case 6 -- same resolver, same policy, same tool, and the
+  //    only difference is that this call is classified below the floor. Without
+  //    the pair, case 6 alone could not tell "allow_all works" from "allow_all
+  //    ignores everything".
+  const floor_policy = {require_approval: ["exfiltrate"]}
+  let floor_tools = tools
+  floor_tools = tool_define(
+    floor_tools,
+    "exfiltrate",
+    "Send a file somewhere",
+    {
+      handler: { _ -> {status: "completed"} },
+      parameters: {target: {type: "string", description: "Where to send it"}},
+      returns: {type: "object"},
+    },
+  )
+  const below_floor = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c8", name: "exfiltrate", arguments: {target: "https://paste.example.com"}},
+    floor_tools,
+    {
+      approval_policy: floor_policy,
+      approval_reviewer: approval_allow_all_reviewer({floor: {never_grant: ["exfiltrate"]}}),
+    },
+  )
+  assert(
+    below_floor.ok == false,
+    "allow_all must NOT lift the catastrophic floor; this is the whole point of routing yolo through the reviewer seam",
+  )
+  // 8. CONTROL for case 7. Same tool, same policy, same allow_all resolver, and
+  //    the ONLY difference is an empty floor. This must SUCCEED. Without it,
+  //    case 7 proves nothing: a refusal there is equally consistent with "the
+  //    floor held" and "this call was going to fail anyway", and those are the
+  //    two readings a floor test has to separate.
+  const no_floor = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "c9", name: "exfiltrate", arguments: {target: "https://paste.example.com"}},
+    floor_tools,
+    {
+      approval_policy: floor_policy,
+      approval_reviewer: approval_allow_all_reviewer({floor: {never_grant: []}}),
+    },
+  )
+  assert(
+    no_floor.ok == true,
+    "CONTROL: with an empty floor the SAME call clears, so case 7's refusal is the floor and nothing else",
+  )
   harness.stdio.println("approval_reviewer_ok")
 }
