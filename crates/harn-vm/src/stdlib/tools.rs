@@ -817,16 +817,16 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             .collect(),
         _ => Vec::new(),
     };
-    tools.push(VmValue::dict(tool_entry));
+    let tool_entry = VmValue::dict(tool_entry);
+    crate::tool_registry::validate_tool_entry(&tool_entry)?;
+    tools.push(tool_entry);
 
     let mut new_registry = registry;
     new_registry.insert(
         crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(tools)),
     );
-    let new_registry = VmValue::dict(new_registry);
-    crate::tool_registry::tool_registry_catalog(&new_registry)?;
-    Ok(new_registry)
+    Ok(VmValue::dict(new_registry))
 }
 
 #[harn_builtin(

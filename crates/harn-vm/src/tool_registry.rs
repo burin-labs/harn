@@ -193,6 +193,12 @@ pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
     crate::llm::helpers::vm_value_to_json_strict(value, "result")
 }
 
+/// Validate one definition as it enters a registry. Cross-entry invariants are
+/// checked once when the registry is published or projected.
+pub(crate) fn validate_tool_entry(entry: &VmValue) -> Result<(), VmError> {
+    catalog_entry(entry).map(|_| ())
+}
+
 fn registry_dict(registry: &VmValue) -> Result<&crate::value::DictMap, VmError> {
     let dict = match registry {
         VmValue::Dict(dict) => dict,
