@@ -975,7 +975,10 @@ mod tests {
         run.evidence.execution_id = Some("external-run-1".to_string());
         std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
 
-        let error = execute_run_record(&path).unwrap_err();
+        let error = match execute_run_record(&path) {
+            Ok(_) => panic!("a claimed non-Harn execution identity must fail closed"),
+            Err(error) => error,
+        };
         assert!(error.contains("run record has invalid execution evidence"));
     }
 
