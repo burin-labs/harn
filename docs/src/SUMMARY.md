@@ -159,6 +159,7 @@
 - [Response compaction](./stdlib/response-compaction.md)
 - [Calendar stdlib](./stdlib/calendar.md)
 - [External actions](./stdlib/external-action.md)
+- [Execution decisions](./stdlib/execution.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Compaction pins and the goal object](./stdlib/agent-pins-goal.md)

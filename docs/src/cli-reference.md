@@ -15,6 +15,7 @@ Execute a `.harn` file.
 harn run <file.harn>
 harn run --trace <file.harn>
 harn run --profile --profile-json profile.json <file.harn>
+harn run --flight-recorder <file.harn>
 harn run -e 'harness.stdio.log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
@@ -40,6 +41,10 @@ harn run --resume .harn/workers/worker_...json
 | Flag | Description |
 |---|---|
 | `--trace` | Print LLM trace summary after execution. Can also be set with `HARN_TRACE=1` |
+| `--flight-recorder` | Save the bounded, value-free VM code path under `.harn-runs/flight-recordings/`. Can also be set with `HARN_FLIGHT_RECORDER=1`. |
+| `--flight-recorder-out <path>` | Write the flight recording to one explicit file. Requires `--flight-recorder`; Harn doesn't rotate files in a caller-owned directory. |
+| `--flight-recorder-max-events <count>` | Retain the newest 1 to 1,000,000 VM events in memory. Default: 250,000. Requires `--flight-recorder`. |
+| `--flight-recorder-retain <count>` | Retain the newest 1 to 1,024 recordings in Harn's default directory. Default: 16. Requires `--flight-recorder`. |
 | `--profile` | Print a categorical timing breakdown after execution. Can also be set with `HARN_PROFILE=1` |
 | `--profile-json <path>` | Write the categorical timing breakdown as JSON. Can also be set with `HARN_PROFILE_JSON=<path>` |
 | `--explain-cost` | Print static LLM token/cost estimates without executing the script |
@@ -77,6 +82,13 @@ harn run --resume .harn/workers/worker_...json
 | `--rusage-fd <fd>` | Write `--emit-rusage-json` output to an already-open Unix file descriptor |
 | `--allow-unsigned` | When running a `.harnpack`, accept bundles that carry no Ed25519 signature (local-dev override) |
 | `--dry-run-verify` | When running a `.harnpack`, verify the signature and replay into the cache without executing the entrypoint |
+
+Every completed VM invocation through `harn run` writes an automatic
+`.harn-runs/hxe-....json` run record. Harn retains the newest 128 automatic
+records without deleting workflow or imported records. The record's
+`evidence.execution_id` is the same identity attached to its spans and optional
+flight recording. `--json` emits `evidence_persisted` after this record is
+readable and before the terminal `result` or `error` event.
 
 `--approve-risky` is explicit operator authority, not pipeline configuration. It
 records a receipt on the protected operation and never relaxes the generic

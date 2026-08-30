@@ -111,8 +111,9 @@ impl Vm {
         entry: TopLevelEntry,
     ) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
+        self.prepare_execution_for_top_level();
         let registry = self.pool_registry.clone();
-        let owner = crate::observability::execution_scope::mint_execution_scope();
+        let owner = self.execution_id.clone();
         let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
             owner,
             self.llm_mock_context.clone(),
@@ -126,7 +127,23 @@ impl Vm {
         let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_entry_scoped(entry).await
         });
-        crate::orchestration::scope_ambient(ambient, execution).await
+        let result = crate::orchestration::scope_ambient(ambient, execution).await;
+        if self.owns_execution {
+            if let Some(recorder) = self.flight_recorder.as_ref() {
+                match &result {
+                    Ok(_) => recorder.finish("returned", None),
+                    Err(error) => recorder.finish(
+                        if error.process_exit_code().is_some() {
+                            "process_exited"
+                        } else {
+                            "failed"
+                        },
+                        error.process_exit_code(),
+                    ),
+                }
+            }
+        }
+        result
     }
 
     async fn execute_entry_scoped(&mut self, entry: TopLevelEntry) -> Result<VmValue, VmError> {

@@ -88,7 +88,7 @@ versions.
 | `harn lint --json`             | Per-file lint diagnostics + autofix availability         |
 | `harn parse --json`            | Tagged Harn AST with byte spans                          |
 | `harn tokens --json`           | Lexer token stream with source lexemes                   |
-| `harn run --json`              | Streaming NDJSON event log (stdout/stderr/tool/result)   |
+| `harn run --json`              | Streaming NDJSON event log (stdio/tool/evidence/result)  |
 | `harn run --emit-summary-json` | One terminal raw NDJSON summary object on stderr/file/fd  |
 | `harn run --emit-phase-json`   | One terminal raw NDJSON phase object on stderr/file/fd    |
 | `harn run --emit-rusage-json`  | One terminal raw NDJSON CPU sample on stderr/file/fd      |
@@ -127,6 +127,31 @@ versions.
 | `harn upgrade --json`          | Self-update probe (`--check`) or install summary         |
 
 ## Per-command notes
+
+### `harn run --json`
+
+After the VM finishes, Harn writes the execution's run record and emits one
+`evidence_persisted` event before the terminal event:
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "event_type": "evidence_persisted",
+    "seq": 4,
+    "execution_id": "hxe-0199...",
+    "run_record_path": "/workspace/.harn-runs/hxe-0199....json"
+  },
+  "error": null,
+  "warnings": []
+}
+```
+
+When `--flight-recorder` is active, `data.flight_recording` contains the same
+artifact descriptor stored in the run record. Otherwise the field is omitted.
+The path is readable when the event arrives. A terminal `result` or `error`
+always has a higher `seq`.
 
 ### `harn version --json`
 

@@ -54,6 +54,26 @@ pub struct RunAuxOptions {
 pub struct RunControlOptions {
     pub timeout: Option<Duration>,
     pub project_runtime: super::ProjectRuntimeMode,
+    pub flight_recorder: FlightRecorderOptions,
+}
+
+#[derive(Clone, Debug)]
+pub struct FlightRecorderOptions {
+    pub enabled: bool,
+    pub out: Option<PathBuf>,
+    pub max_events: usize,
+    pub retain_files: usize,
+}
+
+impl Default for FlightRecorderOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            out: None,
+            max_events: harn_vm::flight_recorder::DEFAULT_MAX_EVENTS,
+            retain_files: harn_vm::flight_recorder::DEFAULT_RETAIN_FILES,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +160,20 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
 pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
     RunControlOptions {
         timeout: args.timeout,
+        flight_recorder: FlightRecorderOptions {
+            enabled: args.flight_recorder,
+            out: args.flight_recorder_out.clone(),
+            max_events: args
+                .flight_recorder_max_events
+                .map_or(harn_vm::flight_recorder::DEFAULT_MAX_EVENTS, |value| {
+                    value as usize
+                }),
+            retain_files: args
+                .flight_recorder_retain
+                .map_or(harn_vm::flight_recorder::DEFAULT_RETAIN_FILES, |value| {
+                    value as usize
+                }),
+        },
         project_runtime: if args.standalone {
             super::ProjectRuntimeMode::Standalone
         } else if args.eager_project_handlers {

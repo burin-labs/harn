@@ -43,6 +43,7 @@ pub mod bridge;
 pub use bridge::{
     inject_leading_authorities, inject_leading_authority, leading_authority_param_count,
 };
+mod bounded_files;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
@@ -66,6 +67,7 @@ pub mod environment_registry;
 pub mod event_log;
 pub mod events;
 pub mod external_agent;
+pub mod flight_recorder;
 pub mod flow;
 pub mod harness;
 pub mod harness_auth;

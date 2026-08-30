@@ -7,6 +7,7 @@ mod debug;
 mod dispatch;
 mod execution;
 mod execution_deadline;
+mod execution_evidence;
 mod format;
 mod interrupts;
 mod introspection;

@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn jsonl_sink_binds_events_to_the_active_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("event_log.jsonl");
+    let sink = JsonlEventSink::open(&path).unwrap();
+    let execution_id = crate::mint_execution_scope();
+    let _scope = crate::enter_execution_scope(execution_id.clone());
+
+    sink.handle_event(&AgentEvent::IterationStart {
+        session_id: "s".into(),
+        iteration: 1,
+        provider: String::new(),
+        model: String::new(),
+    });
+    sink.flush().unwrap();
+
+    let line = std::fs::read_to_string(path).unwrap();
+    let event: PersistedAgentEvent = serde_json::from_str(&line).unwrap();
+    assert_eq!(event.execution_id.as_deref(), Some(execution_id.as_ref()));
+}
+
+#[test]
 fn jsonl_sink_writes_monotonic_indices_and_timestamps() {
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!("harn-event-log-{}", std::process::id()));

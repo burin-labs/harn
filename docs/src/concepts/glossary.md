@@ -100,6 +100,22 @@ run. Holds artifacts, per-stage results, and the replay trace.
 
 ## Durable state
 
+**Execution.** One top-level Harn program invocation and every child VM it
+creates. Its durable `hxe-...` identity is shared by local spans, run records,
+flight recordings, OpenTelemetry, and host projections.
+
+**Execution evidence.** The facts and artifacts Harn records about an
+execution. A run record is the durable index. Spans and an optional flight
+recording are projections or linked artifacts, not separate execution owners.
+
+**Run record.** The durable JSON index for one execution or workflow session.
+It carries lifecycle state, evidence identity, spans, artifacts, transcript
+pointers, and replay inputs that the run produced.
+
+**Flight recording.** An opt-in, bounded record of the exact VM instructions
+and source locations an execution reached. It omits runtime values, arguments,
+results, and stack contents. See [Debugging agent runs](../debugging.md#record-the-exact-code-path).
+
 **Model job.** One finite, asynchronous model request with a closed lifecycle:
 `queued`, `running`, `succeeded`, `failed`, or `canceled`. Harn owns its events,
 receipt, output storage, and replay; a backend owns provider translation. See

@@ -61,7 +61,7 @@ fn replay_fixture_round_trip_passes() {
         usage: None,
         replay_fixture: None,
         observability: None,
-        trace_spans: vec![],
+        evidence: ExecutionEvidenceRecord::default(),
         tool_recordings: vec![],
         hitl_questions: vec![],
         persona_runtime: vec![],
