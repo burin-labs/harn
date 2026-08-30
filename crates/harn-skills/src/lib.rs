@@ -130,6 +130,7 @@ impl std::error::Error for SkillDiscoveryError {}
 const SOURCES: &[&str] = &[
     include_str!("corpus/harn-agent/SKILL.md"),
     include_str!("corpus/harn-apps/SKILL.md"),
+    include_str!("corpus/harn-control-events/SKILL.md"),
     include_str!("corpus/harn-de-slop/SKILL.md"),
     include_str!("corpus/harn-diagnostics/SKILL.md"),
     include_str!("corpus/harn-docs/SKILL.md"),
@@ -388,6 +389,7 @@ mod tests {
             [
                 "harn-agent",
                 "harn-apps",
+                "harn-control-events",
                 "harn-de-slop",
                 "harn-diagnostics",
                 "harn-docs",
@@ -492,6 +494,10 @@ mod tests {
         let expectations = [
             ("harn-agent", ["agent_loop", "session id", "approval"]),
             ("harn-apps", ["std/ui", "ui.test.run", "harn app run"]),
+            (
+                "harn-control-events",
+                ["session/cancel", "controloutcome", "interrupt_immediate"],
+            ),
             ("harn-de-slop", ["typed", "structural guard", "rebase"]),
             ("harn-diagnostics", ["diagnostic", "repair", "conformance"]),
             ("harn-docs", ["diátaxis", "glossary", "slopwash"]),
