@@ -229,7 +229,12 @@ impl McpServer {
                                 "[harn] serve mcp: reload failed; keeping previous registry: {error}"
                             );
                         }
-                        None => reload_enabled = false,
+                        None => {
+                            eprintln!(
+                                "[harn] serve mcp: source reload task stopped; keeping current registry"
+                            );
+                            reload_enabled = false;
+                        }
                     }
                 }
             }
@@ -267,7 +272,7 @@ impl McpServer {
             self.connection
                 .lock()
                 .expect("MCP session lock poisoned")
-                .mark_initialized();
+                .accept_initialized_notification();
             return None;
         }
         let id = msg.get("id").cloned()?;

@@ -202,11 +202,11 @@ impl McpServerSession {
         &self.client_identity
     }
 
-    pub fn is_ready_for_notifications(&self) -> bool {
+    pub(crate) fn is_ready_for_notifications(&self) -> bool {
         self.notifications_ready
     }
 
-    pub fn mark_initialized(&mut self) {
+    pub(crate) fn accept_initialized_notification(&mut self) {
         if self.initialized_protocol_version.is_some() {
             self.notifications_ready = true;
         }
@@ -796,7 +796,7 @@ mod tests {
     #[test]
     fn released_session_waits_for_initialized_notification_before_server_notifications() {
         let mut session = McpServerSession::default();
-        session.mark_initialized();
+        session.accept_initialized_notification();
         assert!(!session.is_ready_for_notifications());
         session
             .initialize(
@@ -812,7 +812,7 @@ mod tests {
             .expect("initialize should negotiate");
 
         assert!(!session.is_ready_for_notifications());
-        session.mark_initialized();
+        session.accept_initialized_notification();
         assert!(session.is_ready_for_notifications());
     }
 
