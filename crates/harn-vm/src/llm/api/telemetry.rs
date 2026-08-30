@@ -982,6 +982,7 @@ mod tests {
     #[test]
     fn as_vm_dict_projects_every_serialized_field() {
         let telemetry = ProviderTelemetry {
+            data_controls: None,
             source: source::OLLAMA_CHAT.to_string(),
             serving_base_url: Some("https://provider.example/v1".to_string()),
             serving_fingerprint: Some("build-1".to_string()),
