@@ -532,14 +532,14 @@ On stdio, the server accepts `initialize` from released MCP clients and
 `server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
 2026-07-28 flow.
 
-Use `--watch` while developing a script-published registry. Harn watches the
-entry script's directory recursively. It compiles, executes, and validates a
-complete replacement registry and VM before changing the live server. A valid
-replacement keeps the MCP connection open and emits the standard tool,
-resource, and prompt list-change notifications. An invalid replacement is
-reported on stderr and the previous handlers remain callable. Watch mode is
-limited to the stdio script surface because that surface has one connection and
-one VM whose lifetime Harn can replace atomically.
+Use `--watch` while developing a script-published registry. Harn watches `.harn`
+files and `harn.toml` recursively below the entry script's directory. It
+compiles, executes, and validates a complete replacement registry and VM before
+changing the live server. A valid replacement keeps the MCP connection open and
+emits the standard tool, resource, and prompt list-change notifications. An
+invalid replacement is reported on stderr and the previous handlers remain
+callable. Watch mode is limited to the stdio script surface because that surface
+has one connection and one VM whose lifetime Harn can replace atomically.
 
 List endpoints are cursor-paginated. `tools/list`, `resources/list`,
 `resources/templates/list`, and `prompts/list` return up to 100 entries by
