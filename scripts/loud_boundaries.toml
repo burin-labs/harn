@@ -58,6 +58,7 @@ was_silent = true
 event = "agent_event:boundary_failure"
 anchors = [
   "crates/harn-vm/src/llm/api/response/boundary.rs",
+  "crates/harn-vm/src/llm/api/response/openai.rs",
   "crates/harn-vm/src/llm/api/response.rs",
 ]
 test = "crates/harn-vm/src/llm/api/response/boundary/tests.rs"
