@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 
 use crate::mcp_server::convert::annotations_to_json;
-use crate::value::{VmClosure, VmError, VmValue};
+use crate::value::{VmClosure, VmDictExt, VmError, VmValue};
 
 pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/1.0";
 
@@ -52,7 +52,7 @@ impl ToolAudience {
         Self::Agent,
     ];
 
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "cli" => Self::Cli,
             "mcp" => Self::Mcp,
@@ -61,6 +61,62 @@ impl ToolAudience {
             "agent" => Self::Agent,
             _ => return None,
         })
+    }
+}
+
+/// Retain the original executable entries and registry metadata while
+/// projecting one adapter audience. This is the closure-preserving companion
+/// to [`tool_registry_catalog_for_audience`]: runtime consumers can establish
+/// one trusted exposure boundary without rebuilding handlers from the static
+/// catalog.
+pub fn project_tools_for_audience(
+    tools: &VmValue,
+    audience: ToolAudience,
+) -> Result<VmValue, VmError> {
+    let (entries, wrapper) = match tools {
+        VmValue::List(entries) => ((**entries).clone(), None),
+        VmValue::Dict(wrapper) => match wrapper.get("tools") {
+            Some(VmValue::List(entries)) => ((**entries).clone(), Some(wrapper)),
+            _ => {
+                return Err(VmError::Runtime(
+                    "tool projection requires a tool registry or list of tool definitions".into(),
+                ))
+            }
+        },
+        _ => {
+            return Err(VmError::Runtime(
+                "tool projection requires a tool registry or list of tool definitions".into(),
+            ))
+        }
+    };
+
+    // Normalize even legacy `{tools: [...]}` wrappers and bare lists through
+    // the canonical registry parser. The projected value preserves the
+    // caller's original outer shape and the executable closure objects.
+    let mut validation_registry = wrapper
+        .map(|wrapper| (**wrapper).clone())
+        .unwrap_or_default();
+    validation_registry.put_str("_type", "tool_registry");
+    validation_registry.insert(
+        crate::value::intern_key("tools"),
+        VmValue::List(std::sync::Arc::new(entries.clone())),
+    );
+    let catalog = tool_registry_catalog(&VmValue::dict(validation_registry))?;
+    let projected = entries
+        .into_iter()
+        .zip(catalog.tools)
+        .filter_map(|(entry, catalog)| catalog.governance.allows(audience).then_some(entry))
+        .collect::<Vec<_>>();
+
+    if let Some(wrapper) = wrapper {
+        let mut projected_registry = (**wrapper).clone();
+        projected_registry.insert(
+            crate::value::intern_key("tools"),
+            VmValue::List(std::sync::Arc::new(projected)),
+        );
+        Ok(VmValue::dict(projected_registry))
+    } else {
+        Ok(VmValue::List(std::sync::Arc::new(projected)))
     }
 }
 

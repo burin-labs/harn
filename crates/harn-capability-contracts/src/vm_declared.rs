@@ -152,6 +152,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("obs", "metrics_inc"),
     ("obs", "pipeline_lifecycle_audit_log_snapshot"),
     ("obs", "pipeline_lifecycle_audit_log_take"),
+    ("obs", "run_record"),
     ("obs", "set_level"),
     ("obs", "trace_end"),
     ("obs", "trace_id"),

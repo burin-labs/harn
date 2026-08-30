@@ -504,3 +504,155 @@ fn microcompact_handles_multibyte_utf8() {
     let result3 = microcompact_tool_output(&cjk, 400);
     assert!(result3.contains("snipped"));
 }
+
+/// Negative control for #7617: force the summarizer to return nothing and prove
+/// the source context is not discarded.
+///
+/// The source window uses the block-array `content` shape that real agent
+/// transcripts carry (tool results and multi-part turns), not the string shape.
+/// A compaction that archives a non-empty source window and carries zero source
+/// bytes into the summary has silently destroyed context, so it must never be
+/// reported as a successful compaction.
+#[tokio::test(flavor = "current_thread")]
+async fn empty_summarizer_response_never_discards_non_empty_source_context() {
+    crate::llm::reset_llm_state();
+    crate::llm::push_llm_mock(
+        crate::llm::parse_llm_mock_value(&serde_json::json!({"text": ""}))
+            .expect("valid empty compaction mock"),
+    );
+
+    let mut options = crate::value::DictMap::new();
+    options.put_str("provider", "mock");
+    options.put_str("model", "mock");
+    options.put_str("call_role", "agent.main");
+    let llm_opts = crate::llm::extract_llm_options(&[
+        crate::value::VmValue::String(arcstr::ArcStr::from("current turn")),
+        crate::value::VmValue::String(arcstr::ArcStr::from("parent system prompt")),
+        crate::value::VmValue::dict(options),
+    ])
+    .expect("parent LLM options");
+
+    let mut messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "ROOT-CAUSE-MARKER the lease never publishes"}]
+        }),
+        serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "EVIDENCE-MARKER status reported active null"}]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "name": "read",
+            "content": [{"type": "text", "text": "NEXT-STEP-MARKER add the queued projection"}]
+        }),
+        serde_json::json!({"role": "user", "content": "keep this recent turn"}),
+        serde_json::json!({"role": "user", "content": "and this one"}),
+    ];
+    let config = AutoCompactConfig {
+        token_threshold: 1,
+        keep_last: 2,
+        compact_strategy: CompactStrategy::Llm,
+        ..Default::default()
+    };
+
+    let outcome = auto_compact_messages_with_result(&mut messages, &config, Some(&llm_opts)).await;
+
+    let Ok(Some(result)) = outcome else {
+        // An explicit typed failure is an acceptable outcome, but then the
+        // source context must still be intact.
+        let surviving = serde_json::to_string(&messages).expect("messages encode");
+        assert!(
+            surviving.contains("ROOT-CAUSE-MARKER"),
+            "a refused compaction must preserve the source context; got:\n{surviving}"
+        );
+        return;
+    };
+
+    let live = serde_json::to_string(&messages).expect("messages encode");
+    let carried = format!("{}\n{live}", result.summary);
+    for marker in ["ROOT-CAUSE-MARKER", "EVIDENCE-MARKER", "NEXT-STEP-MARKER"] {
+        assert!(
+            carried.contains(marker),
+            "compaction reported success while discarding {marker}; \
+             summary was {} bytes:\n{}\n--- live messages ---\n{live}",
+            result.summary.len(),
+            result.summary
+        );
+    }
+}
+
+/// The boundary's fail-closed backstop for #7617: when every summarizer pass has
+/// carried zero source bytes, the compaction is refused and the drained source
+/// window is put back, rather than a bare scaffold header replacing real work.
+///
+/// A recap budget too small to admit any observation is the reachable
+/// configuration that produces a scaffold-only summary deterministically.
+#[tokio::test(flavor = "current_thread")]
+async fn a_summary_that_carries_no_source_bytes_is_refused_and_restores_the_window() {
+    let mut messages: Vec<serde_json::Value> = (0..12)
+        .map(|i| {
+            serde_json::json!({
+                "role": "tool",
+                "content": format!("SOURCE-MARKER-{i}: {}", "detail ".repeat(60)),
+            })
+        })
+        .collect();
+    let before = messages.clone();
+    let config = AutoCompactConfig {
+        token_threshold: 1,
+        keep_last: 2,
+        compact_strategy: CompactStrategy::ObservationMask,
+        // Smaller than the header alone, so every observation is dropped and the
+        // summary is pure scaffold.
+        recap_budget_bytes: 1,
+        ..Default::default()
+    };
+
+    let outcome = auto_compact_messages_with_result(&mut messages, &config, None).await;
+
+    let error = outcome.expect_err("a summary carrying zero source bytes must not succeed");
+    let rendered = format!("{error:?}");
+    assert!(
+        rendered.contains("carried 0 of"),
+        "the refusal must report the measurement, got: {rendered}"
+    );
+    assert_eq!(
+        messages, before,
+        "a refused compaction must leave the source window exactly as it found it"
+    );
+}
+
+/// Measured zero and unmeasured are different facts, and the receipt must keep
+/// them apart end to end.
+#[test]
+fn compaction_measurement_separates_measured_zero_from_no_measurement() {
+    let unmeasured = CompactionSourceMeasurement::default();
+    assert_eq!(unmeasured.source_bytes, None);
+    assert!(
+        !unmeasured.discarded_source_context(),
+        "an absent measurement must never be read as a discarded source window"
+    );
+
+    let measured_zero = CompactionSourceMeasurement {
+        source_message_count: Some(4),
+        source_bytes: Some(900),
+        summary_bytes: Some(64),
+        carried_source_bytes: Some(0),
+    };
+    assert!(
+        measured_zero.discarded_source_context(),
+        "a measured zero carry against a non-empty source window is a failure"
+    );
+
+    let empty_source = CompactionSourceMeasurement {
+        source_message_count: Some(2),
+        source_bytes: Some(0),
+        summary_bytes: Some(64),
+        carried_source_bytes: Some(0),
+    };
+    assert!(
+        !empty_source.discarded_source_context(),
+        "nothing was discarded when the source window held no content bytes"
+    );
+}

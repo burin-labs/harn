@@ -17,9 +17,26 @@ use crate::vm::Vm;
 
 mod process_proxy;
 mod provider_allow;
+mod rules;
 pub mod ssrf;
 #[cfg(test)]
 pub(crate) mod test_support;
+
+// `rules` owns the parse side; `mod.rs` and its siblings reach the parsed
+// shapes through these names.
+pub(crate) use rules::{
+    normalize_host, parse_bool, parse_default_action, parse_rule_list, parse_rule_values,
+    parse_ssrf_mode, EgressTarget,
+};
+
+// Egress test scaffolding lives in `test_support`; the whole crate reaches it
+// through these paths, which is why they are re-exported rather than moved.
+#[cfg(test)]
+pub use test_support::reset_egress_policy_for_tests;
+#[cfg(test)]
+pub(crate) use test_support::{
+    install_test_policy, test_env_guard, EgressTestConfigGuard, EgressTestEnvGuard,
+};
 
 pub use process_proxy::{ProcessEgressAudit, ProcessEgressProxy};
 pub use provider_allow::{
@@ -56,7 +73,7 @@ pub enum SsrfMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DefaultAction {
+pub(crate) enum DefaultAction {
     Allow,
     Deny,
 }
@@ -74,14 +91,14 @@ struct EgressPolicy {
 }
 
 #[derive(Clone, Debug)]
-struct EgressRule {
+pub(crate) struct EgressRule {
     raw: String,
     matcher: EgressMatcher,
     port: Option<u16>,
 }
 
 #[derive(Clone, Debug)]
-enum EgressMatcher {
+pub(crate) enum EgressMatcher {
     Host(String),
     Suffix(String),
     Ip(IpAddr),
@@ -94,10 +111,139 @@ struct EgressState {
     policy: Option<ConfiguredPolicy>,
 }
 
+/// Which axes one policy contribution actually declared.
+///
+/// This is the difference between "the caller set `allow_loopback: false`" and
+/// "the caller said nothing about loopback". Composition needs that distinction:
+/// an undeclared axis must not silently overwrite a declared one with its own
+/// type default.
+#[derive(Clone, Copy, Debug, Default)]
+struct DeclaredAxes {
+    allow: bool,
+    deny: bool,
+    default: bool,
+    block_private: bool,
+    allow_loopback: bool,
+}
+
+/// Per-axis provenance for the effective policy: which contributions shaped
+/// each axis. Reported in the `egress_policy` receipt so a script can see that
+/// its `default: "allow"` lost to an environment `deny`, instead of guessing.
+#[derive(Clone, Debug, Default)]
+struct AxisSources {
+    allow: Vec<&'static str>,
+    deny: Vec<&'static str>,
+    default: Vec<&'static str>,
+    block_private: Vec<&'static str>,
+    allow_loopback: Vec<&'static str>,
+}
+
+/// The one resolved egress policy, composed from every contribution.
+///
+/// Environment and script configuration are not rivals for a single slot. They
+/// compose under a tighten-only rule: restrictions union, and no contribution
+/// can loosen a restriction another one declared. A script may therefore add its
+/// own allow rules under an ambient `HARN_EGRESS_*` confinement without either
+/// side failing, and the receipt names who decided what.
 #[derive(Clone, Debug)]
 struct ConfiguredPolicy {
-    source: &'static str,
+    /// Every contribution that shaped the effective policy, in install order.
+    /// Never empty.
+    sources: Vec<&'static str>,
+    axis_sources: AxisSources,
+    /// False once any contribution that declared loopback refused it. Loopback
+    /// access is a permission, so it survives only while every declaring
+    /// contribution grants it.
+    allow_loopback_declared: bool,
+    /// The composed policy every enforcement path reads.
     policy: EgressPolicy,
+}
+
+impl ConfiguredPolicy {
+    /// A resolution with exactly one contribution that declared every axis.
+    /// Used by paths that build a complete policy directly rather than by
+    /// composing contributions (the child-process proxy, and tests).
+    fn single(source: &'static str, policy: EgressPolicy) -> Self {
+        Self::first(
+            policy,
+            DeclaredAxes {
+                allow: true,
+                deny: true,
+                default: true,
+                block_private: true,
+                allow_loopback: true,
+            },
+            source,
+        )
+    }
+
+    fn first(policy: EgressPolicy, declared: DeclaredAxes, source: &'static str) -> Self {
+        let mut axis_sources = AxisSources::default();
+        if declared.allow {
+            axis_sources.allow.push(source);
+        }
+        if declared.deny {
+            axis_sources.deny.push(source);
+        }
+        if declared.default {
+            axis_sources.default.push(source);
+        }
+        if declared.block_private {
+            axis_sources.block_private.push(source);
+        }
+        if declared.allow_loopback {
+            axis_sources.allow_loopback.push(source);
+        }
+        Self {
+            sources: vec![source],
+            axis_sources,
+            allow_loopback_declared: !declared.allow_loopback || policy.allow_loopback,
+            policy,
+        }
+    }
+
+    /// Compose an incoming contribution onto this one. Tighten-only:
+    ///
+    /// * `allow` and `deny` rules union. `deny` already overrides `allow` at
+    ///   match time, so unioning exceptions cannot defeat a declared denial.
+    /// * `default` resolves to `deny` if any declaring contribution said `deny`.
+    /// * `block_private` resolves to the private-address block if any declaring
+    ///   contribution asked for it; an `off` cannot switch a declared block off.
+    /// * `allow_loopback` holds only while every declaring contribution allows it.
+    fn compose(&mut self, incoming: EgressPolicy, declared: DeclaredAxes, source: &'static str) {
+        if !self.sources.contains(&source) {
+            self.sources.push(source);
+        }
+        if declared.allow {
+            self.policy.allow.extend(incoming.allow);
+            self.axis_sources.allow.push(source);
+        }
+        if declared.deny {
+            self.policy.deny.extend(incoming.deny);
+            self.axis_sources.deny.push(source);
+        }
+        if declared.default {
+            self.axis_sources.default.push(source);
+            if incoming.default == DefaultAction::Deny {
+                self.policy.default = DefaultAction::Deny;
+            }
+        }
+        if declared.block_private {
+            self.axis_sources.block_private.push(source);
+            self.policy.block_private = match (self.policy.block_private, incoming.block_private) {
+                (Some(SsrfMode::BlockPrivate), _) | (_, Some(SsrfMode::BlockPrivate)) => {
+                    Some(SsrfMode::BlockPrivate)
+                }
+                (existing, None) => existing,
+                (_, incoming) => incoming,
+            };
+        }
+        if declared.allow_loopback {
+            self.axis_sources.allow_loopback.push(source);
+            self.allow_loopback_declared &= incoming.allow_loopback;
+            self.policy.allow_loopback = self.allow_loopback_declared;
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,8 +309,8 @@ pub fn register_egress_builtins(vm: &mut Vm) {
             let Some(VmValue::Dict(config)) = args.first() else {
                 return Err(vm_error("egress_policy: requires a config dict"));
             };
-            let policy = policy_from_config(config)?;
-            install_policy(policy, "stdlib")?;
+            let (policy, declared) = policy_from_config(config)?;
+            install_policy(policy, declared, "stdlib")?;
             Ok(policy_summary())
         },
     );
@@ -380,90 +526,6 @@ impl Drop for EgressPolicyScope {
 
 pub(crate) fn clear_explicit_egress_policy_requirement_for_host() {
     REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH.with(|depth| *depth.borrow_mut() = 0);
-}
-
-#[cfg(test)]
-pub fn reset_egress_policy_for_tests() {
-    reset_egress_policy_for_host();
-}
-
-/// Gives a test a clean egress universe with hermetic edges: it layers this
-/// domain's policy reset over the shared env seam
-/// ([`crate::test_env::test_env_guard`]). On both creation and drop the inner
-/// guard clears this thread's env overrides while this wrapper resets this
-/// thread's egress policy state, so neither ambient configuration nor a sibling
-/// test's leftovers can leak in, and nothing leaks out. All `cfg(test)` egress
-/// state is thread-keyed, so no cross-test serialization is needed and the
-/// guard is safe to hold across `await` points.
-///
-/// This governs only the *inputs* to policy installation;
-/// `harness.net.egress_policy(...)`'s deliberate refuse-to-override behavior is
-/// unchanged.
-#[cfg(test)]
-#[must_use]
-pub(crate) fn test_env_guard() -> EgressTestEnvGuard {
-    // The inner guard clears the shared env overrides on creation; layer the
-    // egress-specific policy reset on top.
-    let inner = crate::test_env::test_env_guard();
-    reset_egress_policy_for_host();
-    EgressTestEnvGuard { inner }
-}
-
-/// Guard returned by [`test_env_guard`]. Injects `HARN_EGRESS_*` values for
-/// this thread via [`EgressTestEnvGuard::set`] and, on drop, resets this
-/// thread's egress policy state on top of the inner guard clearing the shared
-/// env overrides.
-#[cfg(test)]
-pub(crate) struct EgressTestEnvGuard {
-    inner: crate::test_env::TestEnvGuard,
-}
-
-#[cfg(test)]
-impl EgressTestEnvGuard {
-    /// Sets a `HARN_EGRESS_*` variable for this thread only, visible to the
-    /// shared env seam ([`crate::test_env::env_var_seamed`]) readers on the
-    /// same thread.
-    pub(crate) fn set(&self, key: &str, value: &str) {
-        self.inner.set(key, value);
-    }
-}
-
-#[cfg(test)]
-impl Drop for EgressTestEnvGuard {
-    fn drop(&mut self) {
-        // Reset the egress policy state; the `inner` field's Drop then clears
-        // the shared env overrides. Neither read depends on the other's order.
-        reset_egress_policy_for_host();
-    }
-}
-
-/// A clean egress configuration scope for constructing a test client.
-#[cfg(test)]
-pub(crate) struct EgressTestConfigGuard {
-    _env: EgressTestEnvGuard,
-}
-
-#[cfg(test)]
-impl EgressTestConfigGuard {
-    pub(crate) fn new() -> Self {
-        Self {
-            _env: test_env_guard(),
-        }
-    }
-}
-
-/// Install a thread-local egress policy from `(key, value)` config pairs for
-/// tests that need to drive the real HTTP client path without touching
-/// process-global `HARN_EGRESS_*` env (which is unsound under concurrency).
-#[cfg(test)]
-pub(crate) fn install_test_policy(config: &[(&str, VmValue)]) {
-    let map = config
-        .iter()
-        .cloned()
-        .map(|(key, value)| (key.to_string(), value))
-        .collect();
-    let policy = policy_from_config(&map).expect("test egress policy parses");
-    install_policy(policy, "test").expect("test egress policy installs");
 }
 
 /// Scope outbound network to explicit `harness.net.egress_policy(...)` /
@@ -1056,16 +1118,24 @@ fn audit_blocked_background(blocked: EgressBlocked) {
     }
 }
 
-fn install_policy(policy: EgressPolicy, source: &'static str) -> Result<(), VmError> {
+/// Install one egress-policy contribution.
+///
+/// A second contribution composes onto the first rather than failing. Refusing
+/// it made an ambient `HARN_EGRESS_*` setting break every suite that configures
+/// its own policy, and made the failure read as a product defect in whatever
+/// connector happened to run. Composition is tighten-only, so accepting the
+/// second contribution cannot weaken the first.
+fn install_policy(
+    policy: EgressPolicy,
+    declared: DeclaredAxes,
+    source: &'static str,
+) -> Result<(), VmError> {
     ensure_env_seeded()?;
     with_state_write(|state| {
-        if let Some(existing) = &state.policy {
-            return Err(vm_error(format!(
-                "egress_policy: policy already configured from {}",
-                existing.source
-            )));
+        match &mut state.policy {
+            Some(existing) => existing.compose(policy, declared, source),
+            slot => *slot = Some(ConfiguredPolicy::first(policy, declared, source)),
         }
-        state.policy = Some(ConfiguredPolicy { source, policy });
         Ok(())
     })
 }
@@ -1087,10 +1157,16 @@ pub(crate) fn install_deny_by_default_policy(allow: &[String]) -> Result<(), VmE
         allow_loopback: false,
     };
     reset_egress_policy_for_host();
-    let configured = ConfiguredPolicy {
-        source: "testbench",
+    let configured = ConfiguredPolicy::first(
         policy,
-    };
+        DeclaredAxes {
+            allow: true,
+            deny: true,
+            default: true,
+            ..DeclaredAxes::default()
+        },
+        "testbench",
+    );
     with_state_write(|state| {
         state.env_checked = true;
         state.policy = Some(configured);
@@ -1140,15 +1216,25 @@ fn ensure_env_seeded() -> Result<(), VmError> {
         if !any_set {
             return Ok(());
         }
-        state.policy = Some(ConfiguredPolicy {
-            source: "environment",
-            policy: build_policy()?,
-        });
+        let declared = DeclaredAxes {
+            allow: allow.is_some(),
+            deny: deny.is_some(),
+            default: default.is_some(),
+            block_private: block_private.is_some(),
+            allow_loopback: allow_loopback.is_some(),
+        };
+        state.policy = Some(ConfiguredPolicy::first(
+            build_policy()?,
+            declared,
+            "environment",
+        ));
         Ok(())
     })
 }
 
-fn policy_from_config(config: &crate::value::DictMap) -> Result<EgressPolicy, VmError> {
+fn policy_from_config(
+    config: &crate::value::DictMap,
+) -> Result<(EgressPolicy, DeclaredAxes), VmError> {
     let allow = match config.get("allow") {
         Some(VmValue::List(items)) => parse_rule_values(items)?,
         Some(VmValue::Nil) => Vec::new(),
@@ -1174,59 +1260,32 @@ fn policy_from_config(config: &crate::value::DictMap) -> Result<EgressPolicy, Vm
         Some(value) => parse_bool(&value.display())?,
         None => false,
     };
-    Ok(EgressPolicy {
-        allow,
-        deny,
-        default,
-        block_private,
-        allow_loopback,
-    })
+    let declared = DeclaredAxes {
+        allow: config.contains_key("allow"),
+        deny: config.contains_key("deny"),
+        default: config.contains_key("default"),
+        block_private: config.contains_key("block_private"),
+        allow_loopback: config.contains_key("allow_loopback"),
+    };
+    Ok((
+        EgressPolicy {
+            allow,
+            deny,
+            default,
+            block_private,
+            allow_loopback,
+        },
+        declared,
+    ))
 }
 
-fn parse_ssrf_mode(raw: &str) -> Result<SsrfMode, VmError> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        // `private` and `on` engage the private-address block; `off` opts out.
-        "private" | "on" | "block" | "block_private" | "true" => Ok(SsrfMode::BlockPrivate),
-        "off" | "false" | "none" => Ok(SsrfMode::Off),
-        other => Err(vm_error(format!(
-            "egress_policy: block_private must be `private`/`on` or `off`, got `{other}`"
-        ))),
-    }
-}
-
-fn parse_bool(raw: &str) -> Result<bool, VmError> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "true" | "1" | "yes" | "on" => Ok(true),
-        "false" | "0" | "no" | "off" | "" => Ok(false),
-        other => Err(vm_error(format!(
-            "egress_policy: allow_loopback must be a boolean, got `{other}`"
-        ))),
-    }
-}
-
-fn parse_rule_values(values: &[VmValue]) -> Result<Vec<EgressRule>, VmError> {
-    values
-        .iter()
-        .map(|value| EgressRule::parse(&value.display()))
-        .collect()
-}
-
-fn parse_rule_list(raw: &str) -> Result<Vec<EgressRule>, VmError> {
-    raw.split([',', '\n', ';'])
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(EgressRule::parse)
-        .collect()
-}
-
-fn parse_default_action(raw: &str) -> Result<DefaultAction, VmError> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "" | "allow" => Ok(DefaultAction::Allow),
-        "deny" => Ok(DefaultAction::Deny),
-        other => Err(vm_error(format!(
-            "egress_policy: default must be `allow` or `deny`, got `{other}`"
-        ))),
-    }
+fn source_list(sources: &[&'static str]) -> VmValue {
+    VmValue::List(std::sync::Arc::new(
+        sources
+            .iter()
+            .map(|source| VmValue::String(arcstr::ArcStr::from(*source)))
+            .collect(),
+    ))
 }
 
 fn policy_summary() -> VmValue {
@@ -1234,7 +1293,36 @@ fn policy_summary() -> VmValue {
     let mut dict = BTreeMap::new();
     if let Some(configured) = configured {
         dict.insert("configured".to_string(), VmValue::Bool(true));
-        dict.put_str("source", configured.source);
+        // Receipt: every contribution that shaped this policy, and which of them
+        // decided each axis. `source` stays as the contribution that most
+        // recently composed in, so a single-source policy reads as it always did.
+        dict.put_str(
+            "source",
+            configured.sources.last().copied().unwrap_or("stdlib"),
+        );
+        dict.insert("sources".to_string(), source_list(&configured.sources));
+        let mut axis_sources = BTreeMap::new();
+        axis_sources.insert(
+            "allow".to_string(),
+            source_list(&configured.axis_sources.allow),
+        );
+        axis_sources.insert(
+            "deny".to_string(),
+            source_list(&configured.axis_sources.deny),
+        );
+        axis_sources.insert(
+            "default".to_string(),
+            source_list(&configured.axis_sources.default),
+        );
+        axis_sources.insert(
+            "block_private".to_string(),
+            source_list(&configured.axis_sources.block_private),
+        );
+        axis_sources.insert(
+            "allow_loopback".to_string(),
+            source_list(&configured.axis_sources.allow_loopback),
+        );
+        dict.insert("axis_sources".to_string(), VmValue::dict(axis_sources));
         dict.put_str(
             "default",
             match configured.policy.default {
@@ -1277,167 +1365,6 @@ fn policy_summary() -> VmValue {
         dict.insert("configured".to_string(), VmValue::Bool(false));
     }
     VmValue::dict(dict)
-}
-
-impl EgressRule {
-    fn parse(raw: &str) -> Result<Self, VmError> {
-        let raw = raw.trim();
-        if raw.is_empty() {
-            return Err(vm_error("egress_policy: empty egress rule"));
-        }
-        let (host, port) = parse_rule_host_port(raw)?;
-        let host = normalize_host(&host);
-        let matcher = if let Some(suffix) = host.strip_prefix("*.") {
-            if suffix.is_empty() {
-                return Err(vm_error(format!(
-                    "egress_policy: invalid wildcard rule `{raw}`"
-                )));
-            }
-            EgressMatcher::Suffix(suffix.to_string())
-        } else if host.contains('/') {
-            EgressMatcher::Cidr(IpNet::from_str(&host).map_err(|error| {
-                vm_error(format!("egress_policy: invalid CIDR rule `{raw}`: {error}"))
-            })?)
-        } else if let Ok(ip) = IpAddr::from_str(&host) {
-            EgressMatcher::Ip(ip)
-        } else {
-            EgressMatcher::Host(host)
-        };
-        Ok(Self {
-            raw: raw.to_string(),
-            matcher,
-            port,
-        })
-    }
-
-    fn matches(&self, target: &EgressTarget) -> bool {
-        if let Some(port) = self.port {
-            if target.port != Some(port) {
-                return false;
-            }
-        }
-        match &self.matcher {
-            EgressMatcher::Host(host) => target.host == *host,
-            EgressMatcher::Suffix(suffix) => {
-                crate::harness_net::host_has_dns_suffix(&target.host, suffix)
-            }
-            EgressMatcher::Ip(ip) => target.ip == Some(*ip),
-            EgressMatcher::Cidr(net) => target.ip.is_some_and(|ip| net.contains(&ip)),
-        }
-    }
-
-    /// True when this rule is an IP-literal or CIDR matcher (the only rule
-    /// kinds that can be evaluated against a *resolved* address). Host and
-    /// suffix matchers can only ever match the URL hostname, so they are out
-    /// of scope for the resolved-IP layer.
-    fn is_ip_matcher(&self) -> bool {
-        matches!(self.matcher, EgressMatcher::Ip(_) | EgressMatcher::Cidr(_))
-    }
-
-    /// Whether this IP/CIDR rule matches a *resolved* address for the given
-    /// request port. Host/suffix rules never match here (they pin to the URL
-    /// hostname, not the address it resolves to). Returns `false` for non-IP
-    /// matchers so callers can blanket-iterate the rule list.
-    fn matches_resolved_ip(&self, ip: IpAddr, request_port: Option<u16>) -> bool {
-        if let Some(port) = self.port {
-            if request_port != Some(port) {
-                return false;
-            }
-        }
-        match &self.matcher {
-            EgressMatcher::Ip(rule_ip) => *rule_ip == ip,
-            EgressMatcher::Cidr(net) => net.contains(&ip),
-            EgressMatcher::Host(_) | EgressMatcher::Suffix(_) => false,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct EgressTarget {
-    host: String,
-    ip: Option<IpAddr>,
-    port: Option<u16>,
-}
-
-impl EgressTarget {
-    fn parse(raw_url: &str) -> Result<Self, VmError> {
-        let parsed = Url::parse(raw_url)
-            .map_err(|error| vm_error(format!("egress: invalid URL `{raw_url}`: {error}")))?;
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| vm_error(format!("egress: URL `{raw_url}` does not include a host")))?;
-        let host = normalize_host(host);
-        let ip = IpAddr::from_str(&host).ok();
-        Ok(Self {
-            host,
-            ip,
-            port: parsed.port_or_known_default(),
-        })
-    }
-
-    fn is_loopback_host(&self) -> bool {
-        self.host == "localhost"
-            || self.ip.is_some_and(|ip| match ip {
-                IpAddr::V4(v4) => v4.is_loopback(),
-                IpAddr::V6(v6) => {
-                    v6.is_loopback()
-                        || v6
-                            .to_ipv4_mapped()
-                            .is_some_and(|mapped| mapped.is_loopback())
-                }
-            })
-    }
-}
-
-fn parse_rule_host_port(raw: &str) -> Result<(String, Option<u16>), VmError> {
-    if let Ok(url) = Url::parse(raw) {
-        if let Some(host) = url.host_str() {
-            return Ok((host.to_string(), url.port_or_known_default()));
-        }
-    }
-    let raw = raw.trim();
-    if let Some(rest) = raw.strip_prefix('[') {
-        let Some((host, suffix)) = rest.split_once(']') else {
-            return Err(vm_error(format!(
-                "egress_policy: invalid bracketed host rule `{raw}`"
-            )));
-        };
-        let port = if let Some(port) = suffix.strip_prefix(':') {
-            Some(parse_port(raw, port)?)
-        } else if suffix.is_empty() {
-            None
-        } else {
-            return Err(vm_error(format!(
-                "egress_policy: invalid bracketed host rule `{raw}`"
-            )));
-        };
-        return Ok((host.to_string(), port));
-    }
-    if let Some((host, port)) = split_host_port(raw) {
-        return Ok((host.to_string(), Some(parse_port(raw, port)?)));
-    }
-    Ok((raw.to_string(), None))
-}
-
-fn split_host_port(raw: &str) -> Option<(&str, &str)> {
-    let (host, port) = raw.rsplit_once(':')?;
-    if host.contains(':') || port.is_empty() || !port.chars().all(|ch| ch.is_ascii_digit()) {
-        return None;
-    }
-    Some((host, port))
-}
-
-fn parse_port(rule: &str, raw: &str) -> Result<u16, VmError> {
-    raw.parse::<u16>()
-        .map_err(|error| vm_error(format!("egress_policy: invalid port in `{rule}`: {error}")))
-}
-
-fn normalize_host(host: &str) -> String {
-    host.trim()
-        .trim_end_matches('.')
-        .trim_matches('[')
-        .trim_matches(']')
-        .to_ascii_lowercase()
 }
 
 fn redact_sensitive_url(url: &str) -> String {

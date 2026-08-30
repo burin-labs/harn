@@ -103,8 +103,6 @@ use super::api::{
 use super::trace::{trace_llm_call, LlmTraceEntry};
 use super::{api, cost, first_token, rate_limit, resolved_dispatch, routing, trace};
 
-use super::agent_tools::next_call_id;
-
 mod raw_provider_capture;
 mod raw_tool_receipts;
 mod served_context_receipts;
@@ -126,6 +124,10 @@ pub(crate) use transcript_ambient::{
     current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
     swap_llm_transcript_ambient, LlmTranscriptAmbient,
 };
+
+fn next_call_id() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
 
 fn hash_str(value: &str) -> u64 {
     use std::hash::{Hash, Hasher};

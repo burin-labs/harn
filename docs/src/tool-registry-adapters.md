@@ -36,7 +36,9 @@ fn widget_tools() -> ToolRegistry {
         openWorldHint: true,
       },
       execution_policy: {kind: "fetch", side_effect_level: "network"},
-      governance: {audiences: ["cli", "mcp", "catalog", "dashboard", "agent"]},
+      governance: {
+        audiences: ["cli", "mcp", "catalog", "dashboard", "agent"],
+      },
       cli: {command: ["widgets", "get"]},
       source: {
         kind: "openapi",
@@ -178,6 +180,15 @@ remain visible to all five adapters for compatibility.
 Use a narrow list for operator-only projections. For example,
 `{audiences: ["cli", "catalog"]}` keeps a command available to local operators
 and schema generators without advertising or accepting it over MCP.
+
+`tool_project(registry, audience)` returns the executable projection while
+preserving its handler closures and outer registry metadata. Adapter and agent
+infrastructure should project once at its input boundary, then pass only that
+value to discovery, prompt, search, narrowing, and invocation consumers. The
+agent lifecycle composer owns the closure-preserving `agent` projection before
+it derives model controls; `agent_loop` delegates to that seam. The direct
+`harness.llm.call(...)` option normalizer applies the same projection before
+model-facing prompt guidance or tool schemas are assembled.
 
 ## Validation boundaries
 

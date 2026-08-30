@@ -23,7 +23,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::RecapMetrics;
+use super::{CompactionSourceMeasurement, RecapMetrics};
 
 /// Current on-the-wire schema version for [`CompactionReceipt`]. Bump this when
 /// the receipt's meaning changes in a way readers must branch on; additive
@@ -73,6 +73,14 @@ pub struct CompactionReceipt {
     /// Observation-mask recap metrics; `None` for the LLM/truncate/custom
     /// strategies, which do not spend a recap budget.
     pub recap: Option<RecapMetrics>,
+    /// Source-window and summary byte measurement for this compaction.
+    ///
+    /// `None` means this compaction path took no measurement — host-script
+    /// receipts normalized at `__host_agent_record_compaction` never see the
+    /// engine's source window, so they cannot report one. That is deliberately
+    /// distinct from `Some(..)` carrying `Some(0)`, which is a measurement that
+    /// was taken and read zero.
+    pub source_measurement: Option<CompactionSourceMeasurement>,
 }
 
 /// Generate a fresh, unique compaction receipt id.
@@ -137,6 +145,12 @@ impl CompactionReceipt {
             recap: payload
                 .get("recap")
                 .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
+            // Host-script compaction reports its own metadata; it never sees the
+            // engine's source window, so it has no measurement to report. `None`
+            // here is "not measured", which readers must not read as zero.
+            source_measurement: payload.get("source_measurement").and_then(|value| {
+                serde_json::from_value::<CompactionSourceMeasurement>(value.clone()).ok()
+            }),
         }
     }
 }
@@ -169,6 +183,14 @@ mod tests {
                 kept_results_count: 3,
                 dropped_count: 1,
                 carried_prior_recap: true,
+            }),
+            // A measured zero must round-trip as a measured zero, not collapse
+            // into "no measurement".
+            source_measurement: Some(CompactionSourceMeasurement {
+                source_message_count: Some(7),
+                source_bytes: Some(4_096),
+                summary_bytes: Some(512),
+                carried_source_bytes: Some(0),
             }),
         };
         let json = receipt.to_json();

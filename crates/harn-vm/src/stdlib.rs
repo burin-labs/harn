@@ -119,6 +119,7 @@ mod testing;
 mod timing;
 pub mod token_redaction;
 pub(crate) mod tool_hooks;
+mod tool_projection;
 pub(crate) mod tools;
 pub mod tracing;
 mod transcript_compact;
@@ -225,6 +226,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     review::register_review_builtins(vm);
     secret_scan::register_secret_scan_builtins(vm);
     tools::register_tool_builtins(vm);
+    tool_projection::register_tool_projection_builtins(vm);
     tool_hooks::register_tool_hooks_builtins(vm);
     crate::composition::register_composition_builtins(vm);
     skills::register_skill_builtins(vm);

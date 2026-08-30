@@ -35,6 +35,7 @@ mod agent_terminal_class;
 /// and this is the owner of what those status strings mean.
 pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
+mod agent_tool_governance;
 mod agent_tools;
 pub mod api;
 #[cfg(test)]
@@ -604,10 +605,14 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
         }
         None => String::new(),
     };
-    let registry = args
-        .get(1)
-        .map(helpers::vm_value_to_json)
-        .unwrap_or(serde_json::Value::Null);
+    let registry = match args.get(1) {
+        Some(registry) => crate::tool_registry::project_tools_for_audience(
+            registry,
+            crate::tool_registry::ToolAudience::Agent,
+        )
+        .map(|registry| helpers::vm_value_to_json(&registry))?,
+        None => serde_json::Value::Null,
+    };
     let opts = args
         .get(2)
         .map(helpers::vm_value_to_json)
