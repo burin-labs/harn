@@ -1029,7 +1029,7 @@ pub(crate) fn serve_subcommand_names() -> Vec<String> {
 
 /// Schema version for `harn version --json`. Bump when the data shape
 /// changes; new optional fields can be added freely.
-pub(crate) const VERSION_SCHEMA_VERSION: u32 = 1;
+pub(crate) const VERSION_SCHEMA_VERSION: u32 = 2;
 
 /// Launch the Harn debug adapter (DAP) over stdio for `harn dap`.
 ///

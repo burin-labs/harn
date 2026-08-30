@@ -122,7 +122,8 @@ pub mod op_interrupt;
 pub mod orchestration;
 pub mod runtime_content;
 pub use runtime_content::{
-    runtime_content_fingerprint, RuntimeCompatibilityFingerprint, RuntimeContentFingerprint,
+    runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
+    RuntimeContentFingerprint,
 };
 mod persistent_state;
 pub mod personas;

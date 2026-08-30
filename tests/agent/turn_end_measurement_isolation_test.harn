@@ -1,0 +1,113 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_emit_event } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Seed the shape an offline rubric grader records after a run. The event is
+ * deliberately attached to the live session: if the loop ever treats the
+ * shared event ledger as turn-end authority, this is the shortest path by
+ * which a grading verdict could steer the session.
+ */
+fn emit_grading_verdict(agent: HarnessAgent, session_id: string, verdict: string) {
+  agent_emit_event(
+    agent,
+    session_id,
+    "judge_decision",
+    {
+      iteration: 0,
+      verdict: verdict,
+      reasoning: "seeded boundary falsifier",
+      next_step: "",
+      judge_duration_ms: 0,
+      source: "offline_rubric_measurement",
+    },
+  )
+}
+
+fn grading_verdicts(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "judge_decision"
+        && event?.source == "offline_rubric_measurement"
+    },
+  )
+    .to_list()
+}
+
+pipeline test_grading_done_cannot_override_turn_end_continue(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("First completion proposal. ##DONE##"),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"One product task remains.\"}"),
+      llm_text("Second completion proposal. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The product task is complete.\"}"),
+    ],
+    { ->
+      const session_id = "grading-done-turn-end-continue-" + harness.random.uuid()
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: session_id,
+        loop_until_done: true,
+        max_iterations: 4,
+        done_sentinel: "##DONE##",
+        turn_end_condition: {provider: "mock", max_invocations: 2},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() {
+          emit_grading_verdict(harness.agent, session_id, "done")
+          return agent_loop(harness, "Complete the product task.", nil, options)
+        },
+      )
+      const result = captured.result
+      const grading = grading_verdicts(captured.events)
+      assert_eq(len(grading), 1, "the seeded grading verdict must reach the session event ledger")
+      assert_eq(grading[0].verdict, "done")
+      assert_eq(result.status, "done")
+      assert_eq(len(harness.llm.mock_calls()), 4)
+      assert_eq(result.turn_end_condition.invocations, 2)
+      assert_eq(result.turn_end_condition.vetoes, 1)
+    },
+  )
+}
+
+pipeline test_grading_continue_cannot_override_turn_end_done(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Complete response. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The product task is complete.\"}"),
+    ],
+    { ->
+      const session_id = "grading-continue-turn-end-done-" + harness.random.uuid()
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: session_id,
+        loop_until_done: true,
+        max_iterations: 2,
+        done_sentinel: "##DONE##",
+        turn_end_condition: {provider: "mock", max_invocations: 1},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() {
+          emit_grading_verdict(harness.agent, session_id, "continue")
+          return agent_loop(harness, "Complete the product task.", nil, options)
+        },
+      )
+      const result = captured.result
+      const grading = grading_verdicts(captured.events)
+      assert_eq(len(grading), 1, "the seeded grading verdict must reach the session event ledger")
+      assert_eq(grading[0].verdict, "continue")
+      assert_eq(result.status, "done")
+      assert_eq(len(harness.llm.mock_calls()), 2)
+      assert_eq(result.turn_end_condition.invocations, 1)
+      assert_eq(result.turn_end_condition.vetoes, 0)
+    },
+  )
+}
