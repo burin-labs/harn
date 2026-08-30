@@ -2,14 +2,33 @@
  * `harn version` ported to .harn — see harn#2301 (W1).
  *
  * Build-time constants come from env vars set by the dispatch shim in
- * crates/harn-cli/src/lib.rs's `Command::Version` arm: HARN_BUILD_NAME,
- * HARN_BUILD_VERSION, HARN_BUILD_DESCRIPTION, and HARN_BUILD_REVISION.
+ * crates/harn-cli/src/entrypoint.rs's `run_version`: HARN_BUILD_NAME,
+ * HARN_BUILD_VERSION, HARN_BUILD_DESCRIPTION, HARN_BUILD_REVISION, and the
+ * VM-owned HARN_RUNTIME_CONTENT_FINGERPRINT receipt.
  * The shim reads package metadata and the optional revision embedded by the
  * build script, never from the caller's runtime environment or checkout.
  *
  * The banner and JSON envelope shapes are pinned by
  * crates/harn-cli/tests/harn_cli_e2e/version_dispatch.rs.
  */
+import { get_typed_value } from "std/schema"
+
+type RuntimeCompatibilityFingerprint = {
+  codegen_fingerprint: string,
+  bytecode_schema_version: int,
+  linked_program_schema_version: int,
+  linker_algorithm_version: int,
+}
+
+type RuntimeContentFingerprint = {
+  schema: string,
+  content_sha256: string,
+  harn_version: string,
+  embedded_stdlib_sha256: string,
+  compatibility: RuntimeCompatibilityFingerprint,
+  source_revision: string?,
+}
+
 fn render_banner(version: string) -> string {
   return "\n ╱▔▔╲\n ╱    ╲    harn v" + version
     + "\n │ ◆  │    the agent harness language\n │    │\n ╰──╯╱\n   ╱╱\n"
@@ -20,6 +39,7 @@ fn render_json(
   version: string,
   description: string,
   source_revision: string?,
+  runtime_content_fingerprint: RuntimeContentFingerprint,
 ) -> string {
   // Adding an optional field does not bump VERSION_SCHEMA_VERSION.
   const env = {
@@ -30,6 +50,7 @@ fn render_json(
       version: version,
       description: description,
       source_revision: source_revision,
+      runtime_content_fingerprint: runtime_content_fingerprint,
     },
     error: nil,
     warnings: [],
@@ -49,7 +70,13 @@ fn main(harness: Harness) {
     } else {
       raw_revision
     }
-    harness.stdio.println(render_json(name, version, description, source_revision))
+    const runtime_content_fingerprint: RuntimeContentFingerprint = get_typed_value(
+      json_parse(harness.env.get_or("HARN_RUNTIME_CONTENT_FINGERPRINT", "{}")),
+      schema_of(RuntimeContentFingerprint),
+    )
+    harness.stdio.println(
+      render_json(name, version, description, source_revision, runtime_content_fingerprint),
+    )
   } else {
     harness.stdio.println(render_banner(version))
   }

@@ -118,6 +118,10 @@ pub mod module_source;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
+pub mod runtime_content;
+pub use runtime_content::{
+    runtime_content_fingerprint, RuntimeCompatibilityFingerprint, RuntimeContentFingerprint,
+};
 mod persistent_state;
 pub mod personas;
 pub mod portable;

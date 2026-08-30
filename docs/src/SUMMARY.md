@@ -233,6 +233,7 @@
 - [MCP, ACP, and A2A integration](./mcp-and-acp.md)
 - [Outbound workflow server](./harn-serve.md)
 - [Embedding Harn in Rust](./embedding-rust.md)
+- [Linked runtime content fingerprint](./runtime-content-fingerprint.md)
 - [Portable kernel contract](./portable-kernel-reference.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [Generated protocol artifacts](./protocol-artifacts.md)
