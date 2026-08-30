@@ -200,7 +200,7 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
     )
 }
 
-#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[ignore = "binary surface: runs in the slow E2E/smoke job"]
 #[test]
 fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
     let temp = TempDir::new().unwrap();
