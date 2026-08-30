@@ -22,6 +22,17 @@ fn count_ticks(path: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
+fn harn_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("Harn string literal")
+}
+
+#[test]
+fn generated_harn_path_literal_preserves_windows_separators() {
+    let literal = harn_string_literal(r"C:\temp\ticks.txt");
+    assert_eq!(literal, r#""C:\\temp\\ticks.txt""#);
+    assert!(!literal.contains('\t'));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_notification_stops_agent_loop() {
     let local = tokio::task::LocalSet::new();
@@ -31,6 +42,7 @@ async fn acp_session_cancel_notification_stops_agent_loop() {
             let tick_path = dir.path().join("ticks.txt");
             std::fs::write(&tick_path, "").expect("seed tick file");
             let pipeline_path = dir.path().join("cancel-loop.harn");
+            let tick_literal = harn_string_literal(&tick_path.to_string_lossy());
 
             let mut mocks = String::new();
             for index in 0..MAX_ITERATIONS {
@@ -51,8 +63,8 @@ fn tick_tools(harness: Harness) {{
     "Record one tick and wait",
     {{
       handler: {{ args ->
-        harness.fs.append("{tick}", "tick\n")
-        harness.clock.sleep_ms({sleep})
+        harness.fs.append({tick_literal}, "tick\n")
+        harness.clock.sleep_ms({TICK_SLEEP_MS})
         "ticked"
       }},
       parameters: {{n: {{type: "number", description: "Tick index"}}}},
@@ -74,11 +86,9 @@ pipeline default(harness: Harness, task: unknown) {{
     max_iterations: {MAX_ITERATIONS},
     done_judge: nil,
   }})
-  harness.fs.append("{tick}", "STATUS:" + to_string(result.status) + "\n")
+  harness.fs.append({tick_literal}, "STATUS:" + to_string(result.status) + "\n")
 }}
 "#,
-                tick = tick_path.to_string_lossy(),
-                sleep = TICK_SLEEP_MS,
             );
             std::fs::write(&pipeline_path, source).expect("write cancel-loop pipeline");
 
