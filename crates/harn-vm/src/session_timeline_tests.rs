@@ -1,6 +1,6 @@
 use super::*;
 use crate::event_log::{FileEventLog, MemoryEventLog};
-use crate::orchestration::{save_run_record, RunRecord};
+use crate::orchestration::{save_run_record, ExecutionEvidenceRecord, RunRecord};
 use futures::StreamExt;
 use harn_session_store::{
     AppendEvent, CreateSession, ImportSession, SessionEventKind, SessionImporter, SessionStore,
@@ -247,14 +247,17 @@ async fn persisted_10k_event_tool_timeline_projects_every_completed_tool() {
 fn run_record_spans_project_parent_child_tree_and_redact_metadata() {
     let mut run = RunRecord {
         id: "run-1".to_string(),
-        trace_spans: vec![
-            span(
-                2,
-                Some(1),
-                json!({"status": "ok", "api_key": "should-redact"}),
-            ),
-            span(1, None, json!({"session_id": "s1"})),
-        ],
+        evidence: ExecutionEvidenceRecord {
+            trace_spans: vec![
+                span(
+                    2,
+                    Some(1),
+                    json!({"status": "ok", "api_key": "should-redact"}),
+                ),
+                span(1, None, json!({"session_id": "s1"})),
+            ],
+            ..ExecutionEvidenceRecord::default()
+        },
         ..RunRecord::default()
     };
     run.metadata
@@ -416,10 +419,13 @@ async fn persisted_run_record_reads_nested_spans() {
     let run_path = temp.path().join("run-1.json");
     let mut run = RunRecord {
         id: "run-1".to_string(),
-        trace_spans: vec![
-            span(1, None, json!({"session_id": "s1"})),
-            span(2, Some(1), json!({"session_id": "s1"})),
-        ],
+        evidence: ExecutionEvidenceRecord {
+            trace_spans: vec![
+                span(1, None, json!({"session_id": "s1"})),
+                span(2, Some(1), json!({"session_id": "s1"})),
+            ],
+            ..ExecutionEvidenceRecord::default()
+        },
         ..RunRecord::default()
     };
     run.metadata

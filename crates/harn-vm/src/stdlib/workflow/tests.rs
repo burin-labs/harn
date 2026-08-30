@@ -627,3 +627,36 @@ fn reset_drains_interned_workflow_run_state() {
     reset_workflow_run_states();
     assert_eq!(workflow_run_state_count(), 0);
 }
+
+#[test]
+fn workflow_run_projects_the_active_vm_execution_owner() {
+    crate::reset_thread_local_state();
+    let owner = crate::mint_execution_scope();
+    let _scope = crate::enter_execution_scope(owner.clone());
+    let graph = WorkflowGraph {
+        entry: "act".to_string(),
+        nodes: std::collections::BTreeMap::from_iter([(
+            "act".to_string(),
+            WorkflowNode {
+                id: Some("act".to_string()),
+                kind: "act".to_string(),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+
+    let state = prepare_workflow_state(
+        "owner-probe".to_string(),
+        graph,
+        Vec::new(),
+        &crate::value::DictMap::new(),
+    )
+    .expect("prepare workflow state");
+
+    assert_ne!(state.run.id, owner.as_ref());
+    assert_eq!(
+        state.run.evidence.execution_id.as_deref(),
+        Some(owner.as_ref())
+    );
+}

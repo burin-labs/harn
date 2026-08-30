@@ -621,8 +621,36 @@ export type PortalToolLoadEvent = {
   scope: string
 }
 
+export type PortalFlightRecording = {
+  schema_version: number
+  execution_id: string
+  format: string
+  path: string
+  content_hash: string
+  byte_length: number
+  retained_events: number
+  dropped_events: number
+  value_policy: "omitted"
+}
+
+export type PortalEvidenceGap = {
+  component: string
+  code: string
+  message: string
+}
+
+export type PortalRunView = {
+  evidence: {
+    schema_version: number
+    execution_id: string | null
+    flight_recording: PortalFlightRecording | null
+    gaps: PortalEvidenceGap[]
+  }
+}
+
 export type PortalRunDetail = {
   summary: RunSummary
+  view: PortalRunView
   task: string
   workflow_id: string
   parent_run_id: string | null

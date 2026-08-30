@@ -196,6 +196,8 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
         )),
       ]
     : []
+  const evidence = detail.view.evidence
+  const flight = evidence.flight_recording
 
   return (
     <section className="detail">
@@ -225,6 +227,54 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           ))}
         </div>
       </header>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Execution evidence</h3>
+            <p>One Harn identity joins this run record, spans, and detailed artifacts.</p>
+          </div>
+          <span className={`pill ${evidence.gaps.length ? "status-failed" : "status-completed"}`}>
+            {evidence.gaps.length ? `${evidence.gaps.length} gap${evidence.gaps.length === 1 ? "" : "s"}` : "complete"}
+          </span>
+        </div>
+        <div className="policy-grid">
+          <div className="policy-item">
+            <div className="eyebrow">Execution identity</div>
+            <div className="mono">{evidence.execution_id || "legacy record"}</div>
+          </div>
+          <div className="policy-item">
+            <div className="row">
+              <strong>Flight recording</strong>
+              <span className="turn-chip">{flight ? `${formatNumber(flight.retained_events)} events` : "off"}</span>
+            </div>
+            {flight ? (
+              <div className="policy-list">
+                <div className="mono meta">{flight.path}</div>
+                <div className="meta">
+                  {formatNumber(flight.dropped_events)} dropped • values {flight.value_policy}
+                </div>
+                <div className="mono meta">{flight.content_hash}</div>
+              </div>
+            ) : (
+              <div className="meta">No exact VM path was requested for this run.</div>
+            )}
+          </div>
+          <div className="policy-item">
+            <div className="row">
+              <strong>Evidence gaps</strong>
+              <span className="turn-chip">{evidence.gaps.length}</span>
+            </div>
+            <div className="policy-list">
+              {evidence.gaps.length ? evidence.gaps.map((gap) => (
+                <div className="meta" key={`${gap.component}:${gap.code}`}>
+                  {gap.component} / {gap.code}: {gap.message}
+                </div>
+              )) : <div className="meta">No requested evidence is missing.</div>}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="card-grid">
         {detail.insights.map((item) => (

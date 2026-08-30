@@ -16,6 +16,58 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
+fn test_run_flight_recorder_is_explicit_and_bounded() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--flight-recorder",
+        "--flight-recorder-max-events",
+        "42",
+        "--flight-recorder-retain",
+        "3",
+        "--flight-recorder-out",
+        "recording.json",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.flight_recorder);
+    assert_eq!(args.flight_recorder_max_events, Some(42));
+    assert_eq!(args.flight_recorder_retain, Some(3));
+    assert_eq!(
+        args.flight_recorder_out.as_deref(),
+        Some(std::path::Path::new("recording.json"))
+    );
+
+    assert_eq!(
+        Cli::try_parse_from([
+            "harn",
+            "run",
+            "--flight-recorder-out",
+            "recording.json",
+            "main.harn",
+        ])
+        .unwrap_err()
+        .kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+    assert_eq!(
+        Cli::try_parse_from([
+            "harn",
+            "run",
+            "--flight-recorder",
+            "--flight-recorder-max-events",
+            "0",
+            "main.harn",
+        ])
+        .unwrap_err()
+        .kind(),
+        clap::error::ErrorKind::ValueValidation
+    );
+}
+
+#[test]
 fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
     let cli = Cli::parse_from(["harn", "run", "main.harn"]);
     let Command::Run(args) = cli.command.unwrap() else {

@@ -416,6 +416,7 @@ impl Vm {
                 }
             }
 
+            let frame_depth = self.frames.len();
             let frame = match self.frames.last_mut() {
                 Some(f) => f,
                 None => return Ok(self.stack.pop().unwrap_or(VmValue::Nil)),
@@ -474,6 +475,17 @@ impl Vm {
                 Some(op) => op,
                 None => return Err(VmError::InvalidInstruction(op_byte)),
             };
+            if let Some(recorder) = self.flight_recorder.as_ref() {
+                recorder.record_instruction(
+                    &self.runtime_context.task_id,
+                    frame_depth,
+                    frame.fn_name.as_str(),
+                    &frame.chunk,
+                    self.source_file.as_deref(),
+                    frame.ip - 1,
+                    op,
+                );
+            }
             let op_result: Result<(), VmError> = if let Some(result) = self.execute_op_sync(op) {
                 result
             } else if self.scope_interrupts_clean() {
@@ -705,6 +717,7 @@ impl crate::vm::Vm {
             }
         }
 
+        let frame_depth = self.frames.len();
         let frame = match self.frames.last_mut() {
             Some(f) => f,
             None => {
@@ -727,8 +740,22 @@ impl crate::vm::Vm {
             return Ok(None);
         }
 
-        let op = frame.chunk.code[frame.ip];
+        let op_offset = frame.ip;
+        let op = frame.chunk.code[op_offset];
         frame.ip += 1;
+
+        if let (Some(recorder), Some(decoded)) = (self.flight_recorder.as_ref(), Op::from_byte(op))
+        {
+            recorder.record_instruction(
+                &self.runtime_context.task_id,
+                frame_depth,
+                frame.fn_name.as_str(),
+                &frame.chunk,
+                self.source_file.as_deref(),
+                op_offset,
+                decoded,
+            );
+        }
 
         match self.execute_op_with_scope_interrupts(op).await {
             Ok(Some(val)) => Ok(Some((val, false))),

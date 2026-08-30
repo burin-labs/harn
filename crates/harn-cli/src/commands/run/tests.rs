@@ -17,6 +17,7 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod evidence;
 mod exit_status;
 mod host_dispatch;
 mod network;

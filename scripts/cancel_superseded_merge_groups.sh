@@ -48,7 +48,7 @@ done
 if [[ -n "$expected_sha" && ! "$expected_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
   die "--expected-sha must be a full commit SHA"
 fi
-expected_sha="${expected_sha,,}"
+expected_sha="$(printf '%s' "$expected_sha" | tr '[:upper:]' '[:lower:]')"
 
 tmp_dir="$(mktemp -d)"
 cleanup() {

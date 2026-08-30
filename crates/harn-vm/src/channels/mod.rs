@@ -17,6 +17,8 @@ use crate::triggers::event::{ChannelEventPayload, KnownProviderPayload};
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TenantId, TriggerEvent};
 use crate::value::{VmError, VmStream, VmValue};
 
+mod projection;
+
 const CHANNEL_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const CHANNEL_EVENT_KIND: &str = "channel.emit";
 const IDEMPOTENCY_HEADER: &str = "harn.channel.id";
@@ -140,23 +142,23 @@ pub struct SignedTimestamp {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct StoredChannelEvent {
-    id: String,
-    name: String,
-    payload: serde_json::Value,
-    emitted_at: SignedTimestamp,
-    emitted_by: String,
-    scope: String,
-    scope_id: String,
+pub(super) struct StoredChannelEvent {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) payload: serde_json::Value,
+    pub(super) emitted_at: SignedTimestamp,
+    pub(super) emitted_by: String,
+    pub(super) scope: String,
+    pub(super) scope_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pipeline_id: Option<String>,
+    pub(super) pipeline_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<String>,
+    pub(super) session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tenant_id: Option<String>,
-    retention: String,
+    pub(super) tenant_id: Option<String>,
+    pub(super) retention: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    ttl_ms: Option<i64>,
+    pub(super) ttl_ms: Option<i64>,
 }
 
 /// CH-07 (#1878): durable replay-determinism receipt for a single
@@ -405,6 +407,12 @@ pub(crate) async fn emit_channel_from_vm(
     );
     headers.insert(SCOPE_ID_HEADER.to_string(), resolved.scope_id.clone());
     headers.insert(EMITTED_BY_HEADER.to_string(), emitted_by.clone());
+    if let Some(execution_id) = crate::current_execution_scope() {
+        headers.insert(
+            crate::tracing::meta::EXECUTION_ID.to_string(),
+            execution_id.to_string(),
+        );
+    }
 
     let log = log_for_scope(resolved.scope);
     let mut log_event = LogEvent::new(
@@ -418,7 +426,7 @@ pub(crate) async fn emit_channel_from_vm(
         .append_idempotent_by_header(&resolved.topic, IDEMPOTENCY_HEADER, &event_id, log_event)
         .await
         .map_err(channel_log_error)?;
-    let receipt = receipt_value(
+    let receipt = projection::receipt_value(
         &resolved.topic,
         outcome.event_id,
         &outcome.event,
@@ -481,7 +489,7 @@ pub(crate) async fn channel_events_from_vm(
         .map_err(channel_log_error)?;
     let values = events
         .into_iter()
-        .map(|(event_id, event)| event_value(&resolved.topic, event_id, event))
+        .map(|(event_id, event)| projection::event_value(&resolved.topic, event_id, event))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
         values,
@@ -505,7 +513,7 @@ pub(crate) async fn channel_subscribe_from_vm(
     tokio::task::spawn_local(async move {
         while let Some(next) = events.next().await {
             let value = match next {
-                Ok((event_id, event)) => event_value(&topic, event_id, event)
+                Ok((event_id, event)) => projection::event_value(&topic, event_id, event)
                     .map(|value| crate::stdlib::json_to_vm_value(&value)),
                 Err(error) => Err(channel_log_error(error)),
             };
@@ -1231,72 +1239,6 @@ fn retention_for_scope(scope: ChannelScope) -> &'static str {
         ChannelScope::Tenant => "tenant_event_log",
         ChannelScope::Org => "org_event_log",
     }
-}
-
-fn receipt_value(
-    topic: &Topic,
-    event_id: EventId,
-    event: &LogEvent,
-    inserted: bool,
-) -> Result<serde_json::Value, VmError> {
-    let record = stored_record(event)?;
-    Ok(serde_json::json!({
-        "event_id": event_id,
-        "cursor": event_id,
-        "id": record.id,
-        "name": record.name,
-        "name_resolved": record.name,
-        "scope": record.scope,
-        "scope_id": record.scope_id,
-        "payload": record.payload,
-        "emitted_at": record.emitted_at,
-        "emitted_by": record.emitted_by,
-        "pipeline_id": record.pipeline_id,
-        "session_id": record.session_id,
-        "tenant_id": record.tenant_id,
-        "retention": record.retention,
-        "ttl_ms": record.ttl_ms,
-        "topic": topic.as_str(),
-        "inserted": inserted,
-        "duplicate": !inserted,
-    }))
-}
-
-fn event_value(
-    topic: &Topic,
-    event_id: EventId,
-    event: LogEvent,
-) -> Result<serde_json::Value, VmError> {
-    let record = stored_record(&event)?;
-    Ok(serde_json::json!({
-        "event_id": event_id,
-        "cursor": event_id,
-        "topic": topic.as_str(),
-        "kind": event.kind,
-        "headers": event.headers,
-        "occurred_at_ms": event.occurred_at_ms,
-        "id": record.id,
-        "name": record.name,
-        "name_resolved": record.name,
-        "scope": record.scope,
-        "scope_id": record.scope_id,
-        "payload": record.payload,
-        "emitted_at": record.emitted_at,
-        "emitted_by": record.emitted_by,
-        "pipeline_id": record.pipeline_id,
-        "session_id": record.session_id,
-        "tenant_id": record.tenant_id,
-        "retention": record.retention,
-        "ttl_ms": record.ttl_ms,
-    }))
-}
-
-fn stored_record(event: &LogEvent) -> Result<StoredChannelEvent, VmError> {
-    serde_json::from_value(event.payload.clone()).map_err(|error| {
-        VmError::Runtime(format!(
-            "channel event store contained malformed channel payload: {error}"
-        ))
-    })
 }
 
 fn parse_options(value: Option<&VmValue>, builtin: &str) -> Result<ChannelOptions, VmError> {
