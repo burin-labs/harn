@@ -897,7 +897,7 @@ fn truncate_compaction_summary_with_context(
                     content.len()
                 )
             } else {
-                content.clone()
+                content
             };
             carried += truncated.len();
             Some(format!("[{role}] {truncated}"))
