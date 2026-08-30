@@ -256,7 +256,7 @@ hook_export_cargo_build_dir() {
   fi
 }
 
-hook_export_cargo_target_dir() {
+hook_export_freshness_target_dir() {
   if [ -z "${CARGO_TARGET_DIR:-}" ]; then
     target_dir=$(hook_target_dir)
     if [ -z "$target_dir" ]; then
@@ -265,6 +265,10 @@ hook_export_cargo_target_dir() {
     export CARGO_TARGET_DIR="$target_dir"
     printf '=== Hook: using Cargo target dir %s ===\n' "$CARGO_TARGET_DIR" >&2
   fi
+}
+
+hook_export_cargo_target_dir() {
+  hook_export_freshness_target_dir
   mkdir -p "$CARGO_TARGET_DIR"
   hook_export_cargo_build_dir
 }
@@ -321,7 +325,7 @@ hook_ensure_harn() {
     return
   fi
 
-  hook_export_cargo_target_dir
+  hook_export_freshness_target_dir
   # Exact receipt validation is the unchanged hook fast path. Only a missing or
   # stale proof falls through to Cargo; signing and receipt production belong
   # exclusively to that mutating build path.
@@ -329,6 +333,7 @@ hook_ensure_harn() {
     printf '%s\n' "$HARN_FRESH_WORKTREE_BIN"
     return
   fi
+  hook_export_cargo_target_dir
   resolved_harn=$(hook_build_harn_bin)
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
     HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2

@@ -76,7 +76,18 @@ harn_collect_artifact_freshness_evidence() {
 harn_write_freshness_authority_path() {
   local output="$1"
   local path="$2"
+  local kind="${3:-file}"
   local projected="$path"
+  local tag=""
+
+  case "$kind" in
+    file) tag=f ;;
+    git-config) tag=g ;;
+    *)
+      echo "error: unknown Harn freshness authority kind: $kind" >&2
+      return 2
+      ;;
+  esac
 
   # Authority-list entries cross a data boundary: unlike command-line
   # arguments, NUL-delimited file contents are not rewritten by MSYS before a
@@ -91,7 +102,69 @@ harn_write_freshness_authority_path() {
       projected="$(cygpath -w "$path")" || return $?
       ;;
   esac
-  printf '%s\0' "$projected" >>"$output"
+  # The native checker owns authority semantics. The shell merely serializes
+  # the path plus its input kind, so no no-build path can depend on a mutable
+  # shell-generated projection.
+  printf '%s%s\0' "$tag" "$projected" >>"$output"
+}
+
+# Add every Git configuration source that was resolved when the receipt is
+# produced. Git follows includes while listing values, so included files with
+# active settings join the same native projection. The checker intentionally
+# does not invoke Git on its hot path: it filters these file bytes itself.
+#
+# An include added after the receipt is still covered because the native filter
+# retains include and includeIf directives from the parent file. A process that
+# changes Git's config-selection environment after the build needs a rebuild;
+# the receipt describes the exact process environment that produced its binary.
+harn_write_git_config_authorities() {
+  local output="$1"
+  local repo_root=""
+  local path=""
+  local origin=""
+  local key=""
+
+  repo_root="$(harn_repo_root)" || return $?
+  path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" || return $?
+  harn_write_freshness_authority_path "$output" "$path" git-config || return $?
+
+  # Explicit global/system locations are meaningful even while empty. They
+  # therefore need an authority entry before `git config --list` has a value
+  # to report from them.
+  if [[ -n "${GIT_CONFIG_GLOBAL:-}" && "$GIT_CONFIG_GLOBAL" != /dev/null ]]; then
+    harn_write_freshness_authority_path "$output" "$GIT_CONFIG_GLOBAL" git-config || return $?
+  fi
+  if [[ -n "${GIT_CONFIG_SYSTEM:-}" && "$GIT_CONFIG_SYSTEM" != /dev/null ]]; then
+    harn_write_freshness_authority_path "$output" "$GIT_CONFIG_SYSTEM" git-config || return $?
+  fi
+
+  # `--show-origin --name-only -z` emits pairs of NUL-delimited origin and
+  # key records. Keep this build-time discovery in one Git process; the hook
+  # later verifies only the native manifest.
+  while IFS= read -r -d '' origin; do
+    if ! IFS= read -r -d '' key; then
+      echo "error: Git configuration origin list ended without a key" >&2
+      return 1
+    fi
+    case "$origin" in
+      file:*)
+        path="${origin#file:}"
+        case "$path" in
+          .git/*)
+            path="$(git -C "$repo_root" rev-parse --path-format=absolute \
+              --git-path "${path#.git/}")" || return $?
+            ;;
+          /* | [A-Za-z]:[\\/]*) ;;
+          *)
+            echo "error: cannot resolve relative Git configuration authority: $path" >&2
+            return 1
+            ;;
+        esac
+        harn_write_freshness_authority_path \
+          "$output" "$path" git-config || return $?
+        ;;
+    esac
+  done < <(git -C "$repo_root" config --includes --show-origin --name-only --null --list)
 }
 
 harn_write_freshness_authority_list() {
@@ -121,12 +194,12 @@ harn_write_freshness_authority_list() {
   for path in \
     "$repo_root/.cargo" \
     "$repo_root/.cargo/config.toml" \
-    "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" \
     "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"; do
     if [[ -e "$path" ]]; then
       harn_write_freshness_authority_path "$output" "$path" || return $?
     fi
   done
+  harn_write_git_config_authorities "$output" || return $?
 }
 
 harn_build_freshness_id_from_parts() {
