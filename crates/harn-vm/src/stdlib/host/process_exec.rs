@@ -11,7 +11,7 @@
 use std::time::Instant;
 
 use serde_json::Value as JsonValue;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
@@ -76,6 +76,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
     // CPU, and toolchain lanes as writers, so every spawned command participates.
     let _process_admission = super::process_admission::acquire_process_admission(ctx).await?;
     let (tape_program, tape_args) = process_exec_argv(params)?;
+    let stdin = process_exec_stdin(params, "process.exec")?;
     let tape_cwd = optional_string(params, "cwd").map(|cwd| resolve_process_exec_cwd(&cwd));
     let started_at = audited_utc_now_rfc3339("host_call/process.exec.started_at");
     let started = crate::clock_mock::leak_audit::instant_now("host_call/process.exec.started");
@@ -143,7 +144,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
         let output = crate::stdlib::sandbox::windows_command_output(
             tape_program,
             tape_args,
-            launch.into_process_config(),
+            launch.into_process_config(stdin.clone()),
             policy,
             profile,
         )
@@ -187,13 +188,28 @@ pub(super) async fn dispatch_process_exec_after_policy(
         &cleanup_token,
     );
     crate::op_interrupt::preserve_process_owner_token(cmd.as_std_mut());
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
+    cmd.stdin(match &stdin {
+        crate::stdlib::sandbox::ProcessStdin::Null => std::process::Stdio::null(),
+        crate::stdlib::sandbox::ProcessStdin::Bytes(_) => std::process::Stdio::piped(),
+    })
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
+    .kill_on_drop(true);
     let mut child = cmd
         .spawn()
         .map_err(|error| crate::value::environment_io_error_thrown(&error, error.to_string()))?;
+    let stdin_task = match stdin {
+        crate::stdlib::sandbox::ProcessStdin::Bytes(input) => {
+            let mut pipe = child.stdin.take().ok_or_else(|| {
+                VmError::Runtime("host_call process.exec stdin pipe was not captured".to_string())
+            })?;
+            Some(tokio::spawn(async move {
+                pipe.write_all(&input).await?;
+                pipe.shutdown().await
+            }))
+        }
+        crate::stdlib::sandbox::ProcessStdin::Null => None,
+    };
     drop(profile_guard);
     let pid = child.id();
     crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
@@ -300,6 +316,24 @@ pub(super) async fn dispatch_process_exec_after_policy(
     } else {
         drain_pipes.await?
     };
+    if let Some(stdin_task) = stdin_task {
+        match stdin_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) if timed_out => {
+                tracing::debug!(%error, "process.exec stdin writer ended after timeout");
+            }
+            Ok(Err(error)) => {
+                return Err(VmError::Runtime(format!(
+                    "host_call process.exec write stdin: {error}"
+                )));
+            }
+            Err(error) => {
+                return Err(VmError::Runtime(format!(
+                    "host_call process.exec join stdin writer: {error}"
+                )));
+            }
+        }
+    }
     drop(cleanup_registration);
     if let Some(recording) = tape_recording {
         recording.finish_parts(exit_code, &stdout, &stderr);
@@ -506,14 +540,33 @@ impl ProcessExecLaunch {
     }
 
     #[cfg(target_os = "windows")]
-    fn into_process_config(self) -> crate::stdlib::sandbox::ProcessCommandConfig {
+    fn into_process_config(
+        self,
+        stdin: crate::stdlib::sandbox::ProcessStdin,
+    ) -> crate::stdlib::sandbox::ProcessCommandConfig {
         crate::stdlib::sandbox::ProcessCommandConfig {
             cwd: self.cwd,
             env: self.env,
             env_remove: self.env_remove,
-            stdin_null: true,
+            stdin,
             closed_env: self.closed_env,
         }
+    }
+}
+
+pub(super) fn process_exec_stdin(
+    params: &crate::value::DictMap,
+    label: &str,
+) -> Result<crate::stdlib::sandbox::ProcessStdin, VmError> {
+    match params.get("stdin") {
+        None | Some(VmValue::Nil) => Ok(crate::stdlib::sandbox::ProcessStdin::Null),
+        Some(VmValue::String(value)) => Ok(crate::stdlib::sandbox::ProcessStdin::Bytes(
+            value.as_bytes().to_vec(),
+        )),
+        Some(other) => Err(VmError::TypeError(format!(
+            "host_call {label}: stdin must be a string or nil, got {}",
+            other.type_name()
+        ))),
     }
 }
 

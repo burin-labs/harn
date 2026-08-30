@@ -9,7 +9,9 @@
 // `host` are distinct tokens and each must be hashed separately.
 //
 // Usage: node scripts/scan_hashed_denylist.mjs <denylist-file>
-//   stdin: NUL-separated tracked paths (git ls-files -z)
+//        node scripts/scan_hashed_denylist.mjs <denylist-file> --text-label <label>
+//   default stdin: NUL-separated tracked paths (git ls-files -z)
+//   --text-label stdin: text to scan; locations use the supplied public label
 //   exit 0 = clean, 1 = hits (printed to stdout), 2 = usage/IO error
 
 import { createHash } from "node:crypto";
@@ -17,11 +19,29 @@ import { readFileSync } from "node:fs";
 
 const denylistPath = process.argv[2];
 if (!denylistPath) {
-  process.stderr.write("usage: scan_hashed_denylist.mjs <denylist-file>\n");
+  process.stderr.write(
+    "usage: scan_hashed_denylist.mjs <denylist-file> [--text-label <label>]\n",
+  );
   process.exit(2);
 }
 
-const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+let textLabel;
+if (process.argv.length > 3) {
+  if (
+    process.argv[3] !== "--text-label" ||
+    !/^[A-Za-z0-9._/-]+$/.test(process.argv[4] ?? "") ||
+    process.argv.length !== 5
+  ) {
+    process.stderr.write(
+      "usage: scan_hashed_denylist.mjs <denylist-file> [--text-label <label>]\n",
+    );
+    process.exit(2);
+  }
+  textLabel = process.argv[4];
+}
+
+const sha256 = (text) =>
+  createHash("sha256").update(text, "utf8").digest("hex");
 
 const banned = new Set(
   readFileSync(denylistPath, "utf8")
@@ -34,20 +54,13 @@ if (banned.size === 0) {
   process.exit(2);
 }
 
-const paths = readFileSync(0, "utf8").split("\0").filter(Boolean);
 const tokenPattern = /[A-Za-z0-9._-]+/g;
 // Cache token -> banned? across the whole tree; most tokens repeat heavily.
 const verdict = new Map();
 const hits = [];
 
-for (const path of paths) {
-  let text;
-  try {
-    text = readFileSync(path);
-  } catch {
-    continue; // deleted between ls-files and read
-  }
-  if (text.includes(0)) continue; // binary, mirrors `git grep -I`
+const scanText = (text, location, skipBinary) => {
+  if (skipBinary && text.includes(0)) return; // mirrors `git grep -I` for files
   const lines = text.toString("utf8").split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     const matches = lines[i].match(tokenPattern);
@@ -61,9 +74,24 @@ for (const path of paths) {
       }
       if (bad) {
         // Hash prefix only. The token itself never leaves this process.
-        hits.push(`${path}:${i + 1}: sha256:${sha256(token).slice(0, 12)}`);
+        hits.push(`${location}:${i + 1}: sha256:${sha256(token).slice(0, 12)}`);
       }
     }
+  }
+};
+
+if (textLabel !== undefined) {
+  scanText(readFileSync(0), textLabel, false);
+} else {
+  const paths = readFileSync(0, "utf8").split("\0").filter(Boolean);
+  for (const path of paths) {
+    let text;
+    try {
+      text = readFileSync(path);
+    } catch {
+      continue; // deleted between ls-files and read
+    }
+    scanText(text, path, true);
   }
 }
 

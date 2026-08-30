@@ -54,6 +54,28 @@ pub fn greet(name: string, excited: bool = false) -> dict {
     .unwrap();
 }
 
+fn write_registry_info_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { tool_registry_from } from "std/tools"
+
+fn main(harness: Harness) {
+  const tools = tool_registry_from([
+    {
+      name: "greet",
+      description: "Greet one person.",
+      parameters: {name: {schema: {type: "string"}, required: true}},
+      handler: {args -> {message: "Hello, " + args.name}},
+    },
+  ], {name: "widgets", version: "1.2.3", description: "Widget integration"})
+  harness.tools.mcp_tools(tools)
+}
+"#,
+    )
+    .unwrap();
+}
+
 fn write_authority_export_fixture(temp: &TempDir) {
     fs::create_dir_all(temp.path().join("nested")).unwrap();
     fs::write(
@@ -330,6 +352,35 @@ fn serve_mcp_stdio_initializes_and_calls_from_released_client() {
         "Hello, Codex!"
     );
     assert!(called["result"].get("resultType").is_none());
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_uses_registry_identity_when_transport_metadata_is_absent() {
+    let temp = TempDir::new().unwrap();
+    write_registry_info_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp", command);
+
+    let initialized = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "codex-mcp-client", "version": "test"}
+        }
+    }));
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "widgets");
+    assert_eq!(initialized["result"]["serverInfo"]["version"], "1.2.3");
+    assert_eq!(initialized["result"]["instructions"], "Widget integration");
     client.shutdown_expect_success();
 }
 

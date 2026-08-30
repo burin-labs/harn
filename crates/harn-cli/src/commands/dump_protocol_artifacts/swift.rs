@@ -20,10 +20,12 @@ use super::values::*;
 
 mod activity_types;
 mod codegen_support;
+mod prompt_terminal;
 mod session_timeline;
 
 use activity_types::append_activity_types;
 pub(crate) use codegen_support::*;
+use prompt_terminal::append_prompt_terminal_types;
 use session_timeline::append_session_timeline_types;
 
 #[cfg(test)]
@@ -330,58 +332,7 @@ pub(super) fn generate_swift_for_version(
         "HarnAgentLifecycleEvent",
         &agent_lifecycle_event_values(),
     ));
-    out.push_str(&swift_enum(
-        "HarnAgentTerminalClass",
-        &agent_terminal_class_values(),
-    ));
-    out.push_str(&swift_enum(
-        "HarnAgentTerminalKind",
-        &agent_terminal_kind_values(),
-    ));
-    out.push_str(&swift_enum(
-        "HarnAgentTerminalOwner",
-        &agent_terminal_owner_values(),
-    ));
-    out.push_str(&swift_enum(
-        "HarnACPPromptErrorSchema",
-        &[ACP_PROMPT_ERROR_DATA_SCHEMA.to_string()],
-    ));
-    out.push_str(
-        r"public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
-    public var schema: HarnACPPromptErrorSchema
-    public var terminalClass: HarnAgentTerminalClass
-    public var category: String?
-    public var kind: String?
-    public var reason: String?
-    public var code: String?
-    public var retryable: Bool?
-    public var retryAfterMs: Int?
-    public var provider: String?
-    public var model: String?
-}
-
-public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
-    public var kind: HarnAgentTerminalKind
-    public var reason: String
-    public var owner: HarnAgentTerminalOwner
-    public var terminalClass: HarnAgentTerminalClass?
-}
-
-public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
-    public var terminal: HarnAgentTerminalOutcome?
-}
-
-public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {
-    public var harn: HarnACPPromptResultHarnMetadata
-}
-
-public struct HarnACPPromptResult: Codable, Sendable, Equatable {
-    public var stopReason: String
-    public var _meta: HarnACPPromptResultMetadata?
-}
-
-",
-    );
+    append_prompt_terminal_types(&mut out, ACP_PROMPT_ERROR_DATA_SCHEMA);
     out.push_str(&swift_enum(
         "HarnToolCallReceiptStatus",
         &strs_to_strings(TOOL_CALL_RECEIPT_STATUSES),

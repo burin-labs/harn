@@ -35,6 +35,25 @@
           }
         }
       }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 43,
+      "result": {
+        "stopReason": "end_turn",
+        "_meta": {
+          "harn": {
+            "terminal": {
+              "kind": "provider_error",
+              "reason": "provider_error",
+              "owner": "provider",
+              "terminalClass": "provider_unavailable",
+              "message": "provider capacity is temporarily unavailable",
+              "detail": "request id req-42"
+            }
+          }
+        }
+      }
     }
   ],
   "matrix": {
@@ -43,7 +62,7 @@
     "case": "typed_terminal_truth",
     "source": {
       "kind": "hand_authored",
-      "description": "Harn prompt-result extension preserving policy-budget and unknown terminal truth independently of ACP stopReason."
+      "description": "Harn prompt-result extension preserving policy-budget, unknown, and diagnosed provider terminal truth independently of ACP stopReason."
     }
   }
 }

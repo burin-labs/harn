@@ -1,0 +1,153 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::cli::ToolNewArgs;
+use crate::commands::run::RunSandboxOptions;
+use crate::commands::scaffold_common::harn_identifier_with_prefix;
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
+use crate::package::{
+    current_harn_range_example, generate_package_docs_impl, validate_package_alias, PackageError,
+};
+
+/// `harn tool new` dispatch shim. Validates the requested package alias
+/// in Rust, resolves the destination directory, then delegates the
+/// template render + file-write loop to `cli/scaffold/tool_new.harn`.
+pub(crate) async fn run_new(args: &ToolNewArgs) -> Result<(), PackageError> {
+    validate_package_alias(&args.name)?;
+    let dest = args
+        .dir
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&args.name));
+    if dest.exists() {
+        if !args.force {
+            return Err(format!(
+                "{} already exists. Pass --force to overwrite.",
+                dest.display()
+            )
+            .into());
+        }
+        if !dest.is_dir() {
+            return Err(format!("{} exists and is not a directory.", dest.display()).into());
+        }
+    } else {
+        fs::create_dir_all(&dest)
+            .map_err(|error| format!("failed to create {}: {error}", dest.display()))?;
+    }
+
+    let description = args
+        .description
+        .clone()
+        .unwrap_or_else(|| format!("Custom Harn tool package for {}.", args.name));
+    if description.contains('\n') || description.contains('\r') {
+        return Err("tool description must be a single line".to_string().into());
+    }
+    let ident = harn_identifier(&args.name)?;
+    let handler = format!("handle_{ident}");
+
+    dispatch_to_script(&args.name, &dest, &ident, &handler, &description).await?;
+    generate_package_docs_impl(Some(&dest), None, false)?;
+
+    println!(
+        "Scaffolded tool package '{}' at {}",
+        args.name,
+        dest.display()
+    );
+    println!("  harn package verify");
+    Ok(())
+}
+
+async fn dispatch_to_script(
+    name: &str,
+    dest: &Path,
+    ident: &str,
+    handler: &str,
+    description: &str,
+) -> Result<(), PackageError> {
+    let dest_str = dest.display().to_string();
+    let harn_range = current_harn_range_example();
+    let _name_env = ScopedEnvVar::set("HARN_TOOL_NAME", name);
+    let _dest_env = ScopedEnvVar::set("HARN_TOOL_DEST", &dest_str);
+    let _ident_env = ScopedEnvVar::set("HARN_TOOL_IDENT", ident);
+    let _handler_env = ScopedEnvVar::set("HARN_TOOL_HANDLER", handler);
+    let _desc_env = ScopedEnvVar::set("HARN_TOOL_DESCRIPTION", description);
+    let _range_env = ScopedEnvVar::set("HARN_TOOL_HARN_RANGE", &harn_range);
+    let _version_env = ScopedEnvVar::set("HARN_TOOL_HARN_VERSION", env!("CARGO_PKG_VERSION"));
+    let exit = dispatch::dispatch_to_embedded_script_with_sandbox(
+        "scaffold/tool_new",
+        Vec::new(),
+        false,
+        RunSandboxOptions::default().with_workspace_root(dest),
+    )
+    .await;
+    if exit != 0 {
+        return Err(format!("tool new scaffolder exited with code {exit}").into());
+    }
+    Ok(())
+}
+
+fn harn_identifier(name: &str) -> Result<String, PackageError> {
+    harn_identifier_with_prefix(name, "tool")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn harn_identifier_normalizes_package_names() {
+        assert_eq!(harn_identifier("acme-tool").unwrap(), "acme_tool");
+        assert_eq!(harn_identifier("123-tool").unwrap(), "tool_123_tool");
+    }
+
+    #[test]
+    fn generated_tool_projects_typed_harness_and_is_canonically_formatted() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let destination = temp.path().join("example-tool");
+        let destination_arg = destination.display().to_string();
+        let result = std::thread::Builder::new()
+            .name("typed-tool-scaffold".to_string())
+            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+                runtime.block_on(async {
+                    let _guard =
+                        crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+                    run_new(&ToolNewArgs {
+                        name: "example-tool".to_string(),
+                        description: None,
+                        dir: Some(destination_arg),
+                        force: false,
+                    })
+                    .await
+                })
+            })
+            .expect("scaffold thread")
+            .join()
+            .expect("scaffold thread completed");
+        result.expect("tool scaffold");
+
+        for relative in ["main.harn", "tests/test_tool.harn"] {
+            let source = fs::read_to_string(destination.join(relative)).expect("generated source");
+            assert!(source.contains("harness: Harness"), "{relative}");
+            assert!(
+                source.contains("agent_dispatch_tool_call(\n    harness.tools,"),
+                "{relative}"
+            );
+            assert_generated_harn_is_formatted(destination.as_path(), relative);
+        }
+    }
+
+    fn assert_generated_harn_is_formatted(root: &Path, relative: &str) {
+        let source = fs::read_to_string(root.join(relative)).expect("generated source");
+        let formatted = harn_fmt::format_source(&source).expect("format generated source");
+        assert_eq!(source, formatted, "{relative} is not canonical");
+    }
+
+    // Force-overwrite parity is covered by `tests/scaffold_dispatch.rs`; the
+    // dispatched script requires the CLI's larger runtime stack.
+}

@@ -625,6 +625,8 @@ export interface HarnAgentTerminalOutcome {
   reason: string
   owner: AgentTerminalOwner
   terminalClass?: AgentTerminalClass
+  message?: string
+  detail?: string
 }
 
 export interface HarnACPPromptResult {

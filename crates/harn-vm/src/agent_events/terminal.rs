@@ -186,6 +186,16 @@ pub struct AgentTerminalOutcome {
         skip_serializing_if = "Option::is_none"
     )]
     pub terminal_class: Option<AgentTerminalClass>,
+    /// Human-readable diagnostic supplied by the failing boundary. This is
+    /// additive and never used for machine decisions; hosts branch on
+    /// `terminal_class` and may display this text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Provider-supplied detail when it is available as a typed string distinct
+    /// from the primary message. Arbitrary error objects stay in the run record
+    /// rather than widening this protocol field into a free-form hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl AgentTerminalOutcome {
@@ -197,6 +207,8 @@ impl AgentTerminalOutcome {
             reason: reason.into(),
             owner: kind.owner().to_string(),
             terminal_class: None,
+            message: None,
+            detail: None,
         }
     }
 
@@ -209,6 +221,25 @@ impl AgentTerminalOutcome {
         self
     }
 
+    /// Preserve the two stable human-diagnostic fields from a structured
+    /// terminal error. Unknown/nested fields remain available in the durable
+    /// run record and are deliberately not copied onto the public wire shape.
+    #[must_use]
+    pub fn with_error(mut self, error: Option<&serde_json::Value>) -> Self {
+        if let Some(error) = error {
+            self.message = error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| error.as_str())
+                .map(str::to_string);
+            self.detail = error
+                .get("detail")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+        }
+        self
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         let mut value = serde_json::json!({
             "kind": self.kind.as_str(),
@@ -217,6 +248,12 @@ impl AgentTerminalOutcome {
         });
         if let Some(class) = self.terminal_class {
             value["terminalClass"] = serde_json::Value::String(class.as_str().to_string());
+        }
+        if let Some(message) = &self.message {
+            value["message"] = serde_json::Value::String(message.clone());
+        }
+        if let Some(detail) = &self.detail {
+            value["detail"] = serde_json::Value::String(detail.clone());
         }
         value
     }
@@ -653,10 +690,37 @@ mod tests {
     }
 
     #[test]
+    fn provider_diagnostics_are_typed_additive_fields() {
+        let error = serde_json::json!({
+            "message": "upstream capacity is temporarily unavailable",
+            "detail": "request id req-42",
+            "nested": {"private": "kept only in the run record"},
+        });
+        let outcome = AgentTerminalOutcome::new(AgentTerminalKind::ProviderError, "provider_error")
+            .with_terminal_class(Some(AgentTerminalClass::ProviderUnavailable))
+            .with_error(Some(&error));
+
+        assert_eq!(
+            outcome.message.as_deref(),
+            Some("upstream capacity is temporarily unavailable")
+        );
+        assert_eq!(outcome.detail.as_deref(), Some("request id req-42"));
+        let encoded = outcome.to_json();
+        assert_eq!(encoded["message"], error["message"]);
+        assert_eq!(encoded["detail"], error["detail"]);
+        assert!(encoded.get("nested").is_none());
+
+        let decoded: AgentTerminalOutcome = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, outcome);
+    }
+
+    #[test]
     fn an_outcome_without_a_class_serializes_exactly_as_it_did_before() {
         let outcome = AgentTerminalOutcome::new(AgentTerminalKind::PolicyBudget, "max_iterations");
 
         assert_eq!(outcome.terminal_class, None);
+        assert_eq!(outcome.message, None);
+        assert_eq!(outcome.detail, None);
         assert_eq!(
             outcome.to_json(),
             serde_json::json!({

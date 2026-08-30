@@ -46,6 +46,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
                 "mcp_tools: argument must be a tool registry".into(),
             ));
         }
+        crate::tool_registry::tool_registry_catalog(&registry)?;
         MCP_SERVE_REGISTRY.with(|cell| {
             *cell.borrow_mut() = Some(registry);
         });

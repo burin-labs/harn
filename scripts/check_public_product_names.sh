@@ -28,6 +28,15 @@ pattern="${product}-code|${product}-evals|${product}-commerce|${brand} Code"
 denylist="$repo_root/scripts/consumer-host-denylist.sha256"
 scanner="$repo_root/scripts/scan_hashed_denylist.mjs"
 
+stdin_label=""
+if [[ "$#" -ne 0 ]]; then
+  if [[ "$#" -ne 2 || "$1" != "--stdin-label" || ! "$2" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    echo "usage: check_public_product_names.sh [--stdin-label <public-label>]" >&2
+    exit 2
+  fi
+  stdin_label="$2"
+fi
+
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-public-product-names.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -37,6 +46,21 @@ sha256_of_stdin() {
   else
     shasum -a 256 | awk '{print $1}'
   fi
+}
+
+report_verdict() {
+  if [[ -s "$tmp_dir/hits.txt" ]]; then
+    echo "error: public text names a downstream host product or its private infrastructure:" >&2
+    cat "$tmp_dir/hits.txt" >&2
+    echo >&2
+    echo "Use host-neutral wording (downstream host, host repo, packager) and" >&2
+    echo "RFC-2606/RFC-5737 placeholders (example.internal, 192.0.2.0/24)." >&2
+    echo "Locations are reported by digest so this output stays safe in a public log;" >&2
+    echo "inspect the named source locally to see what matched." >&2
+    exit 1
+  fi
+
+  echo "public product-name and infrastructure scan passed"
 }
 
 # Paths whose match is deliberate. A path is allowlisted for BOTH arms; keep
@@ -52,6 +76,51 @@ is_allowlisted() {
     *) return 1 ;;
   esac
 }
+
+if [[ ! -f "$denylist" ]]; then
+  echo "error: missing hashed denylist at $denylist" >&2
+  exit 2
+fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "error: node is required to evaluate the hashed infrastructure denylist" >&2
+  exit 2
+fi
+
+if [[ -n "$stdin_label" ]]; then
+  metadata="$tmp_dir/input.txt"
+  umask 077
+  cat >"$metadata"
+
+  set +e
+  grep -a -n -o -E -- "$pattern" "$metadata" >"$tmp_dir/all-hits.txt"
+  scan_status=$?
+  set -e
+  if [[ "$scan_status" -gt 1 ]]; then
+    echo "error: failed to scan public text for downstream product names" >&2
+    exit "$scan_status"
+  fi
+
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    line="${hit%%:*}"
+    matched="${hit#*:}"
+    digest="$(printf '%s' "$matched" | sha256_of_stdin)"
+    printf '%s:%s: sha256:%s\n' "$stdin_label" "$line" "${digest:0:12}" >>"$tmp_dir/hits.txt"
+  done <"$tmp_dir/all-hits.txt"
+
+  set +e
+  node "$scanner" "$denylist" --text-label "$stdin_label" \
+    <"$metadata" >"$tmp_dir/host-hits.txt"
+  host_status=$?
+  set -e
+  if [[ "$host_status" -gt 1 ]]; then
+    echo "error: failed to evaluate the hashed infrastructure denylist" >&2
+    exit "$host_status"
+  fi
+  cat "$tmp_dir/host-hits.txt" >>"$tmp_dir/hits.txt"
+  report_verdict
+  exit 0
+fi
 
 # --- Arm 1: downstream product names -----------------------------------------
 set +e
@@ -78,15 +147,6 @@ while IFS= read -r hit; do
 done <"$tmp_dir/all-hits.txt"
 
 # --- Arm 2: private infrastructure, by hash ----------------------------------
-if [[ ! -f "$denylist" ]]; then
-  echo "error: missing hashed denylist at $denylist" >&2
-  exit 2
-fi
-if ! command -v node >/dev/null 2>&1; then
-  echo "error: node is required to evaluate the hashed infrastructure denylist" >&2
-  exit 2
-fi
-
 set +e
 git -C "$repo_root" ls-files -z \
   | (cd "$repo_root" && node "$scanner" "$denylist") >"$tmp_dir/host-hits.txt"
@@ -107,15 +167,4 @@ while IFS= read -r hit; do
 done <"$tmp_dir/host-hits.txt"
 
 # --- Verdict -----------------------------------------------------------------
-if [[ -s "$tmp_dir/hits.txt" ]]; then
-  echo "error: tracked source files name a downstream host product or its private infrastructure:" >&2
-  cat "$tmp_dir/hits.txt" >&2
-  echo >&2
-  echo "Use host-neutral wording (downstream host, host repo, packager) and" >&2
-  echo "RFC-2606/RFC-5737 placeholders (example.internal, 192.0.2.0/24)." >&2
-  echo "Locations are reported by digest so this output stays safe in a public log;" >&2
-  echo "open the file:line to see what matched." >&2
-  exit 1
-fi
-
-echo "public source product-name and infrastructure scan passed"
+report_verdict
