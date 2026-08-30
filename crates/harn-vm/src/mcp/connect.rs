@@ -18,11 +18,23 @@ pub(crate) async fn mcp_connect_stdio_impl(
     }
     cmd.kill_on_drop(true);
 
-    let transport = rmcp::transport::TokioChildProcess::new(cmd).map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "mcp_connect: failed to spawn '{command}': {e}"
         ))))
     })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        VmError::Runtime(format!("mcp_connect: '{command}' stdout was not piped"))
+    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| VmError::Runtime(format!("mcp_connect: '{command}' stdin was not piped")))?;
+    let raw_responses = super::raw_stdio::RawResponseLog::default();
+    let transport = (
+        super::raw_stdio::RawResponseReader::new(stdout, raw_responses.clone()),
+        stdin,
+    );
     let requested_version = sdk_protocol_version(&requested_protocol_version);
     let handler = HarnSdkClientHandler::new(command, requested_version.clone());
     let legacy_version = if requested_version >= rmcp::model::ProtocolVersion::STANDARD_HEADERS {
@@ -46,6 +58,12 @@ pub(crate) async fn mcp_connect_stdio_impl(
         .serve_with_lifecycle(transport, lifecycle)
         .await
         .map_err(|error| VmError::Runtime(format!("MCP SDK initialization failed: {error}")))?;
+    // The SDK cache stores its current typed model, so a cache hit cannot
+    // reproduce negotiated-version or additive fields captured from the wire.
+    // Keep stdio results on the raw path until the cache itself can retain them.
+    running
+        .set_response_cache_config(rmcp::service::ClientCacheConfig::disabled())
+        .await;
     let peer_info = running
         .peer_info()
         .ok_or_else(|| VmError::Runtime("MCP SDK did not retain negotiated server info".into()))?;
@@ -57,6 +75,8 @@ pub(crate) async fn mcp_connect_stdio_impl(
         inner: Arc::new(Mutex::new(Some(McpClientInner::Sdk(SdkMcpClientInner {
             running,
             handler,
+            raw_responses,
+            child,
         })))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
         discovery_result: Arc::new(Mutex::new(Some(discovery_result))),
