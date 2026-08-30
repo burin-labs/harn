@@ -187,4 +187,46 @@ EOF
 run_finalize_tag_fixture "tag-and-branch-carry-fragment" false
 run_finalize_tag_fixture "branch-folded-tag-still-carries-fragment" true
 
+# --- Case 9: post-candidate fragments defer through the production entry ----
+scoped="$tmp_root/scoped"
+mkdir -p "$scoped/changelog.d"
+git -C "$scoped" init -q -b main
+git -C "$scoped" config user.name "Release guard fixture"
+git -C "$scoped" config user.email "release-guard@example.invalid"
+git -C "$scoped" config commit.gpgSign false
+printf '[workspace.package]\nversion = "0.10.999"\n' > "$scoped/Cargo.toml"
+printf '# Changelog\n\n## v0.10.999\n\n- Candidate note.\n' > "$scoped/CHANGELOG.md"
+git -C "$scoped" add Cargo.toml CHANGELOG.md
+git -C "$scoped" commit -q -m "immutable release candidate"
+candidate=$(git -C "$scoped" rev-parse HEAD)
+git -C "$scoped" branch "release-attempt/v0.10.999/$candidate" "$candidate"
+printf -- '- Arrived after candidate.\n' > "$scoped/changelog.d/later.fixed.md"
+git -C "$scoped" add changelog.d/later.fixed.md
+git -C "$scoped" commit -q -m "post-candidate fragment"
+git -C "$scoped" tag v0.10.999
+git -C "$scoped" switch -q --detach v0.10.999
+
+scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
+  --repo "$scoped" --version 0.10.999)
+[[ "$(jq -r '.resolved' <<< "$scope")" == "true" ]] \
+  || { echo "FAIL: candidate scope did not resolve: $scope" >&2; exit 1; }
+[[ "$(jq -r '.owned | length' <<< "$scope")" == "0" ]] \
+  || { echo "FAIL: later fragment read as candidate-owned: $scope" >&2; exit 1; }
+[[ "$(jq -r '.deferred[0]' <<< "$scope")" == "changelog.d/later.fixed.md" ]] \
+  || { echo "FAIL: later fragment was not deferred: $scope" >&2; exit 1; }
+
+scoped_metadata="$tmp_root/scoped-fake-release-metadata"
+cat > "$scoped_metadata" <<'EOF'
+#!/usr/bin/env bash
+printf '0.10.998\n'
+EOF
+chmod +x "$scoped_metadata"
+if ! output=$(cd "$scoped" && \
+    HARN_RELEASE_ROOT="$scoped" \
+    HARN_RELEASE_METADATA_BIN="$scoped_metadata" \
+    bash "$ship_script" --finalize --skip-dry-run --skip-github-release 2>&1); then
+  grep -q "deferring 1 post-candidate" <<< "$output" \
+    || { echo "FAIL: finalize rejected proven deferred fragment: $output" >&2; exit 1; }
+fi
+
 echo "release_ship_fragment_guard_test: ok"

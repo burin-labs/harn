@@ -12,13 +12,14 @@ use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
+    parse_openai_tool_argument_json_values, parse_tool_arguments,
 };
 use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
-    extract_cache_write_tokens, is_billed_noncommittal_completion,
-    parse_openai_tool_argument_json_values, CompletionContractSignals, ProviderResponseEnvelope,
+    extract_cache_write_tokens, is_billed_noncommittal_completion, CompletionContractSignals,
+    ProviderResponseEnvelope,
 };
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
@@ -118,7 +119,7 @@ fn append_ollama_tool_calls(
         if name.is_empty() {
             continue;
         }
-        let arguments = super::response::parse_tool_arguments(function.get("arguments"));
+        let arguments = parse_tool_arguments(function.get("arguments"));
         let id = call
             .get("id")
             .and_then(|value| value.as_str())

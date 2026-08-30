@@ -1754,7 +1754,7 @@ generated CLI, or inspect its canonical catalog.
 harn tool new acme-echo
 harn tool new acme-echo --dir packages/acme-echo
 harn tool new acme-echo --description "Echo text for tests."
-harn tool run server.harn widgets get --widget-id 42 # harn-doc-cli: allow-stale
+harn tool run server.harn widgets get --widget-id 42 --json # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
 harn tool schema server.harn --pretty
 ```
@@ -3715,7 +3715,14 @@ to advertise an MCP v2.1 Server Card.
 ```bash
 harn serve mcp agent.harn                  # auto-detect surface
 harn serve mcp agent.harn --card ./card.json
+harn serve mcp --surface script --watch agent.harn
 ```
+
+`--watch` is available for a script-published registry over stdio. Harn loads
+and validates the complete replacement before swapping handlers, keeps the
+previous runtime after an invalid edit, and notifies the connected client with
+the standard tool, resource, and prompt list-change notifications after a
+successful reload.
 
 `harn serve a2a` uses the shared `harn-serve` dispatch core and exposes each
 exported `pub fn` in the target module as an A2A skill. The adapter publishes an
