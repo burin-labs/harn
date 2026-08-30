@@ -8,6 +8,11 @@ pipeline test(harness: Harness, task: unknown) {
     {role: "assistant", content: "The root cause is likely in diagnostic recovery."},
   )
   harness.agent.inject(session, {role: "user", content: "Keep the failing tests and next command."})
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "pre_compact",
+    { _hook_harness, _event -> return {modify: {strategy: "truncate", target_tokens: 1}} },
+  )
   const kept = harness.agent.compact(
     session,
     {
@@ -26,9 +31,16 @@ pipeline test(harness: Harness, task: unknown) {
   const snapshot = harness.agent.snapshot(session)
   const events = transcript_events_by_kind(snapshot, "compaction")
   const event = events[0]
+  const receipt = event.metadata.receipt
   harness.stdio.println(trim(transcript_summary(snapshot) ?? "") != "")
   harness.stdio.println(event.metadata?.mode == "host")
   harness.stdio.println(event.metadata?.instruction_mode == "extend")
   harness.stdio.println(event.metadata?.instruction_source == "host")
+  harness.stdio.println(receipt.requested_strategy == "custom")
+  harness.stdio.println(receipt.engine_strategy == "truncate")
+  harness.stdio.println(receipt.resolved_threshold_tokens == 1)
+  harness.stdio.println(receipt.threshold_source == "pre_compact_modify")
+  harness.stdio.println(receipt.hard_limit_tokens == 1)
   harness.stdio.println(kept)
+  harness.agent.clear_session_hooks()
 }

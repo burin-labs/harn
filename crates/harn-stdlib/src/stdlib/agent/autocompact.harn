@@ -200,12 +200,16 @@ fn __compact_options(opts: dict, engine_strategy: string, keep_last: any) {
 }
 
 /**
- * Normalize the engine-owned lifecycle result once. Automatic compaction is a
- * two-boundary path: Harn decides when to ask, while the Rust engine decides
- * what actually ran. Receipt fields must come from the latter or a nested
- * `auto_compact` override can be executed correctly and reported incorrectly.
+ * Join session-level request intent with the engine-owned lifecycle result.
+ * The session hook runs outside the raw-message workflow builtin, so Harn owns
+ * the original request while the engine owns what actually ran and measured.
+ * `agent_record_compaction` validates this joined shape into one receipt.
  */
-fn __engine_compaction_fields(compact_result: dict) {
+fn __session_compaction_fields(
+  compact_result: dict,
+  requested_strategy: string,
+  threshold_modified: bool,
+) {
   const receipt = compact_result.receipt
   guard type_of(receipt) == "dict" else {
     throw "transcript_auto_compact archived messages without an engine receipt"
@@ -213,18 +217,19 @@ fn __engine_compaction_fields(compact_result: dict) {
   guard type_of(receipt.engine_strategy) == "string" && receipt.engine_strategy != "" else {
     throw "transcript_auto_compact receipt omitted the applied engine strategy"
   }
-  guard type_of(receipt.requested_strategy) == "string" && receipt.requested_strategy != "" else {
-    throw "transcript_auto_compact receipt omitted the requested strategy"
-  }
   const measurement = receipt.source_measurement
   guard type_of(measurement) == "dict" else {
     throw "transcript_auto_compact receipt omitted its source measurement"
   }
   return {
-    requested_strategy: receipt.requested_strategy,
+    requested_strategy: requested_strategy,
     engine_strategy: receipt.engine_strategy,
     resolved_threshold_tokens: receipt.resolved_threshold_tokens,
-    threshold_source: receipt.threshold_source,
+    threshold_source: if threshold_modified {
+      "pre_compact_modify"
+    } else {
+      receipt.threshold_source
+    },
     hard_limit_tokens: receipt.hard_limit_tokens,
     source_measurement: measurement,
     // Flat compatibility projection for transcript readers that predate the
@@ -244,7 +249,8 @@ fn __apply_pre_compact_modify(compact_opts: dict, control: dict) {
     options = options + {keep_last: modify.keep_last}
   }
   if type_of(modify.target_tokens) == "int" {
-    options = options + {token_threshold: modify.target_tokens}
+    options = options
+      + {token_threshold: modify.target_tokens, hard_limit_tokens: modify.target_tokens}
     threshold_modified = true
   }
   const strategy = modify.strategy ?? modify.engine_strategy
@@ -480,11 +486,11 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
-    let engine_fields = __engine_compaction_fields(compact_result)
-      + {requested_strategy: requested_strategy}
-    if effective.threshold_modified {
-      engine_fields = engine_fields + {threshold_source: "pre_compact_modify"}
-    }
+    const engine_fields = __session_compaction_fields(
+      compact_result,
+      requested_strategy,
+      effective.threshold_modified,
+    )
     agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "auto",
@@ -592,7 +598,7 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
-    const engine_fields = __engine_compaction_fields(compact_result)
+    const engine_fields = __session_compaction_fields(compact_result, "observation_mask", false)
     agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "emergency",

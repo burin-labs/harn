@@ -1800,6 +1800,14 @@ fn build_compact_config(
         }
         cfg.compress_callback = Some(v);
     }
+    cfg.request_provenance = crate::orchestration::CompactionRequestProvenance {
+        requested_strategy: Some(
+            crate::orchestration::compact_strategy_name(&cfg.compact_strategy).to_string(),
+        ),
+        threshold_source: opts
+            .contains_key("token_threshold")
+            .then_some(crate::orchestration::CompactionThresholdSource::TokenThreshold),
+    };
     Ok(cfg)
 }
 

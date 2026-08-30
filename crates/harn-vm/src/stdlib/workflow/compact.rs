@@ -150,7 +150,16 @@ pub(super) async fn transcript_auto_compact_builtin(
             .map(|v| ("token_threshold", v))
             .or_else(|| o.get("compact_threshold").map(|v| ("compact_threshold", v)))
     });
-    let threshold_source = threshold.as_ref().map(|(key, _)| *key).unwrap_or("default");
+    let threshold_source = threshold
+        .as_ref()
+        .map(|(key, _)| match *key {
+            "token_threshold" => crate::orchestration::CompactionThresholdSource::TokenThreshold,
+            "compact_threshold" => {
+                crate::orchestration::CompactionThresholdSource::CompactThreshold
+            }
+            _ => unreachable!("threshold keys are selected above"),
+        })
+        .unwrap_or(crate::orchestration::CompactionThresholdSource::Default);
     if let Some((key, v)) = threshold {
         config.token_threshold = non_negative_usize(v, "transcript_auto_compact", key)?;
     }
@@ -235,11 +244,14 @@ pub(super) async fn transcript_auto_compact_builtin(
     } else {
         None
     };
-    let requested_strategy =
-        crate::orchestration::compact_strategy_name(&config.compact_strategy).to_string();
+    config.request_provenance = crate::orchestration::CompactionRequestProvenance {
+        requested_strategy: Some(
+            crate::orchestration::compact_strategy_name(&config.compact_strategy).to_string(),
+        ),
+        threshold_source: Some(threshold_source),
+    };
     let lifecycle =
-        crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Workflow)
-            .with_request_provenance(Some(&requested_strategy), Some(threshold_source));
+        crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Workflow);
     // `Ok(None)` means no compaction happened (under threshold / hook blocked /
     // nothing to do); the messages vec is left untouched, so archived is 0.
     // Otherwise the engine reports its real archived-message count.

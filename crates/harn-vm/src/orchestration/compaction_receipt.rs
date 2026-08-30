@@ -88,11 +88,9 @@ pub struct CompactionReceipt {
     pub recap: Option<RecapMetrics>,
     /// Source-window and summary byte measurement for this compaction.
     ///
-    /// `None` means this compaction path took no measurement — host-script
-    /// receipts normalized at `__host_agent_record_compaction` never see the
-    /// engine's source window, so they cannot report one. That is deliberately
-    /// distinct from `Some(..)` carrying `Some(0)`, which is a measurement that
-    /// was taken and read zero.
+    /// `None` means this compaction path took no measurement. That is
+    /// deliberately distinct from `Some(..)` carrying `Some(0)`, which is a
+    /// measurement that was taken and read zero.
     pub source_measurement: Option<CompactionSourceMeasurement>,
 }
 
@@ -168,9 +166,8 @@ impl CompactionReceipt {
             recap: payload
                 .get("recap")
                 .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
-            // Host-script compaction reports its own metadata; it never sees the
-            // engine's source window, so it has no measurement to report. `None`
-            // here is "not measured", which readers must not read as zero.
+            // A host script may forward the engine's typed measurement. When it
+            // does not, `None` remains "not measured", never a measured zero.
             source_measurement: payload.get("source_measurement").and_then(|value| {
                 serde_json::from_value::<CompactionSourceMeasurement>(value.clone()).ok()
             }),

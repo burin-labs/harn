@@ -55,8 +55,46 @@ pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
 ///   Tier 2 (`hard_limit_tokens` / `hard_limit_strategy`): aggressive LLM-powered
 ///     summarization that fires when tier-1 alone isn't enough, typically as the
 ///     transcript approaches the model's actual context window.
+#[derive(Clone, Debug, Default)]
+pub struct CompactionRequestProvenance {
+    /// Normalized strategy requested at the owning boundary, before a
+    /// lifecycle hook or fallback changes the engine that actually runs.
+    pub requested_strategy: Option<String>,
+    /// Boundary field that supplied the tier-1 threshold.
+    pub threshold_source: Option<CompactionThresholdSource>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactionThresholdSource {
+    TokenThreshold,
+    CompactThreshold,
+    TargetTokens,
+    CompactionPolicy,
+    RuntimeConfig,
+    PreCompactModify,
+    Default,
+}
+
+impl CompactionThresholdSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TokenThreshold => "token_threshold",
+            Self::CompactThreshold => "compact_threshold",
+            Self::TargetTokens => "target_tokens",
+            Self::CompactionPolicy => "compaction_policy",
+            Self::RuntimeConfig => "runtime_config",
+            Self::PreCompactModify => "pre_compact_modify",
+            Self::Default => "default",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AutoCompactConfig {
+    /// Request facts captured by the boundary that parsed this config. The
+    /// lifecycle snapshots them before hooks run, while the remaining config
+    /// fields continue to describe the effective policy.
+    pub request_provenance: CompactionRequestProvenance,
     /// Number of earliest messages to keep verbatim before the compacted
     /// summary. The system prompt is not part of this list and is always
     /// preserved separately by the caller.
@@ -123,6 +161,7 @@ pub struct AutoCompactConfig {
 impl Default for AutoCompactConfig {
     fn default() -> Self {
         Self {
+            request_provenance: CompactionRequestProvenance::default(),
             keep_first: 0,
             token_threshold: 48_000,
             tool_output_max_chars: 16_000,
