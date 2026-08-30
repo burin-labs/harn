@@ -44,7 +44,11 @@ fn widget_tools() -> ToolRegistry {
       },
       handler: {args -> {id: args.widget_id, label: "example"}},
     },
-  ], {name: "widgets", version: "1.0.0", description: "Widget integration"})
+  ], {
+    name: "widgets",
+    version: "1.0.0",
+    description: "Widget integration",
+  })
 }
 
 fn main(harness: Harness) {
