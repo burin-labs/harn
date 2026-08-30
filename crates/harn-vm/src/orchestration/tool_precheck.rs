@@ -227,6 +227,21 @@ fn truthy(value: Option<&VmValue>) -> bool {
     matches!(value, Some(VmValue::Bool(true)))
 }
 
+/// Build the model-facing denial for a precheck refusal.
+///
+/// Lives here rather than at the dispatch site because the audience-split
+/// rendering of a precheck refusal is this module's contract, not dispatch
+/// logic — and the dispatch function is under a file-length ratchet.
+pub fn precheck_tool_denial(denial: ToolPrecheckDenial) -> crate::agent_events::ToolDenial {
+    let gate = crate::agent_events::DenialGate::DeterministicPrecheck;
+    let built = if denial.retryable {
+        crate::agent_events::ToolDenial::retryable(gate, None, denial.model_cue)
+    } else {
+        crate::agent_events::ToolDenial::terminal(gate, None, denial.model_cue)
+    };
+    built.with_audiences(denial.machine_reason, denial.human_summary)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

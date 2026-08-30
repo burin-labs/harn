@@ -64,9 +64,10 @@ pub use sessions::{
     acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
 };
 use sessions::{
-    apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,
-    ConcurrentSessionControls, Session, SessionBudget, SessionCancellation, SessionInfo,
+    apply_session_budget_rearm, cancel_session_command_handles, lookup_session_cancellation,
+    preempt_session_interruption, prepare_session_prompt, session_project_root_for_cwd,
+    ConcurrentSessionControl, ConcurrentSessionControls, Session, SessionBudget,
+    SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -722,6 +723,15 @@ pub struct AcpServerConfig {
 pub struct AcpSandboxConfig {
     pub read_only_roots: Vec<String>,
     pub process: harn_vm::orchestration::ProcessSandboxPolicy,
+    /// An embedder's explicit confinement choice, overriding what the
+    /// configured roots would otherwise imply.
+    ///
+    /// Without this an embedder could only ever ARM confinement, never decline
+    /// it: `policy_for_mode` inferred `Worktree` from the presence of process
+    /// config, so a host that wanted a deliberately unconfined run had no way
+    /// to say so and would silently get a confined one. `None` keeps the
+    /// historical inference exactly as it was.
+    pub requested_profile: Option<harn_vm::orchestration::SandboxProfile>,
 }
 
 impl AcpServerConfig {
@@ -839,7 +849,9 @@ impl AcpSandboxConfig {
     /// per-turn policy use this method, while callers arming an OS or network
     /// sandbox use the narrower predicate.
     pub fn is_configured(&self) -> bool {
-        !self.read_only_roots.is_empty() || self.has_process_confinement()
+        !self.read_only_roots.is_empty()
+            || self.has_process_confinement()
+            || self.requested_profile.is_some()
     }
 
     /// Whether the embedder opted into process-level OS confinement.
@@ -854,6 +866,7 @@ impl AcpSandboxConfig {
         Self {
             read_only_roots: canonicalize_sandbox_roots(roots),
             process: harn_vm::orchestration::ProcessSandboxPolicy::default(),
+            requested_profile: None,
         }
     }
 
@@ -861,6 +874,7 @@ impl AcpSandboxConfig {
         Self {
             read_only_roots: Vec::new(),
             process,
+            requested_profile: None,
         }
     }
 

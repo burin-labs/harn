@@ -94,12 +94,12 @@ top-level keys before `v0.8`).
 | `stall_warnings` | list | Present when `stall_diagnostics` is enabled. Diagnostic warning records emitted when a repeat streak reaches the configured threshold |
 | `suspected_loop` | bool | Present when `stall_diagnostics` is enabled. `true` when at least one stall warning fired |
 | `completion_judge` | dict | Present when `verify_completion_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session judge call/veto counts, the resolved cap (`nil` when disabled), and whether the cap was hit. Lets a harness report judge churn without transcript mining |
-| `done_judge` | dict | Present when `done_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session done-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `done_judge.cadence.max_invocations`, which only gates when the judge is due |
+| `turn_end_condition` | dict | Present when `turn_end_condition` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session turn-end-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `turn_end_condition.cadence.max_invocations`, which only gates when the judge is due |
 
 `judge_decision` agent events carry `{verdict, confirm, reason, reasoning,
 next_step, trigger, escalation_recommended?, escalation_target?}`.
 `verify_completion` closures, `verify_completion_judge`,
-and `done_judge` all use this event, so harnesses can measure completion-gate
+and `turn_end_condition` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.
 The completion judge receives the task, rubric, and a small snapshot of the
 latest meaningful actions. It does not receive the whole transcript or tools it
@@ -255,7 +255,7 @@ history again, double-counting the conversation. Persistence and seeding are
 alternatives, not layers — pick one.
 When `history` is non-empty and the task `message` is blank, the loop treats the
 last history turn as the current turn and does not append an empty user message.
-The seeded turns are ordinary transcript turns thereafter: `done_judge`,
+The seeded turns are ordinary transcript turns thereafter: `turn_end_condition`,
 compaction, and per-turn projection all treat them like any turn the loop
 produced itself (compaction may summarize them once the transcript grows).
 
@@ -376,7 +376,7 @@ Same as `harness.llm.call`, plus additional options:
 | `deadline_ms` | int | nil | Monotonic duration from `agent_loop` entry. The earliest of this value and `iteration_budget.wall_clock_ms` is the enclosing terminal deadline used for completion-judge admission. It is a duration, never a cross-process absolute timestamp. |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
 | `verify_completion_judge` | bool/dict | nil | Structured judge for a proposed stop. `true` uses defaults. A dict may set `provider`, `model`, `system`, `feedback_fallback`, `operation_timeout_ms` (default `60000`), `deadline_reserve_ms` (default `5000`), and `max_invocations` (default `5`; `0` disables the cap). The loop ends as `completion_unverified` when the judge cannot fit before the loop deadline, times out, or reaches its cap. |
-| `done_judge` | bool/dict | nil | Structured judge for natural completion or a done sentinel. The model returns `{verdict, detail}` where `verdict` is `done` or `continue`; `detail` is supporting evidence for `done`, or the single gap and next action for `continue`. Harn produces `stop_unverified` when a deadline or policy limit prevents a verdict. It shares the timeout fields above and supports `max_invocations` plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}`. |
+| `turn_end_condition` | bool/dict | nil | Structured judge for natural completion or a done sentinel. The model returns `{verdict, detail}` where `verdict` is `done` or `continue`; `detail` is supporting evidence for `done`, or the single gap and next action for `continue`. Harn produces `stop_unverified` when a deadline or policy limit prevents a verdict. It shares the timeout fields above and supports `max_invocations` plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}`. |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
 | `input_guardrail` | closure | nil | Pre-loop guardrail closure. It runs before the first main model turn with `{session_id, task, user_message, messages, recent_context, provider, model}` and returns `{tripwire, reason, label?, confidence?}`. A tripwire emits `input_guardrail_verdict` and stops as `status: "input_guardrail"` / `stop_reason: "input_guardrail_tripwire"` without spending the main loop turn. Build the closure with `agent_input_guardrail(...)` from `std/agent/guardrails` |
 | `llm_caller_transport` | dict | nil | Explicit guarantees for a custom `llm_caller`. `{forwards_assistant_prefill: true}` permits one-shot assistant-prefill recoveries only when the caller forwards that request option unchanged; absence stays fail-closed. Provider capability and multi-route safety gates still apply. |
@@ -708,6 +708,7 @@ Fields:
 | `initial` | int | `max / 4` (adaptive), `max` (fixed) | Iteration cap to start with |
 | `max` | int | `16` (adaptive), `50` (fixed) | Hard upper bound; extensions never raise the cap above this |
 | `extend_by` | int | `2` (adaptive), `0` (fixed) | Default extension delta when policy returns `{action: "extend"}` without `by` / `until` |
+| `progress_window` | int | `extend_by` (adaptive), `0` (fixed) | How many recent turns the default policy looks back over for a progressing turn. `1` restricts the decision to the boundary turn alone |
 | `expose_decisions` | bool | `mode == "adaptive"` | When true, the result includes an `adaptive_budget` summary with the decision log |
 
 `max_iterations: N` and `iteration_budget: {mode: "fixed", initial: N, max: N}`
@@ -734,7 +735,7 @@ loop_control: { state ->
   if state.progress.changed
     && !state.progress.no_net_advance
     && !state.progress.no_information_gain {
-    return {action: "extend", by: 2, reason: "recent turn made progress"}
+    return {action: "extend", by: 2, reason: "progress within window"}
   }
   return nil
 }
@@ -757,11 +758,12 @@ State snapshot fields:
 | `session.successful_tool_names` / `session.rejected_tool_names` | Cumulative deduplicated tool name sets |
 | `session.required_tools_satisfied` / `session.required_tools_missing` | `require_successful_tools` postcondition status |
 | `completion.proposed` | True when post-turn logic proposed a natural / sentinel break this turn |
-| `completion.vetoed` | True when `verify_completion` / `verify_completion_judge` / `done_judge` vetoed |
+| `completion.vetoed` | True when `verify_completion` / `verify_completion_judge` / `turn_end_condition` vetoed |
 | `completion.verdict` / `completion.feedback` | Judge verdict and feedback string when present |
 | `progress.changed` | True if this turn made tool calls, produced new successful tool names, or wrote visible text |
 | `progress.no_net_advance` | True when verify-bearing activity repeats a failing outcome without advancing it |
 | `progress.no_information_gain` | True when every completed, explicitly read-only observation this turn exactly repeats a prior `(tool, arguments, result)` signature |
+| `progress.turns_since_progressing` | Turns elapsed since the last turn that had a non-vetoed activity signal; `0` means this turn did |
 | `progress.summary` | Human-readable progress hint (`"executed N tool call(s)"`, `"completion gate vetoed"`, etc.) |
 
 Return value is one of:
@@ -777,10 +779,20 @@ When no `loop_control` is provided and the budget is adaptive, the stdlib
 installs a small default policy that extends only when one of these is true at
 the cap edge:
 
-- the latest verify/done judge vetoed completion,
+- the latest verify/turn-end judge vetoed completion,
 - `require_successful_tools` is unsatisfied, or
-- the most recent turn has an activity signal that is not vetoed by a measured
-  repeated verification outcome or an all-repeated read-only observation set.
+- some turn within the last `progress_window` turns (default `extend_by`) had an
+  activity signal that was not vetoed by a measured repeated verification
+  outcome or an all-repeated read-only observation set.
+
+The window exists because the budget boundary lands on whatever turn it lands
+on. A run that had been editing and then spent its last turns reading files back
+to repair a failed check would be stopped at its initial cap by a
+boundary-turn-only rule, even though the repair was in flight. The definition of
+a progressing turn is unchanged; only how far back the rule looks for one
+changed. A window in which no turn progresses still stops the loop, so a
+sustained thrash buys at most one extension before the counter passes the window,
+and `max` remains the outer bound in every case.
 
 The read-only veto is structural: tool annotations must classify every call as
 read-only, every result must succeed, and every exact result must already have
@@ -820,7 +832,7 @@ for decision in result.adaptive_budget.decisions {
 `agent_loop` options — not a separate tier, just the constructor for the
 agent-cell option dict. It packages the common harness shapes — audit,
 repair, summary, verify, and the four captains — so script authors don't
-hand-tune `max_iterations`, `max_nudges`, `done_sentinel`, `done_judge`,
+hand-tune `max_iterations`, `max_nudges`, `done_sentinel`, `turn_end_condition`,
 `turn_policy`, provider/timeout/budget defaults, and transport retry on every
 call. The returned value is an ordinary options dict (caller overrides always
 win) that you pass to `agent_loop` directly.
@@ -926,12 +938,12 @@ const local_audit = agent_loop(
 
 Preset roles, defaults summarized:
 
-| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `stall_diagnostics` | `done_sentinel` / `done_judge` |
+| Preset | `profile` | `tool_format` | `loop_until_done` | `max_nudges` | Default `iteration_budget` | `stall_diagnostics` | `done_sentinel` / `turn_end_condition` |
 |---|---|---|---|---:|---|---|---|
 | `audit` | `verifier` | `native` | true | 1 | adaptive `{initial: 4, max: 12, extend_by: 2}` | enabled, threshold 3 | both `nil` (natural completion) |
 | `repair` | `tool_using` | `native` | true | 2 | adaptive `{initial: 4, max: 16, extend_by: 2}` | enabled, threshold 3 | both `nil` |
 | `summary` | `completer` | unset | false | 0 | fixed `{initial: 1, max: 1}` | unset | both `nil`, `tool_choice: "none"` |
-| `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `done_judge: true` |
+| `verify` | `verifier` | unset | false | 0 | adaptive `{initial: 1, max: 5, extend_by: 1}` | unset | `turn_end_condition: true` |
 | `merge_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 8, max: 60, extend_by: 4}` | enabled, threshold 3 | both `nil`; default consent denies writes |
 | `review_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 30, extend_by: 3}` | enabled, threshold 3 | both `nil` |
 | `oncall_captain` | `tool_using` | `native` | true | 3 | adaptive `{initial: 6, max: 24, extend_by: 3}` | enabled, threshold 3 | both `nil`; default `with_rate_limit(harness.runtime, {max_calls: 50})` |

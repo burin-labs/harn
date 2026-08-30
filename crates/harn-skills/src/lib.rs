@@ -129,7 +129,9 @@ impl std::error::Error for SkillDiscoveryError {}
 
 const SOURCES: &[&str] = &[
     include_str!("corpus/harn-agent/SKILL.md"),
+    include_str!("corpus/harn-approval-review/SKILL.md"),
     include_str!("corpus/harn-apps/SKILL.md"),
+    include_str!("corpus/harn-control-events/SKILL.md"),
     include_str!("corpus/harn-de-slop/SKILL.md"),
     include_str!("corpus/harn-diagnostics/SKILL.md"),
     include_str!("corpus/harn-docs/SKILL.md"),
@@ -140,6 +142,7 @@ const SOURCES: &[&str] = &[
     include_str!("corpus/harn-product-quality/SKILL.md"),
     include_str!("corpus/harn-providers/SKILL.md"),
     include_str!("corpus/harn-rules/SKILL.md"),
+    include_str!("corpus/harn-sandbox-policy/SKILL.md"),
     include_str!("corpus/harn-testing/SKILL.md"),
     include_str!("corpus/harn-tracing/SKILL.md"),
     include_str!("corpus/release-harn/SKILL.md"),
@@ -387,7 +390,9 @@ mod tests {
             names,
             [
                 "harn-agent",
+                "harn-approval-review",
                 "harn-apps",
+                "harn-control-events",
                 "harn-de-slop",
                 "harn-diagnostics",
                 "harn-docs",
@@ -398,6 +403,7 @@ mod tests {
                 "harn-product-quality",
                 "harn-providers",
                 "harn-rules",
+                "harn-sandbox-policy",
                 "harn-testing",
                 "harn-tracing",
                 "release-harn",
@@ -492,6 +498,10 @@ mod tests {
         let expectations = [
             ("harn-agent", ["agent_loop", "session id", "approval"]),
             ("harn-apps", ["std/ui", "ui.test.run", "harn app run"]),
+            (
+                "harn-control-events",
+                ["session/cancel", "controloutcome", "interrupt_immediate"],
+            ),
             ("harn-de-slop", ["typed", "structural guard", "rebase"]),
             ("harn-diagnostics", ["diagnostic", "repair", "conformance"]),
             ("harn-docs", ["diátaxis", "glossary", "slopwash"]),

@@ -1,8 +1,7 @@
 //! Selector resolution and per-call option merging.
 
 use super::super::selection_builtins::{
-    llm_model_defaults_builtin, llm_model_ladder_builtin, llm_reasoning_effort_budget_builtin,
-    llm_resolved_options_builtin,
+    llm_model_defaults_builtin, llm_model_ladder_builtin, llm_resolved_options_builtin,
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
@@ -21,26 +20,6 @@ fn test_llm_model_defaults_returns_empty_for_unknown_model() {
         dict.is_empty(),
         "unknown model should yield empty defaults dict, got {dict:?}"
     );
-}
-
-#[test]
-fn test_llm_reasoning_effort_budget_matches_canonical_mapping() {
-    let mut out = String::new();
-    for level in [
-        "minimal", "low", "medium", "high", "xhigh", "max", "", "unknown",
-    ] {
-        let args = vec![VmValue::String(arcstr::ArcStr::from(level))];
-        let result =
-            llm_reasoning_effort_budget_builtin(&args, &mut out).expect("builtin returned error");
-        let got = match result {
-            VmValue::Int(n) => n,
-            other => panic!("expected Int, got {other:?}"),
-        };
-        let expected = i64::from(crate::llm::reasoning_policy::budget_for_reasoning_level(
-            level,
-        ));
-        assert_eq!(got, expected, "budget mismatch for level {level:?}");
-    }
 }
 
 #[test]

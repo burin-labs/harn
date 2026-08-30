@@ -13,6 +13,7 @@
 mod app;
 mod bench;
 mod canon;
+mod chat;
 mod check;
 mod codemod;
 mod completion;
@@ -87,6 +88,7 @@ mod workflow;
 pub(crate) use app::{AppArgs, AppCommand};
 pub(crate) use bench::{BenchArgs, BenchCommand, BenchPortableArgs, BenchReplayArgs};
 pub(crate) use canon::{CanonArgs, CanonCheckArgs, CanonCommand};
+pub(crate) use chat::ChatArgs;
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use codemod::CodemodArgs;
 pub(crate) use completion::{CompletionArgs, CompletionShell};
@@ -257,7 +259,7 @@ pub(crate) use test_bench::{
     TestBenchReplayArgs, TestBenchRunArgs, TestBenchValidateAnnotationsArgs,
 };
 pub(crate) use time::{TimeArgs, TimeCommand, TimeRunArgs};
-pub(crate) use tool::{ToolArgs, ToolCommand, ToolNewArgs};
+pub(crate) use tool::{ToolArgs, ToolCommand, ToolNewArgs, ToolRunArgs, ToolSchemaArgs};
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs, TracePrefixStabilityArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
 pub(crate) use try_cmd::TryArgs;
@@ -556,6 +558,9 @@ SCRIPTING
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]
     Try(TryArgs),
+    /// Chat with a model interactively and see how fast it answers. Plain
+    /// completions with no tools, defaulting to the active local selection.
+    Chat(ChatArgs),
     /// Manage and inspect Harn skills: corpus discovery (list/get/dump/
     /// resolved/inspect/match/install/new) and provenance (sign/endorse/
     /// verify/who-signed/key/trust).

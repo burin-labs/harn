@@ -52,6 +52,12 @@ pub use command_policy::*;
 mod tool_precheck;
 pub use tool_precheck::*;
 
+/// The `AutoReview` answerer for an `Ask` with nobody to ask. Mirrors the
+/// precheck seam above, but fails CLOSED: it can only lift a refusal, so an
+/// ambiguity it cannot read must never become a grant.
+mod approval_reviewer;
+pub use approval_reviewer::*;
+
 mod compaction;
 pub use compaction::*;
 
@@ -105,7 +111,8 @@ pub(crate) use ambient_scope::{
     scope_run_event_sink, scope_spawned_source_dir, AmbientExecutionScope,
 };
 pub use ambient_scope::{
-    scope_execution_policy, scope_fresh_trigger_registry, scope_llm_runtime_overrides,
+    scope_execution_policy, scope_fresh_run_runtime, scope_fresh_tracing_runtime,
+    scope_fresh_trigger_registry, scope_llm_runtime_overrides,
     scope_llm_runtime_overrides_with_provider_endpoints,
 };
 

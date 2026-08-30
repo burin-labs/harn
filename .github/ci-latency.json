@@ -87,6 +87,7 @@
       "fmt": { "budget_ms": 60000 },
       "package-audit": { "budget_ms": 590000 },
       "lint-md": { "budget_ms": 30000 },
+      "release-contract": { "budget_ms": 120000 },
       "rust-checks": { "budget_ms": 470000 },
       "rust-check-inputs": { "budget_ms": 600000 },
       "rust-artifacts-ready": { "budget_ms": 240000 },

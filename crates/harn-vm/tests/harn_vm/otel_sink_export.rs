@@ -129,14 +129,21 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
 
     let mut start_meta = BTreeMap::new();
     start_meta.insert("turn".to_string(), serde_json::json!(7));
+    start_meta.insert(
+        "harn.execution.id".to_string(),
+        serde_json::json!("hxe-otel-smoke"),
+    );
     emit_span_start(42, None, "burin.turn", "agent_loop", start_meta);
+    emit_span_start(43, Some(42), "burin.tool", "tool_call", BTreeMap::new());
+    emit_span_end(43, BTreeMap::new());
     emit_span_end(42, BTreeMap::new());
 
     // Sanity: our CollectorSink also received the event. This proves
     // additional sinks coexist with the OtelSink (regression cover
     // for accidentally clobbering the chain).
-    assert_eq!(probe.spans.borrow().len(), 1);
+    assert_eq!(probe.spans.borrow().len(), 2);
     assert_eq!(probe.spans.borrow()[0].name, "burin.turn");
+    assert_eq!(probe.spans.borrow()[1].name, "burin.tool");
 
     // Drain the batch explicitly via the public shutdown hook —
     // mirrors what `harn-cli` does on process exit. Also clears the
@@ -170,6 +177,37 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
         combined.contains("burin-otel-smoke"),
         "expected the service.name resource attribute in payload, got:\n{combined}",
     );
+    assert!(
+        combined.contains("harn.execution.id") && combined.contains("hxe-otel-smoke"),
+        "expected the shared Harn execution id in the OTLP payload, got:\n{combined}",
+    );
+    let spans = snapshot
+        .iter()
+        .filter_map(|request| request.split_once("\r\n\r\n").map(|(_, body)| body))
+        .filter_map(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .flat_map(|payload| {
+            payload["resourceSpans"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .flat_map(|resource| {
+            resource["scopeSpans"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .flat_map(|scope| scope["spans"].as_array().cloned().unwrap_or_default())
+        .collect::<Vec<_>>();
+    let root = spans
+        .iter()
+        .find(|span| span["name"] == "burin.turn")
+        .expect("root span exported");
+    let child = spans
+        .iter()
+        .find(|span| span["name"] == "burin.tool")
+        .expect("child span exported");
+    assert_eq!(child["parentSpanId"], root["spanId"]);
 
     drop(stub);
 

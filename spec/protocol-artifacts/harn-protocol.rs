@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.123-dev";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.125-dev";
 
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
@@ -836,6 +836,8 @@ pub enum HarnToolPermissionDecider {
     RuntimePolicy,
     #[serde(rename = "host_unavailable")]
     HostUnavailable,
+    #[serde(rename = "auto_reviewer")]
+    AutoReviewer,
 }
 
 impl HarnToolPermissionDecider {
@@ -846,6 +848,7 @@ impl HarnToolPermissionDecider {
         Self::ManagedPolicy,
         Self::RuntimePolicy,
         Self::HostUnavailable,
+        Self::AutoReviewer,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -856,6 +859,7 @@ impl HarnToolPermissionDecider {
             Self::ManagedPolicy => "managed_policy",
             Self::RuntimePolicy => "runtime_policy",
             Self::HostUnavailable => "host_unavailable",
+            Self::AutoReviewer => "auto_reviewer",
         }
     }
 }

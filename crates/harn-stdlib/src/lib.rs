@@ -117,6 +117,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "eval/hypothesis/workflow" => "stdlib/eval/hypothesis/workflow.harn",
     "eval/agreement" => "stdlib/stdlib_eval_agreement.harn",
     "runtime" => "stdlib/stdlib_runtime.harn",
+    "runtime/content_fingerprint" => "stdlib/runtime/content_fingerprint.harn",
     "io" => "stdlib/stdlib_io.harn",
     "net" => "stdlib/stdlib_net.harn",
     "command" => "stdlib/stdlib_command.harn",
@@ -194,6 +195,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/catalog" => "stdlib/llm/catalog.harn",
     "llm/safe" => "stdlib/llm/safe.harn",
     "llm/envelope" => "stdlib/llm/envelope.harn",
+    "llm/speed" => "stdlib/llm/speed.harn",
+    "llm/chat_session" => "stdlib/llm/chat_session.harn",
     "llm/caller" => "stdlib/llm/caller.harn",
     "harness/policy" => "stdlib/harness/policy.harn",
     "llm/budget" => "stdlib/llm/budget.harn",
@@ -293,6 +296,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/canon" => "stdlib/agent/canon.harn",
     "agent/skills" => "stdlib/agent/skills.harn",
     "agent/autocompact" => "stdlib/agent/autocompact.harn",
+    "agent/response_compaction" => "stdlib/agent/response_compaction.harn",
     "agent/mcp" => "stdlib/agent/mcp.harn",
     "agent/command_capture" => "stdlib/agent/command_capture.harn",
     "agent/contracts" => "stdlib/agent/contracts.harn",
@@ -303,6 +307,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/daemon" => "stdlib/agent/daemon.harn",
     "agent/preflight" => "stdlib/agent/preflight.harn",
     "agent/postturn" => "stdlib/agent/postturn.harn",
+    "agent/turn_end" => "stdlib/agent/turn_end.harn",
     "agent/tool_surface" => "stdlib/agent/tool_surface.harn",
     "agent/stance" => "stdlib/agent/stance.harn",
     "agent/lanes" => "stdlib/agent/lanes.harn",
@@ -315,6 +320,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/completion_requirements" => "stdlib/agent/completion_requirements.harn",
     "agent/completion_evidence" => "stdlib/agent/completion_evidence.harn",
     "agent/judge" => "stdlib/agent/judge.harn",
+    "agent/approval_review" => "stdlib/agent/approval_review.harn",
+    "agent/approval_review_calibration" => "stdlib/agent/approval_review_calibration.harn",
     "agent/guardrails" => "stdlib/agent/guardrails.harn",
     "agent/step_judge" => "stdlib/agent/step_judge.harn",
     "agent/scratchpad" => "stdlib/agent/scratchpad.harn",
@@ -339,6 +346,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "coordination" => "stdlib/stdlib_coordination.harn",
     "coordination/append_metadata" => "stdlib/coordination/append_metadata.harn",
     "coordination/schema" => "stdlib/coordination/schema.harn",
+    "execution" => "stdlib/stdlib_execution.harn",
     "fleet/coordination" => "stdlib/fleet/coordination.harn",
     "postgres" => "stdlib/stdlib_postgres.harn",
     "postgres/query" => "stdlib/postgres/query.harn",
@@ -476,6 +484,7 @@ pub struct StdlibCliScript {
 pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliScript, name, [
     "codemod" => "stdlib/cli/codemod.harn",
     "canon/check" => "stdlib/cli/canon/check.harn",
+    "chat" => "stdlib/cli/chat.harn",
     "doctor" => "stdlib/cli/doctor.harn",
     "echo" => "stdlib/cli/echo.harn",
     // Helper module for the embedded `eval/*` scripts. Has a stub `main`
@@ -787,9 +796,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        entrypoint_modules, find_cli_script, get_stdlib_prompt_asset, get_stdlib_source,
-        matching_paren_len, parse_public_function_line, public_functions_for_module,
-        STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
+        entrypoint_modules, get_stdlib_prompt_asset, matching_paren_len,
+        parse_public_function_line, public_functions_for_module, STDLIB_CLI_SCRIPTS,
+        STDLIB_PROMPT_ASSETS, STDLIB_SOURCES,
     };
 
     #[test]
@@ -821,14 +830,6 @@ mod tests {
     }
 
     #[test]
-    fn find_cli_script_round_trips() {
-        for entry in STDLIB_CLI_SCRIPTS {
-            assert_eq!(find_cli_script(entry.name), Some(entry.source));
-        }
-        assert!(find_cli_script("not-a-real-script").is_none());
-    }
-
-    #[test]
     fn stdlib_source_names_are_unique() {
         let mut names = BTreeSet::new();
         for entry in STDLIB_SOURCES {
@@ -852,85 +853,6 @@ mod tests {
         let mut paths = BTreeSet::new();
         for entry in STDLIB_PROMPT_ASSETS {
             assert!(paths.insert(entry.path), "duplicate {}", entry.path);
-        }
-    }
-
-    #[test]
-    fn key_stdlib_modules_resolve() {
-        for module in [
-            "context",
-            "context/maintenance",
-            "context/eval",
-            "eval/stats",
-            "eval/remote_fanout",
-            "eval/agreement",
-            "edit",
-            "verification",
-            "disclosure",
-            "artifact/web",
-            "command",
-            "waitpoint",
-            "llm/handlers",
-            "media/asset",
-            "media/composition",
-            "model_job",
-            "model_job/contracts",
-            "model_job/runtime",
-            "model_job/testing",
-            "model_job/comfyui",
-            "model_job/openai",
-            "ui",
-            "ui/contracts",
-            "ui/renderer",
-            "ui/testing",
-            "llm/tool_middleware",
-            "llm/tool_binder",
-            "llm/missing_tool_call",
-            "llm/tool_shape",
-            "llm/dialects",
-            "llm/ensemble",
-            "llm/rerank",
-            "personas/prelude",
-            "personas/bulletins",
-            "agent/host_tools",
-            "agent/host_injection",
-            "agent/tool_lifecycle",
-            "agent/user",
-            "agent/cut_rules",
-            "agent/governors",
-            "agent/loop_post_turn",
-            "agent/completion_gate",
-            "agent/guardrails",
-            "cli",
-            "cli/envelope",
-            "cli/models/batch_artifacts",
-            "cli/models/batch_cancel",
-            "cli/models/batch_download",
-            "cli/models/batch_lifecycle",
-            "cli/models/batch_rejoin",
-            "cli/models/batch_status",
-            "cli/models/batch_submit",
-            "cli/models/batch_transport",
-            "cli/models/lora_render",
-            "llm/optimize",
-            "llm/judge",
-            "llm/faithfulness",
-            "llm/refine",
-            "connectors/shared",
-            "connectors/github",
-            "connectors/linear",
-            "connectors/notion",
-            "connectors/slack",
-            "triage",
-            "dashboard/jobs",
-            "ui_resource",
-            "host_conditions",
-            "host_lease",
-        ] {
-            assert!(
-                get_stdlib_source(module).is_some(),
-                "std/{module} should resolve"
-            );
         }
     }
 

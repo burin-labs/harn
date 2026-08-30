@@ -7,7 +7,7 @@
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, TargetArch};
@@ -84,6 +84,10 @@ struct LandlockProfile {
     ruleset_fd: libc::c_int,
     rules: Vec<LandlockRule>,
     handled_access_fs: u64,
+    /// Subtrees no grant may cover. Landlock has no deny rule, so this is
+    /// enforced by never granting a path that contains one; see
+    /// [`expand_around_denied`].
+    read_deny_roots: Vec<PathBuf>,
 }
 
 struct LandlockRule {
@@ -184,6 +188,7 @@ fn landlock_profile(
         ruleset_fd,
         rules: Vec::new(),
         handled_access_fs,
+        read_deny_roots: super::process_sandbox_read_deny_roots(policy),
     };
     for (path, access) in standard_device_rules() {
         push_rule(&mut profile, path, access, true)?;
@@ -329,6 +334,137 @@ fn standard_device_rules() -> Vec<(PathBuf, u64)> {
     .collect()
 }
 
+/// Landlock's ruleset is allow-only: `landlock_add_rule` grants, and there is no
+/// deny counterpart. A denial is therefore expressed by NOT granting — which
+/// means a grant that contains a denied subtree has to be replaced by the set of
+/// its children that do not lead to that subtree, recursively, down to the
+/// denied path's parent.
+///
+/// Returns the paths to grant in place of `root`. Fails closed: if a directory
+/// on the path to a denial cannot be enumerated, or the expansion exceeds
+/// [`MAX_DENY_EXPANSION_RULES`], the caller refuses the spawn rather than
+/// granting a root that would include the denied subtree.
+///
+/// Cost is one `read_dir` per level between `root` and each denial inside it,
+/// which for the default credential denylist is a handful of home-directory
+/// listings. A denial that is not inside `root` costs nothing.
+///
+/// Newly created siblings are NOT granted: a directory added after expansion is
+/// invisible to the child. That is the safe direction, and it is why this is
+/// done per spawn rather than cached.
+fn expand_around_denied(root: &Path, denied: &[PathBuf]) -> Result<Vec<PathBuf>, VmError> {
+    let inside: Vec<&PathBuf> = denied
+        .iter()
+        .filter(|deny| deny.starts_with(root) && deny.as_path() != root)
+        .collect();
+    if denied.iter().any(|deny| root.starts_with(deny)) {
+        // The root IS denied, or sits inside a denial. Grant nothing.
+        return Ok(Vec::new());
+    }
+    if inside.is_empty() {
+        return Ok(vec![root.to_path_buf()]);
+    }
+    let mut granted: Vec<PathBuf> = Vec::new();
+    for deny in &inside {
+        let relative = deny.strip_prefix(root).map_err(|_| {
+            sandbox_rejection(format!(
+                "cannot subtract '{}' from sandbox root '{}'",
+                deny.display(),
+                root.display()
+            ))
+        })?;
+        let mut cursor = root.to_path_buf();
+        for component in relative.components() {
+            // An ancestor we cannot enumerate ends the walk, and the walk
+            // ending grants NOTHING below that directory. That is the safe
+            // direction on an allow-only backend: the denial is expressed by
+            // the absence of a grant, so stopping early is strictly narrower
+            // than continuing, never wider.
+            //
+            // Two shapes reach here, and both must end the walk rather than
+            // refuse the spawn:
+            //
+            // * NOT FOUND. Nothing below a missing directory exists, so there
+            //   is nothing to subtract. Refusing here blocked every spawn on
+            //   any host that simply had no `~/.kube` (measured on a downstream
+            //   host's CI fleet, where it would have taken every run down).
+            // * PERMISSION DENIED. We cannot list it, so we cannot grant its
+            //   children; granting nothing is exactly right. Refusing here
+            //   broke every run whose `$HOME` was not readable by the runtime
+            //   (`/root` under the hardened conformance profile), turning an
+            //   unreadable home into a total outage for no authority gained.
+            //
+            // The failure mode this must never become is granting `cursor`
+            // itself, which would expose the denied path. Ending the walk does
+            // not do that: nothing is pushed to `granted` on this iteration.
+            let entries = match std::fs::read_dir(&cursor) {
+                Ok(entries) => entries,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                    ) =>
+                {
+                    break
+                }
+                Err(error) => {
+                    return Err(sandbox_rejection(format!(
+                        "cannot enumerate '{}' to exclude denied path '{}': {error}; refusing \
+                         the spawn rather than granting a root that would expose it",
+                        cursor.display(),
+                        deny.display()
+                    )));
+                }
+            };
+            let step = cursor.join(component.as_os_str());
+            for entry in entries.flatten() {
+                let sibling = entry.path();
+                if sibling == step {
+                    continue;
+                }
+                if denied
+                    .iter()
+                    .any(|d| sibling.starts_with(d) || d.starts_with(&sibling))
+                {
+                    // Another denial lives here; it is handled by its own pass.
+                    continue;
+                }
+                if !granted.contains(&sibling) {
+                    granted.push(sibling);
+                }
+            }
+            cursor = step;
+            if granted.len() > MAX_DENY_EXPANSION_RULES {
+                return Err(sandbox_rejection(format!(
+                    "excluding denied paths from sandbox root '{}' produced {} rules, over the \
+                     {} cap; the directory that expanded was '{}' while excluding '{}'. Refusing \
+                     the spawn rather than granting the root unsubtracted.",
+                    root.display(),
+                    granted.len(),
+                    MAX_DENY_EXPANSION_RULES,
+                    cursor.display(),
+                    deny.display(),
+                )));
+            }
+        }
+    }
+    Ok(granted)
+}
+
+/// Ceiling on complement expansion.
+///
+/// Landlock itself has no small documented rule limit — rules are added one
+/// `landlock_add_rule` syscall at a time and bounded by memory — so this is a
+/// guard against a pathological directory, not a kernel constraint. It is set
+/// well above anything a real home produces: measured on the two Linux eval
+/// hosts, the product-default denylist expands to well under a hundred rules
+/// (see `report_default_denylist_expansion_cost`, which prints the live count).
+///
+/// Set high enough that a real machine cannot hit it, because the failure mode
+/// is a refused spawn: a cap that trips on a busy home turns a security feature
+/// into an outage.
+const MAX_DENY_EXPANSION_RULES: usize = 4096;
+
 fn push_rule(
     profile: &mut LandlockProfile,
     path: PathBuf,
@@ -336,9 +472,67 @@ fn push_rule(
     optional: bool,
 ) -> Result<(), VmError> {
     let path = super::normalize_for_policy(&path);
+    // Every Landlock grant funnels through here, so the subtraction lives here
+    // too: no call site can add a root and forget to exclude the denylist.
+    if !profile.read_deny_roots.is_empty() {
+        let deny_roots = profile.read_deny_roots.clone();
+        let expanded = expand_around_denied(&path, &deny_roots)?;
+        if expanded.len() != 1 || expanded[0] != path {
+            for replacement in expanded {
+                push_rule_exact(profile, replacement, allowed_access, true)?;
+            }
+            return Ok(());
+        }
+    }
+    push_rule_exact(profile, path, allowed_access, optional)
+}
+
+fn push_rule_exact(
+    profile: &mut LandlockProfile,
+    path: PathBuf,
+    allowed_access: u64,
+    optional: bool,
+) -> Result<(), VmError> {
     let file = match std::fs::File::open(&path) {
         Ok(file) => file,
-        Err(error) if optional && error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        // An OPTIONAL root we cannot open is skipped, not fatal. Missing and
+        // unreadable are the same answer here: we cannot grant it, and not
+        // granting it is strictly narrower than the alternative.
+        //
+        // Only NotFound was tolerated before, and that turned an unreadable
+        // preset root into a refusal of the entire spawn. It is reachable
+        // whenever the runtime's `$HOME` is not its own: with `HOME=/root`
+        // under a non-root uid, the `~/.asdf` preset root exists, cannot be
+        // opened, and killed every confined command.
+        //
+        // A NON-optional root still fails closed: something explicitly asked
+        // for it, so silently dropping it would be a grant the caller believes
+        // it has.
+        Err(error)
+            if optional
+                && matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                ) =>
+        {
+            // A root that EXISTS but cannot be opened is dropped silently
+            // otherwise, and a silently narrower sandbox is the shape that
+            // reads as success: the agent loses reach with nothing in the
+            // transcript to explain it. Missing roots stay quiet, because an
+            // absent optional root is the normal case and saying so every time
+            // would bury this.
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                super::warn_once(
+                    &format!("sandbox_unreadable_root:{}", path.display()),
+                    &format!(
+                        "sandbox root '{}' exists but could not be opened ({error}); it was NOT \
+                         granted. The child runs with less reach, not more.",
+                        path.display()
+                    ),
+                );
+            }
+            return Ok(());
+        }
         Err(error) => {
             return Err(sandbox_rejection(format!(
                 "failed to open sandbox path '{}': {error}",
@@ -875,504 +1069,5 @@ const DIRECTORY_ONLY_ACCESS_FS: u64 = LANDLOCK_ACCESS_FS_READ_DIR
     | LANDLOCK_ACCESS_FS_REFER;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
-        | LANDLOCK_ACCESS_FS_REMOVE_DIR
-        | LANDLOCK_ACCESS_FS_REMOVE_FILE
-        | LANDLOCK_ACCESS_FS_MAKE_CHAR
-        | LANDLOCK_ACCESS_FS_MAKE_DIR
-        | LANDLOCK_ACCESS_FS_MAKE_REG
-        | LANDLOCK_ACCESS_FS_MAKE_SOCK
-        | LANDLOCK_ACCESS_FS_MAKE_FIFO
-        | LANDLOCK_ACCESS_FS_MAKE_BLOCK
-        | LANDLOCK_ACCESS_FS_MAKE_SYM
-        | LANDLOCK_ACCESS_FS_REFER
-        | LANDLOCK_ACCESS_FS_TRUNCATE;
-
-    fn linux_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
-        CapabilityPolicy {
-            tools: Vec::new(),
-            capabilities: std::collections::BTreeMap::from([(
-                "workspace".to_string(),
-                ops.iter().map(|op| op.to_string()).collect(),
-            )]),
-            workspace_roots: vec!["/ws".to_string()],
-            read_only_roots: Vec::new(),
-            side_effect_level: Some("read_only".to_string()),
-            recursion_limit: None,
-            tool_arg_constraints: Vec::new(),
-            tool_annotations: std::collections::BTreeMap::new(),
-            sandbox_profile: SandboxProfile::Worktree,
-            process_sandbox: Default::default(),
-            process_network_proxy: None,
-        }
-    }
-
-    #[test]
-    fn managed_proxy_fails_closed_without_proxy_only_network_namespace() {
-        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
-        policy.side_effect_level = Some("network".to_string());
-        policy.process_network_proxy = Some(crate::orchestration::ProcessNetworkProxy {
-            http_port: 3128,
-            socks_port: 1080,
-        });
-
-        let error = match profile_setup("ignored", &policy, SandboxProfile::Worktree) {
-            Ok(_) => panic!("managed proxy must not widen to unrestricted Linux sockets"),
-            Err(error) => error,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("requires a proxy-only Linux network namespace"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn no_network_excludes_addressable_sockets_but_allows_local_socketpair() {
-        // At a sub-network ceiling, the egress-capable socket syscalls are
-        // not allowlisted, but `socketpair` (anonymous, unaddressable local IPC) stays
-        // allowed so Cargo's socketpair-backed jobserver can spawn rustc.
-        let policy = linux_policy_with_workspace_ops(&["read_text"]);
-        assert_eq!(
-            policy.side_effect_level.as_deref(),
-            Some("read_only"),
-            "fixture must be below the network ceiling",
-        );
-        let allowed = allowed_syscalls(&policy);
-
-        assert!(
-            !allowed.contains(&libc::SYS_socket),
-            "addressable socket() must not be allowlisted without network",
-        );
-        assert!(
-            !allowed.contains(&libc::SYS_connect),
-            "connect() must not be allowlisted without network",
-        );
-        assert!(
-            allowed.contains(&libc::SYS_socketpair),
-            "socketpair() (local IPC) must be allowlisted — Cargo's jobserver needs it",
-        );
-        // The socketpair-backed jobserver also drives its pair with the
-        // send/recv family. They open no egress while socket/connect/bind
-        // stay absent from the allowlist.
-        for call in [
-            libc::SYS_recvfrom,
-            libc::SYS_recvmsg,
-            libc::SYS_sendmsg,
-            libc::SYS_sendto,
-        ] {
-            assert!(
-                allowed.contains(&call),
-                "send/recv syscall {call} must be allowlisted — local socketpair IPC (Cargo jobserver) needs it",
-            );
-        }
-        // The egress-capable openers stay absent: no addressable socket can be
-        // created or routed, so the inherited-fd send/recv calls cannot reach the network.
-        for call in [
-            libc::SYS_socket,
-            libc::SYS_connect,
-            libc::SYS_bind,
-            libc::SYS_listen,
-            libc::SYS_accept,
-            libc::SYS_accept4,
-        ] {
-            assert!(
-                !allowed.contains(&call),
-                "egress opener {call} must stay absent without network",
-            );
-        }
-    }
-
-    #[test]
-    fn network_ceiling_allows_all_socket_syscalls() {
-        // When network side effects are permitted, none of the socket family
-        // is removed from the allowlist (socketpair included).
-        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
-        policy.side_effect_level = Some("network".to_string());
-        let allowed = allowed_syscalls(&policy);
-        for call in [
-            libc::SYS_socket,
-            libc::SYS_socketpair,
-            libc::SYS_connect,
-            libc::SYS_bind,
-        ] {
-            assert!(
-                allowed.contains(&call),
-                "network ceiling must allowlist socket-family syscall {call}",
-            );
-        }
-    }
-
-    #[test]
-    fn network_ceiling_grants_exact_name_service_files_without_opening_run() {
-        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
-        assert!(network_name_service_read_roots(&policy).is_empty());
-
-        policy.side_effect_level = Some("network".to_string());
-        let roots = network_name_service_read_roots(&policy);
-        assert_eq!(
-            roots,
-            [
-                "/etc/resolv.conf",
-                "/etc/hosts",
-                "/etc/nsswitch.conf",
-                "/etc/gai.conf",
-                "/etc/host.conf",
-            ]
-            .into_iter()
-            .map(PathBuf::from)
-            .collect::<Vec<_>>(),
-        );
-        assert!(
-            roots.iter().all(|root| !root.starts_with("/run")),
-            "the repair must grant canonical resolver files, never the mutable /run tree",
-        );
-    }
-
-    #[test]
-    fn process_network_ceiling_controls_real_child_socket() {
-        let workspace = tempfile::tempdir().expect("workspace");
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener");
-        let address = listener.local_addr().expect("listener address");
-        let args = vec![
-            "-c".to_string(),
-            format!("exec 3<>/dev/tcp/127.0.0.1/{}", address.port()),
-        ];
-
-        let run_probe = |policy: &CapabilityPolicy| {
-            let mut command = Command::new("/bin/bash");
-            command.args(&args).current_dir(workspace.path());
-            let preparation = Backend::prepare_std_command(
-                "/bin/bash",
-                &args,
-                &mut command,
-                policy,
-                SandboxProfile::Worktree,
-            )
-            .expect("prepare sandboxed child");
-            assert!(matches!(preparation, PrepareOutcome::Direct));
-            command.output().expect("run sandboxed child")
-        };
-
-        let mut denied = linux_policy_with_workspace_ops(&["read_text"]);
-        denied.workspace_roots = vec![workspace.path().display().to_string()];
-        denied.side_effect_level = Some("process_exec".to_string());
-        let denied_output = run_probe(&denied);
-        assert!(
-            !denied_output.status.success(),
-            "the default process-exec ceiling must deny an addressable child socket",
-        );
-
-        let mut allowed = denied;
-        allowed.side_effect_level = Some("network".to_string());
-        let allowed_output = run_probe(&allowed);
-        assert!(
-            allowed_output.status.success(),
-            "the network ceiling must permit the child loopback socket: {}",
-            String::from_utf8_lossy(&allowed_output.stderr),
-        );
-        listener
-            .set_nonblocking(true)
-            .expect("set listener nonblocking");
-        listener
-            .accept()
-            .expect("the listener must observe the allowed child connection");
-    }
-
-    #[test]
-    fn seccomp_filter_is_default_deny_allowlist() {
-        let filter = compile_seccomp_program(&[libc::SYS_read, libc::SYS_write])
-            .expect("compile the probe filter");
-        assert_eq!(
-            filter.last().map(|entry| entry.k),
-            Some(libc::SECCOMP_RET_ERRNO | libc::EPERM as u32),
-            "seccomp fallthrough must deny unknown syscalls",
-        );
-        assert!(
-            filter
-                .iter()
-                .any(|entry| entry.k == libc::SECCOMP_RET_ALLOW),
-            "allowlisted syscalls must jump to an allow action",
-        );
-    }
-
-    /// The filter must reject foreign ABIs before it ever looks at a syscall
-    /// number. `msync` stands in for the general hazard: we allow number 26,
-    /// and i386 number 26 is `ptrace` — which
-    /// `allowlist_excludes_process_introspection_and_io_uring` asserts we
-    /// withhold. Without the arch gate that exclusion is reachable anyway,
-    /// through `int $0x80`.
-    #[test]
-    fn seccomp_filter_validates_architecture_before_syscall_number() {
-        let filter = compile_seccomp_program(&[libc::SYS_msync]).expect("compile the probe filter");
-
-        let arch_load = filter.first().expect("filter must not be empty");
-        assert_eq!(
-            arch_load.code,
-            (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
-            "the first instruction must be an absolute word load",
-        );
-        assert_eq!(
-            arch_load.k, 4,
-            "the first load must read seccomp_data.arch (offset 4), not .nr (offset 0)",
-        );
-
-        assert_eq!(
-            filter.get(2).map(|entry| entry.k),
-            Some(libc::SECCOMP_RET_KILL_PROCESS),
-            "an architecture mismatch must kill the process, never return EPERM: \
-             EPERM would let a caller probe the whole syscall space for free",
-        );
-
-        // Only after the arch gate may the program consult the syscall number.
-        assert_eq!(
-            filter.get(3).map(|entry| (entry.code, entry.k)),
-            Some(((libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16, 0)),
-            "the syscall number load must follow the architecture check",
-        );
-    }
-
-    #[test]
-    fn allowlist_excludes_process_introspection_and_io_uring() {
-        let policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
-        let allowed = allowed_syscalls(&policy);
-        for call in [
-            libc::SYS_ptrace,
-            libc::SYS_process_vm_readv,
-            libc::SYS_process_vm_writev,
-            libc::SYS_io_uring_setup,
-            libc::SYS_io_uring_enter,
-            libc::SYS_io_uring_register,
-        ] {
-            assert!(
-                !allowed.contains(&call),
-                "dangerous syscall {call} must stay outside the seccomp allowlist",
-            );
-        }
-    }
-
-    #[test]
-    fn read_only_access_grants_read_and_execute_but_never_write() {
-        let access = read_only_access();
-        assert_ne!(access & LANDLOCK_ACCESS_FS_READ_FILE, 0, "read file");
-        assert_ne!(access & LANDLOCK_ACCESS_FS_READ_DIR, 0, "read dir");
-        assert_ne!(access & LANDLOCK_ACCESS_FS_EXECUTE, 0, "execute");
-        assert_eq!(
-            access & WRITE_BITS,
-            0,
-            "read-only access must not carry any write/create/remove right",
-        );
-    }
-
-    #[test]
-    fn read_only_access_is_independent_of_workspace_write_capability() {
-        // Even when the policy otherwise allows workspace writes, the
-        // read-only access bits are unchanged: a read-only root gets
-        // read+execute only.
-        let writable = linux_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
-        assert_ne!(
-            workspace_access(&writable) & LANDLOCK_ACCESS_FS_WRITE_FILE,
-            0,
-            "writable workspace root should carry write",
-        );
-        assert_eq!(
-            read_only_access() & WRITE_BITS,
-            0,
-            "read-only roots stay unwritable regardless of workspace write capability",
-        );
-    }
-
-    #[test]
-    fn package_manager_config_roots_are_read_only() {
-        let temp_home = tempfile::tempdir().expect("temp home");
-        std::fs::write(
-            temp_home.path().join(".npmrc"),
-            "registry=https://registry.example\n",
-        )
-        .expect("write npmrc");
-        let roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
-
-        assert!(
-            roots.iter().any(|path| path.ends_with(".npmrc")),
-            "npmrc should be part of the package-manager preset"
-        );
-        assert!(
-            roots
-                .iter()
-                .any(|path| path.ends_with(".cargo/config.toml")),
-            "cargo config should be part of the package-manager preset"
-        );
-        assert!(
-            roots.iter().all(|path| path.starts_with(temp_home.path())),
-            "package-manager roots must stay under HOME"
-        );
-        assert_eq!(
-            read_only_access() & WRITE_BITS,
-            0,
-            "package-manager Landlock rules use read-only access bits"
-        );
-    }
-
-    #[test]
-    fn developer_toolchain_roots_are_read_only() {
-        let temp_home = tempfile::tempdir().expect("temp home");
-        let roots = super::super::developer_toolchain_read_roots_for_home(temp_home.path());
-
-        assert!(
-            roots.iter().any(|path| path.ends_with(".local/share/uv")),
-            "uv runtimes should be part of the developer-toolchain preset"
-        );
-        assert!(
-            roots.iter().any(|path| path.ends_with(".rustup")),
-            "rustup should be part of the developer-toolchain preset"
-        );
-        assert!(
-            roots.iter().all(|path| path.starts_with(temp_home.path())),
-            "developer-toolchain roots must stay under HOME"
-        );
-        assert_eq!(
-            read_only_access() & WRITE_BITS,
-            0,
-            "developer-toolchain Landlock rules use read-only access bits"
-        );
-    }
-
-    #[test]
-    fn developer_toolchains_admit_linux_vendor_installations() {
-        let enabled = CapabilityPolicy {
-            process_sandbox: crate::orchestration::ProcessSandboxPolicy {
-                presets: Some(vec![ProcessSandboxPreset::DeveloperToolchains]),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert_eq!(
-            developer_toolchain_system_read_roots(&enabled),
-            vec![PathBuf::from("/opt")]
-        );
-
-        let disabled = CapabilityPolicy {
-            process_sandbox: crate::orchestration::ProcessSandboxPolicy {
-                presets: Some(Vec::new()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(developer_toolchain_system_read_roots(&disabled).is_empty());
-    }
-
-    #[test]
-    fn standard_device_rules_allow_common_device_files_only() {
-        let rules = standard_device_rules();
-        assert_eq!(rules.len(), 4);
-        assert!(rules.iter().any(|(path, access)| path.as_path()
-            == std::path::Path::new("/dev/null")
-            && access & LANDLOCK_ACCESS_FS_READ_FILE != 0
-            && access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0
-            && access & LANDLOCK_ACCESS_FS_IOCTL_DEV == 0));
-        for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
-            let Some((_, access)) = rules
-                .iter()
-                .find(|(path, _)| path.as_path() == std::path::Path::new(device))
-            else {
-                panic!("missing standard device rule for {device}");
-            };
-            assert_ne!(
-                *access & LANDLOCK_ACCESS_FS_READ_FILE,
-                0,
-                "{device} should be readable"
-            );
-            assert_eq!(
-                *access & LANDLOCK_ACCESS_FS_WRITE_FILE,
-                0,
-                "{device} must not be writable"
-            );
-            assert_eq!(
-                *access & LANDLOCK_ACCESS_FS_IOCTL_DEV,
-                0,
-                "{device} must not receive device ioctl access"
-            );
-        }
-    }
-
-    #[test]
-    fn directory_only_access_excludes_file_applicable_rights() {
-        // The file-applicable rights must never be classified as
-        // directory-only, otherwise `push_rule` would strip a read/exec
-        // grant from a regular-file rule and silently under-scope it.
-        for right in [
-            LANDLOCK_ACCESS_FS_READ_FILE,
-            LANDLOCK_ACCESS_FS_WRITE_FILE,
-            LANDLOCK_ACCESS_FS_EXECUTE,
-            LANDLOCK_ACCESS_FS_TRUNCATE,
-            LANDLOCK_ACCESS_FS_IOCTL_DEV,
-        ] {
-            assert_eq!(
-                DIRECTORY_ONLY_ACCESS_FS & right,
-                0,
-                "file-applicable right {right:#x} must not be directory-only",
-            );
-        }
-        // READ_DIR is the right that triggers the EINVAL on regular files.
-        assert_ne!(
-            DIRECTORY_ONLY_ACCESS_FS & LANDLOCK_ACCESS_FS_READ_DIR,
-            0,
-            "READ_DIR must be classified as directory-only",
-        );
-    }
-
-    #[test]
-    fn read_only_access_on_a_regular_file_drops_directory_only_bits() {
-        // A read-only preset root that resolves to a *file* (e.g.
-        // `~/.gitconfig`) must end up with only file-applicable rights;
-        // the `READ_DIR` bit in `read_only_access()` would otherwise make
-        // `landlock_add_rule` return EINVAL.
-        let masked = read_only_access() & !DIRECTORY_ONLY_ACCESS_FS;
-        assert_eq!(
-            masked & LANDLOCK_ACCESS_FS_READ_DIR,
-            0,
-            "READ_DIR must be stripped for non-directory rules",
-        );
-        assert_ne!(
-            masked & LANDLOCK_ACCESS_FS_READ_FILE,
-            0,
-            "READ_FILE must survive for non-directory rules",
-        );
-        assert_ne!(
-            masked & LANDLOCK_ACCESS_FS_EXECUTE,
-            0,
-            "EXECUTE must survive for non-directory rules",
-        );
-    }
-
-    #[test]
-    fn landlock_handled_access_tracks_device_ioctl_abi() {
-        assert_eq!(
-            landlock_handled_access(4) & LANDLOCK_ACCESS_FS_IOCTL_DEV,
-            0,
-            "ABI 4 kernels do not support device ioctl mediation",
-        );
-        assert_ne!(
-            landlock_handled_access(5) & LANDLOCK_ACCESS_FS_IOCTL_DEV,
-            0,
-            "ABI 5+ kernels should explicitly mediate device ioctls",
-        );
-    }
-
-    #[test]
-    fn proc_runtime_reads_require_restricted_yama_scope() {
-        for safe in ["1", "2\n", "3"] {
-            assert!(yama_scope_contains_process_reads(safe), "scope {safe}");
-        }
-        for unsafe_or_unknown in ["0", "", "disabled", "256"] {
-            assert!(
-                !yama_scope_contains_process_reads(unsafe_or_unknown),
-                "scope {unsafe_or_unknown} must not grant procfs reads",
-            );
-        }
-    }
-}
+#[path = "linux_tests.rs"]
+mod tests;

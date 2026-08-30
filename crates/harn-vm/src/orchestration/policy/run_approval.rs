@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::approval_resolver::ApprovalResolver;
+
 use super::{PolicyAction, ToolApprovalPolicy};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -47,7 +49,19 @@ pub struct RunAuthorityPosture {
 }
 
 impl RunAuthorityPosture {
-    fn approval_is_unsatisfiable(self) -> bool {
+    /// Whether an `ask` on this run has nobody to answer it.
+    ///
+    /// Takes the resolver, because that is the whole question. A non-interactive
+    /// run with no approval bridge genuinely cannot reach a person -- but
+    /// "cannot reach a person" and "cannot obtain an answer" stopped being the
+    /// same statement once a resolver could answer. Collapsing `Ask` to `Deny`
+    /// under a resolver that was installed precisely to answer asks would make
+    /// the feature a no-op on headless, which is the only surface the evals run
+    /// on.
+    fn approval_is_unsatisfiable(self, resolver: ApprovalResolver) -> bool {
+        if resolver.answers_ask_without_a_person() {
+            return false;
+        }
         self.interactivity == RunInteractivity::NonInteractive
             && self.approval_availability == ApprovalAvailability::Unavailable
     }
@@ -65,22 +79,53 @@ impl RunAuthorityPosture {
 pub struct RunApprovalPolicy {
     posture: RunAuthorityPosture,
     effective: ToolApprovalPolicy,
+    resolver: ApprovalResolver,
 }
 
 impl RunApprovalPolicy {
+    /// Construct with the default [`ApprovalResolver::Host`].
+    ///
+    /// Kept as-is so every existing caller keeps its exact behavior. Adding the
+    /// resolver as a field on [`RunAuthorityPosture`] would have been the
+    /// tidier shape and was rejected: it is a public struct with struct-literal
+    /// construction across the workspace and one downstream product, so the
+    /// field would be a breaking change to a type that is not itself changing.
     pub fn construct(
         posture: RunAuthorityPosture,
         build: impl FnOnce(RunAuthorityPosture) -> ToolApprovalPolicy,
     ) -> Self {
+        Self::construct_with_resolver(posture, ApprovalResolver::Host, build)
+    }
+
+    /// Construct with an explicit resolver.
+    ///
+    /// The resolver is host authority and arrives as typed input. It is never
+    /// read from ambient config here: a resolver that could be picked up from
+    /// the environment would make "which policy did this run enforce" a
+    /// question the receipt could not answer.
+    pub fn construct_with_resolver(
+        posture: RunAuthorityPosture,
+        resolver: ApprovalResolver,
+        build: impl FnOnce(RunAuthorityPosture) -> ToolApprovalPolicy,
+    ) -> Self {
         let mut effective = build(posture);
-        if posture.approval_is_unsatisfiable() {
+        if posture.approval_is_unsatisfiable(resolver) {
             deny_unsatisfiable_approval(&mut effective);
         }
-        Self { posture, effective }
+        Self {
+            posture,
+            effective,
+            resolver,
+        }
     }
 
     pub fn posture(&self) -> RunAuthorityPosture {
         self.posture
+    }
+
+    /// The resolver this run installed.
+    pub fn resolver(&self) -> ApprovalResolver {
+        self.resolver
     }
 
     pub fn effective(&self) -> &ToolApprovalPolicy {
@@ -155,6 +200,72 @@ mod tests {
         );
         assert!(matches!(
             untrusted.effective().evaluate("edit", &json!({})),
+            super::super::ToolApprovalDecision::AutoDenied { .. }
+        ));
+    }
+
+    /// THE MATCHED PAIR for the conditional collapse.
+    ///
+    /// The same posture -- non-interactive, no approval bridge -- and the same
+    /// `ask` rule, resolved two ways. Under `Host` the ask has nobody to answer
+    /// it and must still collapse to a denial; under a resolver that answers,
+    /// it must survive as an ask. Either test alone proves nothing: the first
+    /// passes against code that always collapses, the second against code that
+    /// never does.
+    fn ask_rule_policy() -> ToolApprovalPolicy {
+        serde_json::from_value(json!({
+            "rules": [{
+                "id": "rule-ask",
+                "action": "ask",
+                "match": {"tool": "rule_tool"},
+                "reason": "review the rule tool"
+            }]
+        }))
+        .expect("policy parses")
+    }
+
+    #[test]
+    fn host_resolver_still_collapses_an_unanswerable_ask() {
+        let policy = RunApprovalPolicy::construct_with_resolver(
+            posture(WorkspaceTrust::Trusted),
+            ApprovalResolver::Host,
+            |_| ask_rule_policy(),
+        );
+        assert!(matches!(
+            policy.effective().evaluate("rule_tool", &json!({})),
+            super::super::ToolApprovalDecision::AutoDenied { .. }
+        ));
+        assert_eq!(policy.resolver(), ApprovalResolver::Host);
+    }
+
+    #[test]
+    fn a_resolver_that_answers_keeps_the_ask_askable() {
+        for resolver in [ApprovalResolver::AutoReview, ApprovalResolver::AllowAll] {
+            let policy = RunApprovalPolicy::construct_with_resolver(
+                posture(WorkspaceTrust::Trusted),
+                resolver,
+                |_| ask_rule_policy(),
+            );
+            // Not AutoDenied. Collapsing here is what would make the whole
+            // feature a no-op on headless -- the only surface the evals run on.
+            assert_eq!(
+                policy.effective().evaluate("rule_tool", &json!({})),
+                super::super::ToolApprovalDecision::RequiresHostApproval,
+                "{resolver:?} answers asks, so the ask must reach it"
+            );
+            assert_eq!(policy.resolver(), resolver);
+        }
+    }
+
+    #[test]
+    fn the_default_constructor_is_unchanged() {
+        // Every existing caller must keep its exact behavior, or this becomes a
+        // silent auto-approver rollout rather than an opt-in one.
+        let legacy =
+            RunApprovalPolicy::construct(posture(WorkspaceTrust::Trusted), |_| ask_rule_policy());
+        assert_eq!(legacy.resolver(), ApprovalResolver::Host);
+        assert!(matches!(
+            legacy.effective().evaluate("rule_tool", &json!({})),
             super::super::ToolApprovalDecision::AutoDenied { .. }
         ));
     }

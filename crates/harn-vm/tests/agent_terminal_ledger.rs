@@ -168,7 +168,7 @@ pipeline main(harness: Harness, task: unknown) {
           tool_caller: tool_caller,
           loop_until_done: true,
           done_sentinel: "##DONE##",
-          done_judge: false,
+          turn_end_condition: false,
           final_wrapup: false,
           iteration_budget: {mode: "fixed", initial: 8, max: 8},
           stall_diagnostics: {

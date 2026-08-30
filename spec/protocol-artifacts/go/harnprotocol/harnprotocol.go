@@ -14,7 +14,7 @@ import (
 )
 
 // ArtifactVersion pins the Harn release that generated this binding.
-const ArtifactVersion = "0.10.123-dev"
+const ArtifactVersion = "0.10.125-dev"
 
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
@@ -888,6 +888,8 @@ type HarnAgentTerminalOutcome struct {
 	Reason        string             `json:"reason"`
 	Owner         AgentTerminalOwner `json:"owner"`
 	TerminalClass AgentTerminalClass `json:"terminalClass,omitempty"`
+	Message       string             `json:"message,omitempty"`
+	Detail        string             `json:"detail,omitempty"`
 }
 
 // HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.

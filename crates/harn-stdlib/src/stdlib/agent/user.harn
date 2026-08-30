@@ -576,7 +576,7 @@ fn __agentic_user_call_loop(harness: Harness, answerer: dict, prompts: dict) {
       loop_until_done: true,
       max_iterations: iteration_limit,
       max_nudges: answerer?.max_nudges ?? 2,
-      done_judge: answerer?.done_judge ?? false,
+      turn_end_condition: answerer?.turn_end_condition ?? false,
       session_id: answerer?.session_id,
     }
   const result = agent_loop(harness, prompts.prompt, prompts.system, opts)
@@ -668,7 +668,7 @@ pub fn agentic_user(
     max_llm_calls: config?.max_llm_calls ?? 8,
     max_iterations: config?.max_iterations ?? 4,
     max_nudges: config?.max_nudges ?? 2,
-    done_judge: config?.done_judge ?? false,
+    turn_end_condition: config?.turn_end_condition ?? false,
     system_prompt: config?.system_prompt,
     prompt: config?.prompt,
     transcript_max_chars: config?.transcript_max_chars ?? 4000,

@@ -1164,12 +1164,12 @@ mod tests {
 
     #[path = "structured_output_tests.rs"]
     mod structured_output;
-
     fn env(index: u64, event: AgentEvent) -> PersistedAgentEvent {
         PersistedAgentEvent {
             index,
             emitted_at_ms: 0,
             frame_depth: None,
+            execution_id: None,
             event,
         }
     }
@@ -1617,20 +1617,6 @@ mod tests {
         };
         assert!(exact.matches("read_file"));
         assert!(!exact.matches("read_files"));
-    }
-
-    #[test]
-    fn round_trip_report_serialization() {
-        let events = vec![
-            iteration_start(1, "s", 1),
-            tool_call(2, "s", "list_checks", json!({"pr": 1})),
-            iteration_end(3, "s", 1),
-        ];
-        let report = audit_transcript(&events, None);
-        let json = serde_json::to_string(&report).expect("serialize");
-        let parsed: AuditReport = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed.pass, report.pass);
-        assert_eq!(parsed.event_count, report.event_count);
     }
 
     #[test]

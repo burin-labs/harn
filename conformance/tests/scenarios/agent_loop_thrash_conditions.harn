@@ -234,7 +234,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("exempt=" + exempt.pattern + ",trips=" + to_string(exempt.trips))
   // Invariant: the advisory judge is NOT consulted until a deterministic trip
-  // fires. Run a full agent_loop with a stalled done_judge but only ONE noop
+  // fires. Run a full agent_loop with a stalled turn_end_condition but only ONE noop
   // call (below threshold) so no stall warning ever fires; assert zero judge
   // decisions were emitted.
   let tools = tool_registry()
@@ -270,7 +270,7 @@ pipeline default(harness: Harness) {
             final_wrapup: false,
             session_id: session,
             stall_diagnostics: {enabled: true, threshold: 3},
-            done_judge: {cadence: {when: "stalled"}},
+            turn_end_condition: {cadence: {when: "stalled"}},
           },
         ) },
       )

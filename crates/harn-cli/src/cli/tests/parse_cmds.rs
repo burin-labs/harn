@@ -16,6 +16,58 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
+fn test_run_flight_recorder_is_explicit_and_bounded() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--flight-recorder",
+        "--flight-recorder-max-events",
+        "42",
+        "--flight-recorder-retain",
+        "3",
+        "--flight-recorder-out",
+        "recording.json",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.flight_recorder);
+    assert_eq!(args.flight_recorder_max_events, Some(42));
+    assert_eq!(args.flight_recorder_retain, Some(3));
+    assert_eq!(
+        args.flight_recorder_out.as_deref(),
+        Some(std::path::Path::new("recording.json"))
+    );
+
+    assert_eq!(
+        Cli::try_parse_from([
+            "harn",
+            "run",
+            "--flight-recorder-out",
+            "recording.json",
+            "main.harn",
+        ])
+        .unwrap_err()
+        .kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+    assert_eq!(
+        Cli::try_parse_from([
+            "harn",
+            "run",
+            "--flight-recorder",
+            "--flight-recorder-max-events",
+            "0",
+            "main.harn",
+        ])
+        .unwrap_err()
+        .kind(),
+        clap::error::ErrorKind::ValueValidation
+    );
+}
+
+#[test]
 fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
     let cli = Cli::parse_from(["harn", "run", "main.harn"]);
     let Command::Run(args) = cli.command.unwrap() else {
@@ -304,6 +356,44 @@ fn test_test_bench_run_help_discloses_wasi_feature_gate() {
     ] {
         assert!(help.contains(token), "expected `{token}` in help");
     }
+}
+
+#[test]
+fn test_parses_chat_command() {
+    let cli = Cli::parse_from([
+        "harn",
+        "chat",
+        "qwen36-coder",
+        "--provider",
+        "llamacpp",
+        "--system",
+        "be brief",
+        "--verbose",
+    ]);
+
+    let Command::Chat(args) = cli.command.unwrap() else {
+        panic!("expected chat command");
+    };
+    assert_eq!(args.model.as_deref(), Some("qwen36-coder"));
+    assert_eq!(args.provider.as_deref(), Some("llamacpp"));
+    assert_eq!(args.system.as_deref(), Some("be brief"));
+    assert!(args.verbose);
+    assert!(!args.no_stats);
+}
+
+#[test]
+fn test_parses_bare_chat_command() {
+    let cli = Cli::parse_from(["harn", "chat"]);
+    let Command::Chat(args) = cli.command.unwrap() else {
+        panic!("expected chat command");
+    };
+    assert!(args.model.is_none());
+    assert_eq!(args.stats_mode(), "compact");
+}
+
+#[test]
+fn test_chat_rejects_verbose_with_no_stats() {
+    assert!(Cli::try_parse_from(["harn", "chat", "--verbose", "--no-stats"]).is_err());
 }
 
 #[test]

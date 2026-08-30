@@ -165,7 +165,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.123-dev"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.125-dev"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -1063,6 +1063,8 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
     reason: str
     owner: AgentTerminalOwner
     terminalClass: Optional[AgentTerminalClass] = None
+    message: Optional[str] = None
+    detail: Optional[str] = None
 
 
 @dataclass

@@ -255,7 +255,11 @@ An explicit empty `presets: []` disables every named preset. `read_roots` and
 `write_roots` are for subprocesses only; `write_roots` are also gated by the
 workspace-write capability. `CapabilityPolicy::intersect` narrows presets and
 roots to their common set, so managed or parent ceilings can prevent a child
-policy from adding host filesystem reach. `allow_tcp_loopback` defaults to
+policy from adding host filesystem reach. `read_deny_roots` is the one subtractive term: it beats every
+grant, and it unions rather than intersects as policies nest, because narrowing
+a denial would widen authority. See the
+[credential denylist reference](./sandbox-read-deny-reference.md).
+`allow_tcp_loopback` defaults to
 `false` and is host-owned authority: a nested policy can neither introduce it
 nor erase an outer host grant. Stage-policy validation also rejects a flattened
 child that tries to introduce it beyond its ceiling.

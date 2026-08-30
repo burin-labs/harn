@@ -70,12 +70,12 @@ pipeline test_bad_judge_seam_throws(harness: Harness, task: any) {
   assert(is_err(outcome), "gate rejects an unknown judge_seam")
 }
 
-pipeline test_done_judge_seam_routes(harness: Harness, task: any) {
+pipeline test_turn_end_judge_seam_routes(harness: Harness, task: any) {
   const bundle = agent_completion_gate(
     harness.runtime,
-    {facts: __facts, judge: true, judge_seam: "done_judge"},
+    {facts: __facts, judge: true, judge_seam: "turn_end_condition"},
   )
-  assert(bundle?.done_judge != nil, "judge rides the done_judge seam")
+  assert(bundle?.turn_end_condition != nil, "judge rides the turn_end_condition seam")
   assert_eq(bundle?.verify_completion_judge, nil)
 }
 

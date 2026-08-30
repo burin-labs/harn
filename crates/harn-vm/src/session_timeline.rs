@@ -437,7 +437,7 @@ impl TimelineBuilder {
     }
 
     fn add_run_spans(&mut self, run: &RunRecord, policy: &RedactionPolicy) {
-        for span in &run.trace_spans {
+        for span in &run.evidence.trace_spans {
             if !span_matches_query(span, &self.query) {
                 continue;
             }

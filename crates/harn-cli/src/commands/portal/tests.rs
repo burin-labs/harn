@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use axum::response::Response;
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
@@ -29,9 +30,17 @@ use super::transcript::discover_transcript_steps;
 use super::util::{date_ms, owning_stage, portal_now_rfc3339, portal_unique_id, preview_text};
 
 mod capability_snapshot_tests;
+mod replay_summary_tests;
 
 fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     test_portal_state_with_mutations(run_dir, true)
+}
+
+async fn response_json(response: Response) -> serde_json::Value {
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    serde_json::from_slice(&body).expect("response body is JSON")
 }
 
 fn test_portal_state_with_mutations(
@@ -379,14 +388,17 @@ fn build_run_detail_saturates_trace_span_end_times() {
         workflow_id: "wf".to_string(),
         workflow_name: Some("demo".to_string()),
         status: "complete".to_string(),
-        trace_spans: vec![harn_vm::orchestration::RunTraceSpanRecord {
-            span_id: 1,
-            kind: "tool_call".to_string(),
-            name: "huge-span".to_string(),
-            start_ms: u64::MAX - 1,
-            duration_ms: 10,
+        evidence: harn_vm::orchestration::ExecutionEvidenceRecord {
+            trace_spans: vec![harn_vm::orchestration::RunTraceSpanRecord {
+                span_id: 1,
+                kind: "tool_call".to_string(),
+                name: "huge-span".to_string(),
+                start_ms: u64::MAX - 1,
+                duration_ms: 10,
+                ..Default::default()
+            }],
             ..Default::default()
-        }],
+        },
         ..Default::default()
     };
 
@@ -470,7 +482,10 @@ fn build_run_detail_joins_tool_call_audit_onto_matching_activity() {
         task: "task".to_string(),
         status: "succeeded".to_string(),
         persisted_path: Some(run_path.to_string_lossy().into_owned()),
-        trace_spans,
+        evidence: harn_vm::orchestration::ExecutionEvidenceRecord {
+            trace_spans,
+            ..Default::default()
+        },
         transcript: Some(transcript),
         ..Default::default()
     };
@@ -741,6 +756,11 @@ async fn api_runs_returns_json() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["filtered_count"], 1);
+    assert_eq!(payload["pagination"]["total_runs"], 1);
+    assert_eq!(payload["runs"][0]["id"], "run-1");
+    assert_eq!(payload["runs"][0]["status"], "complete");
 }
 
 #[tokio::test]
@@ -1099,6 +1119,10 @@ async fn api_meta_returns_workspace_and_run_dir() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let expected = temp.path().display().to_string();
+    assert_eq!(payload["workspace_root"], expected);
+    assert_eq!(payload["run_dir"], expected);
 }
 
 #[tokio::test]
@@ -1116,6 +1140,16 @@ async fn api_highlight_keywords_returns_payload() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert!(payload["keyword"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+    assert!(payload["literal"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "nil")));
+    assert!(payload["built_in"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item == "uuid")));
 }
 
 #[tokio::test]
@@ -1133,6 +1167,16 @@ async fn api_llm_options_returns_payload() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let providers = payload["providers"]
+        .as_array()
+        .expect("provider options array");
+    assert!(!providers.is_empty());
+    assert!(providers.iter().all(|provider| {
+        provider["name"].is_string()
+            && provider["auth_envs"].is_array()
+            && provider["models"].is_array()
+    }));
 }
 
 #[tokio::test]
@@ -1434,28 +1478,4 @@ fn build_policy_summary_reads_validation_metadata() {
     assert_eq!(summary.validation_errors, vec!["missing edge".to_string()]);
     assert_eq!(summary.validation_warnings, vec!["unused node".to_string()]);
     assert_eq!(summary.reachable_nodes, vec!["plan".to_string()]);
-}
-
-#[test]
-fn build_replay_summary_reads_fixture_metadata() {
-    let fixture = harn_vm::orchestration::ReplayFixture {
-        id: "fixture-1".to_string(),
-        source_run_id: "run-1".to_string(),
-        created_at: "2026-04-04T00:00:00Z".to_string(),
-        expected_status: "completed".to_string(),
-        stage_assertions: vec![harn_vm::orchestration::ReplayStageAssertion {
-            node_id: "plan".to_string(),
-            expected_status: "completed".to_string(),
-            expected_outcome: "success".to_string(),
-            expected_branch: Some("true".to_string()),
-            required_artifact_kinds: vec!["notes".to_string()],
-            visible_text_contains: Some("done".to_string()),
-        }],
-        ..Default::default()
-    };
-
-    let summary = build_replay_summary(Some(&fixture)).unwrap();
-    assert_eq!(summary.fixture_id, "fixture-1");
-    assert_eq!(summary.stage_assertions.len(), 1);
-    assert_eq!(summary.stage_assertions[0].node_id, "plan");
 }

@@ -23,6 +23,7 @@ use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
 
+use super::approval_reviewer::{swap_approval_reviewer_depth, swap_approval_reviewer_stack};
 use super::command_policy::{
     swap_command_policy_hook_depth, swap_command_policy_stack, CommandPolicy,
 };
@@ -142,6 +143,13 @@ pub(crate) struct AmbientExecutionScope {
     /// fresh for a new logical call stack.
     precheck: Vec<std::sync::Arc<crate::value::VmClosure>>,
     precheck_depth: usize,
+    /// The `AutoReview` answerer. Inherited for the same reason the precheck
+    /// is: a spawned worker that inherited a policy it cannot satisfy, but not
+    /// the reviewer that could answer for it, would refuse work its parent
+    /// would have been allowed to do. The re-entrancy depth begins fresh,
+    /// because the child is a new logical call stack.
+    approval_reviewer: Vec<std::sync::Arc<crate::value::VmClosure>>,
+    approval_reviewer_depth: usize,
     /// State whose inheritance is specific to child-interpreter subtasks.
     /// Grouping it makes capture and per-poll restoration one typed contract.
     subtask: SubtaskAmbientState,
@@ -190,6 +198,8 @@ impl AmbientExecutionScope {
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             precheck: clone_via_swap(swap_tool_precheck_stack),
+            approval_reviewer: clone_via_swap(swap_approval_reviewer_stack),
+            approval_reviewer_depth: 0,
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
@@ -282,6 +292,8 @@ impl AmbientExecutionScope {
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
             precheck: clone_via_swap(swap_tool_precheck_stack),
             precheck_depth: clone_via_swap(swap_tool_precheck_depth),
+            approval_reviewer: clone_via_swap(swap_approval_reviewer_stack),
+            approval_reviewer_depth: clone_via_swap(swap_approval_reviewer_depth),
             subtask: SubtaskAmbientState::capture(),
         }
     }
@@ -351,6 +363,11 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.command_hook_depth, swap_command_policy_hook_depth);
         swap_slot(&mut self.precheck, swap_tool_precheck_stack);
         swap_slot(&mut self.precheck_depth, swap_tool_precheck_depth);
+        swap_slot(&mut self.approval_reviewer, swap_approval_reviewer_stack);
+        swap_slot(
+            &mut self.approval_reviewer_depth,
+            swap_approval_reviewer_depth,
+        );
         self.subtask.swap_in_place();
     }
 }
@@ -492,6 +509,34 @@ pub fn scope_fresh_trigger_registry<F: Future>(inner: F) -> impl Future<Output =
     scope
         .subtask
         .set_trigger_registry(crate::triggers::registry::runtime::fresh_trigger_registry());
+    scope_ambient(scope, inner)
+}
+
+/// Run one entrypoint future with an execution-owned span collector.
+///
+/// The collector is poll-scoped, so concurrent in-process runs that interleave
+/// on one executor thread cannot reset, parent, or persist each other's spans.
+pub fn scope_fresh_tracing_runtime<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope
+        .subtask
+        .set_tracing_runtime(crate::tracing::fresh_tracing_runtime());
+    scope_ambient(scope, inner)
+}
+
+/// Run one entrypoint with all run-owned ambient registries refreshed together.
+///
+/// Capturing once is essential: nesting independent fresh-scope wrappers lets
+/// the inner wrapper restore the caller's value for fields refreshed by the
+/// outer wrapper.
+pub fn scope_fresh_run_runtime<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope
+        .subtask
+        .set_trigger_registry(crate::triggers::registry::runtime::fresh_trigger_registry());
+    scope
+        .subtask
+        .set_tracing_runtime(crate::tracing::fresh_tracing_runtime());
     scope_ambient(scope, inner)
 }
 
@@ -657,6 +702,58 @@ mod tests {
         assert!(Arc::ptr_eq(
             &caller,
             &crate::triggers::registry::active_trigger_registry(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn fresh_tracing_scopes_isolate_interleaved_runs_and_restore_the_caller() {
+        let caller = crate::tracing::active_tracing_runtime();
+        let run = |name: &'static str| {
+            scope_fresh_tracing_runtime(async move {
+                let owner = crate::tracing::active_tracing_runtime();
+                crate::tracing::set_tracing_enabled(true);
+                let span =
+                    crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, name.into());
+                tokio::task::yield_now().await;
+                crate::tracing::span_end(span);
+                (owner, crate::tracing::peek_spans())
+            })
+        };
+        let ((alpha_owner, alpha), (beta_owner, beta)) = tokio::join!(run("alpha"), run("beta"));
+
+        assert!(!Arc::ptr_eq(&alpha_owner, &beta_owner));
+        assert_eq!(alpha.len(), 1);
+        assert_eq!(alpha[0].name, "alpha");
+        assert_eq!(beta.len(), 1);
+        assert_eq!(beta[0].name, "beta");
+        assert!(Arc::ptr_eq(
+            &caller,
+            &crate::tracing::active_tracing_runtime(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn fresh_run_scope_refreshes_both_registries_and_restores_the_caller() {
+        let caller_triggers = crate::triggers::registry::active_trigger_registry();
+        let caller_tracing = crate::tracing::active_tracing_runtime();
+
+        let (run_triggers, run_tracing) = scope_fresh_run_runtime(async {
+            (
+                crate::triggers::registry::active_trigger_registry(),
+                crate::tracing::active_tracing_runtime(),
+            )
+        })
+        .await;
+
+        assert!(!Arc::ptr_eq(&caller_triggers, &run_triggers));
+        assert!(!Arc::ptr_eq(&caller_tracing, &run_tracing));
+        assert!(Arc::ptr_eq(
+            &caller_triggers,
+            &crate::triggers::registry::active_trigger_registry(),
+        ));
+        assert!(Arc::ptr_eq(
+            &caller_tracing,
+            &crate::tracing::active_tracing_runtime(),
         ));
     }
 

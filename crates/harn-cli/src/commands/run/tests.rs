@@ -17,6 +17,7 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod evidence;
 mod exit_status;
 mod host_dispatch;
 mod network;
@@ -358,6 +359,7 @@ fn run_sandbox_attestation_reports_effective_policy() {
             socks_port: 1080,
         }),
         process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+            read_deny_roots: Vec::new(),
             allow_tcp_loopback: true,
             ..harn_vm::orchestration::ProcessSandboxPolicy::default()
         },

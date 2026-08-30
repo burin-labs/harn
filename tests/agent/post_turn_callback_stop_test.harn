@@ -146,13 +146,11 @@ pipeline test_a_host_verdict_can_waive_verification_on_a_sentinel_terminal(
           max_iterations: 4,
           done_sentinel: "##DONE##",
           verify_completion: { info ->
-            let count = harness.runtime.shared_snapshot(verify_calls)
+            const count = harness.runtime.shared_snapshot(verify_calls)
             harness.runtime.shared_set(verify_calls, count.value + 1)
             return nil
           },
-          post_turn_callback: { info ->
-            return {stop: true, needs_verify: false}
-          },
+          post_turn_callback: { info -> return {stop: true, needs_verify: false} },
         },
       )
       assert_eq(result?.stop_reason, "sentinel")
@@ -188,13 +186,11 @@ pipeline test_a_sentinel_terminal_still_verifies_when_the_host_says_nothing(
           max_iterations: 4,
           done_sentinel: "##DONE##",
           verify_completion: { info ->
-            let count = harness.runtime.shared_snapshot(verify_calls)
+            const count = harness.runtime.shared_snapshot(verify_calls)
             harness.runtime.shared_set(verify_calls, count.value + 1)
             return nil
           },
-          post_turn_callback: { info ->
-            return {stop: true}
-          },
+          post_turn_callback: { info -> return {stop: true} },
         },
       )
       assert_eq(result?.stop_reason, "sentinel")

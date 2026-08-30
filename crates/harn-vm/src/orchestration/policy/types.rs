@@ -3,6 +3,10 @@
 //! constraint machinery. Everything here is plain data (+ a single
 //! helper, `enforce_tool_arg_constraints`, that operates on it).
 
+#[path = "read_deny_defaults_data.rs"]
+mod read_deny_defaults;
+pub use read_deny_defaults::default_read_deny_home_paths;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -285,6 +289,26 @@ pub struct ProcessSandboxPolicy {
     pub presets: Option<Vec<ProcessSandboxPreset>>,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
+    /// Subtrees a confined child may never read, whatever else grants them.
+    ///
+    /// This is the ONLY subtractive term in the policy. It composes
+    /// most-restrictive over every additive source: a preset, a workspace root,
+    /// a `read_only_root`, and an explicit `read_roots` entry all lose to it.
+    /// That ordering is the point — `PackageManagerConfig` grants `~/.config`,
+    /// `~/.cache`, and `~/.netrc` wholesale, so a denylist that merely competed
+    /// with presets would leave credentials readable by default.
+    ///
+    /// Enforced on macOS (a trailing `deny file-read*`, last-match-wins) and on
+    /// Linux (Landlock is allow-only, so the denial is expressed by granting
+    /// the siblings that do not lead to it). **Windows and OpenBSD do not apply
+    /// it yet**, and they do NOT refuse the spawn either.
+    ///
+    /// Refusing would be the fail-closed reflex, and it is wrong here: the
+    /// default denylist is never empty, so refusing on an unsupporting backend
+    /// would refuse every spawn on that platform. Saying plainly that the term
+    /// is unenforced there is worth more than a comment claiming a protection
+    /// the code does not provide.
+    pub read_deny_roots: Vec<String>,
     /// Permit a confined child to bind and connect TCP loopback sockets while
     /// retaining the deny on non-loopback destinations. Backends that cannot
     /// enforce this distinction reject the spawn rather than widening it.
@@ -314,6 +338,7 @@ impl ProcessSandboxPolicy {
         }
         extend_unique(&mut self.read_roots, &other.read_roots);
         extend_unique(&mut self.write_roots, &other.write_roots);
+        extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
     }
 
@@ -329,6 +354,15 @@ impl ProcessSandboxPolicy {
             presets,
             read_roots: intersect_roots(&self.read_roots, &requested.read_roots),
             write_roots: intersect_roots(&self.write_roots, &requested.write_roots),
+            // UNION, not intersection, and deliberately so. Every other field
+            // here narrows as it nests; this one is a denial, so narrowing it
+            // would WIDEN the resulting authority. A nested request may add a
+            // denial and may never drop one the outer policy made.
+            read_deny_roots: {
+                let mut denied = self.read_deny_roots.clone();
+                extend_unique(&mut denied, &requested.read_deny_roots);
+                denied
+            },
             // Loopback is host-owned authority like `process_network_proxy`:
             // a nested request may neither invent it nor erase an outer grant.
             // Host configuration still composes additively through `extend`.

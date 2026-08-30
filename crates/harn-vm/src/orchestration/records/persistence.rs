@@ -122,6 +122,7 @@ pub struct AgentSessionReplayEvent {
     pub event_id: EventId,
     pub kind: String,
     pub occurred_at_ms: i64,
+    pub execution_id: Option<String>,
     pub event: AgentEvent,
 }
 
@@ -172,6 +173,13 @@ pub async fn load_agent_session_replay_events_from_log(
                     event_id,
                     kind: record.kind,
                     occurred_at_ms: record.occurred_at_ms,
+                    execution_id: record.headers.get("execution_id").cloned().or_else(|| {
+                        record
+                            .payload
+                            .get("execution_id")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    }),
                     event,
                 });
             }
@@ -505,6 +513,7 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     if run.root_run_id.is_none() {
         run.root_run_id = Some(run.id.clone());
     }
+    normalize_evidence_identity(&mut run);
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
     }
@@ -529,6 +538,59 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
     )
 }
 
+pub const DEFAULT_EXECUTION_RUN_RETENTION: usize = 128;
+
+/// Save and retain one automatic execution record as a cross-process
+/// transaction. Workflow records in the same directory are never selected.
+pub fn save_execution_run_record(run: &RunRecord, path: &Path) -> Result<String, VmError> {
+    let parent = execution_record_parent(path)?;
+    crate::bounded_files::with_retention_transaction(parent, || {
+        let persisted = save_run_record(run, Some(&path.to_string_lossy()))
+            .map_err(|error| error.to_string())?;
+        prune_execution_run_records_unlocked(path).map_err(|error| error.to_string())?;
+        Ok(persisted)
+    })
+    .map_err(VmError::Runtime)
+}
+
+/// Bound only automatically-created execution records. Workflow and imported
+/// run records share the directory but are never selected by this retention.
+pub fn prune_execution_run_records(keep_path: &Path) -> Result<(), VmError> {
+    let parent = execution_record_parent(keep_path)?;
+    crate::bounded_files::with_retention_transaction(parent, || {
+        prune_execution_run_records_unlocked(keep_path).map_err(|error| error.to_string())
+    })
+    .map_err(VmError::Runtime)
+}
+
+fn execution_record_parent(path: &Path) -> Result<&Path, VmError> {
+    path.parent().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "execution run record path has no parent: {}",
+            path.display()
+        ))
+    })
+}
+
+fn prune_execution_run_records_unlocked(keep_path: &Path) -> Result<(), VmError> {
+    let parent = execution_record_parent(keep_path)?;
+    crate::bounded_files::retain_newest_files(
+        parent,
+        keep_path,
+        DEFAULT_EXECUTION_RUN_RETENTION,
+        |candidate| {
+            candidate.extension().and_then(|ext| ext.to_str()) == Some("json")
+                && candidate
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| {
+                        stem.starts_with(crate::observability::execution_scope::EXECUTION_ID_PREFIX)
+                    })
+        },
+    )
+    .map_err(VmError::Runtime)
+}
+
 pub(crate) fn save_run_record_with_transcript(
     run: &RunRecord,
     path: Option<&str>,
@@ -538,6 +600,7 @@ pub(crate) fn save_run_record_with_transcript(
         .map(PathBuf::from)
         .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
     let mut materialized = run.clone();
+    normalize_evidence_identity(&mut materialized);
     merge_hitl_questions_from_active_log(&mut materialized);
     materialize_child_runs_from_stage_metadata(&mut materialized);
     if materialized.replay_fixture.is_none() {
@@ -565,6 +628,25 @@ pub(crate) fn save_run_record_with_transcript(
     Ok(path.to_string_lossy().into_owned())
 }
 
+fn normalize_evidence_identity(run: &mut RunRecord) {
+    if run.evidence.schema_version == 0 {
+        run.evidence.schema_version = super::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+    }
+    if run.evidence.execution_id.is_none()
+        && !run
+            .evidence
+            .gaps
+            .iter()
+            .any(|gap| gap.component == "execution_identity")
+    {
+        run.evidence.gaps.push(super::types::RunEvidenceGapRecord {
+            component: "execution_identity".to_string(),
+            code: "legacy_missing".to_string(),
+            message: "this run record predates durable VM execution identities".to_string(),
+        });
+    }
+}
+
 pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     let (mut run, _) = load_run_record_snapshot(path)?;
     let transcript_path = discover_llm_transcript_sidecar(&run, path);
@@ -583,6 +665,7 @@ pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
     let mut run: RunRecord = serde_json::from_slice(&content)
         .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
+    normalize_evidence_identity(&mut run);
     materialize_child_runs_from_stage_metadata(&mut run);
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
@@ -591,6 +674,40 @@ pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8
         .get_or_insert_with(|| path.to_string_lossy().into_owned());
     sync_run_handoffs(&mut run);
     Ok((run, content))
+}
+
+#[cfg(test)]
+mod execution_retention_tests {
+    use super::*;
+
+    #[test]
+    fn automatic_execution_retention_never_selects_workflow_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let workflow = dir.path().join("workflow-important.json");
+        std::fs::write(&workflow, "{}\n").unwrap();
+        let mut keep = PathBuf::new();
+        for index in 0..130 {
+            let path = dir.path().join(format!("hxe-{index:03}.json"));
+            std::fs::write(&path, "{}\n").unwrap();
+            keep = path;
+        }
+
+        prune_execution_run_records(&keep).unwrap();
+
+        let automatic_count = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with(crate::observability::execution_scope::EXECUTION_ID_PREFIX)
+                        && name.ends_with(".json")
+                })
+            })
+            .count();
+        assert_eq!(automatic_count, DEFAULT_EXECUTION_RUN_RETENTION);
+        assert!(keep.is_file());
+        assert!(workflow.is_file());
+    }
 }
 
 #[cfg(test)]

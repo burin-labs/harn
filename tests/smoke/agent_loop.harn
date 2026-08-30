@@ -51,7 +51,7 @@ pipeline default(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 4,
-          done_judge: nil,
+          turn_end_condition: nil,
         },
       )
       if result.status != "done" {

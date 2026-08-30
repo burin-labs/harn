@@ -1,0 +1,381 @@
+import { LlmSpeedUsage, format_speed_line, format_speed_report } from "std/llm/speed"
+
+/**
+ * std/llm/chat_session - an interactive chat loop against one model.
+ *
+ * A raw-model probe surface, not an agent. Each turn is exactly one request
+ * through `harness.llm.stream_call`: no tools, no agent session, no reminders,
+ * no project-context profile, and no system prompt unless the caller sets one.
+ * That matters whenever the point is to measure the model - a turn carrying an
+ * injected tool contract would report prompt-eval work the user never asked
+ * for.
+ *
+ * Conversation history is append-only. Each turn appends the user message and
+ * then the assistant reply, and nothing already in the list is rewritten,
+ * which is what lets a provider's prefix cache stay warm across turns.
+ *
+ * This is a module rather than a command body so it can be driven directly:
+ * a test supplies keystrokes with `harness.testing.stdin_set` and taped
+ * completions with `with_llm_script`, and drives the same loop a person does.
+ */
+pub type ChatSessionConfig = {
+  provider?: string,
+  model?: string,
+  label?: string,
+  endpoint?: string,
+  system?: string,
+  stats?: string,
+}
+
+const __MULTILINE_FENCE = "\"\"\""
+
+const __COMMAND_LIST = """Commands:
+  /help, /?                show this message
+  /bye                     exit (or Ctrl-D)
+  /model [name]            show the current model, or switch to another
+  /system [text]           show the system prompt, or set it for this session
+  /stats [off|on|verbose]  show or change the per-response speed line
+  /clear                   forget the conversation so far
+"""
+
+/**
+ * The multiline hint is concatenated rather than written inline: the fence is
+ * itself a triple quote, so it cannot appear literally inside a triple-quoted
+ * string.
+ */
+fn __help_text() -> string {
+  return __COMMAND_LIST + "\n\nWrap a message in " + __MULTILINE_FENCE
+    + " to send several lines at once."
+}
+
+fn __print_stats(
+  stdio: HarnessStdio,
+  mode: string,
+  usage: LlmSpeedUsage,
+  ttft_ms: int?,
+  wall_ms: int,
+) {
+  if mode == "off" {
+    return
+  }
+  // Stats go to stderr, as `ollama run --verbose` does, so piping a session
+  // to a file captures the conversation without the measurements woven in.
+  if mode == "verbose" {
+    for line in format_speed_report(usage, ttft_ms, wall_ms) {
+      stdio.eprintln(line)
+    }
+    return
+  }
+  stdio.eprintln("  " + format_speed_line(usage, ttft_ms, wall_ms))
+}
+
+// -------------------------------------------------------------------------------------------------
+// Input
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Read one turn of input, honoring the `\"\"\"` multiline fence.
+ *
+ * Returns `{status: "ok", text}`, or `{status: "eof"|"interrupt"}` when the
+ * user is done. An unterminated fence at end of input ends the session rather
+ * than sending a half-typed message.
+ */
+fn __read_turn(stdio: HarnessStdio, prompt: string) -> dict {
+  const first = stdio.read_line({prompt: prompt})
+  if !first.ok {
+    return {status: first.status ?? "eof"}
+  }
+  const line = first.value ?? ""
+  if trim(line) != __MULTILINE_FENCE {
+    return {status: "ok", text: line}
+  }
+  let collected = []
+  while true {
+    const next = stdio.read_line({prompt: "... "})
+    if !next.ok {
+      return {status: next.status ?? "eof"}
+    }
+    const body = next.value ?? ""
+    if trim(body) == __MULTILINE_FENCE {
+      return {status: "ok", text: join(collected, "\n")}
+    }
+    collected = collected.appending(body)
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Slash commands
+// -------------------------------------------------------------------------------------------------
+
+fn __describe_model(state: dict) -> string {
+  const provider = state["provider"]
+  if provider == nil {
+    return state["label"] ?? state["model"] ?? "(none)"
+  }
+  return (state["label"] ?? state["model"] ?? "(none)") + " on " + provider
+}
+
+/**
+ * Name the route the session actually resolved to, endpoint included.
+ *
+ * The provider and model can each come from an explicit argument, a stored
+ * local selection, the environment, or a catalog default. Three of those are
+ * invisible at the prompt, so the session states the resolved answer once,
+ * before the first message, rather than leaving the user to infer which model
+ * their timings describe.
+ */
+fn __route_banner(state: dict) -> string {
+  const described = __describe_model(state)
+  const endpoint = state["endpoint"]
+  if endpoint == nil || endpoint == "" {
+    return "Talking to " + described + "."
+  }
+  return "Talking to " + described + " at " + endpoint + "."
+}
+
+fn __apply_model_command(stdio: HarnessStdio, state: dict, argument: string?) -> dict {
+  if argument == nil {
+    stdio.println(__route_banner(state))
+    return state
+  }
+  // Clear the pinned provider so the catalog routes the new name. Model
+  // resolution belongs to the provider catalog, never to this script — which
+  // is also why the endpoint is dropped rather than guessed: the session
+  // cannot know where the catalog will send the new model, and reporting the
+  // previous endpoint would be worse than reporting none.
+  stdio.println("Now talking to " + argument + ".")
+  return state + {model: argument, label: argument, provider: nil, endpoint: nil}
+}
+
+fn __apply_system_command(stdio: HarnessStdio, state: dict, argument: string?) -> dict {
+  if argument == nil {
+    const current = state["system"]
+    if current == nil {
+      stdio.println("No system prompt is set.")
+    } else {
+      stdio.println(current)
+    }
+    return state
+  }
+  stdio.println("System prompt set for this session.")
+  return state + {system: argument}
+}
+
+fn __apply_stats_command(stdio: HarnessStdio, state: dict, argument: string?) -> dict {
+  if argument == nil {
+    stdio.println("Speed stats are " + state["stats"] + ".")
+    return state
+  }
+  const requested = lowercase(argument)
+  const mode = if requested == "on" {
+    "compact"
+  } else {
+    requested
+  }
+  if mode != "off" && mode != "compact" && mode != "verbose" {
+    stdio.eprintln("Use /stats with off, on, or verbose.")
+    return state
+  }
+  stdio.println("Speed stats are " + mode + ".")
+  return state + {stats: mode}
+}
+
+/**
+ * Handle one slash command. Returns the updated state plus `exit`, which the
+ * main loop honors as the one way this REPL ends by request.
+ */
+fn __handle_command(stdio: HarnessStdio, state: dict, line: string) -> dict {
+  const body = trim(substring(line, 1, len(line)))
+  const space = index_of(body, " ")
+  const name = lowercase(
+    if space < 0 {
+      body
+    } else {
+      substring(body, 0, space)
+    },
+  )
+  const argument = if space < 0 {
+    nil
+  } else {
+    __blank_to_nil(trim(substring(body, space + 1, len(body))))
+  }
+  if name == "bye" || name == "exit" || name == "quit" {
+    return {state: state, exit: true}
+  }
+  if name == "help" || name == "?" {
+    stdio.println(__help_text())
+    return {state: state, exit: false}
+  }
+  if name == "model" {
+    return {state: __apply_model_command(stdio, state, argument), exit: false}
+  }
+  if name == "system" {
+    return {state: __apply_system_command(stdio, state, argument), exit: false}
+  }
+  if name == "stats" {
+    return {state: __apply_stats_command(stdio, state, argument), exit: false}
+  }
+  if name == "clear" {
+    stdio.println("Conversation cleared.")
+    return {state: state + {messages: []}, exit: false}
+  }
+  stdio.eprintln("Unknown command: /" + name + ". Try /help.")
+  return {state: state, exit: false}
+}
+
+fn __blank_to_nil(text: string) {
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+// -------------------------------------------------------------------------------------------------
+// One model turn
+// -------------------------------------------------------------------------------------------------
+
+fn __call_options(state: dict) -> dict {
+  let options = {messages: state["messages"]}
+  if state["provider"] != nil {
+    options = options + {provider: state["provider"]}
+  }
+  if state["model"] != nil {
+    options = options + {model: state["model"]}
+  }
+  return options
+}
+
+/**
+ * Turn a provider failure into something the user can act on rather than a
+ * stack trace. A server that stopped part-way through a session is the common
+ * cause, so name the commands that check and restart one — hedged, because
+ * this path cannot tell a local runtime from a cloud outage. The startup
+ * readiness check reports the unambiguous case precisely.
+ *
+ * The session survives: one failed turn returns to the prompt instead of
+ * ending the conversation.
+ */
+fn __report_turn_error(stdio: HarnessStdio, state: dict, error: any) {
+  stdio.eprintln("")
+  stdio.eprintln("The model did not answer: " + to_string(error?.message ?? error))
+  if state["provider"] != nil {
+    stdio.eprintln(
+      "If " + state["provider"]
+        + " is a local server, `harn local list` shows what is running and "
+        + "`harn local launch` starts one.",
+    )
+  }
+}
+
+/**
+ * Stream one reply, rendering tokens as they arrive.
+ *
+ * Returns `{ok, text, usage, ttft_ms}`. `ttft_ms` is measured here, client
+ * side, because it is a client-side fact: it includes queueing and transport,
+ * which is exactly what a person waiting at a prompt experiences. Server-side
+ * prefill and decode timings come from `usage.provider_telemetry` instead.
+ */
+fn __stream_reply(harness: Harness, state: dict) -> dict {
+  const started_ms = harness.clock.monotonic_ms()
+  let ttft_ms = nil
+  let text = ""
+  let usage: LlmSpeedUsage = {input_tokens: nil, output_tokens: nil, provider_telemetry: nil}
+  try {
+    const chunks = harness.llm.stream_call(
+      __last_user_text(state),
+      state["system"],
+      __call_options(state),
+    )
+    for chunk in chunks {
+      const visible = chunk.visible_delta ?? ""
+      if visible != "" && ttft_ms == nil {
+        ttft_ms = harness.clock.monotonic_ms() - started_ms
+      }
+      if visible != "" {
+        harness.stdio.print(visible)
+      }
+      text = chunk.partial ?? text
+      if chunk.usage != nil {
+        usage = chunk.usage
+      }
+    }
+  } catch (error) {
+    __report_turn_error(harness.stdio, state, error)
+    return {ok: false}
+  }
+  harness.stdio.println("")
+  return {
+    ok: true,
+    text: text,
+    usage: usage,
+    ttft_ms: ttft_ms,
+    wall_ms: harness.clock.monotonic_ms() - started_ms,
+  }
+}
+
+fn __last_user_text(state: dict) -> string {
+  const messages = state["messages"]
+  if len(messages) == 0 {
+    return ""
+  }
+  return to_string(messages[len(messages) - 1]["content"] ?? "")
+}
+
+// -------------------------------------------------------------------------------------------------
+// Session
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Run the chat loop until the user leaves, and return the process exit code.
+ *
+ * Reads from stdin and renders to stdout, so the host owns the terminal and
+ * this owns the conversation. Ends on `/bye`, on end of input, or on an
+ * interrupt.
+ *
+ * @effects: [host, llm.call]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn chat_session(harness: Harness, config: ChatSessionConfig = {}) -> int {
+  let state = {
+    provider: config.provider,
+    model: config.model,
+    label: config.label ?? config.model,
+    endpoint: config.endpoint,
+    system: config.system,
+    stats: config.stats ?? "compact",
+    messages: [],
+  }
+  harness.stdio.println(__route_banner(state))
+  harness.stdio.println("Type /help for commands, /bye to finish.")
+  harness.stdio.println("")
+  while true {
+    const turn = __read_turn(harness.stdio, ">>> ")
+    if turn.status != "ok" {
+      harness.stdio.println("")
+      return 0
+    }
+    const text = trim(turn.text)
+    if text == "" {
+      continue
+    }
+    if starts_with(text, "/") {
+      const outcome = __handle_command(harness.stdio, state, text)
+      state = outcome.state
+      if outcome.exit {
+        return 0
+      }
+      continue
+    }
+    // Append-only: the user turn goes on the end and stays there.
+    state = state + {messages: state["messages"].appending({role: "user", content: text})}
+    const reply = __stream_reply(harness, state)
+    if !reply.ok {
+      continue
+    }
+    state = state
+      + {messages: state["messages"].appending({role: "assistant", content: reply.text})}
+    __print_stats(harness.stdio, state["stats"], reply.usage, reply.ttft_ms, reply.wall_ms)
+    harness.stdio.println("")
+  }
+}

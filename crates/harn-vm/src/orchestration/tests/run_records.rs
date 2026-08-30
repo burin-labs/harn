@@ -449,24 +449,26 @@ fn normalize_run_record_preserves_trace_spans() {
         "workflow_id": "wf",
         "status": "completed",
         "started_at": "1",
-        "trace_spans": [
-            {
-                "span_id": 1,
-                "parent_id": null,
-                "kind": "pipeline",
-                "name": "workflow",
-                "start_ms": 0,
-                "duration_ms": 42,
-                "metadata": {"model": "demo"}
-            }
-        ]
+        "evidence": {
+            "trace_spans": [
+                {
+                    "span_id": 1,
+                    "parent_id": null,
+                    "kind": "pipeline",
+                    "name": "workflow",
+                    "start_ms": 0,
+                    "duration_ms": 42,
+                    "metadata": {"model": "demo"}
+                }
+            ]
+        }
     }));
 
     let run = normalize_run_record(&value).unwrap();
-    assert_eq!(run.trace_spans.len(), 1);
-    assert_eq!(run.trace_spans[0].kind, "pipeline");
+    assert_eq!(run.evidence.trace_spans.len(), 1);
+    assert_eq!(run.evidence.trace_spans[0].kind, "pipeline");
     assert_eq!(
-        run.trace_spans[0].metadata["model"],
+        run.evidence.trace_spans[0].metadata["model"],
         serde_json::json!("demo")
     );
 }

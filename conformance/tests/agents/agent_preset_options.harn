@@ -52,7 +52,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(verify.profile)
   harness.stdio.println(verify.iteration_budget.mode)
   harness.stdio.println(verify.iteration_budget.max)
-  harness.stdio.println(verify.done_judge)
+  harness.stdio.println(verify.turn_end_condition)
   // String sugar: iteration_budget: "adaptive" keeps preset numeric defaults
   // but explicitly switches mode.
   const audit_adaptive_sugar = agent_preset(harness, "audit", {iteration_budget: "adaptive"})

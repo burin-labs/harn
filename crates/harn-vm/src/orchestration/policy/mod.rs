@@ -1,6 +1,8 @@
 //! Policy types and capability-ceiling enforcement.
 
 mod approval_activity;
+mod approval_resolver;
+mod approval_review_config;
 mod approval_rules;
 mod capability_lattice;
 mod effect_call_cache;
@@ -35,6 +37,13 @@ pub use approval_activity::{
     ToolPermissionPolicyOutcome, ToolPermissionRequester, ToolPermissionResolution,
     ToolPermissionScope,
 };
+pub use approval_resolver::{
+    ApprovalResolver, ApprovalResolverReceipt, APPROVAL_RESOLVER_RECEIPT_SCHEMA,
+};
+pub use approval_review_config::{
+    ApprovalReviewPolicy, BreakerConfig, DenylistConfig, FloorConfig, OnReviewerError,
+    ReviewerConfig, TrustConfig, VerdictConfig, APPROVAL_REVIEW_POLICY,
+};
 pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     next_approval_policy_repeat_count, next_approval_unavailable_class_repeat_count, ApprovalShape,
@@ -64,11 +73,11 @@ pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
 pub use types::{
-    enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
-    ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
-    MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessNetworkProxy, ProcessSandboxPolicy,
-    ProcessSandboxPreset, ReducePolicy, RequiredSuccessfulTool, RetryPolicy, SandboxProfile,
-    StageContract, ToolArgConstraint, TurnPolicy,
+    default_read_deny_home_paths, enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics,
+    CapabilityPolicy, ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy,
+    JoinPolicy, MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessNetworkProxy,
+    ProcessSandboxPolicy, ProcessSandboxPreset, ReducePolicy, RequiredSuccessfulTool, RetryPolicy,
+    SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy,
 };
 
 thread_local! {

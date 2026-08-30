@@ -639,6 +639,17 @@ pub enum AgentEvent {
         projected_input_tokens: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         projected_output_tokens: Option<u64>,
+        /// How `projected_cost_usd` was computed: `worst_case` (no completed
+        /// call yet, so uncached input and the whole output budget) or
+        /// `observed` (this session's cache-hit ratio and mean output). A
+        /// reader needs this plus `headroom_usd` to tell "the session spent
+        /// the cap" from "an estimate for the next call crossed it".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projection_basis: Option<String>,
+        /// Limit minus session cost at the moment of the stop: what was still
+        /// unspent when the projection rejected the call.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        headroom_usd: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -38,7 +38,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
+          turn_end_condition: nil,
         },
       )
       harness.stdio.println(result.status)

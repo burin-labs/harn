@@ -419,6 +419,35 @@ pub struct RunObservabilityRecord {
     pub daemon_events: Vec<DaemonEventRecord>,
 }
 
+/// Canonical evidence identity and optional high-detail artifacts for a run.
+/// Run records, telemetry, IDE views, and cloud ingestion project this owner;
+/// they do not mint parallel execution identities.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ExecutionEvidenceRecord {
+    pub schema_version: u32,
+    pub execution_id: Option<String>,
+    /// Completed duration-bearing operations for this execution. This is the
+    /// canonical persisted span tree; telemetry and user interfaces project it.
+    pub trace_spans: Vec<RunTraceSpanRecord>,
+    pub flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
+    /// Evidence requested for this execution that could not be made durable.
+    /// A saved gap is preferable to silently presenting a partial record as
+    /// complete evidence.
+    pub gaps: Vec<RunEvidenceGapRecord>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunEvidenceGapRecord {
+    /// Stable evidence component, for example `flight_recording`.
+    pub component: String,
+    /// Stable machine-readable failure code.
+    pub code: String,
+    /// Redacted diagnostic detail for operators.
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RunStageDiffRecord {
@@ -1052,7 +1081,7 @@ pub struct RunRecord {
     pub usage: Option<LlmUsageRecord>,
     pub replay_fixture: Option<ReplayFixture>,
     pub observability: Option<RunObservabilityRecord>,
-    pub trace_spans: Vec<RunTraceSpanRecord>,
+    pub evidence: ExecutionEvidenceRecord,
     pub tool_recordings: Vec<ToolCallRecord>,
     pub hitl_questions: Vec<RunHitlQuestionRecord>,
     pub persona_runtime: Vec<RunPersonaRuntimeRecord>,
@@ -1114,6 +1143,30 @@ pub struct RunTraceSpanRecord {
     /// persisted before this field existed still load.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+}
+
+impl From<&crate::tracing::Span> for RunTraceSpanRecord {
+    fn from(span: &crate::tracing::Span) -> Self {
+        Self {
+            trace_id: span.trace_id.clone(),
+            span_id: span.span_id,
+            parent_id: span.parent_id,
+            kind: span.kind.as_str().to_string(),
+            name: span.name.clone(),
+            start_ms: span.start_ms,
+            duration_ms: span.duration_ms,
+            ttft_ms: span
+                .metadata
+                .get("first_token_ms")
+                .and_then(serde_json::Value::as_u64),
+            metadata: span.metadata.clone(),
+            links: span.links.clone(),
+            cost_usd: span
+                .metadata
+                .get(crate::tracing::meta::COST_USD)
+                .and_then(serde_json::Value::as_f64),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1319,23 +1372,22 @@ mod trace_span_record_tests {
     }
 
     #[test]
-    fn legacy_run_record_without_new_span_kinds_still_loads() {
-        // A RunRecord whose trace carries the new marker span kinds must
-        // deserialize (kinds are free-form strings on the record), and an
-        // older record without them is unaffected.
+    fn execution_evidence_accepts_extensible_span_kinds() {
         let json = serde_json::json!({
-            "trace_spans": [
-                { "trace_id": "t", "span_id": 1, "kind": "model_route", "name": "model_route",
-                  "metadata": { "from_model": "a", "to_model": "b", "reason": "escalation" } },
-                { "trace_id": "t", "span_id": 2, "kind": "tool_mount", "name": "tool_mount",
-                  "metadata": { "source": "mcp", "tool_count": 3 } }
-            ]
+            "evidence": {
+                "trace_spans": [
+                    { "trace_id": "t", "span_id": 1, "kind": "model_route", "name": "model_route",
+                      "metadata": { "from_model": "a", "to_model": "b", "reason": "escalation" } },
+                    { "trace_id": "t", "span_id": 2, "kind": "tool_mount", "name": "tool_mount",
+                      "metadata": { "source": "mcp", "tool_count": 3 } }
+                ]
+            }
         });
         let decoded: RunRecord = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded.trace_spans.len(), 2);
-        assert_eq!(decoded.trace_spans[0].kind, "model_route");
+        assert_eq!(decoded.evidence.trace_spans.len(), 2);
+        assert_eq!(decoded.evidence.trace_spans[0].kind, "model_route");
         assert_eq!(
-            decoded.trace_spans[1].metadata["source"],
+            decoded.evidence.trace_spans[1].metadata["source"],
             serde_json::json!("mcp")
         );
     }

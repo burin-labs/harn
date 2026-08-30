@@ -1,0 +1,1185 @@
+//! Tests for the macos sandbox backend, split out of `macos.rs` to keep
+//! that file under the source-length ratchet. Same module path as before
+//! (`super::*` still resolves to `macos.rs`), so nothing about scope moved.
+
+use super::*;
+
+#[test]
+fn sandbox_exec_missing_program_matches_direct_spawn_error() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let cwd = std::env::current_dir().expect("current dir");
+    let mut policy = macos_policy_with_workspace_ops(&[]);
+    policy.workspace_roots = vec![cwd.display().to_string()];
+    let config = ProcessCommandConfig {
+        cwd: Some(cwd),
+        ..Default::default()
+    };
+    let missing = "definitely-not-a-real-binary-harn-4885";
+    let direct = Command::new(missing)
+        .output()
+        .map_err(spawn_error)
+        .expect_err("direct missing program");
+    let sandboxed =
+        Backend::run_to_output(missing, &[], &config, &policy, SandboxProfile::Worktree)
+            .expect_err("sandboxed missing program");
+
+    assert_eq!(sandboxed.to_string(), direct.to_string());
+}
+
+#[test]
+fn sandbox_exec_keeps_genuine_nonzero_exit_as_output() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let cwd = std::env::current_dir().expect("current dir");
+    let mut policy = macos_policy_with_workspace_ops(&[]);
+    policy.workspace_roots = vec![cwd.display().to_string()];
+    let config = ProcessCommandConfig {
+        cwd: Some(cwd),
+        ..Default::default()
+    };
+    let output = Backend::run_to_output(
+        "/bin/sh",
+        &strings(["-c", "exit 71"]),
+        &config,
+        &policy,
+        SandboxProfile::Worktree,
+    )
+    .expect("sandboxed nonzero exit");
+
+    assert_eq!(output.status.code(), Some(71));
+}
+
+#[test]
+fn sandbox_profile_allows_go_build_and_module_caches_read_write() {
+    // Regression for the 2026-07-18 Burin dogfood repro. `go build`/`go test`
+    // write compiled objects to GOCACHE and modules to GOMODCACHE; when the
+    // default (unset-env) locations are not writable, go fails with the
+    // misleading "package fmt is not in std (GOROOT/src/fmt)". Assert the
+    // writable profile grants read AND write to the default Go caches.
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let cache_roots =
+        super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+    let go_build = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new("Library/Caches/go-build")))
+        .expect("macOS Go build cache root")
+        .display()
+        .to_string();
+    let go_mod = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new("go/pkg/mod")))
+        .expect("Go module cache root")
+        .display()
+        .to_string();
+
+    let writable = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+        &[],
+        &[],
+        &cache_roots,
+    );
+    let write_line = writable
+        .lines()
+        .find(|line| line.starts_with("(allow file-write* (subpath"))
+        .expect("a multi-subpath file-write* allow line");
+    for path in [&go_build, &go_mod] {
+        let escaped = sandbox_profile_escape(path);
+        assert!(
+            writable.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+            "Go cache should be readable: {writable}"
+        );
+        assert!(
+            write_line.contains(&format!("(subpath \"{escaped}\")")),
+            "Go cache should be writable under a writable policy: {writable}"
+        );
+    }
+}
+
+/// End-to-end regression: `go build` of a stdlib-only module must succeed
+/// under the DEFAULT sandbox profile (all presets, no relocated GOCACHE).
+/// Before the toolchain-cache-preset fix this failed with
+/// `package fmt is not in std (/opt/homebrew/.../src/fmt)` because the
+/// default GOCACHE (`~/Library/Caches/go-build`) was not a writable root.
+/// Skips cleanly where `sandbox-exec` or `go` is unavailable.
+#[test]
+fn sandbox_exec_profile_allows_go_build_with_default_cache() {
+    let Some(go) = [
+        "/opt/homebrew/bin/go",
+        "/usr/local/go/bin/go",
+        "/usr/bin/go",
+    ]
+    .into_iter()
+    .find(|path| Path::new(path).exists()) else {
+        return;
+    };
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let temp = tempfile::TempDir::new().expect("temp go module");
+    std::fs::write(temp.path().join("go.mod"), "module repromod\n\ngo 1.24\n")
+        .expect("write go.mod");
+    std::fs::write(
+        temp.path().join("main.go"),
+        "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n",
+    )
+    .expect("write main.go");
+
+    // Default presets (process_sandbox default => all four incl.
+    // SystemRuntime + DeveloperToolchains cache roots). Workspace-write so
+    // the module dir is writable; GOCACHE/GOMODCACHE come from the toolchain
+    // cache preset, NOT from an env override.
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+    policy.workspace_roots = vec![temp.path().to_string_lossy().into_owned()];
+    let PrepareOutcome::WrappedExec { wrapper, args } = wrap_with_sandbox_exec(
+        go,
+        &strings(["build", "-o", "/dev/null", "./..."]),
+        &policy,
+        SandboxProfile::Worktree,
+    )
+    .expect("wrap go build") else {
+        panic!("macOS backend should wrap with sandbox-exec");
+    };
+
+    let output = Command::new(wrapper)
+        .args(args)
+        .current_dir(temp.path())
+        .output()
+        .expect("run sandboxed go build");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "go build must succeed under the default sandbox\nstderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("is not in std"),
+        "go must not report a toolchain-cache denial as a std-package defect: {stderr}"
+    );
+}
+
+#[test]
+fn sandbox_profile_grants_cargo_registry_write_without_readonly_redeny() {
+    // Cargo's registry/git caches must be read+write (build unpacks sources)
+    // AND must not be re-denied by the package-manager read-only preset —
+    // the macOS backend emits `(deny file-write*)` for package-manager roots
+    // after the write block, so a naive grant that left `.cargo/registry` in
+    // both lists would be cancelled by last-match-wins.
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let cache_roots =
+        super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+    let package_roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
+    let registry = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new(".cargo/registry")))
+        .expect("cargo registry cache root")
+        .display()
+        .to_string();
+    // The read-only package-manager preset must no longer own registry/git.
+    assert!(
+        !package_roots
+            .iter()
+            .any(|path| path.ends_with(std::path::Path::new(".cargo/registry"))),
+        "cargo registry must not stay in the read-only package-manager preset"
+    );
+
+    let writable = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+        &[],
+        &package_roots,
+        &cache_roots,
+    );
+    let escaped = sandbox_profile_escape(&registry);
+    let write_line = writable
+        .lines()
+        .find(|line| line.starts_with("(allow file-write* (subpath"))
+        .expect("a multi-subpath file-write* allow line");
+    assert!(
+        write_line.contains(&format!("(subpath \"{escaped}\")")),
+        "cargo registry must be writable: {writable}"
+    );
+    assert!(
+        !writable.contains(&format!("(deny file-write* (subpath \"{escaped}\"))")),
+        "cargo registry write must not be re-denied by the package-manager preset: {writable}"
+    );
+    // Credentials/config at the CARGO_HOME root stay read-only.
+    let config = package_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new(".cargo/config.toml")))
+        .expect("cargo config stays package-manager read-only")
+        .display()
+        .to_string();
+    let config_escaped = sandbox_profile_escape(&config);
+    assert!(
+        !write_line.contains(&format!("(subpath \"{config_escaped}\")")),
+        "cargo config must NOT become writable: {writable}"
+    );
+}
+
+/// The toolchain-cache roots must be writable while package configuration
+/// stays read-only. A direct filesystem probe proves the policy boundary
+/// without nesting Cargo, consulting a registry, or compiling a fixture.
+#[test]
+fn sandbox_exec_profile_scopes_toolchain_cache_writes() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .expect("HOME for sandbox policy probe");
+    let cargo_home = tempfile::tempdir_in(home).expect("temp CARGO_HOME");
+    // macOS resolves /var/folders through /private/var/folders. Use the
+    // canonical spelling for every rule and disable the broad UserTemp
+    // grant so only the explicit toolchain-cache root can authorize writes.
+    let cargo_home_path = std::fs::canonicalize(cargo_home.path()).expect("canonical CARGO_HOME");
+    let registry = cargo_home_path.join("registry");
+    std::fs::create_dir_all(&registry).expect("registry dir");
+    let config = cargo_home_path.join("config.toml");
+    std::fs::write(&config, "[net]\noffline = true\n").expect("cargo config");
+
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+    policy.workspace_roots.clear();
+    policy.process_sandbox.presets = Some(
+        ProcessSandboxPreset::default_presets()
+            .iter()
+            .copied()
+            .filter(|preset| *preset != ProcessSandboxPreset::UserTemp)
+            .collect(),
+    );
+    let profile = render_profile_with_extra_read_roots(
+        &policy,
+        &[cargo_home_path],
+        &[config.clone()],
+        std::slice::from_ref(&registry),
+    );
+
+    let cache_probe = registry.join("write-probe");
+    let cache_output = Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &profile, "--"])
+        .arg("/usr/bin/touch")
+        .arg(&cache_probe)
+        .output()
+        .expect("run cache write probe");
+    assert!(
+        cache_output.status.success(),
+        "toolchain cache must be writable: {}",
+        String::from_utf8_lossy(&cache_output.stderr)
+    );
+
+    let config_output = Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &profile, "--"])
+        .arg("/usr/bin/touch")
+        .arg(&config)
+        .output()
+        .expect("run config write probe");
+    assert!(
+        !config_output.status.success(),
+        "package configuration must stay read-only"
+    );
+}
+
+fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
+    CapabilityPolicy {
+        tools: Vec::new(),
+        capabilities: std::collections::BTreeMap::from([(
+            "workspace".to_string(),
+            ops.iter().map(|op| op.to_string()).collect(),
+        )]),
+        workspace_roots: vec!["/tmp/harn-workspace".to_string()],
+        read_only_roots: Vec::new(),
+        side_effect_level: Some("read_only".to_string()),
+        recursion_limit: None,
+        tool_arg_constraints: Vec::new(),
+        tool_annotations: std::collections::BTreeMap::new(),
+        sandbox_profile: SandboxProfile::Worktree,
+        process_sandbox: Default::default(),
+        process_network_proxy: None,
+    }
+}
+
+#[test]
+fn sandbox_profile_does_not_grant_global_file_read() {
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    assert!(
+        !profile.contains("(allow file-read*)\n"),
+        "profile must not grant global file reads"
+    );
+    assert!(
+        profile.contains("(allow file-read-data (literal \"/\"))"),
+        "profile should permit root-directory reads needed to exec common macOS binaries"
+    );
+    assert!(
+        profile.contains("harn-workspace"),
+        "workspace root should be included in scoped read grants: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
+    let read_only = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    assert!(
+        !read_only.contains("(allow file-write* (subpath \"/tmp\")"),
+        "read-only profile must not grant temp writes"
+    );
+
+    let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+    assert!(
+        writable.contains("(allow file-write*") && writable.contains("(subpath \"/tmp\")"),
+        "writable profile should grant temp writes: {writable}"
+    );
+    assert!(
+        writable.contains("(allow file-read* (subpath \"/private/var/folders\"))"),
+        "writable profile should let developer tools read per-user temp caches: {writable}"
+    );
+    assert!(
+        writable.contains("(allow file-write*")
+            && writable.contains("(subpath \"/private/var/folders\")"),
+        "writable profile should let developer tools update per-user temp caches: {writable}"
+    );
+}
+
+#[test]
+fn sandbox_profile_allows_applications_for_xcode_toolchains() {
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    assert!(
+        profile.contains("(allow file-read* (subpath \"/Applications\"))"),
+        "Applications should be readable so Xcode toolchain bundles can load: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_honors_explicit_process_presets() {
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.process_sandbox.presets = Some(vec![ProcessSandboxPreset::SystemRuntime]);
+    let profile = render_profile(&policy);
+
+    assert!(
+        !profile.contains("(allow file-read* (subpath \"/Applications\"))"),
+        "disabling developer_toolchains should remove Xcode bundle access: {profile}"
+    );
+    assert!(
+        !profile.contains("(subpath \"/private/var/folders\")"),
+        "disabling user_temp should remove per-user temp cache access: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_allows_package_manager_config_read_only() {
+    let temp_home = tempfile::tempdir().expect("temp home");
+    std::fs::write(
+        temp_home.path().join(".npmrc"),
+        "registry=https://registry.example\n",
+    )
+    .expect("write npmrc");
+
+    let package_roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
+    let profile = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+        &[],
+        &package_roots,
+        &[],
+    );
+    let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
+        .into_iter()
+        .find(|path| path.ends_with(".npmrc"))
+        .expect("npmrc root")
+        .display()
+        .to_string();
+    let escaped = sandbox_profile_escape(&npmrc_path);
+
+    assert!(
+        profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+        "package manager config should be readable: {profile}"
+    );
+    assert!(
+        profile.contains(&format!("(deny file-write* (subpath \"{escaped}\"))")),
+        "package manager config should be explicitly re-denied writes: {profile}"
+    );
+    assert!(
+        !profile.contains(&format!("(allow file-write* (subpath \"{escaped}\"))")),
+        "package manager config must not get direct write access: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_allows_home_toolchain_roots_read_only() {
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let toolchain_roots = super::super::developer_toolchain_read_roots_for_home(temp_home.path());
+    let uv_path = toolchain_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new(".local/share/uv")))
+        .expect("uv root")
+        .display()
+        .to_string();
+    let rustup_path = toolchain_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new(".rustup")))
+        .expect("rustup root")
+        .display()
+        .to_string();
+    let profile = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+        &toolchain_roots,
+        &[],
+        &[],
+    );
+
+    for path in [uv_path, rustup_path] {
+        let escaped = sandbox_profile_escape(&path);
+        assert!(
+            profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+            "home toolchain root should be readable: {profile}"
+        );
+        assert!(
+            !profile.contains(&format!("(allow file-write* (subpath \"{escaped}\"))")),
+            "home toolchain root must stay read-only: {profile}"
+        );
+    }
+}
+
+#[test]
+fn sandbox_profile_allows_jvm_ios_toolchain_caches_read_write() {
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let cache_roots =
+        super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+    let gradle_path = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new(".gradle")))
+        .expect("gradle cache root")
+        .display()
+        .to_string();
+    let derived_data_path = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new("Library/Developer/Xcode/DerivedData")))
+        .expect("DerivedData cache root")
+        .display()
+        .to_string();
+
+    // Writable policy: the build can read AND write its toolchain caches.
+    // The writable roots all land on the single `(allow file-write* ...)`
+    // line, so isolate that line and assert each cache subpath is on it.
+    let writable = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+        &[],
+        &[],
+        &cache_roots,
+    );
+    let write_line = writable
+        .lines()
+        .find(|line| line.starts_with("(allow file-write* (subpath"))
+        .expect("a multi-subpath file-write* allow line");
+    for path in [&gradle_path, &derived_data_path] {
+        let escaped = sandbox_profile_escape(path);
+        assert!(
+            writable.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+            "JVM/iOS toolchain cache should be readable: {writable}"
+        );
+        assert!(
+            write_line.contains(&format!("(subpath \"{escaped}\")")),
+            "JVM/iOS toolchain cache should be writable under a writable policy: {writable}"
+        );
+    }
+
+    // Read-only policy: caches are readable (dependency resolution) but
+    // never writable — the whole workspace-write block is skipped.
+    let read_only = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text"]),
+        &[],
+        &[],
+        &cache_roots,
+    );
+    let gradle_escaped = sandbox_profile_escape(&gradle_path);
+    assert!(
+        read_only.contains(&format!(
+            "(allow file-read* (subpath \"{gradle_escaped}\"))"
+        )),
+        "toolchain cache should still be readable under a read-only policy: {read_only}"
+    );
+    assert!(
+        !read_only
+            .lines()
+            .any(|line| line.starts_with("(allow file-write* (subpath")),
+        "read-only policy must not emit a workspace file-write allow: {read_only}"
+    );
+}
+
+#[test]
+fn sandbox_profile_honors_process_only_roots() {
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.process_sandbox.read_roots = vec!["/opt/vendor-sdk".to_string()];
+    policy.process_sandbox.write_roots = vec!["/opt/vendor-cache".to_string()];
+    let profile = render_profile(&policy);
+
+    assert!(
+        profile.contains("(allow file-read* (subpath \"/opt/vendor-sdk\"))"),
+        "process read roots should be readable: {profile}"
+    );
+    assert!(
+        profile.contains("(allow file-read* (subpath \"/opt/vendor-cache\"))"),
+        "process write roots should also be readable: {profile}"
+    );
+    assert!(
+        profile.contains("(subpath \"/opt/vendor-cache\")"),
+        "process write roots should be writable when workspace writes are allowed: {profile}"
+    );
+    assert!(
+        !profile.contains("(allow file-write* (subpath \"/opt/vendor-sdk\"))"),
+        "process read roots must not be writable: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_allows_standard_devices_without_broad_dev_write() {
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    for device in ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"] {
+        assert!(
+            profile.contains(&format!("(literal \"{device}\")")),
+            "standard device {device} should be explicitly allowed: {profile}"
+        );
+    }
+    for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
+        assert!(
+            profile.contains(&format!("(literal \"{device}\")")),
+            "common read-only device {device} should be explicitly allowed: {profile}"
+        );
+    }
+    assert!(
+        profile.contains("(subpath \"/dev/fd\")"),
+        "numeric descriptor aliases should be allowed narrowly: {profile}"
+    );
+    assert!(
+        !profile.contains("(allow file-write* (subpath \"/dev\"))"),
+        "profile must not grant broad writes to every device: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_only_allows_network_at_the_network_ceiling() {
+    let mut denied = macos_policy_with_workspace_ops(&["read_text"]);
+    denied.side_effect_level = Some("process_exec".to_string());
+    let denied_profile = render_profile(&denied);
+    assert!(!denied_profile.contains("(allow network*)"));
+
+    let mut allowed = denied;
+    allowed.side_effect_level = Some("network".to_string());
+    let allowed_profile = render_profile(&allowed);
+    assert!(allowed_profile.contains("(allow network*)"));
+}
+
+#[test]
+fn tcp_loopback_policy_does_not_open_remote_network() {
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.side_effect_level = Some("network".to_string());
+    policy.process_sandbox.allow_tcp_loopback = true;
+
+    let profile = render_profile(&policy);
+
+    assert!(
+        profile.contains("(allow network-bind (local ip \"localhost:*\"))"),
+        "{profile}"
+    );
+    assert!(
+        profile.contains("(allow network-inbound (local ip \"localhost:*\"))"),
+        "{profile}"
+    );
+    assert!(
+        profile.contains("(allow network-outbound (remote ip \"localhost:*\"))"),
+        "{profile}"
+    );
+    assert!(!profile.contains("(allow network*)"), "{profile}");
+}
+
+#[test]
+fn managed_process_proxy_replaces_wildcard_network_grant() {
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.side_effect_level = Some("network".to_string());
+    policy.process_network_proxy = Some(crate::orchestration::ProcessNetworkProxy {
+        http_port: 3128,
+        socks_port: 1080,
+    });
+
+    let profile = render_profile(&policy);
+
+    assert!(!profile.contains("(allow network*)"), "{profile}");
+    assert!(
+        profile.contains("(allow network-outbound (remote ip \"localhost:3128\"))"),
+        "{profile}"
+    );
+    assert!(
+        profile.contains("(allow network-outbound (remote ip \"localhost:1080\"))"),
+        "{profile}"
+    );
+}
+
+#[test]
+fn managed_proxy_metadata_cannot_raise_the_network_ceiling() {
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+    policy.process_network_proxy = Some(crate::orchestration::ProcessNetworkProxy {
+        http_port: 3128,
+        socks_port: 1080,
+    });
+
+    let profile = render_profile(&policy);
+
+    assert!(!profile.contains("network-outbound"), "{profile}");
+    assert!(!profile.contains("(allow network*)"), "{profile}");
+}
+
+#[test]
+fn sandbox_exec_profile_allows_common_device_runtime_access() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() {
+        return;
+    }
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    let output = Command::new(SANDBOX_EXEC_PATH)
+        .args([
+            "-p",
+            &profile,
+            "--",
+            "/bin/sh",
+            "-c",
+            "cat /dev/null >/dev/null \
+                 && dd if=/dev/zero of=/dev/null bs=1 count=1 2>/dev/null \
+                 && dd if=/dev/urandom of=/dev/null bs=1 count=1 2>/dev/null",
+        ])
+        .output()
+        .expect("run sandbox-exec device smoke");
+    assert!(
+        output.status.success(),
+        "standard device smoke should pass\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn sandbox_exec_profile_allows_xcrun_to_resolve_swift() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/xcrun").exists() {
+        return;
+    }
+    let profile = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
+    let output = Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &profile, "--", "/usr/bin/xcrun", "--find", "swift"])
+        .output()
+        .expect("run sandbox-exec xcrun smoke");
+    assert!(
+        output.status.success(),
+        "xcrun should resolve swift inside the sandbox\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("file system sandbox blocked open"),
+        "xcrun stderr must not expose a raw sandbox profile miss"
+    );
+}
+
+#[test]
+fn swiftpm_invocations_use_outer_harn_sandbox() {
+    let args = strings(["test", "--filter", "SysMonCoreTests"]);
+    let rewritten = macos_sandbox_compatible_args("swift", &args);
+
+    assert_eq!(rewritten.first().map(String::as_str), Some("test"));
+    assert!(rewritten.iter().any(|arg| arg == "--disable-sandbox"));
+    assert!(has_adjacent(&rewritten, "--manifest-cache", "local"));
+    assert!(has_adjacent(
+        &rewritten,
+        "--cache-path",
+        ".build/harn/swiftpm/cache"
+    ));
+    assert!(has_adjacent(
+        &rewritten,
+        "--config-path",
+        ".build/harn/swiftpm/config"
+    ));
+    assert!(has_adjacent(
+        &rewritten,
+        "--security-path",
+        ".build/harn/swiftpm/security"
+    ));
+    assert!(has_adjacent(&rewritten, "--filter", "SysMonCoreTests"));
+
+    let explicit = strings([
+        "test",
+        "--disable-sandbox",
+        "--manifest-cache=none",
+        "--cache-path",
+        ".cache",
+    ]);
+    let rewritten = macos_sandbox_compatible_args("/usr/bin/swift", &explicit);
+    assert_eq!(
+        rewritten
+            .iter()
+            .filter(|arg| *arg == "--disable-sandbox")
+            .count(),
+        1
+    );
+    assert!(
+        !has_adjacent(&rewritten, "--manifest-cache", "local"),
+        "explicit SwiftPM cache policy must not be overwritten: {rewritten:?}"
+    );
+    assert!(
+        !has_adjacent(&rewritten, "--cache-path", ".build/harn/swiftpm/cache"),
+        "explicit SwiftPM cache path must not be overwritten: {rewritten:?}"
+    );
+}
+
+#[test]
+fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/swift").exists() {
+        return;
+    }
+    let temp = tempfile::TempDir::new().expect("temp Swift package");
+    write_swift_package_manifest(temp.path());
+    let policy = macos_policy_with_workspace_ops(&["write_text"]);
+    // Manifest evaluation exercises SwiftPM's own sandbox and toolchain
+    // lookup without paying to compile and link an unrelated test bundle.
+    let args = strings(["package", "dump-package"]);
+    let PrepareOutcome::WrappedExec {
+        wrapper,
+        args: wrapped_args,
+    } = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree)
+        .expect("wrap SwiftPM manifest evaluation")
+    else {
+        panic!("macOS backend should wrap with sandbox-exec");
+    };
+
+    let output = Command::new(wrapper)
+        .args(wrapped_args)
+        .current_dir(temp.path())
+        .output()
+        .expect("run sandboxed SwiftPM manifest evaluation");
+
+    assert!(
+        output.status.success(),
+        "SwiftPM should evaluate a manifest inside Harn's outer sandbox\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("\"name\" : \"SandboxSmoke\""),
+        "SwiftPM should return the evaluated package manifest: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("sandbox_apply") && !stderr.contains("file system sandbox blocked open"),
+        "SwiftPM should not expose nested or missing sandbox policy errors: {stderr}"
+    );
+}
+
+#[test]
+fn read_only_roots_are_granted_read_but_never_write() {
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.read_only_roots = vec!["/mnt/memory".to_string()];
+    let profile = render_profile(&policy);
+
+    assert!(
+        profile.contains("(allow file-read* (subpath \"/mnt/memory\"))"),
+        "read-only root should be granted read: {profile}"
+    );
+    assert!(
+            !profile.contains("(allow file-write* (subpath \"/mnt/memory\"))"),
+            "read-only root must never be granted write even when workspace_write is allowed: {profile}"
+        );
+    assert!(
+        profile
+            .lines()
+            .any(|line| line.starts_with("(allow file-write*") && line.contains("harn-workspace")),
+        "writable workspace root should still get write: {profile}"
+    );
+}
+
+#[test]
+fn nested_read_only_root_is_denied_write_after_broad_workspace_allow() {
+    // /ws/vendor is a read-only root nested under the writable /ws.
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.workspace_roots = vec!["/ws".to_string()];
+    policy.read_only_roots = vec!["/ws/vendor".to_string()];
+    let profile = render_profile(&policy);
+
+    // /ws/vendor is readable.
+    assert!(
+        profile.contains("(allow file-read* (subpath \"/ws/vendor\"))"),
+        "nested read-only root should be granted read: {profile}"
+    );
+    // /ws is writable.
+    assert!(
+        profile.contains("(allow file-write* (subpath \"/ws\"))"),
+        "writable workspace root should still get write: {profile}"
+    );
+    // The broad /ws write allow must be neutralized for /ws/vendor by a
+    // deny emitted after it (sandbox-exec is last-match-wins).
+    let write_allow = profile
+        .lines()
+        .position(|line| line == "(allow file-write* (subpath \"/ws\"))")
+        .expect("expected a write allow for /ws");
+    let vendor_deny = profile
+        .lines()
+        .position(|line| line == "(deny file-write* (subpath \"/ws/vendor\"))")
+        .expect("expected a write deny for /ws/vendor");
+    assert!(
+        vendor_deny > write_allow,
+        "deny for the nested read-only root must come after the broad write allow \
+             so last-match-wins keeps it unwritable: {profile}"
+    );
+}
+
+#[test]
+fn read_only_root_over_toolchain_cache_survives_last_match_wins() {
+    // A host may list a toolchain cache path read-only (so the agent can
+    // browse dependency sources) while the DeveloperToolchains preset also
+    // grants it write. The trailing read-only deny must NOT cancel the cache
+    // write — last-match-wins would otherwise break the build with
+    // `operation not permitted`. Covers the exact cache root AND a nested
+    // subdir (the two shapes a caller's dependency-root derivation emits).
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let cache_roots =
+        super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+    let registry = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new(".cargo/registry")))
+        .expect("cargo registry cache root")
+        .clone();
+    let registry_src = registry.join("src");
+
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+    policy.read_only_roots = vec![
+        registry.display().to_string(),
+        registry_src.display().to_string(),
+    ];
+    let profile = render_profile_with_extra_read_roots(&policy, &[], &[], &cache_roots);
+
+    for path in [&registry, &registry_src] {
+        let escaped = sandbox_profile_escape(&path.display().to_string());
+        assert!(
+            !profile.contains(&format!("(deny file-write* (subpath \"{escaped}\"))")),
+            "a read-only root coinciding with / nested under a cache-write root \
+                 must not be re-denied: {profile}"
+        );
+    }
+    let write_line = profile
+        .lines()
+        .find(|line| line.starts_with("(allow file-write* (subpath"))
+        .expect("a multi-subpath file-write* allow line");
+    let registry_escaped = sandbox_profile_escape(&registry.display().to_string());
+    assert!(
+        write_line.contains(&format!("(subpath \"{registry_escaped}\")")),
+        "the cache root must stay writable: {profile}"
+    );
+}
+
+#[test]
+fn read_only_root_outside_caches_is_still_re_denied_with_caches_present() {
+    // Guard against over-exemption: the cache carve-out must only spare
+    // read-only roots that overlap a cache-write root. A vendored dir under
+    // the workspace is still hermetically re-denied even when cache roots
+    // are present in the same profile.
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let cache_roots =
+        super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+    policy.workspace_roots = vec!["/ws".to_string()];
+    policy.read_only_roots = vec!["/ws/vendor".to_string()];
+    let profile = render_profile_with_extra_read_roots(&policy, &[], &[], &cache_roots);
+    assert!(
+        profile.contains("(deny file-write* (subpath \"/ws/vendor\"))"),
+        "a read-only root outside every cache root must still be re-denied: {profile}"
+    );
+}
+
+#[test]
+fn sandbox_profile_grants_go_env_config_write() {
+    // `go` rewrites its env config on first use; when the config dir is not
+    // writable it fails with `writing go env config: ... operation not
+    // permitted`. The macOS GOENV dir must be on the write-allow line.
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let cache_roots =
+        super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+    let go_env_dir = cache_roots
+        .iter()
+        .find(|path| path.ends_with(std::path::Path::new("Library/Application Support/go")))
+        .expect("macOS GOENV config dir cache root")
+        .display()
+        .to_string();
+    let writable = render_profile_with_extra_read_roots(
+        &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+        &[],
+        &[],
+        &cache_roots,
+    );
+    let write_line = writable
+        .lines()
+        .find(|line| line.starts_with("(allow file-write* (subpath"))
+        .expect("a multi-subpath file-write* allow line");
+    let escaped = sandbox_profile_escape(&go_env_dir);
+    assert!(
+        write_line.contains(&format!("(subpath \"{escaped}\")")),
+        "the Go env config dir must be writable: {writable}"
+    );
+}
+
+#[test]
+fn extra_write_root_grant_survives_last_match_wins_deny_block() {
+    // A caller-declared out-of-jail write grant (`harn run --write-root
+    // <dir>`) arrives as an extra workspace root beyond the primary. It must
+    // get its own file-write allow that the trailing read-only deny block
+    // never cancels: the deny block iterates ONLY read-only and
+    // package-manager roots, so a write grant that leaked into either list
+    // would be silently un-granted under sandbox-exec's last-match-wins.
+    let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+    policy.workspace_roots = vec!["/ws".to_string(), "/out/coordination".to_string()];
+    // A disjoint read-only root that DOES earn a trailing deny — the control
+    // proving the deny block still fires without touching the write grant.
+    policy.read_only_roots = vec!["/ref/shared".to_string()];
+    let profile = render_profile(&policy);
+
+    assert!(
+        profile.contains("(allow file-write* (subpath \"/out/coordination\"))"),
+        "extra write-root grant should get its own write allow: {profile}"
+    );
+    assert!(
+        !profile.contains("(deny file-write* (subpath \"/out/coordination\"))"),
+        "extra write-root grant must never be re-denied by the deny block: {profile}"
+    );
+    let grant_allow = profile
+        .lines()
+        .position(|line| line == "(allow file-write* (subpath \"/out/coordination\"))")
+        .expect("write allow for the grant");
+    let readonly_deny = profile
+        .lines()
+        .position(|line| line == "(deny file-write* (subpath \"/ref/shared\"))")
+        .expect("deny for the disjoint read-only root");
+    assert!(
+        readonly_deny > grant_allow,
+        "read-only deny must still land after the write allows so the grant \
+             stays writable while the read-only root stays hermetic: {profile}"
+    );
+}
+
+#[test]
+fn read_only_root_deny_is_omitted_when_no_workspace_write() {
+    // No write capability: there is no broad write allow to neutralize,
+    // so no deny rule is emitted (pure read-only profile stays minimal).
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.read_only_roots = vec!["/mnt/memory".to_string()];
+    let profile = render_profile(&policy);
+    assert!(
+        !profile.contains("(deny file-write*"),
+        "read-only profile must not emit spurious deny rules: {profile}"
+    );
+}
+
+fn strings(values: impl IntoIterator<Item = &'static str>) -> Vec<String> {
+    values.into_iter().map(str::to_string).collect()
+}
+
+fn has_adjacent(values: &[String], first: &str, second: &str) -> bool {
+    values
+        .windows(2)
+        .any(|pair| pair[0] == first && pair[1] == second)
+}
+
+fn write_swift_package_manifest(root: &Path) {
+    std::fs::write(
+        root.join("Package.swift"),
+        r#"// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "SandboxSmoke"
+)
+"#,
+    )
+    .expect("write package manifest");
+}
+
+// ---- read denylist: it must beat the presets ---------------------------
+//
+// `PackageManagerConfig` grants child reads of `~/.netrc`, `~/.config`, and
+// `~/.cache` wholesale. A denylist that merely competed with presets would
+// never fire on the paths it exists for, because the credential is INSIDE a
+// directory the preset already opened. Composition order is the feature, so
+// it is what these assert.
+
+fn package_manager_preset_policy() -> CapabilityPolicy {
+    CapabilityPolicy {
+        workspace_roots: vec!["/tmp/harn-workspace".to_string()],
+        sandbox_profile: SandboxProfile::Worktree,
+        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+            presets: Some(vec![ProcessSandboxPreset::PackageManagerConfig]),
+            ..Default::default()
+        },
+        ..CapabilityPolicy::default()
+    }
+}
+
+fn denylist_home() -> std::path::PathBuf {
+    super::super::sandbox_user_home_dir().expect("home dir")
+}
+
+/// Positive control. Without it the deny assertions could pass because the
+/// preset granted nothing, rather than because the deny outranked it.
+#[test]
+fn the_package_manager_preset_really_grants_the_parent_directory() {
+    let profile = render_profile(&package_manager_preset_policy());
+    let config = denylist_home().join(".config");
+    assert!(
+        profile.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            config.display()
+        )),
+        "PackageManagerConfig must grant ~/.config, or the denial below proves nothing:\n{profile}"
+    );
+}
+
+/// The requirement, and it is positional: `sandbox-exec` is last-match-wins,
+/// so a deny emitted before a broad allow covering the same path is a no-op.
+#[test]
+fn a_denied_credential_is_refused_even_though_a_preset_granted_its_parent() {
+    let profile = render_profile(&package_manager_preset_policy());
+    let home = denylist_home();
+    let last_allow = profile
+        .rmatch_indices("(allow file-read")
+        .next()
+        .map(|(index, _)| index)
+        .expect("the profile must contain read allows");
+
+    for relative in [
+        ".netrc",
+        ".config/gh/hosts.yml",
+        ".config/gcloud",
+        ".aws",
+        ".docker/config.json",
+        ".ssh",
+    ] {
+        let denied = home.join(relative);
+        let rule = format!("(deny file-read* (subpath \"{}\"))", denied.display());
+        let deny_at = profile
+            .find(&rule)
+            .unwrap_or_else(|| panic!("`{relative}` must be denied by default:\n{profile}"));
+        assert!(
+            deny_at > last_allow,
+            "`{relative}`'s deny is at {deny_at}, before the last read allow at {last_allow}. \
+                 Under last-match-wins that deny is overridden and the credential stays \
+                 readable:\n{profile}"
+        );
+    }
+}
+
+/// The global `(allow file-read-metadata)` would otherwise leak a denied
+/// file's existence and size to a child that cannot open it. `file-read*`
+/// subsumes metadata, so the trailing deny closes that too.
+#[test]
+fn a_denied_path_leaks_neither_content_nor_metadata() {
+    let profile = render_profile(&package_manager_preset_policy());
+    let metadata_at = profile
+        .find("(allow file-read-metadata)")
+        .expect("precondition: the profile grants global metadata reads");
+    let deny_at = profile
+        .find(&format!(
+            "(deny file-read* (subpath \"{}\"))",
+            denylist_home().join(".ssh").display()
+        ))
+        .expect("~/.ssh denied");
+    assert!(
+        deny_at > metadata_at,
+        "the deny must outrank the global metadata allow, or a denied path's existence \
+             still leaks:\n{profile}"
+    );
+}
+
+/// A host may add denials; it may not remove the defaults.
+#[test]
+fn a_host_added_denial_composes_with_the_defaults() {
+    let mut policy = package_manager_preset_policy();
+    policy
+        .process_sandbox
+        .read_deny_roots
+        .push("/opt/company-secrets".to_string());
+    let profile = render_profile(&policy);
+
+    assert!(
+        profile.contains("(deny file-read* (subpath \"/opt/company-secrets\"))"),
+        "a host-added denial must be emitted:\n{profile}"
+    );
+    assert!(
+        profile.contains(&format!(
+            "(deny file-read* (subpath \"{}\"))",
+            denylist_home().join(".ssh").display()
+        )),
+        "adding a denial must not displace the defaults:\n{profile}"
+    );
+}
+
+/// The load-bearing falsifier: a real confined child, a real read.
+///
+/// Every other denylist test above asserts on generated PROFILE TEXT, which
+/// proves what was written, never what the kernel did with it. This spawns
+/// `sandbox-exec` for real and reads two files that differ in exactly one
+/// respect — whether a denial covers them.
+///
+/// Both files live inside a directory the policy grants read access to, so
+/// the refusal cannot be explained by the grant being absent. The sibling is
+/// the control: if it were also refused, the denial would be incidental
+/// rather than the cause, and this test would fail.
+#[test]
+fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let home_path = std::fs::canonicalize(home.path()).expect("canonical home");
+
+    let secrets = home_path.join(".ssh");
+    std::fs::create_dir_all(&secrets).expect("secrets dir");
+    let denied_file = secrets.join("id_ed25519");
+    std::fs::write(&denied_file, "NOT-A-REAL-KEY\n").expect("dummy key");
+
+    // The control, deliberately inside the SAME granted root.
+    let allowed_file = home_path.join("readable.txt");
+    std::fs::write(&allowed_file, "READABLE\n").expect("control file");
+
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots.clear();
+    policy.read_only_roots = vec![home_path.display().to_string()];
+    policy.process_sandbox.read_deny_roots = vec![secrets.display().to_string()];
+    let with_denial = render_profile(&policy);
+
+    let read = |profile: &str, path: &std::path::Path| {
+        Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", profile, "--"])
+            .arg("/bin/cat")
+            .arg(path)
+            .output()
+            .expect("run read probe")
+    };
+
+    // Control first: the grant works, so a later refusal is attributable.
+    let control = read(&with_denial, &allowed_file);
+    assert!(
+        control.status.success(),
+        "the control file inside the same granted root must be readable, or the denial \
+             below proves nothing: {}",
+        String::from_utf8_lossy(&control.stderr)
+    );
+
+    let denied = read(&with_denial, &denied_file);
+    assert!(
+        !denied.status.success(),
+        "a denied file must be refused even though its parent root is granted; it was read: {}",
+        String::from_utf8_lossy(&denied.stdout)
+    );
+
+    // Revert the fix: same policy, same files, denial removed. If this does
+    // not flip to readable, the refusal above was caused by something else
+    // and the denylist is not doing the work this test claims.
+    policy.process_sandbox.read_deny_roots.clear();
+    let without_denial = render_profile(&policy);
+    let ungated = read(&without_denial, &denied_file);
+    assert!(
+        ungated.status.success(),
+        "with the denial removed the same file must become readable, which is what proves \
+             the refusal was the denylist and not an unrelated accident: {}",
+        String::from_utf8_lossy(&ungated.stderr)
+    );
+}

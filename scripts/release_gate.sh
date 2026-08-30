@@ -998,7 +998,7 @@ cmd_audit() {
   # recovery to missing outputs inside this gate's active Cargo build directory;
   # ordinary failures receive no cleanup or retry, and malformed paths fail
   # closed.
-  for idx in "${failed_lane_indices[@]}"; do
+  for idx in ${failed_lane_indices[@]+"${failed_lane_indices[@]}"}; do
     local step="${steps[$idx]}"
     local runner="${runners[$idx]}"
     local first_log="$tmp/$step.first-attempt.log"

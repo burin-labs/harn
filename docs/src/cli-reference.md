@@ -15,6 +15,7 @@ Execute a `.harn` file.
 harn run <file.harn>
 harn run --trace <file.harn>
 harn run --profile --profile-json profile.json <file.harn>
+harn run --flight-recorder <file.harn>
 harn run -e 'harness.stdio.log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
@@ -40,6 +41,10 @@ harn run --resume .harn/workers/worker_...json
 | Flag | Description |
 |---|---|
 | `--trace` | Print LLM trace summary after execution. Can also be set with `HARN_TRACE=1` |
+| `--flight-recorder` | Save the bounded, value-free VM code path under `.harn-runs/flight-recordings/`. Can also be set with `HARN_FLIGHT_RECORDER=1`. |
+| `--flight-recorder-out <path>` | Write the flight recording to one explicit file. Requires `--flight-recorder`; Harn doesn't rotate files in a caller-owned directory. |
+| `--flight-recorder-max-events <count>` | Retain the newest 1 to 1,000,000 VM events in memory. Default: 250,000. Requires `--flight-recorder`. |
+| `--flight-recorder-retain <count>` | Retain the newest 1 to 1,024 recordings in Harn's default directory. Default: 16. Requires `--flight-recorder`. |
 | `--profile` | Print a categorical timing breakdown after execution. Can also be set with `HARN_PROFILE=1` |
 | `--profile-json <path>` | Write the categorical timing breakdown as JSON. Can also be set with `HARN_PROFILE_JSON=<path>` |
 | `--explain-cost` | Print static LLM token/cost estimates without executing the script |
@@ -77,6 +82,13 @@ harn run --resume .harn/workers/worker_...json
 | `--rusage-fd <fd>` | Write `--emit-rusage-json` output to an already-open Unix file descriptor |
 | `--allow-unsigned` | When running a `.harnpack`, accept bundles that carry no Ed25519 signature (local-dev override) |
 | `--dry-run-verify` | When running a `.harnpack`, verify the signature and replay into the cache without executing the entrypoint |
+
+Every completed VM invocation through `harn run` writes an automatic
+`.harn-runs/hxe-....json` run record. Harn retains the newest 128 automatic
+records without deleting workflow or imported records. The record's
+`evidence.execution_id` is the same identity attached to its spans and optional
+flight recording. `--json` emits `evidence_persisted` after this record is
+readable and before the terminal `result` or `error` event.
 
 `--approve-risky` is explicit operator authority, not pipeline configuration. It
 records a receipt on the protected operation and never relaxes the generic
@@ -790,6 +802,79 @@ harn repl
 The REPL keeps incomplete blocks open until braces, brackets, parentheses, and
 quoted strings are balanced, so you can paste or type multi-line pipelines and
 control-flow blocks directly.
+
+## harn chat
+
+Talk to a model and see how fast it answers.
+
+```bash
+harn chat
+```
+
+By default this talks to whatever local model `harn local switch` last
+selected, falling back to the configured provider when there is no selection.
+Name a model to talk to another one; the catalog resolves aliases and picks the
+provider.
+
+The session prints the route it resolved — model, provider, and endpoint —
+before the first prompt, so you always know which model your timings describe.
+If you name a model or provider explicitly and resolution lands somewhere else,
+the command refuses to start rather than talking to something you did not ask
+for.
+
+### Which model gets picked
+
+In order, first match wins:
+
+1. the `MODEL` argument and `--provider` flag
+2. the active `harn local switch` selection
+3. `HARN_LLM_PROVIDER` / `HARN_LLM_MODEL`
+4. the configured default provider and its default model
+
+Note that the stored selection deliberately outranks the environment
+variables, which is the opposite of what most commands do. `harn chat` exists
+to talk to the model you currently have running, and `harn local switch` is how
+you say which one that is; an exported `HARN_LLM_MODEL` from some earlier task
+should not quietly redirect it. Name the model as an argument to override both.
+
+Changing the selection does not affect any other command: nothing else reads
+it, so `harn run` and `harn try` keep resolving their own routing from the
+environment and the catalog.
+
+```bash
+harn chat qwen36-coder
+harn chat --provider ollama --system "Answer in one sentence."
+```
+
+Each turn streams tokens as they arrive and then reports one speed line on
+stderr:
+
+```text
+49.31 tok/s · 143 tokens · first token 210ms · 3.1s total
+```
+
+Use `--verbose` for the full breakdown (load, prompt eval, eval counts,
+durations, and rates) or `--no-stats` for none. Rates come from the server's
+own timings when the provider reports them, so they measure the model rather
+than the round trip; a measurement the provider did not send is left out
+rather than shown as zero.
+
+This is a plain-completions surface, not an agent: no tools, and no system
+prompt unless you set one. That keeps a speed reading about the model instead
+of about scaffolding it never asked for.
+
+Commands inside the session:
+
+| Command | Effect |
+| --- | --- |
+| `/help`, `/?` | list the commands |
+| `/bye` | exit (Ctrl-D also works) |
+| `/model [name]` | show the current model, or switch |
+| `/system [text]` | show the system prompt, or set it |
+| `/stats [off\|on\|verbose]` | change the speed line |
+| `/clear` | forget the conversation so far |
+
+Wrap a message in `"""` to send several lines at once.
 
 ## harn bench
 
@@ -1662,18 +1747,27 @@ channels, sandbox policy, and schedules.
 
 ## harn tool
 
-Scaffold Harn-native custom tool packages.
+Scaffold Harn-native custom tool packages, execute a published registry as a
+generated CLI, or inspect its canonical catalog.
 
 ```bash
 harn tool new acme-echo
 harn tool new acme-echo --dir packages/acme-echo
 harn tool new acme-echo --description "Echo text for tests."
+harn tool run server.harn widgets get --widget-id 42 # harn-doc-cli: allow-stale
+harn tool run server.harn widgets get --help
+harn tool schema server.harn --pretty
 ```
 
 The generated package includes `[[package.tools]]` metadata, a stable
 `tools` export, an MCP entrypoint for lazy agent discovery, package-local
 dispatch tests, API docs, and a CI call to the canonical `harn package verify`
 contract. Run the entrypoint with `harn serve mcp server.harn`.
+
+`harn tool run` and `harn serve mcp --surface script` consume the same
+`ToolRegistry` and invoke the same handler closures. See
+[Tool registry adapters](./tool-registry-adapters.md) for metadata, coercion,
+validation, and catalog details.
 
 ## harn skill
 

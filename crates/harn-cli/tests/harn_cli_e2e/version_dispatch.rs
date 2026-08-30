@@ -34,24 +34,45 @@ fn version_json_dispatch_renders_canonical_envelope() {
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
     let harn_value: serde_json::Value =
         serde_json::from_str(&harn.stdout).expect("harn JSON parses");
-    assert_eq!(harn_value["schemaVersion"], 1);
+    assert_eq!(harn_value["schemaVersion"], 2);
     assert_eq!(harn_value["ok"], true);
     assert!(harn_value["data"]["version"].is_string());
     assert_source_revision(&harn_value);
+    assert_runtime_content_fingerprint(&harn_value);
 }
 
 #[test]
 fn version_json_ignores_runtime_revision_environment() {
     let harn = run_version_subprocess(
         true,
-        &[(
-            "HARN_BUILD_REVISION",
-            "ffffffffffffffffffffffffffffffffffffffff",
-        )],
+        &[
+            (
+                "HARN_BUILD_REVISION",
+                "ffffffffffffffffffffffffffffffffffffffff",
+            ),
+            (
+                "HARN_RUNTIME_CONTENT_FINGERPRINT",
+                "{\"schema\":\"host-supplied\"}",
+            ),
+        ],
     );
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
     let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("version JSON");
     assert_source_revision(&value);
+    assert_runtime_content_fingerprint(&value);
+}
+
+fn assert_runtime_content_fingerprint(value: &serde_json::Value) {
+    let expected = serde_json::to_value(harn_vm::runtime_content_fingerprint())
+        .expect("runtime content fingerprint serializes");
+    let actual = &value["data"]["runtime_content_fingerprint"];
+    assert_eq!(actual, &expected);
+    assert_eq!(actual["schema"], "harn.runtime_content_fingerprint.v1");
+    assert_eq!(actual["content_sha256"].as_str().map(str::len), Some(64));
+    assert_eq!(
+        actual["embedded_stdlib_sha256"].as_str().map(str::len),
+        Some(64)
+    );
 }
 
 #[test]

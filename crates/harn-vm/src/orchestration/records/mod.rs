@@ -6,6 +6,7 @@
 mod action_graph;
 mod diff;
 mod eval_pack;
+mod execution_evidence;
 mod from_session;
 mod json;
 mod persistence;
@@ -29,6 +30,10 @@ pub use eval_pack::{
     replay_fixture_from_run, validate_eval_pack_split, EvalPackLiveExecutor,
     EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
 };
+pub use execution_evidence::{
+    validate_execution_evidence, ExecutionEvidenceValidationError,
+    EXECUTION_EVIDENCE_SCHEMA_VERSION,
+};
 pub use from_session::{
     default_projection_path, list_session_runs, materialize_session_run_record,
     project_run_record_from_session, SessionRunSummary, AGENT_SESSION_WORKFLOW_ID,
@@ -38,7 +43,8 @@ pub use from_session::{
 pub(crate) use persistence::save_run_record_with_transcript;
 pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
-    normalize_run_record, save_run_record, AgentSessionReplayEvent,
+    normalize_run_record, prune_execution_run_records, save_execution_run_record, save_run_record,
+    AgentSessionReplayEvent, DEFAULT_EXECUTION_RUN_RETENTION,
 };
 pub(crate) use report::read_checked_run_report_bytes;
 pub use report::{
@@ -61,14 +67,15 @@ pub use types::{
     EvalPackReliabilityBreakdown, EvalPackReliabilityReport, EvalPackReport, EvalPackRubric,
     EvalPackRunState, EvalPackSplit, EvalPackSplitValidationReport, EvalPackStatsReport,
     EvalPackStatsRow, EvalPackThresholds, EvalPackTrialReport, EvalSuiteCase, EvalSuiteManifest,
-    LlmUsageRecord, ReplayEvalCaseReport, ReplayEvalReport, ReplayEvalSuiteReport, ReplayFixture,
-    ReplayStageAssertion, RunActionGraphEdgeRecord, RunActionGraphNodeRecord, RunCheckpointRecord,
-    RunChildRecord, RunDeliverableSummaryRecord, RunDiffReport, RunExecutionRecord,
-    RunHitlQuestionRecord, RunObservabilityDiffRecord, RunObservabilityRecord,
-    RunPersonaRuntimeRecord, RunPlannerRoundRecord, RunRecord, RunStageAttemptRecord,
-    RunStageDiffRecord, RunStageRecord, RunTaskLedgerSummaryRecord, RunTraceSpanRecord,
-    RunTranscriptArtifactDescriptor, RunTranscriptPointerRecord, RunTransitionRecord,
-    RunVerificationOutcomeRecord, RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
+    ExecutionEvidenceRecord, LlmUsageRecord, ReplayEvalCaseReport, ReplayEvalReport,
+    ReplayEvalSuiteReport, ReplayFixture, ReplayStageAssertion, RunActionGraphEdgeRecord,
+    RunActionGraphNodeRecord, RunCheckpointRecord, RunChildRecord, RunDeliverableSummaryRecord,
+    RunDiffReport, RunEvidenceGapRecord, RunExecutionRecord, RunHitlQuestionRecord,
+    RunObservabilityDiffRecord, RunObservabilityRecord, RunPersonaRuntimeRecord,
+    RunPlannerRoundRecord, RunRecord, RunStageAttemptRecord, RunStageDiffRecord, RunStageRecord,
+    RunTaskLedgerSummaryRecord, RunTraceSpanRecord, RunTranscriptArtifactDescriptor,
+    RunTranscriptPointerRecord, RunTransitionRecord, RunVerificationOutcomeRecord,
+    RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
     ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH, ACTION_GRAPH_EDGE_KIND_DELEGATES,
     ACTION_GRAPH_EDGE_KIND_DLQ_MOVE, ACTION_GRAPH_EDGE_KIND_ENTRY,
     ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,

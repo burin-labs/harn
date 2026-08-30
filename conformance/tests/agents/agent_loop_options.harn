@@ -6,19 +6,19 @@ pipeline default(harness: Harness) {
   // fenced-json (`json`), not heredoc (`text`).
   const no_tools = agent_loop_options(harness, {provider: "mock"})
   harness.stdio.println(no_tools.tool_format)
-  harness.stdio.println(contains(no_tools.keys(), "done_judge"))
+  harness.stdio.println(contains(no_tools.keys(), "turn_end_condition"))
   harness.stdio.println(contains(no_tools.keys(), "verify_completion_judge"))
   const judged = agent_loop_options(
     harness,
-    {provider: "mock", tools: tool_registry(), done_judge: true},
+    {provider: "mock", tools: tool_registry(), turn_end_condition: true},
   )
   harness.stdio.println(judged.done_sentinel)
-  harness.stdio.println(type_of(judged.done_judge))
+  harness.stdio.println(type_of(judged.turn_end_condition))
   const disabled_judges = agent_loop_options(
     harness,
-    {provider: "mock", done_judge: false, verify_completion_judge: false},
+    {provider: "mock", turn_end_condition: false, verify_completion_judge: false},
   )
-  require disabled_judges.done_judge == nil, "false disables done_judge"
+  require disabled_judges.turn_end_condition == nil, "false disables turn_end_condition"
   require disabled_judges.verify_completion_judge == nil, "false disables completion judge"
   const client_search = agent_loop_options(
     harness,
@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
       tools: tool_registry(),
       tool_format: "native",
       loop_until_done: true,
-      done_judge: true,
+      turn_end_condition: true,
     },
   )
   harness.stdio.println(judged_native.done_sentinel == nil)
@@ -101,18 +101,18 @@ pipeline default(harness: Harness) {
   )
   for case in [
     {
-      options: {provider: "mock", done_judge: {fail_open: true}},
-      removed: "done_judge.fail_open",
+      options: {provider: "mock", turn_end_condition: {fail_open: true}},
+      removed: "turn_end_condition.fail_open",
       replacement: "completion judges always fail closed",
     },
     {
-      options: {provider: "mock", done_judge: {fail_open_on_error: true}},
-      removed: "done_judge.fail_open_on_error",
+      options: {provider: "mock", turn_end_condition: {fail_open_on_error: true}},
+      removed: "turn_end_condition.fail_open_on_error",
       replacement: "completion judges always fail closed",
     },
     {
-      options: {provider: "mock", done_judge: {max_feedback: 2}},
-      removed: "done_judge.max_feedback",
+      options: {provider: "mock", turn_end_condition: {max_feedback: 2}},
+      removed: "turn_end_condition.max_feedback",
       replacement: "max_invocations",
     },
     {
@@ -131,9 +131,9 @@ pipeline default(harness: Harness) {
       replacement: "max_invocations",
     },
     {
-      options: {provider: "mock", done_judge: {enabled: false}},
-      removed: "done_judge.enabled",
-      replacement: "done_judge` to false",
+      options: {provider: "mock", turn_end_condition: {enabled: false}},
+      removed: "turn_end_condition.enabled",
+      replacement: "turn_end_condition` to false",
     },
     {
       options: {provider: "mock", verify_completion_judge: {enabled: false}},

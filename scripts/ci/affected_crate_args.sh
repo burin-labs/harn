@@ -101,12 +101,11 @@ fi
 normalize_native_path() {
   # Cargo metadata is rendered through jq @tsv below, which escapes Windows
   # backslashes. Normalize both separator spellings before comparing roots.
-  local path="${1//\\//}"
-  while [[ "$path" == *"//"* ]]; do
-    path="${path//\/\//\/}"
-  done
+  local path
+  path="$(printf '%s' "$1" | tr '\\' '/' | tr -s '/')"
   if [[ "$path" =~ ^([A-Za-z]):/(.*)$ ]]; then
-    local drive="${BASH_REMATCH[1],,}"
+    local drive
+    drive="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
     path="${drive}:/${BASH_REMATCH[2]}"
   fi
   printf '%s\n' "$path"
@@ -166,17 +165,17 @@ directly_changed=()
 unowned=()
 
 add_selected() {
-  contains "$1" "${selected[@]}" && return 0
+  contains "$1" "${selected[@]-}" && return 0
   selected+=("$1")
 }
 
 add_directly_changed() {
-  contains "$1" "${directly_changed[@]}" && return 0
+  contains "$1" "${directly_changed[@]-}" && return 0
   directly_changed+=("$1")
 }
 
 add_unowned() {
-  contains "$1" "${unowned[@]}" && return 0
+  contains "$1" "${unowned[@]-}" && return 0
   unowned+=("$1")
 }
 
@@ -214,11 +213,11 @@ while [[ "$changed" -eq 1 ]]; do
   changed=0
   for ((i = 0; i < ${#package_names[@]}; i++)); do
     name="${package_names[$i]}"
-    contains "$name" "${selected[@]}" && continue
+    contains "$name" "${selected[@]-}" && continue
     IFS=',' read -r -a deps <<<"${package_deps[$i]}"
-    for dep in "${deps[@]}"; do
+    for dep in "${deps[@]-}"; do
       [[ -z "$dep" ]] && continue
-      if contains "$dep" "${selected[@]}"; then
+      if contains "$dep" "${selected[@]-}"; then
         selected+=("$name")
         changed=1
         break
@@ -231,23 +230,23 @@ selected_sorted=()
 while IFS= read -r item; do
   [[ -z "$item" ]] && continue
   selected_sorted+=("$item")
-done < <(sort_unique "${selected[@]}")
+done < <(sort_unique "${selected[@]-}")
 
 directly_sorted=()
 while IFS= read -r item; do
   [[ -z "$item" ]] && continue
   directly_sorted+=("$item")
-done < <(sort_unique "${directly_changed[@]}")
+done < <(sort_unique "${directly_changed[@]-}")
 
 pruned=()
 for name in "${package_names[@]}"; do
-  contains "$name" "${selected_sorted[@]}" || pruned+=("$name")
+  contains "$name" "${selected_sorted[@]-}" || pruned+=("$name")
 done
 pruned_sorted=()
 while IFS= read -r item; do
   [[ -z "$item" ]] && continue
   pruned_sorted+=("$item")
-done < <(sort_unique "${pruned[@]}")
+done < <(sort_unique "${pruned[@]-}")
 
 echo "affected-crates: directly changed: ${directly_sorted[*]}" >&2
 echo "affected-crates: selected (changed + rdeps closure): ${selected_sorted[*]}" >&2

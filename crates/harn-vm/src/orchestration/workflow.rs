@@ -1228,10 +1228,7 @@ pub async fn prepare_stage_node(
                 // sandboxed verification depend on out-of-worktree state.
                 ("/bin/sh", vec!["-c".to_string(), command.to_string()])
             };
-            let mut process_config = crate::stdlib::sandbox::ProcessCommandConfig {
-                stdin_null: true,
-                ..Default::default()
-            };
+            let mut process_config = crate::stdlib::sandbox::ProcessCommandConfig::default();
             if let Some(context) = crate::stdlib::process::current_execution_context() {
                 if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
                     crate::stdlib::sandbox::enforce_process_cwd(std::path::Path::new(&cwd))?;

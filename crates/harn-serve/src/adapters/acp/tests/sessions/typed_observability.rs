@@ -1,5 +1,37 @@
 use super::*;
 
+pub(super) fn timeline_evidence(
+    session_id: &str,
+) -> harn_vm::orchestration::ExecutionEvidenceRecord {
+    let metadata = || BTreeMap::from([("session_id".to_string(), serde_json::json!(session_id))]);
+    harn_vm::orchestration::ExecutionEvidenceRecord {
+        trace_spans: vec![
+            RunTraceSpanRecord {
+                trace_id: "trace-acp".to_string(),
+                span_id: 1,
+                kind: "pipeline".to_string(),
+                name: "root".to_string(),
+                start_ms: 1,
+                duration_ms: 2,
+                metadata: metadata(),
+                ..RunTraceSpanRecord::default()
+            },
+            RunTraceSpanRecord {
+                trace_id: "trace-acp".to_string(),
+                span_id: 2,
+                parent_id: Some(1),
+                kind: "tool_call".to_string(),
+                name: "child".to_string(),
+                start_ms: 2,
+                duration_ms: 3,
+                metadata: metadata(),
+                ..RunTraceSpanRecord::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn typed_observability_logs_never_become_assistant_messages() {
     let local = tokio::task::LocalSet::new();

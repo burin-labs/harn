@@ -25,7 +25,7 @@ Use the component records when a function accepts only part of the contract:
 
 ## Replace `agent_turn`
 
-Call `agent_loop` and set completion policy explicitly. Use `done_judge` when a
+Call `agent_loop` and set completion policy explicitly. Use `turn_end_condition` when a
 judge must approve completion.
 
 ```harn
@@ -33,7 +33,7 @@ const result = agent_loop(harness, task, system, agent_options({
   provider: "openai",
   model: "gpt-5-mini",
   loop_until_done: true,
-  done_judge: true,
+  turn_end_condition: true,
 }))
 ```
 

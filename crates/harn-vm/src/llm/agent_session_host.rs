@@ -170,6 +170,7 @@ struct InstalledPolicies {
     pushed_command: bool,
     pushed_permissions: bool,
     pushed_precheck: bool,
+    pushed_approval_reviewer: bool,
 }
 
 pub(crate) struct SessionPolicyGuard {
@@ -441,7 +442,7 @@ fn initial_user_content(
 /// are injected as ordinary transcript turns by `host_agent_session_init`,
 /// visible to the model exactly as `llm_call`'s `messages` array would be, and
 /// are otherwise indistinguishable from turns the loop produced itself —
-/// done_judge, compaction, and projection all treat them normally.
+/// turn_end_condition, compaction, and projection all treat them normally.
 fn seed_history_messages(opts_map: &crate::value::DictMap) -> Result<Vec<VmValue>, VmError> {
     let Some(value) = opts_map.get("history") else {
         return Ok(Vec::new());

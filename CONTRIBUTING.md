@@ -518,6 +518,28 @@ genuinely unavoidable.
 - Rust files use standard `rustfmt` defaults
 - Avoid adding comments unless the logic is non-obvious
 
+## Keep write-ups repository-agnostic
+
+Harn is a general agent-orchestration project. Issue bodies, PR descriptions,
+code comments, docs, and test fixtures must not cite a downstream consumer's
+private paths, hostnames, IP addresses, or evaluation vocabulary — those read as
+Harn's own and send a public reader to files this repository does not have.
+
+- Use RFC-2606/RFC-5737 placeholders in examples and fixtures
+  (`example.internal`, `192.0.2.0/24`), or an RFC-1918 address that belongs to
+  no real machine when a fixture needs a genuinely private range.
+- Require an explicit environment variable rather than hard-coding a server a
+  contributor cannot reach.
+- Describe a consumer's corpus or program by shape ("a consumer-side eval
+  corpus"), not by its path or its internal metric names. Consumer evaluation
+  programs gate on their own metrics; Harn does not name them.
+
+A named integration fact is fine where behavior depends on it — a downstream
+host's artifact directory in the code-index ignore list is a real directory the
+walker must skip. `scripts/check_public_product_names.sh` enforces the naming
+half of this rule and carries the allowlist of those deliberate exceptions; add
+to that allowlist rather than working around the scan.
+
 ## Maintaining the changelog
 
 Day to day: drop a `changelog.d/<id>.<category>.md` fragment per PR; see

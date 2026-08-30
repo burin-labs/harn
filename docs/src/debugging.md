@@ -78,8 +78,9 @@ debug session. These are the same normalized accounting fields returned by
 
 ## Run views
 
-Every `agent_loop(harness, ...)` or `workflow_execute()` call can produce a persisted run
-under `.harn-runs/`. Inspect it through the stable `harn.run_view.v1` /
+Every completed `harn run` invocation writes a run record under `.harn-runs/`.
+Agent loops and `workflow_execute()` add their richer lifecycle records there.
+Inspect records through the stable `harn.run_view.v1` /
 `harn.session_view.v1` projections rather than depending on private record
 fields.
 
@@ -93,6 +94,36 @@ harn runs view --json .harn-runs/<run-id>.json
 
 The view command shows a structured summary: stages executed, tools called,
 token usage, timing, and final output.
+
+## Record the exact code path
+
+Use the flight recorder when a normal span tree doesn't show which branch or
+instruction ran:
+
+```bash
+harn run --flight-recorder main.harn
+```
+
+Harn prints the artifact path to stderr and links the same artifact from the
+automatic run record. The recording stores source locations, function and task
+identities, instruction offsets, and opcode names. It never stores runtime
+values, arguments, results, or stack contents.
+
+The recorder keeps the newest 250,000 events in memory. Older events increment
+`dropped_events`; their absence never looks like a complete trace. Harn keeps
+the newest 16 default-location files. Change those bounds for one run:
+
+```bash
+harn run --flight-recorder \
+  --flight-recorder-max-events 1000000 \
+  --flight-recorder-retain 32 \
+  main.harn
+```
+
+Use `--flight-recorder-out recording.json` when another tool owns the artifact
+path. Harn won't rotate other JSON files beside a caller-selected path. The
+artifact is written when the VM returns, exits, or fails. A force-killed process
+can lose its in-memory recording.
 
 ## Correlating delegated runs
 

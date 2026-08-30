@@ -64,7 +64,7 @@ pipeline default(harness: Harness) {
         tool_format: "native",
         loop_until_done: true,
         done_sentinel: "##DONE##",
-        done_judge: nil,
+        turn_end_condition: nil,
         max_iterations: 6,
         final_wrapup: false,
         session_id: session,

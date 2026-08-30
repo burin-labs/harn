@@ -61,7 +61,10 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod paths;
+mod process_config;
 mod process_output;
+mod refusal;
+pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 #[cfg(target_os = "windows")]
 pub(crate) use process_output::windows_command_output;
@@ -71,6 +74,9 @@ use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod replace;
+
+pub use refusal::process_violation_error;
+pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
 #[cfg(target_os = "windows")]
@@ -113,23 +119,6 @@ pub enum FsAccess {
     Read,
     Write,
     Delete,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct ProcessCommandConfig {
-    pub cwd: Option<PathBuf>,
-    pub env: Vec<(String, String)>,
-    /// Environment keys removed after the inherited/session environment and
-    /// caller overlays have been composed.
-    pub env_remove: Vec<String>,
-    pub stdin_null: bool,
-    /// When `true`, the child starts from an EMPTY environment and receives only
-    /// the pairs in [`ProcessCommandConfig::env`] — the closed-by-construction
-    /// path an active session environment takes (`security::resolve_env` has
-    /// already composed the policy snapshot and grants into `env`). When
-    /// `false` (outside a session), the child inherits the parent environment
-    /// and `env` is overlaid on top.
-    pub closed_env: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -458,6 +447,21 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     }
     let candidate = normalize_for_policy(path);
     let roots = normalized_workspace_roots(&policy);
+    // The denylist is checked BEFORE any grant, because it must beat all of
+    // them. A workspace root, a read-only root, and a preset are each a reason
+    // to allow; this is the one reason to refuse, and a subtraction that ran
+    // after the grants would never fire on the paths that matter (a credential
+    // under a preset-granted `~/.config` is exactly that case).
+    if access == FsAccess::Read
+        && path_is_denied(&candidate, &process_sandbox_read_deny_roots(&policy))
+    {
+        return Err(SandboxViolation {
+            attempted: candidate,
+            roots,
+            access,
+            read_only: false,
+        });
+    }
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
         return Ok(());
     }
@@ -1435,7 +1439,15 @@ pub fn command_output(
             })?
         }
     };
-    if let Some(error) = process_violation_error(&output) {
+    let refusal_command: Vec<String> = std::iter::once(program.to_string())
+        .chain(args.iter().cloned())
+        .collect();
+    let refusal_cwd = config
+        .cwd
+        .as_deref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    if let Some(error) = process_violation_error(&output, &refusal_command, &refusal_cwd) {
         return Err(error);
     }
     if let Some(span) = recording {
@@ -1544,49 +1556,6 @@ fn ensure_managed_process_egress_supported<B: SandboxBackend + ?Sized>(
         }
         Ok(())
     }
-}
-
-pub fn process_violation_error(output: &std::process::Output) -> Option<VmError> {
-    let policy = crate::orchestration::current_execution_policy()?;
-    // Only a profile that actually confined the process may attribute the
-    // child's failure to the OS sandbox. Under a profile that spawned it
-    // unconfined, a permission error came from the child's own work.
-    if !policy.sandbox_profile.confines_processes() {
-        return None;
-    }
-    if effective_fallback(policy.sandbox_profile) == SandboxFallback::Off
-        || !ActiveBackend::available()
-    {
-        return None;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    if !output.status.success()
-        && (stderr.contains("operation not permitted")
-            || stderr.contains("permission denied")
-            || stderr.contains("access is denied")
-            || stdout.contains("operation not permitted"))
-    {
-        return Some(sandbox_denial_error(
-            format!(
-                "sandbox violation: process was denied by the OS sandbox (status {})",
-                output.status.code().unwrap_or(-1)
-            ),
-            &format!("{stderr}\n{stdout}"),
-            &policy,
-        ));
-    }
-    if sandbox_signal_status(output) {
-        return Some(sandbox_denial_error(
-            format!(
-                "sandbox violation: process was terminated by the OS sandbox (status {})",
-                output.status
-            ),
-            &format!("{stderr}\n{stdout}"),
-            &policy,
-        ));
-    }
-    None
 }
 
 pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {

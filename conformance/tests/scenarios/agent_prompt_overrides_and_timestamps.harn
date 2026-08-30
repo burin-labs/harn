@@ -87,7 +87,7 @@ pipeline test(harness: Harness, task: unknown) {
           tool_format: "text",
           loop_until_done: true,
           max_iterations: 1,
-          done_judge: nil,
+          turn_end_condition: nil,
           turn_policy: {require_action_or_yield: true},
           prompts: {
             "agent.tool_contract_action_text": {text: "CUSTOM TEXT ACTION {{ done_sentinel }}"},

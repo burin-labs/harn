@@ -103,7 +103,7 @@ fn _remembered_history(
       tool_format: tool_format,
       loop_until_done: true,
       done_sentinel: "##DONE##",
-      done_judge: nil,
+      turn_end_condition: nil,
       max_iterations: 3,
       llm_caller: mock_llm,
     },

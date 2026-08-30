@@ -197,7 +197,9 @@ fn agent_terminal_class_from_structured_error(
     {
         return Some(class);
     }
-    if terminal_error_signal_matches(error, |signal| signal == "context_overflow") {
+    if terminal_error_signal_matches(error, |signal| {
+        matches!(signal, "context_overflow" | "context_length_exceeded")
+    }) {
         return Some(AgentTerminalClass::ContextOverflow);
     }
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
@@ -214,7 +216,65 @@ fn agent_terminal_class_from_structured_error(
     if terminal_error_has_after_tool_result_format(error) {
         return Some(AgentTerminalClass::AgentLoopProtocolFailure);
     }
+    // Generic VM categories such as `auth` and `timeout` do not identify an
+    // upstream owner on their own. Once the error carries explicit provider
+    // provenance, however, these closed taxonomy values are authoritative and
+    // must not collapse to `generic_throw`.
+    if terminal_error_has_provider_provenance(error) {
+        return terminal_error_signal_class(error);
+    }
     None
+}
+
+fn terminal_error_signal_class(error: &serde_json::Value) -> Option<AgentTerminalClass> {
+    const STRUCTURED_KEYS: &[&str] = &[
+        "category",
+        "error_category",
+        "reason",
+        "code",
+        "kind",
+        "phase",
+        "status",
+    ];
+    STRUCTURED_KEYS.iter().find_map(|key| {
+        let signal = error.get(*key).and_then(terminal_signal_value)?;
+        match signal.as_str() {
+            "provider_misconfigured"
+            | "provider_not_configured"
+            | "auth"
+            | "auth_failure"
+            | "authentication"
+            | "unauthorized"
+            | "invalid_api_key" => Some(AgentTerminalClass::ProviderMisconfigured),
+            "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
+            "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
+            "provider_unavailable"
+            | "model_unavailable"
+            | "upstream_unavailable"
+            | "overloaded"
+            | "overloaded_error"
+            | "server_error"
+            | "http_error"
+            | "provider_5xx"
+            | "transient_network"
+            | "network_error"
+            | "connection_error"
+            | "circuit_open" => Some(AgentTerminalClass::ProviderUnavailable),
+            _ => None,
+        }
+    })
+}
+
+fn terminal_error_has_provider_provenance(error: &serde_json::Value) -> bool {
+    ["provider", "model"].into_iter().any(|key| {
+        error
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    }) || error
+        .get("origin")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|origin| origin == "provider")
 }
 
 fn agent_terminal_class_from_legacy_text(error: &serde_json::Value) -> Option<AgentTerminalClass> {
@@ -515,6 +575,44 @@ mod tests {
     }
 
     #[test]
+    fn recognized_provider_failures_use_closed_terminal_classes() {
+        let cases = [
+            ("auth", AgentTerminalClass::ProviderMisconfigured),
+            ("auth_failure", AgentTerminalClass::ProviderMisconfigured),
+            ("rate_limited", AgentTerminalClass::RateLimited),
+            ("timeout", AgentTerminalClass::Timeout),
+            ("overloaded", AgentTerminalClass::ProviderUnavailable),
+            ("provider_5xx", AgentTerminalClass::ProviderUnavailable),
+            ("model_unavailable", AgentTerminalClass::ProviderUnavailable),
+            ("transient_network", AgentTerminalClass::ProviderUnavailable),
+        ];
+        for (category, expected) in cases {
+            let error = json!({
+                "category": category,
+                "provider": "example",
+                "model": "example-model",
+                "message": "opaque diagnostic",
+            });
+            assert_eq!(
+                agent_terminal_class("provider_error", "provider_error", Some(&error)),
+                Some(expected),
+                "category={category}"
+            );
+        }
+
+        let local = json!({
+            "category": "timeout",
+            "origin": "local",
+            "message": "a local harness deadline expired",
+        });
+        assert_eq!(
+            agent_terminal_class("error", "", Some(&local)),
+            Some(AgentTerminalClass::GenericThrow),
+            "the same word without provider provenance must not misattribute ownership"
+        );
+    }
+
+    #[test]
     fn agent_terminal_class_uses_legacy_text_only_as_harn_side_fallback() {
         let provider_wrapped = json!({
             "message": "session/prompt error: agent_loop: provider not configured: missing API key"
@@ -550,7 +648,7 @@ mod tests {
     #[test]
     fn completion_unverified_is_a_policy_failure_without_a_runtime_error() {
         let final_status = "completion_unverified";
-        let stop_reason = "done_judge_cap_reached";
+        let stop_reason = "turn_end_judge_cap_reached";
 
         assert!(
             !session_status_indicates_error(final_status),

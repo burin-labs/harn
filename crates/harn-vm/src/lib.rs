@@ -43,6 +43,7 @@ pub mod bridge;
 pub use bridge::{
     inject_leading_authorities, inject_leading_authority, leading_authority_param_count,
 };
+mod bounded_files;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
@@ -66,6 +67,7 @@ pub mod environment_registry;
 pub mod event_log;
 pub mod events;
 pub mod external_agent;
+pub mod flight_recorder;
 pub mod flow;
 pub mod harness;
 pub mod harness_auth;
@@ -92,6 +94,7 @@ pub(crate) mod limits;
 pub mod linked_program;
 pub mod llm;
 pub mod llm_config;
+pub mod local_selection;
 pub mod mcp;
 pub mod mcp_allowlist;
 pub mod mcp_auth;
@@ -117,6 +120,11 @@ pub mod module_source;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
+pub mod runtime_content;
+pub use runtime_content::{
+    runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
+    RuntimeContentFingerprint,
+};
 mod persistent_state;
 pub mod personas;
 pub mod portable;
@@ -164,6 +172,7 @@ pub mod text;
 pub mod text_diff;
 pub mod tool_annotations;
 pub mod tool_call_cancellations;
+pub mod tool_registry;
 pub mod tool_surface;
 pub mod tracing;
 pub mod triggers;
@@ -344,7 +353,7 @@ pub use mcp_registry::{
 pub use mcp_server::{
     take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
     take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
-    McpServer, McpServerMetadata,
+    McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServer, McpServerMetadata,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};

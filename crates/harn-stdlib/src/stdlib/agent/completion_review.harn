@@ -108,38 +108,6 @@ fn __verify_completion_judge_cap(
 }
 
 /**
- * Resolve the optional top-level cap for `done_judge`. Unlike
- * `done_judge.cadence.max_invocations`, this is a terminal veto-loop cap: the
- * judge may fire up to the cap, then the loop finalizes instead of silently
- * continuing until the iteration budget expires.
- */
-fn __done_judge_cap(judge_cfg: CompletionJudgeConfig) -> int? {
-  if type_of(judge_cfg) != "dict" {
-    return nil
-  }
-  const cap = judge_cfg?.max_invocations
-  if cap == nil || cap <= 0 {
-    return nil
-  }
-  return cap
-}
-
-/**
- * agent_done_judge_cap.
- *
- * Resolved terminal veto cap for a `done_judge` config. Returns nil when the
- * cap is not configured or is disabled with 0.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: agent_done_judge_cap(opts?.done_judge)
- */
-pub fn agent_done_judge_cap(judge_cfg: CompletionJudgeConfig) -> int? {
-  return __done_judge_cap(judge_cfg)
-}
-
-/**
  * agent_verify_completion_judge_cap.
  *
  * Resolved completion-judge veto cap for a `verify_completion_judge` config,

@@ -60,13 +60,6 @@ if [[ ! -d "$artifacts_dir" ]]; then
   exit 1
 fi
 
-declare -A target_for_archive=(
-  ["harn-aarch64-apple-darwin.tar.gz"]="aarch64-apple-darwin"
-  ["harn-aarch64-unknown-linux-gnu.tar.gz"]="aarch64-unknown-linux-gnu"
-  ["harn-x86_64-apple-darwin.tar.gz"]="x86_64-apple-darwin"
-  ["harn-x86_64-pc-windows-msvc.zip"]="x86_64-pc-windows-msvc"
-  ["harn-x86_64-unknown-linux-gnu.tar.gz"]="x86_64-unknown-linux-gnu"
-)
 readonly expected_archives=(
   harn-aarch64-apple-darwin.tar.gz
   harn-aarch64-unknown-linux-gnu.tar.gz
@@ -74,6 +67,27 @@ readonly expected_archives=(
   harn-x86_64-pc-windows-msvc.zip
   harn-x86_64-unknown-linux-gnu.tar.gz
 )
+
+target_for_archive() {
+  case "$1" in
+    harn-aarch64-apple-darwin.tar.gz) echo aarch64-apple-darwin ;;
+    harn-aarch64-unknown-linux-gnu.tar.gz) echo aarch64-unknown-linux-gnu ;;
+    harn-x86_64-apple-darwin.tar.gz) echo x86_64-apple-darwin ;;
+    harn-x86_64-pc-windows-msvc.zip) echo x86_64-pc-windows-msvc ;;
+    harn-x86_64-unknown-linux-gnu.tar.gz) echo x86_64-unknown-linux-gnu ;;
+    *) return 1 ;;
+  esac
+}
+
+array_contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -142,7 +156,10 @@ for archive in "${expected_archives[@]}"; do
   fi
 done
 
-mapfile -t downloaded_archives < <(
+downloaded_archives=()
+while IFS= read -r archive; do
+  downloaded_archives+=("$archive")
+done < <(
   find "$artifacts_dir" -maxdepth 1 -type f \
     \( -name 'harn-*.tar.gz' -o -name 'harn-*.zip' \) \
     -exec basename {} \; | LC_ALL=C sort
@@ -174,7 +191,7 @@ fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
-declare -A legacy_used=()
+legacy_used=()
 
 predicate_matches() {
   local result_file="$1"
@@ -217,7 +234,7 @@ predicate_matches() {
 
 for archive in "${expected_archives[@]}"; do
   path="$artifacts_dir/$archive"
-  target="${target_for_archive[$archive]}"
+  target="$(target_for_archive "$archive")"
   digest="$(sha256_file "$path")"
   first_result="$tmp_dir/$archive.first.json"
   verified=false
@@ -229,7 +246,10 @@ for archive in "${expected_archives[@]}"; do
     --limit 100 \
     --format json >"$first_result" 2>"$tmp_dir/$archive.stderr" &&
     predicate_matches "$first_result" "$archive" "$target" "$digest"; then
-    mapfile -t policy_revisions < <(
+    policy_revisions=()
+    while IFS= read -r policy_revision; do
+      policy_revisions+=("$policy_revision")
+    done < <(
       jq -r \
         --arg schema "$predicate_schema" \
         --arg tag "$tag" \
@@ -279,7 +299,7 @@ for archive in "${expected_archives[@]}"; do
     override_digest="$(jq -r --arg archive "$archive" '.archives[$archive] // empty' <<<"$legacy_override")"
   fi
   if [[ "$override_digest" == "$digest" ]]; then
-    legacy_used["$archive"]=1
+    legacy_used+=("$archive")
     echo "::warning title=Legacy release provenance override::$archive has no valid repository attestation; accepting its exact audited SHA-256 for $tag@$source_commit."
     continue
   fi
@@ -290,13 +310,16 @@ for archive in "${expected_archives[@]}"; do
 done
 
 if [[ -n "$legacy_override" ]]; then
-  mapfile -t override_names < <(jq -r '.archives | keys[]' <<<"$legacy_override")
+  override_names=()
+  while IFS= read -r archive; do
+    override_names+=("$archive")
+  done < <(jq -r '.archives | keys[]' <<<"$legacy_override")
   for archive in "${override_names[@]}"; do
-    if [[ -z "${target_for_archive[$archive]+x}" ]]; then
+    if ! target_for_archive "$archive" >/dev/null; then
       echo "error: legacy override names unexpected archive: $archive" >&2
       exit 1
     fi
-    if [[ -z "${legacy_used[$archive]+x}" ]]; then
+    if ! array_contains "$archive" "${legacy_used[@]}"; then
       echo "error: legacy override entry was not needed: $archive" >&2
       exit 1
     fi
