@@ -398,7 +398,14 @@ pub fn agent_lifecycle_tools(
   options: AgentLifecycleToolsOptions? = nil,
 ) -> ToolRegistry {
   const opts: AgentLifecycleToolsOptions = options ?? {}
-  const base = registry ?? tool_registry()
+  // Project before any name-derived decision. This public function is also a
+  // documented precomposition seam, so relying on agent_loop to project its
+  // result would let excluded triggers add controls or suppress a canonical
+  // control through a raw name collision.
+  const base: ToolRegistry = schema_expect(
+    tool_project(registry ?? tool_registry(), "agent"),
+    schema_of(ToolRegistry),
+  )
   let tools = if __agent_lifecycle_await_enabled(opts) {
     __agent_lifecycle_add_await_tool(base)
   } else {

@@ -185,9 +185,10 @@ and schema generators without advertising or accepting it over MCP.
 preserving its handler closures and outer registry metadata. Adapter and agent
 infrastructure should project once at its input boundary, then pass only that
 value to discovery, prompt, search, narrowing, and invocation consumers. The
-agent loop and direct `harness.llm.call(...)` option normalizer apply the
-`agent` projection before model-facing prompt guidance or tool schemas are
-assembled.
+agent lifecycle composer owns the closure-preserving `agent` projection before
+it derives model controls; `agent_loop` delegates to that seam. The direct
+`harness.llm.call(...)` option normalizer applies the same projection before
+model-facing prompt guidance or tool schemas are assembled.
 
 ## Validation boundaries
 

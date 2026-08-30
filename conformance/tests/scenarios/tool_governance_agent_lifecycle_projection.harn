@@ -79,6 +79,11 @@ pipeline test(harness: Harness, task: unknown) {
     "INCLUDED_SPAWN_TRIGGER",
     ["agent"],
   )
+  // Exercise the public precomposition path documented for scripts that
+  // assemble registries before passing them to agent_loop.
+  const excluded_precomposed = agent_lifecycle_tools(harness.agent, excluded_trigger)
+  const collision_precomposed = agent_lifecycle_tools(harness.agent, excluded_collision)
+  const included_precomposed = agent_lifecycle_tools(harness.agent, included_trigger)
   with_llm_script(
     harness.llm,
     [
@@ -87,9 +92,9 @@ pipeline test(harness: Harness, task: unknown) {
       llm_text("<done>included trigger measured</done>"),
     ],
     { ->
-      run_agent(harness, excluded_trigger)
-      run_agent(harness, excluded_collision)
-      run_agent(harness, included_trigger)
+      run_agent(harness, excluded_precomposed)
+      run_agent(harness, collision_precomposed)
+      run_agent(harness, included_precomposed)
       const calls = harness.llm.mock_calls()
       assert_eq(len(calls), 3, "all three production-shaped agent paths reached the model")
       const excluded_system = calls[0].system ?? ""
