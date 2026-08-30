@@ -1603,7 +1603,7 @@ mod tests {
 
         assert_eq!(
             granted,
-            vec![root.clone()],
+            vec![root],
             "a denial that is not inside the root must cost nothing and leave it intact"
         );
     }
@@ -1721,11 +1721,11 @@ mod tests {
     /// covers them.
     ///
     /// Structure mirrors the macOS live test:
-    ///   * control  - the sibling inside the same granted root is readable, so a
-    ///                refusal cannot be explained by an absent grant;
-    ///   * claim    - the denied file is refused;
-    ///   * revert   - with `read_deny_roots` cleared the same file is readable,
-    ///                which is what proves the refusal was the denylist.
+    /// * control: the sibling inside the same granted root is readable, so a
+    ///   refusal cannot be explained by an absent grant;
+    /// * claim: the denied file is refused;
+    /// * revert: with `read_deny_roots` cleared the same file is readable,
+    ///   which is what proves the refusal was the denylist.
     #[test]
     fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
         if landlock_abi_version() == 0 {
@@ -1752,12 +1752,16 @@ mod tests {
                 },
                 ..CapabilityPolicy::default()
             };
-            let _scope = crate::orchestration::push_execution_policy(policy);
+            crate::orchestration::push_execution_policy(policy);
             let output = crate::stdlib::sandbox::command_output(
                 "/bin/cat",
                 &[target.display().to_string()],
                 &crate::stdlib::sandbox::ProcessCommandConfig::default(),
             );
+            // Pop before returning. Each arm must run under its OWN policy, and
+            // a leaked push would leave the last arm's denial on the stack for
+            // whatever runs next on this thread.
+            crate::orchestration::pop_execution_policy();
             Ok(matches!(output, Ok(out) if out.status.success()))
         };
 
