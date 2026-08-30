@@ -99,6 +99,17 @@ pub struct ProviderTelemetry {
     /// zero carries no information.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_accounting_declared: Option<bool>,
+    /// What Harn did about provider retention/training controls on this
+    /// request. Carries four distinguishable outcomes so a host can tell
+    /// "we asked and this provider exposes no control" from "we never asked"
+    /// from "nobody has researched this provider" — three states that all
+    /// look identical on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Boxed: `ProviderTelemetry` is embedded by value in futures that the
+    /// MCP command surface already builds close to clippy's stack-frame
+    /// ceiling, and an inline receipt pushes that frame over it. The box is
+    /// serde-transparent, so the wire and VM shapes are unchanged.
+    pub data_controls: Option<Box<crate::llm::api::data_controls::DataControlsReceipt>>,
     /// Total server-side wall clock (Ollama `total_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_total_ms: Option<u64>,
@@ -232,6 +243,7 @@ impl ProviderTelemetry {
             serving_base_url,
             serving_fingerprint,
             cache_accounting_declared,
+            data_controls,
             server_total_ms,
             server_load_ms,
             server_prompt_eval_ms,
@@ -257,6 +269,7 @@ impl ProviderTelemetry {
             && serving_base_url.is_none()
             && serving_fingerprint.is_none()
             && cache_accounting_declared.is_none()
+            && data_controls.is_none()
             && server_total_ms.is_none()
             && server_load_ms.is_none()
             && server_prompt_eval_ms.is_none()
@@ -517,6 +530,12 @@ impl ProviderTelemetry {
         }
         if let Some(ref serving_fingerprint) = self.serving_fingerprint {
             dict.put_str("serving_fingerprint", serving_fingerprint.as_str());
+        }
+        if let Some(ref data_controls) = self.data_controls {
+            dict.insert(
+                arcstr::ArcStr::from("data_controls"),
+                data_controls.as_vm_dict(),
+            );
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
         insert_opt_u64(&mut dict, "server_load_ms", self.server_load_ms);
@@ -967,6 +986,7 @@ mod tests {
     #[test]
     fn as_vm_dict_projects_every_serialized_field() {
         let telemetry = ProviderTelemetry {
+            data_controls: None,
             source: source::OLLAMA_CHAT.to_string(),
             serving_base_url: Some("https://provider.example/v1".to_string()),
             serving_fingerprint: Some("build-1".to_string()),
