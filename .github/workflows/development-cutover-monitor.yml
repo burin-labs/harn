@@ -1,0 +1,62 @@
+name: Development cutover monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: development-cutover-monitor
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check post-release development cutover
+    if: github.repository == 'burin-labs/harn'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Measure development cutover state
+        id: cutover
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/check_development_cutover.sh
+
+      - name: Publish development cutover status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CHECK_OUTCOME: ${{ steps.cutover.outcome }}
+          DESCRIPTION: ${{ steps.cutover.outputs.description }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse origin/main)"
+          state=success
+          if [[ "$CHECK_OUTCOME" != success ]]; then
+            state=failure
+          fi
+          description="${DESCRIPTION:-development cutover measurement failed}"
+          gh api "repos/$GH_REPO/statuses/$sha" -X POST \
+            -f state="$state" \
+            -f context="development cutover" \
+            -f description="${description:0:139}" \
+            -f target_url="$TARGET_URL" >/dev/null
+          if [[ "$state" == failure ]]; then
+            echo "::error::$description"
+            exit 1
+          fi

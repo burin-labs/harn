@@ -399,65 +399,23 @@ jobs:
       - name: Configure isolated Harn build
         run: make setup-rust
 
-      - name: Prepare development version
-        id: prepare
+      - name: Prepare and open development bump
+        id: development-bump
         env:
           EXPECTED_DEVELOPMENT_VERSION: ${{ needs.detect-drift.outputs.development_version }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          # This step restamps the versioned grammar-fitness receipt, so the
-          # grammars resolved for this build must still satisfy the checked-in
-          # corpus before the receipt is rewritten to describe them. The corpus
-          # gate is an integration test, so the runner is pointed at the
-          # package's integration-test binary rather than its library target.
-          HARN_TEST_ONE_NAME='parser_agreement_corpus::resolved_grammars_pass_the_versioned_fitness_corpus' \
-            HARN_TEST_ONE_PACKAGE=harn-hostlib \
-            HARN_TEST_ONE_BINARY=harn_hostlib \
-            make test-one
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
-          HARN_BIN="$harn_bin" ./scripts/prepare_development_version.sh
-          actual="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          if [[ "$actual" != "$EXPECTED_DEVELOPMENT_VERSION" ]]; then
-            echo "::error::Expected $EXPECTED_DEVELOPMENT_VERSION after development bump, got $actual"
-            exit 1
-          fi
-          echo "version=$actual" >> "$GITHUB_OUTPUT"
-          echo "harn_bin=$harn_bin" >> "$GITHUB_OUTPUT"
+          HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
 
-      - name: Open auto-merge pull request
+      - name: Validate grammar receipt and arm development bump
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DEVELOPMENT_VERSION: ${{ steps.prepare.outputs.version }}
-          HARN_BIN: ${{ steps.prepare.outputs.harn_bin }}
+          DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
         run: |
           set -euo pipefail
-          branch="automation/development-$DEVELOPMENT_VERSION"
-          existing="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // empty')"
-          if [[ -n "$existing" ]]; then
-            echo "::notice::Development bump already open: $existing"
-            exit 0
-          fi
-          HARN_DEVELOPMENT_BUMP_TOKEN="$GH_TOKEN" \
-            HARN_DEVELOPMENT_BUMP_BRANCH="$branch" \
-            HARN_DEVELOPMENT_BUMP_BASE_OID="$(git rev-parse HEAD)" \
-            HARN_DEVELOPMENT_BUMP_VERSION="$DEVELOPMENT_VERSION" \
-            "$HARN_BIN" run --no-sandbox \
-              scripts/bump-driver/publish_development_bump.harn
-          body_file="$(mktemp)"
-          trap 'rm -f "$body_file"' EXIT
-          printf '%s\n' \
-            "Automated post-release cutover to the next patch development identity." \
-            "" \
-            "Stable release strings now remain exclusive to immutable release commits; mid-cycle builds self-report $DEVELOPMENT_VERSION." \
-            > "$body_file"
-          pr_url="$(gh pr create \
-            --base main \
-            --head "$branch" \
-            --title "Start $DEVELOPMENT_VERSION development" \
-            --body-file "$body_file")"
-          gh pr edit "$pr_url" --add-label no-changelog-needed
-          gh pr merge "$pr_url" --auto --squash
-          echo "$pr_url"
+          ./scripts/validate_development_bump.sh
 
   publish:
     name: Publish release
