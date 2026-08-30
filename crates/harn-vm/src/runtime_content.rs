@@ -22,6 +22,63 @@ pub struct RuntimeCompatibilityFingerprint {
     pub bytecode_schema_version: u32,
     pub linked_program_schema_version: u32,
     pub linker_algorithm_version: u32,
+    pub build_features: RuntimeBuildFeatures,
+}
+
+macro_rules! define_runtime_build_features {
+    ($( $field:ident => $cargo_name:literal ),+ $(,)?) => {
+        /// Cargo feature set compiled into the linked VM.
+        ///
+        /// Every declared `harn-vm` feature is represented explicitly so a lean
+        /// embedding cannot share an identity with the distributed full runtime.
+        #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+        #[serde(deny_unknown_fields)]
+        pub struct RuntimeBuildFeatures {
+            $(pub $field: bool),+
+        }
+
+        impl RuntimeBuildFeatures {
+            fn linked() -> Self {
+                Self {$($field: cfg!(feature = $cargo_name)),+}
+            }
+
+            fn update_digest(&self, hasher: &mut Sha256) {
+                $(update_bool_field(hasher, concat!("feature-", $cargo_name), self.$field);)+
+            }
+
+            #[cfg(test)]
+            const CARGO_NAMES: &'static [&'static str] = &[$($cargo_name),+];
+
+            #[cfg(test)]
+            fn none() -> Self {
+                Self {$($field: false),+}
+            }
+
+            #[cfg(test)]
+            fn enable(&mut self, cargo_name: &str) {
+                match cargo_name {
+                    $($cargo_name => self.$field = true),+,
+                    _ => unreachable!("feature list and typed fields share one declaration"),
+                }
+            }
+        }
+    };
+}
+
+define_runtime_build_features! {
+    default => "default",
+    full => "full",
+    llm_bench_internals => "llm-bench-internals",
+    vm_bench_internals => "vm-bench-internals",
+    content => "content",
+    compression => "compression",
+    http_compression => "http-compression",
+    cloud_aws => "cloud-aws",
+    native_keyring => "native-keyring",
+    postgres => "postgres",
+    sqlite => "sqlite",
+    otel => "otel",
+    testbench_wasi => "testbench-wasi",
 }
 
 /// Typed identity of the Harn runtime content linked into an embedding host.
@@ -50,6 +107,7 @@ pub fn runtime_content_fingerprint() -> &'static RuntimeContentFingerprint {
             bytecode_schema_version: crate::bytecode_cache::SCHEMA_VERSION,
             linked_program_schema_version: crate::linked_program::LINKED_PROGRAM_SCHEMA_VERSION,
             linker_algorithm_version: crate::linked_program::LINKER_ALGORITHM_VERSION,
+            build_features: RuntimeBuildFeatures::linked(),
         };
         fingerprint_from_parts(
             crate::bytecode_cache::HARN_VERSION,
@@ -120,6 +178,7 @@ fn fingerprint_from_parts(
         "linker-algorithm-version",
         &compatibility.linker_algorithm_version.to_le_bytes(),
     );
+    compatibility.build_features.update_digest(&mut hasher);
     RuntimeContentFingerprint {
         schema: FINGERPRINT_SCHEMA.to_string(),
         content_sha256: hex(&hasher.finalize()),
@@ -128,6 +187,10 @@ fn fingerprint_from_parts(
         compatibility,
         source_revision,
     }
+}
+
+fn update_bool_field(hasher: &mut Sha256, name: &str, enabled: bool) {
+    update_field(hasher, name, &[u8::from(enabled)]);
 }
 
 fn update_field(hasher: &mut Sha256, name: &str, value: &[u8]) {
@@ -167,12 +230,17 @@ fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn lean_features() -> RuntimeBuildFeatures {
+        RuntimeBuildFeatures::none()
+    }
+
     fn compatibility() -> RuntimeCompatibilityFingerprint {
         RuntimeCompatibilityFingerprint {
             codegen_fingerprint: "codegen-a".to_string(),
             bytecode_schema_version: 14,
             linked_program_schema_version: 1,
             linker_algorithm_version: 1,
+            build_features: lean_features(),
         }
     }
 
@@ -213,6 +281,59 @@ mod tests {
     }
 
     #[test]
+    fn full_and_lean_builds_have_distinct_content_digests() {
+        let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);
+        let lean = fingerprint_from_parts("0.10.123-dev", &stdlib, compatibility(), None);
+        let mut full_compatibility = compatibility();
+        for name in [
+            "default",
+            "full",
+            "postgres",
+            "sqlite",
+            "content",
+            "compression",
+            "http-compression",
+            "cloud-aws",
+            "native-keyring",
+        ] {
+            full_compatibility.build_features.enable(name);
+        }
+        let full = fingerprint_from_parts("0.10.123-dev", &stdlib, full_compatibility, None);
+        assert_ne!(lean.content_sha256, full.content_sha256);
+    }
+
+    #[test]
+    fn every_typed_build_feature_changes_content_digest() {
+        let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);
+        let baseline = fingerprint_from_parts("0.10.123-dev", &stdlib, compatibility(), None);
+        for name in RuntimeBuildFeatures::CARGO_NAMES {
+            let mut changed = compatibility();
+            changed.build_features.enable(name);
+            let fingerprint = fingerprint_from_parts("0.10.123-dev", &stdlib, changed, None);
+            assert_ne!(
+                baseline.content_sha256, fingerprint.content_sha256,
+                "feature {name} must affect runtime content identity"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_build_features_cover_every_declared_cargo_feature() {
+        let manifest: toml::Value =
+            toml::from_str(include_str!("../Cargo.toml")).expect("harn-vm Cargo.toml parses");
+        let mut declared: Vec<&str> = manifest["features"]
+            .as_table()
+            .expect("features table")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        declared.sort_unstable();
+        let mut represented = RuntimeBuildFeatures::CARGO_NAMES.to_vec();
+        represented.sort_unstable();
+        assert_eq!(declared, represented);
+    }
+
+    #[test]
     fn missing_source_revision_remains_absent() {
         let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);
         let fingerprint = fingerprint_from_parts("0.10.123-dev", &stdlib, compatibility(), None);
@@ -233,6 +354,10 @@ mod tests {
         assert_eq!(
             actual.compatibility.codegen_fingerprint,
             crate::bytecode_cache::CODEGEN_FINGERPRINT
+        );
+        assert_eq!(
+            actual.compatibility.build_features,
+            RuntimeBuildFeatures::linked()
         );
         assert_eq!(actual.content_sha256.len(), 64);
     }

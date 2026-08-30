@@ -13,11 +13,28 @@
  */
 import { get_typed_value } from "std/schema"
 
+type RuntimeBuildFeatures = {
+  default: bool,
+  full: bool,
+  llm_bench_internals: bool,
+  vm_bench_internals: bool,
+  content: bool,
+  compression: bool,
+  http_compression: bool,
+  cloud_aws: bool,
+  native_keyring: bool,
+  postgres: bool,
+  sqlite: bool,
+  otel: bool,
+  testbench_wasi: bool,
+}
+
 type RuntimeCompatibilityFingerprint = {
   codegen_fingerprint: string,
   bytecode_schema_version: int,
   linked_program_schema_version: int,
   linker_algorithm_version: int,
+  build_features: RuntimeBuildFeatures,
 }
 
 type RuntimeContentFingerprint = {
@@ -41,9 +58,8 @@ fn render_json(
   source_revision: string?,
   runtime_content_fingerprint: RuntimeContentFingerprint,
 ) -> string {
-  // Adding an optional field does not bump VERSION_SCHEMA_VERSION.
   const env = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ok: true,
     data: {
       name: name,

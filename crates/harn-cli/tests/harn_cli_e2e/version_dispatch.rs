@@ -34,7 +34,7 @@ fn version_json_dispatch_renders_canonical_envelope() {
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
     let harn_value: serde_json::Value =
         serde_json::from_str(&harn.stdout).expect("harn JSON parses");
-    assert_eq!(harn_value["schemaVersion"], 1);
+    assert_eq!(harn_value["schemaVersion"], 2);
     assert_eq!(harn_value["ok"], true);
     assert!(harn_value["data"]["version"].is_string());
     assert_source_revision(&harn_value);

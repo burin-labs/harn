@@ -7,7 +7,7 @@ use harn_cli::tests::common::json_envelope::assert_envelope;
 
 const LINT_SCHEMA_VERSION: u32 = 1;
 const REPLAY_SCHEMA_VERSION: u32 = 1;
-const VERSION_SCHEMA_VERSION: u32 = 1;
+const VERSION_SCHEMA_VERSION: u32 = 2;
 
 fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))

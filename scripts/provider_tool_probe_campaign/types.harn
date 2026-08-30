@@ -21,6 +21,39 @@ pub type ProviderToolProbeBehavior = {
 
 pub type ProviderToolProbeRuntimeStatus = "verified" | "unavailable" | "invalid"
 
+pub type ProviderToolProbeRuntimeBuildFeatures = {
+  default: bool,
+  full: bool,
+  llm_bench_internals: bool,
+  vm_bench_internals: bool,
+  content: bool,
+  compression: bool,
+  http_compression: bool,
+  cloud_aws: bool,
+  native_keyring: bool,
+  postgres: bool,
+  sqlite: bool,
+  otel: bool,
+  testbench_wasi: bool,
+}
+
+pub type ProviderToolProbeRuntimeCompatibilityFingerprint = {
+  codegen_fingerprint: string,
+  bytecode_schema_version: int,
+  linked_program_schema_version: int,
+  linker_algorithm_version: int,
+  build_features: ProviderToolProbeRuntimeBuildFeatures,
+}
+
+pub type ProviderToolProbeRuntimeContentFingerprint = {
+  schema: "harn.runtime_content_fingerprint.v1",
+  content_sha256: string,
+  harn_version: string,
+  embedded_stdlib_sha256: string,
+  compatibility: ProviderToolProbeRuntimeCompatibilityFingerprint,
+  source_revision: string?,
+}
+
 pub type ProviderToolProbeRuntimeReceipt = {
   schema_version: "harn.provider_tool_probe_runtime.v1",
   command: list<string>,
@@ -28,6 +61,7 @@ pub type ProviderToolProbeRuntimeReceipt = {
   exit_code: int,
   version: string,
   source_revision: string?,
+  runtime_content_fingerprint: ProviderToolProbeRuntimeContentFingerprint?,
   reason: string,
 }
 
