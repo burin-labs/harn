@@ -1,3 +1,4 @@
+import { get_typed_value } from "std/schema"
 import "./support"
 import "./types"
 
@@ -150,12 +151,10 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       },
     }
   }
-  const parsed = try {
+  const parsed_result = try {
     json_parse(to_string(child?.stdout ?? ""))
-  } catch (_) {
-    nil
   }
-  if type_of(parsed) != "dict" {
+  if !is_ok(parsed_result) {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
       command: command,
@@ -167,16 +166,10 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       reason: "target Harn runtime produced invalid version JSON",
     }
   }
-  const name = trim(to_string(parsed?.data?.name ?? ""))
-  const version = trim(to_string(parsed?.data?.version ?? ""))
-  const raw_revision = parsed?.data?.source_revision
-  const raw_fingerprint = parsed?.data?.runtime_content_fingerprint
-  const revision_valid = raw_revision == nil
-    || (type_of(raw_revision) == "string"
-      && trim(raw_revision)
-        != "")
-  if parsed?.schemaVersion != 2 || parsed?.ok != true || name != "harn-cli" || version == ""
-    || !revision_valid {
+  const envelope_result = try {
+    get_typed_value(unwrap(parsed_result), schema_of(ProviderToolProbeVersionEnvelope))
+  }
+  if !is_ok(envelope_result) {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
       command: command,
@@ -188,7 +181,15 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       reason: "target Harn runtime version JSON did not match the harn-cli contract",
     }
   }
-  if !schema_is(raw_fingerprint, schema_of(ProviderToolProbeRuntimeContentFingerprint)) {
+  const envelope: ProviderToolProbeVersionEnvelope = unwrap(envelope_result)
+  const version = trim(envelope.data.version)
+  const raw_revision = envelope.data.source_revision
+  const fingerprint = envelope.data.runtime_content_fingerprint
+  const revision_valid = raw_revision == nil
+    || (type_of(raw_revision) == "string"
+      && trim(raw_revision)
+        != "")
+  if !envelope.ok || version == "" || !revision_valid {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
       command: command,
@@ -197,11 +198,9 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       version: "",
       source_revision: nil,
       runtime_content_fingerprint: nil,
-      reason:
-        "target Harn runtime version JSON did not include a valid runtime content fingerprint",
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
     }
   }
-  const fingerprint: ProviderToolProbeRuntimeContentFingerprint = raw_fingerprint
   const source_revision: string? = if raw_revision == nil {
     nil
   } else {

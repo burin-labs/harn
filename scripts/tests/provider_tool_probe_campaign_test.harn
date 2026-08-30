@@ -1,7 +1,8 @@
+import { RuntimeContentFingerprint } from "std/runtime/content_fingerprint"
 import { assert_contains, assert_false, assert_true } from "std/testing"
 import "../provider_tool_probe_campaign.harn"
 
-fn runtime_content_fingerprint() -> ProviderToolProbeRuntimeContentFingerprint {
+fn runtime_content_fingerprint() -> RuntimeContentFingerprint {
   return {
     schema: "harn.runtime_content_fingerprint.v1",
     content_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -179,9 +180,12 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(
           data: {
             name: "harn-cli",
             version: "0.10.24",
+            description: "Harn CLI",
             source_revision: "0123456789abcdef0123456789abcdef01234567",
             runtime_content_fingerprint: runtime_content_fingerprint(),
           },
+          error: nil,
+          warnings: [],
         },
       ),
       stderr: "",
@@ -280,6 +284,27 @@ pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(
       ),
     },
   )
+  const unsuccessful = provider_tool_probe_campaign_runtime_receipt(
+    "harn",
+    {
+      exit_code: 0,
+      stdout: json_stringify(
+        {
+          schemaVersion: 2,
+          ok: false,
+          data: {
+            name: "harn-cli",
+            version: "0.10.24",
+            description: "Harn CLI",
+            source_revision: "0123456789abcdef0123456789abcdef01234567",
+            runtime_content_fingerprint: runtime_content_fingerprint(),
+          },
+          error: nil,
+          warnings: [],
+        },
+      ),
+    },
+  )
   assert_eq(
     wrong_contract,
     {
@@ -295,6 +320,8 @@ pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(
   )
   assert_eq(provider_tool_probe_campaign_runtime_allows_live(malformed), false)
   assert_eq(provider_tool_probe_campaign_runtime_allows_live(wrong_contract), false)
+  assert_eq(unsuccessful.status, "invalid")
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(unsuccessful), false)
 }
 
 @test
@@ -313,18 +340,18 @@ pipeline test_provider_tool_probe_campaign_rejects_schema_two_without_runtime_fi
           data: {
             name: "harn-cli",
             version: "0.10.24",
+            description: "Harn CLI",
             source_revision: "0123456789abcdef0123456789abcdef01234567",
           },
+          error: nil,
+          warnings: [],
         },
       ),
     },
   )
   assert_eq(receipt.status, "invalid")
   assert_eq(receipt.runtime_content_fingerprint, nil)
-  assert_eq(
-    receipt.reason,
-    "target Harn runtime version JSON did not include a valid runtime content fingerprint",
-  )
+  assert_eq(receipt.reason, "target Harn runtime version JSON did not match the harn-cli contract")
   assert_false(provider_tool_probe_campaign_runtime_allows_live(receipt))
 }
 
