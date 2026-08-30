@@ -129,8 +129,8 @@ impl std::error::Error for SkillDiscoveryError {}
 
 const SOURCES: &[&str] = &[
     include_str!("corpus/harn-agent/SKILL.md"),
-    include_str!("corpus/harn-apps/SKILL.md"),
     include_str!("corpus/harn-approval-review/SKILL.md"),
+    include_str!("corpus/harn-apps/SKILL.md"),
     include_str!("corpus/harn-de-slop/SKILL.md"),
     include_str!("corpus/harn-diagnostics/SKILL.md"),
     include_str!("corpus/harn-docs/SKILL.md"),
@@ -388,6 +388,7 @@ mod tests {
             names,
             [
                 "harn-agent",
+                "harn-approval-review",
                 "harn-apps",
                 "harn-de-slop",
                 "harn-diagnostics",

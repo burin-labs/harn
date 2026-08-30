@@ -42,12 +42,17 @@ pub(crate) fn install_session_policy_guard(
 /// adjacent to that function so the list cannot drift: any new policy-shaped
 /// option MUST be added here, otherwise the tool-dispatch fast path would
 /// skip installing it.
-const SESSION_POLICY_OPTION_KEYS: [&str; 5] = [
+const SESSION_POLICY_OPTION_KEYS: [&str; 6] = [
     "policy",
     "approval_policy",
     "command_policy",
     "permissions",
     "tool_precheck",
+    // Load-bearing. A loop that installs ONLY a reviewer names no other key
+    // here, so leaving it out would send that call down the fast path and the
+    // reviewer would never be installed -- present in the source, unreachable
+    // at runtime, and silent about it.
+    "approval_reviewer",
 ];
 
 /// Whether `opts_map` carries any policy/permission-shaped key that
@@ -99,6 +104,17 @@ fn install_session_policies_inner(
         installed.pushed_precheck = true;
     }
 
+    // The `AutoReview` answerer. Typed input, never ambient: a resolver picked
+    // up from the environment would make "which policy did this run enforce" a
+    // question the receipt could not answer.
+    if let Some(reviewer) = crate::orchestration::parse_approval_reviewer_value(
+        opts_map.get("approval_reviewer"),
+        "agent_loop.approval_reviewer",
+    )? {
+        crate::orchestration::push_approval_reviewer(reviewer);
+        installed.pushed_approval_reviewer = true;
+    }
+
     if let Some(permissions) = permissions::parse_dynamic_permission_policy(
         opts_map.get("permissions"),
         "agent_loop.permissions",
@@ -111,6 +127,9 @@ fn install_session_policies_inner(
 }
 
 pub(super) fn release_session_policies(installed: &InstalledPolicies) {
+    if installed.pushed_approval_reviewer {
+        crate::orchestration::pop_approval_reviewer();
+    }
     if installed.pushed_precheck {
         crate::orchestration::pop_tool_precheck();
     }

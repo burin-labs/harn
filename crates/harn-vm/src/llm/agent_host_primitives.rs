@@ -1117,6 +1117,40 @@ pub(super) async fn host_agent_dispatch_tool_call(
             }
         }
     }
+    // The `AutoReview` seam. A policy `Ask` on a host with no approval bridge,
+    // and a policy `Deny`, are both refusals nobody is present to reconsider.
+    // When the embedder installed a reviewer, give it the decision to make
+    // rather than failing the work for want of an answer.
+    //
+    // Ordering matters: this runs AFTER the policy has decided and the trifecta
+    // gate has had its say, so the reviewer sees the final refusal rather than
+    // a preliminary one, and cannot pre-empt a gate that had not run yet.
+    if crate::orchestration::approval_reviewer_active() {
+        if let Some(decision) = approval.as_mut() {
+            if decision.is_deny() || decision.is_ask() {
+                let review_request = serde_json::json!({
+                    "tool": tool_name,
+                    "arguments": tool_args,
+                    "session_id": session_id,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "risk_labels": decision.risk_labels,
+                    "policy_decision": decision.receipt,
+                });
+                let outcome = crate::orchestration::run_approval_review(
+                    Some(&ctx),
+                    review_request,
+                    &session_id,
+                )
+                .await;
+                if outcome.approved {
+                    decision.grant_by_auto_review(&outcome.rationale);
+                    approval_status = Some("auto_review_granted");
+                }
+            }
+        }
+    }
+
     match approval {
         None => {}
         Some(decision) if decision.is_allow() && decision.has_audit_signal() => {

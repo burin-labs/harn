@@ -170,6 +170,7 @@ struct InstalledPolicies {
     pushed_command: bool,
     pushed_permissions: bool,
     pushed_precheck: bool,
+    pushed_approval_reviewer: bool,
 }
 
 pub(crate) struct SessionPolicyGuard {

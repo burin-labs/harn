@@ -52,6 +52,12 @@ pub use command_policy::*;
 mod tool_precheck;
 pub use tool_precheck::*;
 
+/// The `AutoReview` answerer for an `Ask` with nobody to ask. Mirrors the
+/// precheck seam above, but fails CLOSED: it can only lift a refusal, so an
+/// ambiguity it cannot read must never become a grant.
+mod approval_reviewer;
+pub use approval_reviewer::*;
+
 mod compaction;
 pub use compaction::*;
 
