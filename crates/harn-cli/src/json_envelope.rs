@@ -447,7 +447,8 @@ pub fn catalog() -> Vec<SchemaEntry> {
         SchemaEntry {
             command: "version",
             schema_version: crate::VERSION_SCHEMA_VERSION,
-            description: "CLI build metadata: name, version, description.",
+            description:
+                "CLI build metadata and VM-owned linked-runtime content fingerprint.",
             schema_json: None,
         },
         SchemaEntry {

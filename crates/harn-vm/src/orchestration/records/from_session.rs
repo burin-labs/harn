@@ -47,6 +47,7 @@ use super::types::{
     ExecutionEvidenceRecord, LlmUsageRecord, RunChildRecord, RunRecord, RunTraceSpanRecord,
     ToolCallRecord,
 };
+use super::EXECUTION_EVIDENCE_SCHEMA_VERSION;
 use crate::agent_sessions::event_facts as facts;
 use crate::value::VmError;
 
@@ -345,6 +346,7 @@ async fn child_records(
 #[derive(Default)]
 struct SessionFold {
     run_started_at: Option<EventClock>,
+    execution_id: Option<String>,
     last_observed_at: Option<EventClock>,
     task: Option<String>,
     messages: Vec<ProjectedMessage>,
@@ -721,6 +723,18 @@ fn assemble(
         total_cost: known_cost_usd,
         ..fold.usage
     };
+    let (execution_id, execution_identity_gaps) = match fold.execution_id.clone() {
+        Some(execution_id) => (Some(execution_id), Vec::new()),
+        None => (
+            None,
+            vec![super::types::RunEvidenceGapRecord {
+                component: "execution_identity".to_string(),
+                code: "session_projection_unavailable".to_string(),
+                message: "the session event stream does not carry a VM execution identity"
+                    .to_string(),
+            }],
+        ),
+    };
 
     Ok(RunRecord {
         type_name: "run".to_string(),
@@ -740,14 +754,10 @@ fn assemble(
         transcript: projected_transcript(&meta.id, &fold.messages)?,
         usage: (usage.call_count > 0).then_some(usage),
         evidence: ExecutionEvidenceRecord {
-            schema_version: 1,
+            schema_version: EXECUTION_EVIDENCE_SCHEMA_VERSION,
+            execution_id,
             trace_spans: llm_call_spans(&meta.id, run_clock.started_at_ms, &fold.llm_calls),
-            gaps: vec![super::types::RunEvidenceGapRecord {
-                component: "execution_identity".to_string(),
-                code: "session_projection_unavailable".to_string(),
-                message: "the session event stream does not carry a VM execution identity"
-                    .to_string(),
-            }],
+            gaps: execution_identity_gaps,
             ..ExecutionEvidenceRecord::default()
         },
         tool_recordings: fold.tools,
@@ -841,6 +851,7 @@ impl SessionFold {
             text: event.ts.clone(),
             ms: event.ts_ms,
         });
+        self.execution_id = facts::string_at(&event.payload, facts::EXECUTION_ID);
         self.last_observed_at = self.run_started_at.clone();
     }
 
