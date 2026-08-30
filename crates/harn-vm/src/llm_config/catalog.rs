@@ -32,6 +32,15 @@ pub fn provider_config(name: &str) -> Option<ProviderDef> {
     Some(provider)
 }
 
+/// The posture Harn requests when a caller names none.
+///
+/// Lives here rather than as a Rust literal so the shipped default and an
+/// embedder's override read out of the same merged config; see
+/// [`DataPosture`].
+pub fn data_controls_default_posture() -> DataPosture {
+    effective_config().data_controls_policy.default_posture
+}
+
 pub fn provider_protocol(name: &str) -> Option<String> {
     provider_config(name).and_then(|def| def.protocol)
 }

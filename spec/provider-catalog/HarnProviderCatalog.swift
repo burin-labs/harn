@@ -41,6 +41,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
     private let encodedStreamUsageAccounting: Bool?
     public var streamUsageAccounting: Bool? { encodedStreamUsageAccounting }
+    public let dataControls: HarnProviderDataControls?
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -61,6 +62,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case healthcheck
         case encodedCacheUsageAccounting = "cache_usage_accounting"
         case encodedStreamUsageAccounting = "stream_usage_accounting"
+        case dataControls = "data_controls"
         case protocols
         case features
         case caveats
@@ -69,6 +71,46 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case localRuntime = "local_runtime"
         case latencyP50Ms = "latency_p50_ms"
         case performance
+    }
+}
+
+public struct HarnProviderDataControls: Codable, Sendable, Equatable {
+    public let controlScope: String
+    public let retentionDefault: String
+    public let trainingDefault: String
+    public let checkedOn: String
+    public let sources: [String]
+    public let note: String?
+    public let requestControls: [HarnProviderDataControl]?
+
+    enum CodingKeys: String, CodingKey {
+        case controlScope = "control_scope"
+        case retentionDefault = "retention_default"
+        case trainingDefault = "training_default"
+        case checkedOn = "checked_on"
+        case sources
+        case note
+        case requestControls = "request_controls"
+    }
+}
+
+public struct HarnProviderDataControl: Codable, Sendable, Equatable {
+    public let location: String
+    public let name: String
+    public let valueKind: String
+    public let value: String
+    public let effect: String
+    public let appliesTo: [String]?
+    public let caveat: String?
+
+    enum CodingKeys: String, CodingKey {
+        case location
+        case name
+        case valueKind = "value_kind"
+        case value
+        case effect
+        case appliesTo = "applies_to"
+        case caveat
     }
 }
 
