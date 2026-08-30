@@ -299,19 +299,15 @@ pub(crate) fn validate_tool_entry(entry: &VmValue) -> Result<(), VmError> {
     catalog_entry(entry).map(|_| ())
 }
 
-/// Read one entry's normalized audience decision. Registry construction and
-/// adapter publication perform the full structural validation; model-facing
-/// discovery and dispatch also use this parser so malformed raw registries
-/// fail closed instead of bypassing governance.
+/// Read one entry's normalized audience decision. Registry construction,
+/// adapter publication, model-facing discovery, and dispatch all enter through
+/// the same full normalizer so malformed raw registries fail closed instead of
+/// bypassing governance.
 pub(crate) fn tool_entry_allows_audience(
     entry: &crate::value::DictMap,
     audience: ToolAudience,
 ) -> Result<bool, VmError> {
-    let name = entry
-        .get("name")
-        .map(VmValue::display)
-        .unwrap_or_else(|| "<unnamed>".to_string());
-    governance_spec(entry.get("governance"), &name).map(|policy| policy.allows(audience))
+    normalized_catalog_entry(entry).map(|tool| tool.governance.allows(audience))
 }
 
 fn registry_dict(registry: &VmValue) -> Result<&crate::value::DictMap, VmError> {
@@ -377,6 +373,14 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
             ))
         }
     };
+    normalized_catalog_entry(entry)
+}
+
+/// Normalize one raw entry before any adapter decides whether it may expose
+/// the tool. Discovery and dispatch call the same owner as catalog projection,
+/// so reserved namespaces cannot bypass structural policy through a literal
+/// registry.
+fn normalized_catalog_entry(entry: &crate::value::DictMap) -> Result<ToolCatalogEntry, VmError> {
     let name = required_string(entry, "name", "tool registry entry")?;
     let description = optional_description(entry, &format!("tool {name:?}"))?;
     let title = optional_string(entry, "title", &format!("tool {name:?}"))?;

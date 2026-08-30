@@ -12,6 +12,10 @@ type MutateArgs = {note: string}
 
 type MutateData = {updated: bool}
 
+type ActorArgs = {actor: string}
+
+type NestedActorArgs = {request: ActorArgs}
+
 fn expect_failure(label: string, body: fn(nil) -> unknown, text: string) -> nil {
   const caught = try {
     body(nil)
@@ -95,6 +99,74 @@ pipeline test(harness: Harness, task: unknown) {
       operator_tool<MutateArgs, MutateData>(mutation_spec + {data_schema: schema_of(MutateData)})
     },
     "schema_not_strict",
+  )
+  const actor_args_schema = schema_of(ActorArgs)
+  const strict_actor_args_schema = schema_refine(
+    actor_args_schema,
+    schema_strict_object(actor_args_schema.properties),
+  )
+  const nested_actor_args_schema = schema_of(NestedActorArgs)
+  const strict_nested_actor_args_schema = schema_refine(
+    nested_actor_args_schema,
+    schema_strict_object(nested_actor_args_schema.properties),
+  )
+  expect_failure(
+    "args.actor",
+    { _ ->
+      operator_tool<ActorArgs, MutateData>(
+        {
+          operation: "account.status",
+          description: "Read status.",
+          audiences: ["cli"],
+          mode: "read",
+          input_classification: "id_only",
+          output_classification: "id_only",
+          args_schema: strict_actor_args_schema,
+          data_schema: data_schema,
+          handler: { _ ->
+            {
+              schema: "harn.operator-result.v1",
+              operation: "account.status",
+              outcome: "read",
+              replayed: false,
+              data_classification: "id_only",
+              data: {updated: false},
+              receipt_id: "receipt-reserved-actor",
+            }
+          },
+        },
+      )
+    },
+    "reserved_args_property",
+  )
+  expect_failure(
+    "nested args.actor",
+    { _ ->
+      operator_tool<NestedActorArgs, MutateData>(
+        {
+          operation: "account.status",
+          description: "Read status.",
+          audiences: ["cli"],
+          mode: "read",
+          input_classification: "id_only",
+          output_classification: "id_only",
+          args_schema: strict_nested_actor_args_schema,
+          data_schema: data_schema,
+          handler: { _ ->
+            {
+              schema: "harn.operator-result.v1",
+              operation: "account.status",
+              outcome: "read",
+              replayed: false,
+              data_classification: "id_only",
+              data: {updated: false},
+              receipt_id: "receipt-reserved-nested-actor",
+            }
+          },
+        },
+      )
+    },
+    "reserved_args_property",
   )
   const valid: OperatorMutateInvocation<MutateArgs> = {
     schema: "harn.operator-invocation.v1",

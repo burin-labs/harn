@@ -1505,7 +1505,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn forged_call_cannot_dispatch_a_tool_excluded_from_the_agent() {
+    async fn forged_literal_operator_cannot_dispatch_to_the_agent() {
         let bridge_called = Arc::new(AtomicBool::new(false));
         let writer_called = Arc::clone(&bridge_called);
         let bridge = Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
@@ -1520,7 +1520,7 @@ mod tests {
         let mut governance = crate::value::DictMap::new();
         governance.insert(
             crate::value::intern_key("audiences"),
-            VmValue::List(Arc::new(vec![VmValue::String("cli".into())])),
+            VmValue::List(Arc::new(vec![VmValue::String("agent".into())])),
         );
         let mut entry = crate::value::DictMap::new();
         entry.put_str("executor", "host_bridge");
@@ -1529,10 +1529,10 @@ mod tests {
             crate::value::intern_key("governance"),
             VmValue::dict(governance),
         );
-        let tools = tools_dict(vec![("operator_inspect", entry)]);
+        let tools = tools_dict(vec![("operator.inspect", entry)]);
 
         let outcome = dispatch_tool_execution(
-            "operator_inspect",
+            "operator.inspect",
             &serde_json::json!({}),
             Some(&tools),
             Some(&bridge),
@@ -1545,6 +1545,37 @@ mod tests {
         assert!(outcome.executor.is_none());
         let error = outcome.result.unwrap_err().to_string();
         assert!(error.contains("not exposed to the agent/model adapter"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn literal_non_operator_keeps_compatibility_dispatch() {
+        let bridge_called = Arc::new(AtomicBool::new(false));
+        let writer_called = Arc::clone(&bridge_called);
+        let bridge = Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(move |_| {
+                writer_called.store(true, std::sync::atomic::Ordering::SeqCst);
+                Err("expected compatibility dispatch".to_string())
+            }),
+            1,
+        ));
+        let mut entry = crate::value::DictMap::new();
+        entry.put_str("executor", "host_bridge");
+        let tools = tools_dict(vec![("legacy.inspect", entry)]);
+
+        let outcome = dispatch_tool_execution(
+            "legacy.inspect",
+            &serde_json::json!({}),
+            Some(&tools),
+            Some(&bridge),
+            0,
+            0,
+        )
+        .await;
+
+        assert!(bridge_called.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(outcome.executor, Some(ToolExecutor::HostBridge));
     }
 
     #[tokio::test(flavor = "current_thread")]

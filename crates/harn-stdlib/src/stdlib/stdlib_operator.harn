@@ -189,6 +189,37 @@ fn __require_strict_schema(schema: dict, owner: string) -> nil {
   }
 }
 
+/**
+ * Operator arguments may contain arbitrary domain fields, but authenticated
+ * actor identity has one owner: trusted host context. Walk the complete schema
+ * tree so a nested object or referenced-definition branch cannot reintroduce
+ * an exact `actor` property.
+ */
+fn __schema_declares_actor(value: unknown) -> bool {
+  if type_of(value) == "list" {
+    const branches: any = value
+    for branch in branches {
+      if __schema_declares_actor(branch) {
+        return true
+      }
+    }
+    return false
+  }
+  if type_of(value) != "dict" {
+    return false
+  }
+  const node: any = value
+  if type_of(node.properties) == "dict" && contains(node.properties.keys(), "actor") {
+    return true
+  }
+  for key in node.keys() {
+    if __schema_declares_actor(node[key]) {
+      return true
+    }
+  }
+  return false
+}
+
 fn __invocation_schema<Args>(
   operation: string,
   mode: OperatorMode,
@@ -412,6 +443,12 @@ pub fn operator_tool<Args, Data>(spec: OperatorToolSpec<Args, Data>) -> ToolDefi
   __validate_audiences(spec.audiences)
   __require_strict_schema(spec.args_schema, "args_schema")
   __require_strict_schema(spec.data_schema, "data_schema")
+  if __schema_declares_actor(spec.args_schema) {
+    __operator_error(
+      "reserved_args_property",
+      "args_schema cannot declare actor; trusted host context owns authenticated identity",
+    )
+  }
   if spec.input_classification == "personal" && spec.mode != "reveal" {
     __operator_error("personal_input_mode", "personal input is allowed only for reveal tools")
   }

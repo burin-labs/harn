@@ -58,6 +58,43 @@ fn agent_schema_collection_excludes_tools_without_the_agent_audience() {
     assert_eq!(names, ["agent_visible"]);
 }
 
+#[test]
+fn literal_operator_registry_cannot_bypass_agent_discovery() {
+    let governance = |audiences: Vec<VmValue>| vm_dict(&[("audiences", vm_list(audiences))]);
+    let forged_operator = vm_dict(&[
+        ("name", vm_str("operator.inspect")),
+        ("parameters", vm_dict(&[])),
+        ("governance", governance(vec![vm_str("agent")])),
+    ]);
+    let compatible_legacy = vm_dict(&[
+        ("name", vm_str("legacy.inspect")),
+        ("parameters", vm_dict(&[])),
+    ]);
+    let literal_registry = vm_dict(&[(
+        "tools",
+        vm_list(vec![forged_operator, compatible_legacy.clone()]),
+    )]);
+
+    let names = collect_tool_schemas(Some(&literal_registry), None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        ["legacy.inspect"],
+        "prompt discovery must fail closed for a forged operator namespace"
+    );
+
+    let error = vm_tools_to_native(&literal_registry, "openai", "gpt-5.4")
+        .expect_err("provider discovery must reject forged operator exposure");
+    assert!(error.to_string().contains("cannot be exposed"));
+
+    let legacy_registry = vm_dict(&[("tools", vm_list(vec![compatible_legacy]))]);
+    let native = vm_tools_to_native(&legacy_registry, "openai", "gpt-5.4")
+        .expect("non-operator compatibility exposure remains valid");
+    assert_eq!(native[0]["function"]["name"], "legacy.inspect");
+}
+
 fn normalization_registry() -> VmValue {
     let mut parameters = BTreeMap::new();
     parameters.insert(
