@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::chunk::{Chunk, Op};
 
 pub const FLIGHT_RECORDING_SCHEMA_VERSION: u32 = 1;
+pub const FLIGHT_RECORDING_FORMAT: &str = "harn.flight.v1+json";
 pub const DEFAULT_MAX_EVENTS: usize = 250_000;
 pub const DEFAULT_RETAIN_FILES: usize = 16;
 
@@ -237,7 +238,7 @@ pub fn persist_recording(
     Ok(FlightRecordingArtifact {
         schema_version: recording.schema_version,
         execution_id: recording.execution_id.clone(),
-        format: "harn.flight.v1+json".to_string(),
+        format: FLIGHT_RECORDING_FORMAT.to_string(),
         path: path.to_string_lossy().into_owned(),
         content_hash: format!("blake3:{}", blake3::hash(&bytes).to_hex()),
         byte_length: bytes.len() as u64,
