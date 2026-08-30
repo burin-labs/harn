@@ -43,7 +43,7 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task: unknown) {
         tool_format: "text",
         loop_until_done: true,
         done_sentinel: "##DONE##",
-        done_judge: nil,
+        turn_end_condition: nil,
         max_iterations: 3,
       }
       const captured = agent_capture_events(
@@ -105,7 +105,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(
         tool_format: "text",
         loop_until_done: true,
         done_sentinel: "##DONE##",
-        done_judge: nil,
+        turn_end_condition: nil,
         max_iterations: 5,
         stall_diagnostics: {
           enabled: true,

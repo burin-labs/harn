@@ -206,10 +206,14 @@ pub fn __validate_judge_cadence(label: string, value: dict?) {
     + to_string(when)
 }
 
-pub fn __validate_done_judge_cadence(value: dict | bool | nil) {
+pub fn __validate_turn_end_judge_cadence(value: dict | bool | nil) {
   if type_of(value) == "dict" {
-    __validate_optional_nonnegative_int("done_judge", "max_invocations", value?.max_invocations)
-    __validate_judge_cadence("done_judge.cadence", value?.cadence)
+    __validate_optional_nonnegative_int(
+      "turn_end_condition",
+      "max_invocations",
+      value?.max_invocations,
+    )
+    __validate_judge_cadence("turn_end_condition.cadence", value?.cadence)
   }
 }
 
@@ -624,25 +628,29 @@ pub fn __validate_agent_loop_completion_options(opts: dict) {
       )
     }
   }
-  if __has_key(opts, "done_judge") {
-    __validate_judge_dict_or_bool("done_judge", opts.done_judge)
-    __validate_removed_judge_options("done_judge", opts.done_judge)
-    __validate_done_judge_cadence(opts.done_judge)
-    if type_of(opts.done_judge) == "dict" {
+  if __has_key(opts, "turn_end_condition") {
+    __validate_judge_dict_or_bool("turn_end_condition", opts.turn_end_condition)
+    __validate_removed_judge_options("turn_end_condition", opts.turn_end_condition)
+    __validate_turn_end_judge_cadence(opts.turn_end_condition)
+    if type_of(opts.turn_end_condition) == "dict" {
       __validate_completion_requirement_contract(
-        "done_judge",
-        opts.done_judge?.requirement_contract,
+        "turn_end_condition",
+        opts.turn_end_condition?.requirement_contract,
       )
-      __validate_optional_positive_int("done_judge", "timeout_ms", opts.done_judge?.timeout_ms)
       __validate_optional_positive_int(
-        "done_judge",
+        "turn_end_condition",
+        "timeout_ms",
+        opts.turn_end_condition?.timeout_ms,
+      )
+      __validate_optional_positive_int(
+        "turn_end_condition",
         "operation_timeout_ms",
-        opts.done_judge?.operation_timeout_ms,
+        opts.turn_end_condition?.operation_timeout_ms,
       )
       __validate_optional_nonnegative_int(
-        "done_judge",
+        "turn_end_condition",
         "deadline_reserve_ms",
-        opts.done_judge?.deadline_reserve_ms,
+        opts.turn_end_condition?.deadline_reserve_ms,
       )
     }
   }

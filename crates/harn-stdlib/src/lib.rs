@@ -306,6 +306,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/daemon" => "stdlib/agent/daemon.harn",
     "agent/preflight" => "stdlib/agent/preflight.harn",
     "agent/postturn" => "stdlib/agent/postturn.harn",
+    "agent/turn_end" => "stdlib/agent/turn_end.harn",
     "agent/tool_surface" => "stdlib/agent/tool_surface.harn",
     "agent/stance" => "stdlib/agent/stance.harn",
     "agent/lanes" => "stdlib/agent/lanes.harn",

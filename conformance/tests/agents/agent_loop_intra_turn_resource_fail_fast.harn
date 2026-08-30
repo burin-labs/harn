@@ -454,7 +454,7 @@ fn run_scripted(harness: Harness, calls: any, opts: dict = {}) {
             tool_format: "native",
             loop_until_done: true,
             max_iterations: 3,
-            done_judge: nil,
+            turn_end_condition: nil,
             session_id: session,
             tool_caller: { envelope, next ->
               const result = next(envelope)

@@ -1,9 +1,9 @@
-/* Verifies the top-level `done_judge.max_invocations` terminal cap:
-   - `done_judge.cadence.max_invocations` remains a cadence gate; this fixture
+/* Verifies the top-level `turn_end_condition.max_invocations` terminal cap:
+   - `turn_end_condition.cadence.max_invocations` remains a cadence gate; this fixture
      covers the separate top-level veto-loop cap.
    - when the judge repeatedly vetoes, the loop stops with status
-     `completion_unverified` and stop_reason `done_judge_cap_reached`.
-   - the run record carries structured `done_judge` counters.
+     `completion_unverified` and stop_reason `turn_end_judge_cap_reached`.
+   - the run record carries structured `turn_end_condition` counters.
    - `max_invocations: 0` disables the terminal cap and leaves the existing
      `max_verify_attempts` exhaustion behavior in charge. */
 import { agent_capture_events } from "std/agent/events"
@@ -25,13 +25,13 @@ fn run_capped(harness: Harness) {
       llm_text("Round three. ##DONE##"),
     ],
     { ->
-      const session_id = "done-judge-cap-" + harness.random.uuid()
+      const session_id = "turn-end-judge-cap-" + harness.random.uuid()
       const captured = agent_capture_events(
         harness.agent,
         session_id,
         fn() { return agent_loop(
           harness,
-          "Done judge keeps vetoing.",
+          "Turn-end judge keeps vetoing.",
           nil,
           {
             provider: "mock",
@@ -40,17 +40,17 @@ fn run_capped(harness: Harness) {
             max_nudges: 10,
             session_id: session_id,
             done_sentinel: "##DONE##",
-            done_judge: {max_invocations: 2},
+            turn_end_condition: {max_invocations: 2},
           },
         ) },
       )
       const result = captured.result
       harness.stdio.println("capped.status=${result.status}")
       harness.stdio.println("capped.stop_reason=${result.stop_reason}")
-      harness.stdio.println("capped.invocations=${result.done_judge.invocations}")
-      harness.stdio.println("capped.vetoes=${result.done_judge.vetoes}")
-      harness.stdio.println("capped.max_invocations=${result.done_judge.max_invocations}")
-      harness.stdio.println("capped.cap_reached=${result.done_judge.cap_reached}")
+      harness.stdio.println("capped.invocations=${result.turn_end_condition.invocations}")
+      harness.stdio.println("capped.vetoes=${result.turn_end_condition.vetoes}")
+      harness.stdio.println("capped.max_invocations=${result.turn_end_condition.max_invocations}")
+      harness.stdio.println("capped.cap_reached=${result.turn_end_condition.cap_reached}")
       harness.stdio.println(
         "capped.judge_decisions=${len(events_of(captured.events, "judge_decision"))}",
       )
@@ -67,10 +67,10 @@ fn run_approved(harness: Harness) {
       llm_text("{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}"),
     ],
     { ->
-      const session_id = "done-judge-approve-" + harness.random.uuid()
+      const session_id = "turn-end-judge-approve-" + harness.random.uuid()
       const result = agent_loop(
         harness,
-        "Done judge approves on the first proposal.",
+        "Turn-end judge approves on the first proposal.",
         nil,
         {
           provider: "mock",
@@ -79,14 +79,14 @@ fn run_approved(harness: Harness) {
           max_nudges: 10,
           session_id: session_id,
           done_sentinel: "##DONE##",
-          done_judge: {max_invocations: 2},
+          turn_end_condition: {max_invocations: 2},
         },
       )
       harness.stdio.println("approved.status=${result.status}")
-      harness.stdio.println("approved.invocations=${result.done_judge.invocations}")
-      harness.stdio.println("approved.vetoes=${result.done_judge.vetoes}")
-      harness.stdio.println("approved.max_invocations=${result.done_judge.max_invocations}")
-      harness.stdio.println("approved.cap_reached=${result.done_judge.cap_reached}")
+      harness.stdio.println("approved.invocations=${result.turn_end_condition.invocations}")
+      harness.stdio.println("approved.vetoes=${result.turn_end_condition.vetoes}")
+      harness.stdio.println("approved.max_invocations=${result.turn_end_condition.max_invocations}")
+      harness.stdio.println("approved.cap_reached=${result.turn_end_condition.cap_reached}")
       harness.stdio.println("approved.calls=${len(harness.llm.mock_calls())}")
     },
   )
@@ -103,7 +103,7 @@ fn run_cap_disabled(harness: Harness) {
       llm_text("Try three. ##DONE##"),
     ],
     { ->
-      const session_id = "done-judge-disabled-" + harness.random.uuid()
+      const session_id = "turn-end-judge-disabled-" + harness.random.uuid()
       const captured = agent_capture_events(
         harness.agent,
         session_id,
@@ -119,15 +119,15 @@ fn run_cap_disabled(harness: Harness) {
             session_id: session_id,
             done_sentinel: "##DONE##",
             max_verify_attempts: 2,
-            done_judge: {max_invocations: 0},
+            turn_end_condition: {max_invocations: 0},
           },
         ) },
       )
       const result = captured.result
       harness.stdio.println("disabled.status=${result.status}")
       harness.stdio.println("disabled.stop_reason=${result.stop_reason}")
-      harness.stdio.println("disabled.invocations=${result.done_judge.invocations}")
-      harness.stdio.println("disabled.cap_reached=${result.done_judge.cap_reached}")
+      harness.stdio.println("disabled.invocations=${result.turn_end_condition.invocations}")
+      harness.stdio.println("disabled.cap_reached=${result.turn_end_condition.cap_reached}")
       harness.stdio.println(
         "disabled.judge_decisions=${len(events_of(captured.events, "judge_decision"))}",
       )

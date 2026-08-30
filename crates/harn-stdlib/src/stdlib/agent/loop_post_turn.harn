@@ -24,11 +24,11 @@ import {
   __apply_post_turn_options,
   __completion_judge_hit,
   __completion_stop_reason,
-  __done_judge_hit,
   __loop_progress_nudge_text,
   __next_progress_count,
   __next_text_only_count,
   __sync_tool_search_state,
+  __turn_end_judge_hit,
   __turn_made_edit,
   agent_stage,
 } from "std/agent/loop_turn_options"
@@ -99,8 +99,8 @@ pub type AgentLoopPostTurnState = {
   budget_decisions: list<AgentLoopBudgetDecision>,
   consecutive_text_only: int,
   current_max: int,
-  done_judge_invocations: int,
-  done_judge_vetoes: int,
+  turn_end_judge_invocations: int,
+  turn_end_judge_vetoes: int,
   extensions_used: int,
   feedback_history: dict,
   final_status: string,
@@ -110,6 +110,7 @@ pub type AgentLoopPostTurnState = {
   stall_state: AgentStallState,
   stop_reason: string?,
   terminal_write_unverified: bool,
+  turns_since_loop_progress: int,
   turns_since_progress: int,
   verify_attempts: int,
   verify_completion_judge_invocations: int,
@@ -291,6 +292,7 @@ pub fn agent_loop_post_turn_transition(
       missing_required_tools: missing_required_for_loop,
       completion_proposed: false,
       verdict: nil,
+      progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(
         harness.agent,
@@ -307,8 +309,8 @@ pub fn agent_loop_post_turn_transition(
       _session_successful_tools: context.successful_tools_seen,
       _session_rejected_tools: context.rejected_tools_seen,
       _consecutive_text_only: next.consecutive_text_only,
-      _done_judge_invocations: next.done_judge_invocations,
-      _done_judge_loop_state: cadence_loop_state,
+      _turn_end_judge_invocations: next.turn_end_judge_invocations,
+      _turn_end_judge_loop_state: cadence_loop_state,
       _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
         || context.had_parse_errors,
     }
@@ -350,8 +352,8 @@ pub fn agent_loop_post_turn_transition(
       session,
       context.turn_opts
         + {
-          _done_judge_due: false,
-          _done_judge_invocations: next.done_judge_invocations,
+          _turn_end_judge_due: false,
+          _turn_end_judge_invocations: next.turn_end_judge_invocations,
           _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
           _feedback_history: next.feedback_history,
         },
@@ -407,8 +409,8 @@ pub fn agent_loop_post_turn_transition(
         session,
         context.turn_opts
           + {
-            _done_judge_due: outcome?.done_judge_due ?? true,
-            _done_judge_invocations: next.done_judge_invocations,
+            _turn_end_judge_due: outcome?.turn_end_judge_due ?? true,
+            _turn_end_judge_invocations: next.turn_end_judge_invocations,
             _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
             _feedback_history: next.feedback_history,
           },
@@ -421,7 +423,8 @@ pub fn agent_loop_post_turn_transition(
       next = next
         + {
           feedback_history: verdict.feedback_history ?? next.feedback_history,
-          done_judge_invocations: next.done_judge_invocations + __done_judge_hit(verdict),
+          turn_end_judge_invocations: next.turn_end_judge_invocations
+            + __turn_end_judge_hit(verdict),
           verify_completion_judge_invocations: next.verify_completion_judge_invocations
             + __completion_judge_hit(verdict),
         }
@@ -439,7 +442,7 @@ pub fn agent_loop_post_turn_transition(
         next = next
           + {
             verify_attempts: next.verify_attempts + 1,
-            done_judge_vetoes: next.done_judge_vetoes + __done_judge_hit(verdict),
+            turn_end_judge_vetoes: next.turn_end_judge_vetoes + __turn_end_judge_hit(verdict),
             verify_completion_judge_vetoes: next.verify_completion_judge_vetoes
               + __completion_judge_hit(verdict),
           }
@@ -568,6 +571,7 @@ pub fn agent_loop_post_turn_transition(
       verdict: verdict_record,
       progress_no_net_advance: loop_no_net_progress,
       progress_no_information_gain: context.completed_no_information_gain,
+      progress_turns_since_progressing: next.turns_since_loop_progress,
     }
       + __agent_loop_state_budget_fields(
         harness.agent,
@@ -579,6 +583,10 @@ pub fn agent_loop_post_turn_transition(
         context.consecutive_failure_count,
       ),
   )
+  // `agent_loop_snapshot_state` returns the window counter already advanced for
+  // this turn; store it back so the next boundary sees the real streak.
+  next = next
+    + {turns_since_loop_progress: loop_state.progress?.turns_since_progressing ?? 0}
   const command = agent_loop_control_invoke(next.opts, context.budget, loop_state)
   const applied = agent_loop_apply_command(
     harness.agent,

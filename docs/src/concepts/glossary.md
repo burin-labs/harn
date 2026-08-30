@@ -268,7 +268,7 @@ conversational-unit noun.
 |---|---|
 | `harness.llm.call`, `harness.llm.call_structured`, `harness.llm.completion` | [LLM calls](../llm/llm_call.md) |
 | `TokenRef`, `tokenize`, `detokenize`, `logit_bias` | [Exact token references](../llm/tokenizer.md) |
-| `agent_loop`, `AgentSpec`, profiles, `done_judge` | [Agent loops](../llm/agent_loop.md) |
+| `agent_loop`, `AgentSpec`, profiles, `turn_end_condition` | [Agent loops](../llm/agent_loop.md) |
 | Tools, Tool Vault, MCP server tools | [LLM tools](../llm/tools.md) |
 | Sessions, fork, reset, compact, snapshot | [Sessions](../sessions.md) |
 | Transcripts, events, assets | [Transcript architecture](../transcript-architecture.md) |

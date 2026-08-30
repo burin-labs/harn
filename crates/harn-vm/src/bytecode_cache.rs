@@ -297,7 +297,7 @@ impl CacheKey {
     /// Every input to a stdlib module's imported interface is already part of
     /// this key: its own bytes as `content_hash`, and the rest of the closure
     /// it can import as the embedded stdlib table, whose
-    /// [`embedded_stdlib_digest`] every module key's context hash folds in. The
+    /// embedded stdlib digest every module key's context hash folds in. The
     /// interface digest adds no discriminating power here, while deriving it
     /// costs a full lex and parse in front of the lookup that exists to avoid
     /// one. User files keep the real digest: their dependencies are mutable
@@ -1135,26 +1135,6 @@ fn hex(bytes: &[u8]) -> String {
 ///
 /// Cached in a `OnceLock` because `STDLIB_SOURCES` is a static `const`
 /// slice — the digest is identical for the lifetime of the process.
-fn embedded_stdlib_digest() -> &'static [u8; 32] {
-    use std::sync::OnceLock;
-    static DIGEST: OnceLock<[u8; 32]> = OnceLock::new();
-    DIGEST.get_or_init(|| {
-        let mut entries: Vec<(&'static str, &'static str)> = harn_stdlib::STDLIB_SOURCES
-            .iter()
-            .map(|src| (src.module, src.source))
-            .collect();
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        let mut hasher = Sha256::new();
-        for (module, source) in entries {
-            hasher.update(module.as_bytes());
-            hasher.update(b"\0");
-            hasher.update(source.as_bytes());
-            hasher.update(b"\0");
-        }
-        hasher.finalize().into()
-    })
-}
-
 /// Stable compilation context for a source-local module artifact.
 ///
 /// Module compilation does not embed user dependency bodies. Artifact-local
@@ -1181,7 +1161,7 @@ fn module_compilation_context_hash_fingerprinted(
     let mut hasher = Sha256::new();
     hasher.update(b"module-artifact-source-local-v4\0");
     hasher.update(b"stdlib-digest\0");
-    hasher.update(embedded_stdlib_digest());
+    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
     hasher.update(b"\0codegen-fingerprint\0");
     hasher.update(codegen_fingerprint.as_bytes());
     hasher.update(b"\0imported-interface\0");
@@ -1452,7 +1432,7 @@ fn walk_import_graph_fingerprinted(
 
 fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint: &str) {
     hasher.update(b"stdlib-digest\0");
-    hasher.update(embedded_stdlib_digest());
+    hasher.update(crate::runtime_content::embedded_stdlib_digest_bytes());
     hasher.update(b"\0");
     // Fold in the compiler's code-generation fingerprint so a compiler change
     // that alters emitted bytecode for unchanged source busts stale cache

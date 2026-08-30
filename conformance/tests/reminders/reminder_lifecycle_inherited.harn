@@ -19,7 +19,7 @@ pipeline main(harness: Harness) {
           model: "mock",
           session_id: child,
           max_iterations: 1,
-          done_judge: nil,
+          turn_end_condition: nil,
           reminder_propagation: [
             {
               id: "inherited-reminder-1",

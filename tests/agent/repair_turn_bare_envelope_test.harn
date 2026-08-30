@@ -92,7 +92,7 @@ fn _run_bare_envelope_turn(
         tool_format: "json",
         loop_until_done: true,
         done_sentinel: "##DONE##",
-        done_judge: nil,
+        turn_end_condition: nil,
         max_iterations: 3,
         llm_caller: mock_llm,
         missing_tool_call_recovery: {output_contract: output_contract},

@@ -1,0 +1,240 @@
+/**
+ * The turn-end condition: the product loop's bounded terminal check.
+ *
+ * One owner for the question "may this turn end?". The loop proposes
+ * completion; this module decides whether the bounded check is due, whether it
+ * is still under its caps, and how one invocation is counted. The LLM-backed
+ * variant is the turn-end judge, invoked through `std/agent/judge`; everything
+ * that decides *when* it runs and *how often* it may run lives here.
+ *
+ * This is product machinery, not measurement. It has no opinion about how good
+ * an agent is, and it must not acquire one: measurement surfaces observe
+ * finished sessions from outside the loop and may not reach into this policy or
+ * lend it their vocabulary. `scripts/check_turn_end_boundary.harn` enforces
+ * both directions of that seam and names the banned vocabulary.
+ *
+ * Policy in, verdict out: every entry point takes resolved options or a
+ * config and returns a plain typed answer. Caps are typed fields with
+ * defaults, and an undecidable cadence answers `false` (do not end the turn)
+ * so the loop keeps working rather than finishing on a gap.
+ */
+import { __normalize_judge_config } from "std/agent/options_formats"
+import { JudgeConfig } from "std/agent/options_types"
+
+/** The three shapes the `turn_end_condition` option accepts. */
+pub type TurnEndConditionConfig = bool | JudgeConfig | nil
+
+/**
+ * agent_has_turn_end_condition.
+ *
+ * Does this run have a turn-end condition that can actually run? Every
+ * consumer asking that question must ask here rather than testing
+ * `turn_end_condition != nil` itself: the raw test answers `true` for
+ * `turn_end_condition: false`, which is a different question, and two notions
+ * of presence in one loop is how a check ends up governing behavior for a run
+ * that disabled it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_has_turn_end_condition(opts?.turn_end_condition)
+ */
+pub fn agent_has_turn_end_condition(judge_cfg: JudgeConfig?) -> bool {
+  return __normalize_judge_config(judge_cfg) != nil
+}
+
+/**
+ * __turn_end_condition_config.
+ *
+ * Normalized turn-end config for a resolved options dict, or nil when the run
+ * configured none.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __turn_end_condition_config(opts)
+ */
+pub fn __turn_end_condition_config(opts: dict) -> JudgeConfig? {
+  return __normalize_judge_config(opts?.turn_end_condition)
+}
+
+fn __turn_end_judge_cadence(opts: dict) {
+  const judge = __turn_end_condition_config(opts)
+  if judge == nil {
+    return nil
+  }
+  const cadence = judge?.cadence
+  if type_of(cadence) == "dict" {
+    return cadence
+  }
+  return {}
+}
+
+fn __turn_end_judge_loop_state(opts: dict, completion_proposed: bool) {
+  const state = opts?._turn_end_judge_loop_state ?? {}
+  const base_completion = state?.completion ?? {}
+  const completion = base_completion + {proposed: completion_proposed}
+  return state + {completion: completion}
+}
+
+fn __turn_end_judge_when_due(opts: dict, cadence: dict, state: dict) {
+  const when = cadence?.when ?? "always"
+  if type_of(when) == "closure" {
+    return when(state) ? true : false
+  }
+  if when == "always" {
+    return true
+  }
+  if when == "stalled" {
+    const trigger = opts?._turn_end_judge_trigger ?? ""
+    const stalled = state?.stall?.triggered ?? false
+    return trigger == "stalled" || stalled
+  }
+  return false
+}
+
+fn __turn_end_judge_every_due(cadence: dict, turn_number: any) {
+  const every = cadence?.every
+  if every == nil {
+    return true
+  }
+  return turn_number % every == 0
+}
+
+fn __turn_end_judge_past_warmup(cadence: dict, turn_number: any) {
+  const min_iterations = cadence?.min_iterations_before_first
+  if min_iterations == nil {
+    return true
+  }
+  return turn_number > min_iterations
+}
+
+fn __turn_end_judge_under_cap(opts: dict, cadence: dict) {
+  const max_invocations = cadence?.max_invocations
+  if max_invocations == nil {
+    return true
+  }
+  const invocations = opts?._turn_end_judge_invocations ?? 0
+  return invocations < max_invocations
+}
+
+/**
+ * __turn_end_judge_due.
+ *
+ * Is the bounded turn-end judge due at this boundary? False when the run
+ * configured no condition, when the cadence has not come around, or when the
+ * cadence cap is spent.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __turn_end_judge_due(opts, payload, true)
+ */
+pub fn __turn_end_judge_due(opts: dict, payload: dict, completion_proposed: bool) -> bool {
+  const cadence = __turn_end_judge_cadence(opts)
+  if cadence == nil {
+    return false
+  }
+  const raw_iteration = payload?.iteration ?? 0
+  const turn_number = raw_iteration + 1
+  const state = __turn_end_judge_loop_state(opts, completion_proposed)
+  return __turn_end_judge_under_cap(opts, cadence)
+    && __turn_end_judge_past_warmup(cadence, turn_number)
+    && __turn_end_judge_every_due(cadence, turn_number)
+    && __turn_end_judge_when_due(opts, cadence, state)
+}
+
+/**
+ * agent_turn_end_judge_cap.
+ *
+ * Resolved terminal veto cap for a `turn_end_condition` config. Unlike
+ * `turn_end_condition.cadence.max_invocations`, this is a terminal veto-loop
+ * cap: the judge may fire up to the cap, then the loop finalizes instead of
+ * silently continuing until the iteration budget expires. Returns nil when the
+ * cap is not configured or is disabled with 0.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_turn_end_judge_cap(opts?.turn_end_condition)
+ */
+pub fn agent_turn_end_judge_cap(judge_cfg: TurnEndConditionConfig) -> int? {
+  if type_of(judge_cfg) != "dict" {
+    return nil
+  }
+  const cap = judge_cfg?.max_invocations
+  if cap == nil || cap <= 0 {
+    return nil
+  }
+  return cap
+}
+
+/**
+ * __agent_turn_end_judge_stall_cadence.
+ *
+ * The stall-gated cadence for this run, or nil when the condition is not
+ * gated on `when: "stalled"`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __agent_turn_end_judge_stall_cadence(opts)
+ */
+pub fn __agent_turn_end_judge_stall_cadence(opts: dict) -> dict? {
+  const judge = opts?.turn_end_condition
+  if type_of(judge) != "dict" {
+    return nil
+  }
+  const cadence = judge?.cadence
+  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
+    return nil
+  }
+  return cadence
+}
+
+/**
+ * agent_stall_turn_end_judge_due decides whether the stall turn-end judge is due.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stall_turn_end_judge_due(opts, 0, 3)
+ */
+pub fn agent_stall_turn_end_judge_due(opts: dict, invocations: int, turn_number: int) -> bool {
+  const cadence = __agent_turn_end_judge_stall_cadence(opts)
+  if cadence == nil {
+    return false
+  }
+  const max_invocations = cadence?.max_invocations
+  if max_invocations != nil && invocations >= max_invocations {
+    return false
+  }
+  const min_iterations = cadence?.min_iterations_before_first
+  if min_iterations != nil && turn_number <= min_iterations {
+    return false
+  }
+  const every = cadence?.every
+  if every != nil && turn_number % every != 0 {
+    return false
+  }
+  return true
+}
+
+/**
+ * __turn_end_judge_hit.
+ *
+ * One if this completion receipt records a turn-end judge invocation, else
+ * zero. Invocation accounting reads the receipt rather than inferring from a
+ * verdict, so a check that never ran is never counted.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __turn_end_judge_hit(verdict)
+ */
+pub fn __turn_end_judge_hit(verdict: dict) -> int {
+  if verdict?.receipt?.invoked?.turn_end_condition ?? false {
+    return 1
+  }
+  return 0
+}

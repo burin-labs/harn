@@ -48,7 +48,7 @@ pipeline main(harness: Harness) {
             tools: run_tools(),
             tool_format: "native",
             loop_until_done: true,
-            done_judge: false,
+            turn_end_condition: false,
             max_iterations: 2,
             session_id: session,
           },

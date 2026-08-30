@@ -147,7 +147,7 @@ fn base_opts(clock: HarnessClock) {{
     model: "overlap-model",
     llm_caller: make_caller(clock),
     loop_until_done: true,
-    done_judge: false,
+    turn_end_condition: false,
     max_iterations: 1,
     final_wrapup: false,
     tool_format: "text",

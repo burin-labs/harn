@@ -14,7 +14,7 @@ pipeline default(harness: Harness) {
         harness,
         "Hi, how are you?",
         nil,
-        {provider: "mock", max_iterations: 1, done_judge: false},
+        {provider: "mock", max_iterations: 1, turn_end_condition: false},
       )
       harness.stdio.println(result.status)
       harness.stdio.println(result.visible_text)

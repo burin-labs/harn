@@ -38,7 +38,7 @@ iteration:
 | `pre_compact` | Just before `agent_autocompact_if_needed` | — | yes |
 | `post_compact` | Just after `agent_autocompact_if_needed` | — | yes |
 | `pre_tool_dispatch` | After `__invoke_llm` returns, before `__dispatch_tool_calls` | `interrupt_immediate` only | no |
-| `iteration_end` | Stalled-done-judge "done" path, before the loop falls through to terminal | `interrupt_immediate`, `finish_step` | no |
+| `iteration_end` | Stalled-turn-end-judge "done" path, before the loop falls through to terminal | `interrupt_immediate`, `finish_step` | no |
 | `post_tool_dispatch` | After every successful turn dispatch | `interrupt_immediate`, `finish_step` | no |
 | `daemon_idle_pre` | Daemon idle wait, before sleep | `interrupt_immediate` only | no |
 | `daemon_idle_post` | Daemon idle wait, after sleep | `interrupt_immediate` only | no |

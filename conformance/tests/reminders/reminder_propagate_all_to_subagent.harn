@@ -23,7 +23,7 @@ fn parent_tools(harness: Harness, child_session: string) {
             tools: child_tools(),
             tool_format: "native",
             max_iterations: 1,
-            done_judge: nil,
+            turn_end_condition: nil,
           },
         )
       },
@@ -64,7 +64,7 @@ pipeline main(harness: Harness) {
           tools: parent_tools(harness, child),
           tool_format: "native",
           max_iterations: 2,
-          done_judge: nil,
+          turn_end_condition: nil,
         },
       )
       const child_reminders = transcript_events_by_kind(

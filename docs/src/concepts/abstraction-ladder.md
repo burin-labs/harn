@@ -60,7 +60,7 @@ exclusive with an explicit `model:`/`routing:`.
 ## The four-step decision
 
 1. **One shot?** → `harness.llm.call`. If you need JSON, `harness.llm.call_structured`.
-2. **Loop until done, optionally with `done_judge`?** → `agent_loop`.
+2. **Loop until done, optionally with `turn_end_condition`?** → `agent_loop`.
 3. **Need a parallel or backgrounded helper agent?** → `spawn_agent` or
    `sub_agent_run`.
 4. **Need typed, inspectable, replayable orchestration over many stages?** →
@@ -100,7 +100,7 @@ one of these is a plain stdlib module that composes onto `agent_loop` options
 | **Prompt overlays** (data-driven nudges) | [`std/agent/overlays`](../stdlib/agent-lanes-overlays.md#overlays-data-driven-prompt-nudges) | `with_overlay(opts, rows, mode)` — fill-nil prompt fragments, never overriding explicit input. |
 | **Auto-compaction** (*when* to compact) | [`std/agent/autocompact`](../llm/agent_loop.md#agent-loop-compaction) | `compaction_policy(...)`, `agent_autocompact_if_needed(session, opts)` — keep the transcript under the context ceiling. |
 | **Compaction pins** (*what* to preserve) | [`std/agent/pins`](../stdlib/agent-pins-goal.md) | `pin(kind, content)`, `with_pin_roots(opts, pins)`, `pin_compaction_policy(pins)` — a typed pin taxonomy that survives compaction by construction and doubles as reachability-GC roots. Pins *feed* auto-compaction's preservation; they don't decide when it runs. |
-| **Goal object** (structured objective + convergence) | [`std/agent/goal`](../stdlib/agent-pins-goal.md) | `goal(spec)`, `with_goal(opts, g)`, `goal_check(g, facts)`, `goal_reloop(g)` — machine-checkable success criteria, a done-judge composed from `std/agent/judge`, and a bounded re-loop. The durable *what*; not a per-turn surface. |
+| **Goal object** (structured objective + convergence) | [`std/agent/goal`](../stdlib/agent-pins-goal.md) | `goal(spec)`, `with_goal(opts, g)`, `goal_check(g, facts)`, `goal_reloop(g)` — machine-checkable success criteria, a turn-end-judge composed from `std/agent/judge`, and a bounded re-loop. The durable *what*; not a per-turn surface. |
 | **Running-notes recitation** (scratchpad) | `std/agent/scratchpad` | `agent_scratchpad_options(...)`, `agent_scratchpad_recitation_fragment(session, opts)` — re-surface the goal and running notes at the prompt tail each turn. The per-turn *recitation surface* for the goal object above. |
 | **Default mutation toolset** | [`std/agent/host_tools`](../llm/tools.md#default-mutation-tools) | `agent_edit_tools(registry?, opts?)` — the canonical `write_file` / `edit_file` / `create_directory` / `delete_path` set; customize through the existing middleware seams. |
 | **Retry with feedback** (attempt loop) | [`std/workflow` stage `retry_policy`](../workflow-runtime.md#retry-with-feedback) | `retry_policy: {max_attempts, feedback}` or a `repair_prompt_builder` closure — thread findings into the next attempt. This is a *workflow* concern (more than one attempt at a goal). |
@@ -116,7 +116,7 @@ Rarely. The cases that justify hand-rolling on top of `agent_dispatch_tool_call`
 and `agent_parse_tool_calls`:
 
 - You need a custom completion detector that doesn't fit `done_sentinel` or
-  `done_judge`.
+  `turn_end_condition`.
 - You're implementing a research pattern (tree search, voting, debate) where the
   loop body isn't "ask, dispatch, append".
 - You're building a different *kind* of agent — one that doesn't talk back, only

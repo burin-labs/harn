@@ -1,7 +1,7 @@
 import { COMPLETION_JUDGE_DEFAULT_CAP } from "std/agent/judge"
 // std/agent/completion_gate — a configured done-time gate built by composing
 // `verify_completion` (deterministic) with `verify_completion_judge` or
-// `done_judge` (bounded LLM). Domain facts remain host callbacks; this module
+// `turn_end_condition` (bounded LLM). Domain facts remain host callbacks; this module
 // owns their validation, evaluation, persistent veto budget, and option bundle.
 import {
   __completion_gate_apply_budget,
@@ -98,7 +98,7 @@ pub type CompletionVetoCombiner = fn(list<CompletionVerifyVerdict>) -> Completio
  * - `judge` (default off) — attach a bounded LLM completion judge (`true` or a
  *   JudgeConfig-shaped dict); defaults its cap to the compatibility value 5.
  * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
- *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
+ *   the judge rides (`"verify_completion_judge"` or `"turn_end_condition"`).
  * - `feedback_templates` (optional) — a dict overriding the rendered veto feedback
  *   strings per ladder rule (the coding-domain prose is host content, not
  *   mechanism). Keys are the recognized rules (`__completion_gate_feedback_keys`):
@@ -166,8 +166,8 @@ fn __completion_gate_validate_options(opts: dict) {
   }
   if opts?.judge_seam != nil
     && opts.judge_seam != "verify_completion_judge"
-    && opts.judge_seam != "done_judge" {
-    throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
+    && opts.judge_seam != "turn_end_condition" {
+    throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"turn_end_condition\"; got "
       + to_string(opts.judge_seam)
   }
   const templates = opts?.feedback_templates

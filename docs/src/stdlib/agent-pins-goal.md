@@ -94,7 +94,7 @@ const g = goal({
 // Render the goal into every outbound
 // request (existing fragment channel):
 const goal_opts = with_goal(
-  {provider: "anthropic", done_judge: goal_judge(g)}, g,
+  {provider: "anthropic", turn_end_condition: goal_judge(g)}, g,
 )
 const result = agent_loop(harness, "Proceed.", nil, goal_opts)
 
@@ -106,7 +106,7 @@ const floor = goal_check(g, {ci_green: false})
 - `with_goal(opts, goal)` renders the objective, criteria, and constraints into
   the per-turn system prompt through the existing context-profile fragment
   channel.
-- `goal_judge(goal, opts?)` returns a `done_judge` config (the semantic ceiling)
+- `goal_judge(goal, opts?)` returns a `turn_end_condition` config (the semantic ceiling)
   that composes with the existing completion-judge seam; pair it with
   `goal_check` host-fact callbacks for the floor.
 - `goal_reloop(goal, opts?)` returns `agent_loop` options that drive the bounded

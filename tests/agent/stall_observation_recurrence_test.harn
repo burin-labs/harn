@@ -212,7 +212,7 @@ fn _assert_agent_loop_budget_guard(
         tool_format: "native",
         loop_until_done: true,
         done_sentinel: "##DONE##",
-        done_judge: nil,
+        turn_end_condition: nil,
         final_wrapup: false,
         iteration_budget: {mode: "adaptive", initial: 3, max: 5, extend_by: 1},
         stall_diagnostics: stall_diagnostics,
@@ -237,7 +237,7 @@ fn _assert_agent_loop_budget_guard(
             && event.action
               == "extend"
             && event.reason
-              == "recent turn made progress"
+              == "progress within window"
         },
       )
       assert_eq(len(extensions), 0, "the repeated-only turn must not buy an extension")
