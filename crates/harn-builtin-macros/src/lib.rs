@@ -86,6 +86,7 @@ struct CapabilityMethodInput {
     signature: Expr,
     doc: LitStr,
     effects_authorized_by: Option<LitStr>,
+    runtime_infrastructure: Option<proc_macro2::Span>,
 }
 
 impl Parse for CapabilityMethodInput {
@@ -100,12 +101,29 @@ impl Parse for CapabilityMethodInput {
         let signature = input.parse()?;
         input.parse::<Token![,]>()?;
         let doc = input.parse()?;
-        let effects_authorized_by = if input.is_empty() {
-            None
-        } else {
+        // Optional trailing marker. Either a `"<capability>.<operation>"`
+        // string that delegates the declared (read-only) effects to that
+        // grant, or the bare ident `runtime_infrastructure`, which says the
+        // agent runtime performs this on its own behalf and so the coarse
+        // side-effect ladder must not rank it. Never both.
+        let mut effects_authorized_by = None;
+        let mut runtime_infrastructure = None;
+        if !input.is_empty() {
             input.parse::<Token![,]>()?;
-            Some(input.parse()?)
-        };
+            if input.peek(LitStr) {
+                effects_authorized_by = Some(input.parse()?);
+            } else {
+                let marker: Ident = input.parse()?;
+                if marker != "runtime_infrastructure" {
+                    return Err(syn::Error::new(
+                        marker.span(),
+                        "expected a `\"<capability>.<operation>\"` effect authorization or \
+                         the marker `runtime_infrastructure`",
+                    ));
+                }
+                runtime_infrastructure = Some(marker.span());
+            }
+        }
         if !input.is_empty() {
             return Err(input.error("unexpected capability method tokens"));
         }
@@ -116,6 +134,7 @@ impl Parse for CapabilityMethodInput {
             signature,
             doc,
             effects_authorized_by,
+            runtime_infrastructure,
         })
     }
 }
@@ -139,6 +158,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         effects: input.effects,
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
+        runtime_infrastructure: input.runtime_infrastructure,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -192,6 +212,7 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
         effects: input.effects,
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
+        runtime_infrastructure: input.runtime_infrastructure,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -224,6 +245,7 @@ struct BuiltinAttrs {
     effects: Vec<LitStr>,
     effects_declared: bool,
     effects_authorized_by: Option<LitStr>,
+    runtime_infrastructure: Option<proc_macro2::Span>,
     category: Option<LitStr>,
     kind: BuiltinKind,
     parser_only: bool,
@@ -280,6 +302,11 @@ impl Parse for BuiltinAttrs {
                         }
                         "effects_authorized_by" => {
                             out.effects_authorized_by = Some(parse_lit_str(&nv.value)?);
+                        }
+                        "runtime_infrastructure" => {
+                            if parse_lit_bool(&nv.value)? {
+                                out.runtime_infrastructure = Some(nv.path.span());
+                            }
                         }
                         other => {
                             return Err(syn::Error::new(
@@ -534,12 +561,38 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
             ));
         }
     }
+    if let Some(span) = attrs.runtime_infrastructure {
+        if attrs.effects.is_empty() {
+            return Err(syn::Error::new(
+                span,
+                "`runtime_infrastructure` requires at least one declared effect: the \
+                 marker exempts effects from the side-effect ladder, so a contract \
+                 with none reads as audited while asserting nothing",
+            ));
+        }
+        if attrs.effects_authorized_by.is_some() {
+            return Err(syn::Error::new(
+                span,
+                "declare `effects_authorized_by` or `runtime_infrastructure`, not both: \
+                 the first delegates an effect to another capability grant, the second \
+                 says the runtime performed it on its own behalf",
+            ));
+        }
+    }
     let raw = exposure.value();
     if attrs.effects_authorized_by.is_some() && !raw.starts_with("harness.") {
         return Err(syn::Error::new(
             exposure.span(),
             "`effects_authorized_by` is only valid for Harness methods",
         ));
+    }
+    if let Some(span) = attrs.runtime_infrastructure {
+        if !raw.starts_with("harness.") {
+            return Err(syn::Error::new(
+                span,
+                "`runtime_infrastructure` is only valid for Harness methods",
+            ));
+        }
     }
     match raw.as_str() {
         "pure" => {
@@ -639,6 +692,14 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
                             #authority_capability,
                             #authority_operation,
                         ),
+                    )),
+                )
+            } else if attrs.runtime_infrastructure.is_some() {
+                Ok(
+                    quote!(#support::BuiltinContract::harness_runtime_infrastructure(
+                        #capability,
+                        #method,
+                        #effects,
                     )),
                 )
             } else {

@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::llm::helpers::{DirectiveAuthority, ReminderSource, SystemReminder};
+
 /// Persist a daemon snapshot for a Harn-driven agent session.
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -130,6 +132,68 @@ fn bridge_delivery_checkpoint(value: &str) -> Result<crate::bridge::DeliveryChec
     }
 }
 
+/// Tag carried by the standing directive a delivered steer registers.
+pub(crate) const OPERATOR_STEER_TAG: &str = "operator_steer";
+
+/// A steer is an operator control event, not a comment.
+///
+/// `session/inject` with `mode: "steer"` (and its `interrupt` sibling)
+/// splices the operator's instruction into the transcript as a plain
+/// `role: user` message, which carries no directive authority at all. The
+/// turn-end judge's veto feedback, by contrast, is stamped
+/// `DirectiveAuthority::Corrective` in
+/// [`crate::llm::agent_config::inject_agent_feedback`], and the rendered
+/// envelope tells the model that "contract directives override corrective
+/// directives; corrective directives override advisory directives"
+/// (`crates/harn-stdlib/src/stdlib/llm/prompts/directive_envelope_instructions.harn.prompt`).
+///
+/// So a judge re-deriving acceptance from the ORIGINAL task outranked the
+/// operator's live steer: traced on a served session, the model complied
+/// with the steer on the next turn, the judge vetoed, five corrective
+/// directives restated the original task, and the model reverted and ran a
+/// tool the steer had forbidden.
+///
+/// Delivering a steer therefore also registers it as a standing directive at
+/// `contract` authority — the level the operator actually holds — so a later
+/// corrective cannot contradict an accepted steer. Notes:
+///
+///   * `ttl_turns: None`. The judge re-injects its corrective on every
+///     subsequent iteration, so a steer that expired after one turn would
+///     simply lose the same argument later.
+///   * `preserve_on_compact: true`. An operator redirect that a compaction
+///     silently dropped would revert the run for the same reason.
+///   * A dedupe key per message id. Two steers both stand; deduping them
+///     against a shared key would let a second steer erase the first, and a
+///     dropped steer reads exactly like an obeyed one.
+///   * `audit_only` is excluded by construction — it is the one mode whose
+///     contract is "never rendered into a model prompt" (harn#2212) — which
+///     is why this is keyed on the delivery checkpoint rather than on the
+///     queue entry.
+fn operator_steer_directive(
+    checkpoint: crate::bridge::DeliveryCheckpoint,
+    message: &crate::bridge::QueuedUserMessage,
+) -> Option<SystemReminder> {
+    if checkpoint == crate::bridge::DeliveryCheckpoint::EndOfInteraction {
+        return None;
+    }
+    let mut reminder = SystemReminder::new(
+        format!(
+            "The operator redirected this run mid-turn. Follow this instruction for the \
+             remainder of the run, in preference to any earlier instruction it contradicts:\n\
+             {}",
+            message.content
+        ),
+        ReminderSource::Bridge,
+        0,
+    );
+    reminder.tags = vec![OPERATOR_STEER_TAG.to_string()];
+    reminder.dedupe_key = Some(format!("{OPERATOR_STEER_TAG}/{}", message.message_id));
+    reminder.authority = DirectiveAuthority::Contract;
+    reminder.ttl_turns = None;
+    reminder.preserve_on_compact = true;
+    Some(reminder)
+}
+
 async fn drain_bridge_injections_for_checkpoint(
     session_id: &str,
     bridge: &crate::bridge::HostBridge,
@@ -156,6 +220,10 @@ async fn drain_bridge_injections_for_checkpoint(
                     })),
                 )
                 .map_err(VmError::Runtime)?;
+                if let Some(directive) = operator_steer_directive(checkpoint, &message) {
+                    crate::agent_sessions::inject_reminder(session_id, directive)
+                        .map_err(VmError::Runtime)?;
+                }
                 saw_user_message = true;
                 delivered += 1;
             }
@@ -528,4 +596,75 @@ const DAEMON_BRIDGE_BUILTINS: &[&VmBuiltinDef] = &[
 
 pub(super) fn register_daemon_bridge_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, DAEMON_BRIDGE_BUILTINS);
+}
+
+#[cfg(test)]
+mod operator_steer_tests {
+    use super::*;
+    use crate::bridge::{DeliveryCheckpoint, QueuedUserMessage, QueuedUserMessageMode};
+
+    fn queued(mode: QueuedUserMessageMode) -> QueuedUserMessage {
+        QueuedUserMessage {
+            message_id: "msg_inj_0199".to_string(),
+            content: "do not call look again; final reply must be exactly BRAVO".to_string(),
+            transcript_content: serde_json::json!(
+                "do not call look again; final reply must be exactly BRAVO"
+            ),
+            mode,
+        }
+    }
+
+    /// A delivered steer must outrank the turn-end judge's `corrective`
+    /// feedback, so it is registered at the authority the operator holds.
+    #[test]
+    fn a_delivered_steer_becomes_a_standing_contract_directive() {
+        let directive = operator_steer_directive(
+            DeliveryCheckpoint::AfterCurrentOperation,
+            &queued(QueuedUserMessageMode::FinishStep),
+        )
+        .expect("a steer delivered mid-turn registers a directive");
+
+        assert_eq!(directive.authority, DirectiveAuthority::Contract);
+        assert!(directive.body.contains("BRAVO"));
+        assert_eq!(directive.tags, vec![OPERATOR_STEER_TAG.to_string()]);
+        assert_eq!(
+            directive.dedupe_key.as_deref(),
+            Some("operator_steer/msg_inj_0199"),
+            "each steer keeps its own key: a shared key would let a second steer \
+             silently erase the first, and a dropped steer reads like an obeyed one"
+        );
+        assert_eq!(
+            directive.ttl_turns, None,
+            "the judge re-injects its corrective every iteration, so an expiring \
+             steer would simply lose the same argument one turn later"
+        );
+        assert!(
+            directive.preserve_on_compact,
+            "a compaction that dropped the operator's redirect would revert the run"
+        );
+    }
+
+    /// The interrupt sibling is the same control event delivered sooner.
+    #[test]
+    fn an_interrupt_carries_the_same_authority_as_a_steer() {
+        let directive = operator_steer_directive(
+            DeliveryCheckpoint::InterruptImmediate,
+            &queued(QueuedUserMessageMode::InterruptImmediate),
+        )
+        .expect("an interrupt delivered mid-turn registers a directive");
+        assert_eq!(directive.authority, DirectiveAuthority::Contract);
+    }
+
+    /// Negative control. `audit_only` is the one mode whose contract is
+    /// "lands in the transcript, never rendered into a model prompt"
+    /// (harn#2212). Minting a directive from it would put text in front of a
+    /// model that was explicitly promised not to see it.
+    #[test]
+    fn an_audit_only_message_never_becomes_a_directive() {
+        assert!(operator_steer_directive(
+            DeliveryCheckpoint::EndOfInteraction,
+            &queued(QueuedUserMessageMode::AuditOnly),
+        )
+        .is_none());
+    }
 }
