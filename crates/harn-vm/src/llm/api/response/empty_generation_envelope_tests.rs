@@ -88,6 +88,29 @@ fn openai_responses_empty_completion_keeps_provider_response_envelope() {
 }
 
 #[test]
+fn openai_responses_incomplete_reason_outranks_generic_status() {
+    let response = serde_json::json!({
+        "id": "resp-incomplete",
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "output": [],
+        "usage": {"input_tokens": 23, "output_tokens": 5}
+    });
+
+    let error = parse_openai_responses_response(&response, "openai", "gpt-5.4-preview")
+        .expect_err("incomplete empty response must be rejected");
+
+    assert_provider_response_envelope(
+        &error,
+        Some("resp-incomplete"),
+        Some("max_output_tokens"),
+        &[],
+        23,
+        5,
+    );
+}
+
+#[test]
 fn openai_chat_empty_completion_keeps_provider_response_envelope() {
     let response = serde_json::json!({
         "id": "chatcmpl-empty",
@@ -117,4 +140,36 @@ fn openai_chat_empty_completion_keeps_provider_response_envelope() {
         0,
     );
     assert!(error.to_string().contains("delivered no content"));
+}
+
+#[test]
+fn openai_chat_distinguishes_empty_reasoning_from_absent_reasoning() {
+    let absent = serde_json::json!({
+        "id": "chatcmpl-absent-reasoning",
+        "choices": [{"message": {"content": null}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 0}
+    });
+    let present = serde_json::json!({
+        "id": "chatcmpl-empty-reasoning",
+        "choices": [{
+            "message": {"content": null, "reasoning_content": ""},
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 0}
+    });
+
+    let absent_error = parse_llm_response(&absent, "openai", "reasoning-route", false, false)
+        .expect_err("absent reasoning remains an empty generation");
+    let present_error = parse_llm_response(&present, "openai", "reasoning-route", false, false)
+        .expect_err("empty reasoning remains an empty generation");
+
+    let absent_envelope = ProviderResponseEnvelope::from_error(&absent_error)
+        .expect("absent reasoning must still carry an envelope");
+    let present_envelope = ProviderResponseEnvelope::from_error(&present_error)
+        .expect("empty reasoning must still carry an envelope");
+    assert!(absent_envelope.content_block_types().is_empty());
+    assert_eq!(
+        present_envelope.content_block_types(),
+        &["reasoning".to_string()]
+    );
 }

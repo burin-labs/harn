@@ -9,6 +9,14 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.124
+
+### Changed
+
+- Harn now owns structural validation for execution evidence and Flight Recorder
+  artifacts, so hosts and services can reject forged or mismatched execution
+  identities without duplicating the runtime contract.
+
 ## v0.10.123
 
 ### Breaking
