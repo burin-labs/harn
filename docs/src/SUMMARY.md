@@ -156,6 +156,7 @@
 - [Tool surface validation](./tool-surface-validation.md)
 - [Durable step stdlib](./stdlib/step.md)
 - [Cache stdlib](./stdlib/cache.md)
+- [Response compaction](./stdlib/response-compaction.md)
 - [Calendar stdlib](./stdlib/calendar.md)
 - [External actions](./stdlib/external-action.md)
 - [Daemon stdlib](./stdlib/daemon.md)

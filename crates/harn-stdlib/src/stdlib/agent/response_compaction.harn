@@ -1,0 +1,543 @@
+// std/agent/response_compaction - lossless, typed response compaction.
+//
+// The exact value is committed to the workspace-scoped filesystem cache and
+// read back through its declared schema before any summarizer can run. Large
+// values may then be projected as a structured summary. A failed summary uses
+// the caller's schema-validated deterministic fallback; it never weakens exact
+// retention.
+import { cache_get, cache_put, fs_cache } from "std/cache"
+import { get_typed_result, get_typed_value, schema_json } from "std/schema"
+
+pub type ResponseCompactionCapabilities = {fs: HarnessFs, llm: HarnessLlm}
+
+pub type ResponseCompactionOptions<S> = {
+  summarize_above_bytes: int,
+  instructions: string,
+  fallback: S,
+  ladder?: string,
+  max_tokens?: int,
+  ttl_seconds?: int,
+  max_entries?: int,
+  namespace?: string,
+}
+
+pub type ResponseCompactionExactRef = {
+  schema: "harn.response_compaction.exact_ref.v1",
+  storage: "workspace_temp",
+  key: string,
+  namespace: string,
+  ttl_seconds: int,
+  max_entries: int,
+}
+
+pub type ResponseCompactionRoute = {ladder: string, provider?: string, model?: string}
+
+pub type ResponseCompactionFallbackCause = "model_error" | "summary_invalid"
+
+pub type ResponseCompactionUsage = {input_tokens?: int, output_tokens?: int}
+
+pub type ResponseCompactionReceipt = {
+  schema: "harn.response_compaction.receipt.v1",
+  state: "exact" | "summarized" | "fallback",
+  exact_ref: ResponseCompactionExactRef,
+  exact_sha256: string,
+  exact_bytes: int,
+  summary_cache_key: string,
+  summary_cache_hit: bool,
+  summary_call_count: int,
+  summary_usage?: ResponseCompactionUsage,
+  route: ResponseCompactionRoute,
+  fallback_cause?: ResponseCompactionFallbackCause,
+  error_category?: string,
+}
+
+pub type ResponseCompactionOutput<T, S> = {kind: "exact", value: T} \
+  | {kind: "summarized", value: S} \
+  | {kind: "fallback", value: S, cause: ResponseCompactionFallbackCause}
+
+pub type ResponseCompactionResult<T, S> = {
+  output: ResponseCompactionOutput<T, S>,
+  receipt: ResponseCompactionReceipt,
+}
+
+pub type ResponseCompactionExactRead<T> = {state: "found", value: T} \
+  | {state: "missing"} \
+  | {state: "broken", detail: string}
+
+type ResponseSummaryAttempt<S> = {
+  kind: "success",
+  data: S,
+  provider?: string,
+  model?: string,
+  usage?: ResponseCompactionUsage,
+} \
+  | {
+  kind: "failure",
+  cause: ResponseCompactionFallbackCause,
+  error_category: string,
+  usage?: ResponseCompactionUsage,
+}
+
+type ResponseSummaryCaller<S> = fn(string, Schema<S>, string, int) -> unknown
+
+type ResponseCompactionConfig<S> = {
+  summarize_above_bytes: int,
+  instructions: string,
+  fallback: S,
+  ladder: string,
+  max_tokens: int,
+  ttl_seconds: int,
+  max_entries: int,
+  namespace: string,
+}
+
+const __RESPONSE_COMPACTION_VERSION = "harn.response_compaction.v1"
+
+fn __response_compaction_config<S>(
+  summary_schema: Schema<S>,
+  options: ResponseCompactionOptions<S>,
+) -> ResponseCompactionConfig<S> {
+  if options.summarize_above_bytes < 0 {
+    throw "response_compact: summarize_above_bytes must be >= 0"
+  }
+  const instructions = trim(options.instructions)
+  if instructions == "" {
+    throw "response_compact: instructions must be non-empty"
+  }
+  const ladder = trim(options.ladder ?? "agent_cheap")
+  if ladder == "" {
+    throw "response_compact: ladder must be non-empty"
+  }
+  const max_tokens = options.max_tokens ?? 800
+  const ttl_seconds = options.ttl_seconds ?? 86400
+  const max_entries = options.max_entries ?? 256
+  const namespace = trim(options.namespace ?? "response-compaction")
+  if max_tokens <= 0 {
+    throw "response_compact: max_tokens must be positive"
+  }
+  if ttl_seconds <= 0 {
+    throw "response_compact: ttl_seconds must be positive"
+  }
+  if max_entries <= 0 {
+    throw "response_compact: max_entries must be positive"
+  }
+  if namespace == "" {
+    throw "response_compact: namespace must be non-empty"
+  }
+  if contains(namespace, "..") || regex_match("[^A-Za-z0-9._-]", namespace) != nil {
+    throw "response_compact: namespace must be one traversal-safe token"
+  }
+  const fallback = get_typed_value(options.fallback, summary_schema)
+  return {
+    summarize_above_bytes: options.summarize_above_bytes,
+    instructions: instructions,
+    fallback: fallback,
+    ladder: ladder,
+    max_tokens: max_tokens,
+    ttl_seconds: ttl_seconds,
+    max_entries: max_entries,
+    namespace: namespace,
+  }
+}
+
+fn __response_compaction_store(fs: HarnessFs, ref: ResponseCompactionExactRef) -> dict {
+  return fs_cache(
+    path_join(fs.workspace_temp_dir(), "harn-response-compaction"),
+    {namespace: ref.namespace, ttl_seconds: ref.ttl_seconds, max_entries: ref.max_entries},
+  )
+}
+
+fn __response_compaction_exact_ref(
+  fs: HarnessFs,
+  digest: string,
+  config: ResponseCompactionConfig<unknown>,
+) -> ResponseCompactionExactRef {
+  return {
+    schema: "harn.response_compaction.exact_ref.v1",
+    storage: "workspace_temp",
+    key: __RESPONSE_COMPACTION_VERSION + ":exact:" + digest,
+    namespace: config.namespace + "-exact",
+    ttl_seconds: config.ttl_seconds,
+    max_entries: config.max_entries,
+  }
+}
+
+/**
+ * Read an exact value retained by `response_compact` through its original
+ * schema. Expiry/eviction is `missing`; malformed retained data is `broken`.
+ */
+pub fn response_compaction_read_exact<T>(
+  capabilities: ResponseCompactionCapabilities,
+  ref: ResponseCompactionExactRef,
+  schema: Schema<T>,
+) -> ResponseCompactionExactRead<T> {
+  if ref.storage != "workspace_temp"
+    || !ref.key.starts_with(
+    __RESPONSE_COMPACTION_VERSION + ":exact:",
+  )
+    || ref.namespace == ""
+    || contains(ref.namespace, "..")
+    || regex_match("[^A-Za-z0-9._-]", ref.namespace) != nil
+    || ref.ttl_seconds <= 0
+    || ref.max_entries <= 0 {
+    return {state: "broken", detail: "exact reference failed validation"}
+  }
+  const cached = cache_get(
+    capabilities.llm,
+    ref.key,
+    {store: __response_compaction_store(capabilities.fs, ref)},
+  )
+  if !cached.hit {
+    return {state: "missing"}
+  }
+  const validated = get_typed_result(cached.value, schema)
+  if !is_ok(validated) {
+    return {state: "broken", detail: unwrap_err(validated).message}
+  }
+  return {state: "found", value: unwrap(validated)}
+}
+
+fn __response_compaction_persist_exact<T>(
+  capabilities: ResponseCompactionCapabilities,
+  value: T,
+  schema: Schema<T>,
+  ref: ResponseCompactionExactRef,
+) -> T {
+  const typed = get_typed_value(value, schema)
+  cache_put(
+    capabilities.llm,
+    ref.key,
+    typed,
+    {store: __response_compaction_store(capabilities.fs, ref)},
+  )
+  const readback = response_compaction_read_exact(capabilities, ref, schema)
+  match readback.state {
+    "found" -> { return readback.value }
+    "missing" -> {
+      throw "response_compact: exact persistence readback was missing"
+    }
+    "broken" -> {
+      throw "response_compact: exact persistence readback was broken: " + readback.detail
+    }
+  }
+}
+
+fn __response_summary_prompt(exact_json: string, instructions: string) -> string {
+  return "Produce a compact structured projection of the exact response. "
+    + "Preserve the caller-declared facts and do not invent facts.\n\n"
+    + "<instructions>\n"
+    + instructions
+    + "\n</instructions>\n\n"
+    + "<exact_response>\n"
+    + exact_json
+    + "\n</exact_response>"
+}
+
+fn __response_summary_attempt<S>(
+  llm: HarnessLlm,
+  prompt: string,
+  summary_schema: Schema<S>,
+  ladder: string,
+  max_tokens: int,
+) -> ResponseSummaryAttempt<S> {
+  const raw = llm.call_structured_result(
+    prompt,
+    summary_schema,
+    {ladder: ladder, max_tokens: max_tokens, temperature: 0.0, schema_retries: 1},
+  )
+  if raw?.ok == true {
+    const validated = get_typed_result(raw?.data, summary_schema)
+    if is_ok(validated) {
+      let success: ResponseSummaryAttempt<S> = {kind: "success", data: unwrap(validated)}
+      if type_of(raw?.provider) == "string" && raw.provider != "" {
+        success = success + {provider: raw.provider}
+      }
+      if type_of(raw?.model) == "string" && raw.model != "" {
+        success = success + {model: raw.model}
+      }
+      const usage = __response_compaction_usage(raw?.usage)
+      if usage != nil {
+        success = success + {usage: usage}
+      }
+      return success
+    }
+    return {kind: "failure", cause: "summary_invalid", error_category: "schema_validation"}
+  }
+  return {
+    kind: "failure",
+    cause: "model_error",
+    error_category: to_string(raw?.error_category ?? raw?.error?.category ?? "generic"),
+  }
+}
+
+fn __response_compaction_usage(raw: unknown) -> ResponseCompactionUsage? {
+  if type_of(raw) != "dict" {
+    return nil
+  }
+  let usage: ResponseCompactionUsage = {}
+  let measured = false
+  if type_of(raw?.input_tokens) == "int" {
+    usage = usage + {input_tokens: raw.input_tokens}
+    measured = true
+  }
+  if type_of(raw?.output_tokens) == "int" {
+    usage = usage + {output_tokens: raw.output_tokens}
+    measured = true
+  }
+  return measured ? usage : nil
+}
+
+fn __response_summary_attempt_normalize<S>(
+  raw: unknown,
+  summary_schema: Schema<S>,
+) -> ResponseSummaryAttempt<S> {
+  if type_of(raw) != "dict" {
+    return {kind: "failure", cause: "model_error", error_category: "generic"}
+  }
+  if raw?.ok == true {
+    const validated = get_typed_result(raw?.data, summary_schema)
+    if !is_ok(validated) {
+      return {kind: "failure", cause: "summary_invalid", error_category: "schema_validation"}
+    }
+    let success: ResponseSummaryAttempt<S> = {kind: "success", data: unwrap(validated)}
+    if type_of(raw?.provider) == "string" && raw.provider != "" {
+      success = success + {provider: raw.provider}
+    }
+    if type_of(raw?.model) == "string" && raw.model != "" {
+      success = success + {model: raw.model}
+    }
+    const usage = __response_compaction_usage(raw?.usage)
+    if usage != nil {
+      success = success + {usage: usage}
+    }
+    return success
+  }
+  const cause: ResponseCompactionFallbackCause = if raw?.cause == "summary_invalid" {
+    "summary_invalid"
+  } else {
+    "model_error"
+  }
+  let failure: ResponseSummaryAttempt<S> = {
+    kind: "failure",
+    cause: cause,
+    error_category: to_string(raw?.error_category ?? "generic"),
+  }
+  const usage = __response_compaction_usage(raw?.usage)
+  if usage != nil {
+    failure = failure + {usage: usage}
+  }
+  return failure
+}
+
+fn __response_summary_cache_key<S>(
+  exact_digest: string,
+  summary_schema: Schema<S>,
+  config: ResponseCompactionConfig<S>,
+) -> string {
+  return __RESPONSE_COMPACTION_VERSION
+    + ":summary:"
+    + sha256(
+    json_stringify(
+      {
+        exact_sha256: exact_digest,
+        summary_schema: schema_json(summary_schema),
+        instructions: config.instructions,
+        ladder: config.ladder,
+        max_tokens: config.max_tokens,
+      },
+    ),
+  )
+}
+
+fn __response_compaction_receipt(
+  state: "exact" | "summarized" | "fallback",
+  exact_ref: ResponseCompactionExactRef,
+  exact_digest: string,
+  exact_bytes: int,
+  summary_cache_key: string,
+  cache_hit: bool,
+  call_count: int,
+  route: ResponseCompactionRoute,
+  usage: ResponseCompactionUsage? = nil,
+  cause: ResponseCompactionFallbackCause? = nil,
+  error_category: string? = nil,
+) -> ResponseCompactionReceipt {
+  let receipt: ResponseCompactionReceipt = {
+    schema: "harn.response_compaction.receipt.v1",
+    state: state,
+    exact_ref: exact_ref,
+    exact_sha256: exact_digest,
+    exact_bytes: exact_bytes,
+    summary_cache_key: summary_cache_key,
+    summary_cache_hit: cache_hit,
+    summary_call_count: call_count,
+    route: route,
+  }
+  if usage != nil {
+    receipt = receipt + {summary_usage: usage}
+  }
+  if cause != nil {
+    receipt = receipt + {fallback_cause: cause}
+  }
+  if error_category != nil {
+    receipt = receipt + {error_category: error_category}
+  }
+  return receipt
+}
+
+/**
+ * Internal deterministic seam used by the conformance suite. Production
+ * callers use `response_compact`, which always routes through a named catalog
+ * ladder.
+ */
+pub fn __response_compact_with_caller<T, S>(
+  capabilities: ResponseCompactionCapabilities,
+  exact: T,
+  exact_schema: Schema<T>,
+  summary_schema: Schema<S>,
+  options: ResponseCompactionOptions<S>,
+  summarize: ResponseSummaryCaller<S>,
+) -> ResponseCompactionResult<T, S> {
+  const config = __response_compaction_config(summary_schema, options)
+  const exact_json = json_stringify(get_typed_value(exact, exact_schema))
+  const exact_digest = sha256(exact_json)
+  const exact_bytes = bytes_len(bytes_from_string(exact_json))
+  const exact_ref = __response_compaction_exact_ref(capabilities.fs, exact_digest, config)
+  const retained = __response_compaction_persist_exact(capabilities, exact, exact_schema, exact_ref)
+  const summary_key = __response_summary_cache_key(exact_digest, summary_schema, config)
+  const route: ResponseCompactionRoute = {ladder: config.ladder}
+  if exact_bytes <= config.summarize_above_bytes {
+    return {
+      output: {kind: "exact", value: retained},
+      receipt: __response_compaction_receipt(
+        "exact",
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        false,
+        0,
+        route,
+      ),
+    }
+  }
+  const summary_store = fs_cache(
+    path_join(capabilities.fs.workspace_temp_dir(), "harn-response-compaction"),
+    {
+      namespace: config.namespace + "-summary",
+      ttl_seconds: config.ttl_seconds,
+      max_entries: config.max_entries,
+    },
+  )
+  const cached = cache_get(capabilities.llm, summary_key, {store: summary_store})
+  if cached.hit && type_of(cached.value) == "dict" {
+    const cached_summary = get_typed_result(cached.value?.summary, summary_schema)
+    if is_ok(cached_summary) {
+      let cached_route: ResponseCompactionRoute = {ladder: config.ladder}
+      if type_of(cached.value?.provider) == "string" && cached.value.provider != "" {
+        cached_route = cached_route + {provider: cached.value.provider}
+      }
+      if type_of(cached.value?.model) == "string" && cached.value.model != "" {
+        cached_route = cached_route + {model: cached.value.model}
+      }
+      const cached_usage = __response_compaction_usage(cached.value?.usage)
+      return {
+        output: {kind: "summarized", value: unwrap(cached_summary)},
+        receipt: __response_compaction_receipt(
+          "summarized",
+          exact_ref,
+          exact_digest,
+          exact_bytes,
+          summary_key,
+          true,
+          0,
+          cached_route,
+          cached_usage,
+        ),
+      }
+    }
+  }
+  const attempt = __response_summary_attempt_normalize(
+    summarize(
+      __response_summary_prompt(exact_json, config.instructions),
+      summary_schema,
+      config.ladder,
+      config.max_tokens,
+    ),
+    summary_schema,
+  )
+  match attempt.kind {
+    "success" -> {
+      let cache_record = {summary: attempt.data}
+      let resolved_route: ResponseCompactionRoute = {ladder: config.ladder}
+      if attempt.provider != nil {
+        cache_record = cache_record + {provider: attempt.provider}
+        resolved_route = resolved_route + {provider: attempt.provider}
+      }
+      if attempt.model != nil {
+        cache_record = cache_record + {model: attempt.model}
+        resolved_route = resolved_route + {model: attempt.model}
+      }
+      if attempt.usage != nil {
+        cache_record = cache_record + {usage: attempt.usage}
+      }
+      cache_put(capabilities.llm, summary_key, cache_record, {store: summary_store})
+      return {
+        output: {kind: "summarized", value: attempt.data},
+        receipt: __response_compaction_receipt(
+          "summarized",
+          exact_ref,
+          exact_digest,
+          exact_bytes,
+          summary_key,
+          false,
+          1,
+          resolved_route,
+          attempt.usage,
+        ),
+      }
+    }
+    "failure" -> { return {
+      output: {kind: "fallback", value: config.fallback, cause: attempt.cause},
+      receipt: __response_compaction_receipt(
+        "fallback",
+        exact_ref,
+        exact_digest,
+        exact_bytes,
+        summary_key,
+        false,
+        1,
+        route,
+        attempt.usage,
+        attempt.cause,
+        attempt.error_category,
+      ),
+    } }
+  }
+  unreachable("response_compact: summary attempt must be success or failure")
+}
+
+/**
+ * Persist one exact typed response, then return it directly or project it to a
+ * cached structured summary through a named catalog ladder. A summary failure
+ * returns the caller's typed deterministic fallback; the exact reference stays
+ * readable until its bounded TTL/LRU retention expires.
+ */
+pub fn response_compact<T, S>(
+  capabilities: ResponseCompactionCapabilities,
+  exact: T,
+  exact_schema: Schema<T>,
+  summary_schema: Schema<S>,
+  options: ResponseCompactionOptions<S>,
+) -> ResponseCompactionResult<T, S> {
+  return __response_compact_with_caller(
+    capabilities,
+    exact,
+    exact_schema,
+    summary_schema,
+    options,
+    { prompt, schema, ladder, max_tokens ->
+      return __response_summary_attempt(capabilities.llm, prompt, schema, ladder, max_tokens)
+    },
+  )
+}
