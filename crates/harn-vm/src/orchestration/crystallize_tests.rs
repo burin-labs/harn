@@ -223,6 +223,7 @@ fn run_record_crystallization_preserves_execution_identity_without_inventing_leg
         workflow_id: "execution-source".to_string(),
         ..crate::orchestration::RunRecord::default()
     };
+    run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
     run.evidence.execution_id = Some("hxe-019c13e0-8080-7000-8000-000000000004".to_string());
     std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
 

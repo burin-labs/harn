@@ -591,6 +591,7 @@ async fn composition_report_preserves_the_owning_vm_execution_id() {
     let report = run_composition_dispatcher_source(
         r#"
 pipeline default(harness: Harness, task: unknown) {
+  __capture_execution_id()
   return harness.tools.composition_execute(
     "return 42",
     composition_binding_manifest([]),
@@ -599,7 +600,13 @@ pipeline default(harness: Harness, task: unknown) {
 }
 "#,
         move |vm| {
-            *captured_execution_id.lock().unwrap() = Some(vm.execution_id().to_string());
+            vm.register_async_builtin("__capture_execution_id", move |ctx, _args| {
+                let captured_execution_id = Arc::clone(&captured_execution_id);
+                async move {
+                    *captured_execution_id.lock().unwrap() = Some(ctx.execution_id());
+                    Ok(VmValue::Null)
+                }
+            });
         },
     )
     .await
