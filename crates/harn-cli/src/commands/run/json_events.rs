@@ -80,6 +80,13 @@ pub enum RunEventWire {
         fallback_reason: Option<String>,
         artifact_decode_ms: u64,
     },
+    EvidencePersisted {
+        seq: u64,
+        execution_id: String,
+        run_record_path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        flight_recording: Option<harn_vm::flight_recorder::FlightRecordingArtifact>,
+    },
     Result {
         seq: u64,
         value: serde_json::Value,
@@ -103,6 +110,7 @@ impl RunEventWire {
             | Self::Hook { seq, .. }
             | Self::PersonaStage { seq, .. }
             | Self::PackRun { seq, .. }
+            | Self::EvidencePersisted { seq, .. }
             | Self::Result { seq, .. }
             | Self::Error { seq, .. } => *seq,
         }
@@ -283,6 +291,16 @@ impl RunEventSink for NdjsonSink {
                 fallback_reason,
                 artifact_decode_ms,
             },
+            RunEvent::EvidencePersisted {
+                execution_id,
+                run_record_path,
+                flight_recording,
+            } => RunEventWire::EvidencePersisted {
+                seq,
+                execution_id,
+                run_record_path,
+                flight_recording,
+            },
         };
         NdjsonEmitter::write_envelope(&self.inner, wire);
     }
@@ -430,10 +448,38 @@ fn main(harness: Harness) {
             .iter()
             .filter(|event| event["data"]["event_type"] == "result")
             .collect();
+        let evidence: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|event| event["data"]["event_type"] == "evidence_persisted")
+            .collect();
 
         assert_eq!(stdout, "before exit\n");
         assert_eq!(stderr, "diagnostic\n");
         assert_eq!(terminal.len(), 1, "events: {events:#?}");
+        assert_eq!(evidence.len(), 1, "events: {events:#?}");
+        assert!(evidence[0]["data"]["execution_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("hxe-")));
+        let record_path = evidence[0]["data"]["run_record_path"]
+            .as_str()
+            .expect("run record path");
+        let record: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(record_path).expect("evidence event points at readable record"),
+        )
+        .expect("run record JSON");
+        assert_eq!(record["id"], evidence[0]["data"]["execution_id"]);
+        let evidence_index = events
+            .iter()
+            .position(|event| event["data"]["event_type"] == "evidence_persisted")
+            .expect("evidence index");
+        let result_index = events
+            .iter()
+            .position(|event| event["data"]["event_type"] == "result")
+            .expect("result index");
+        assert!(
+            evidence_index < result_index,
+            "evidence must be readable before terminal result"
+        );
         assert_eq!(terminal[0]["data"]["exit_code"], 2);
         assert!(terminal[0]["data"]["value"].is_null());
         assert!(events
@@ -544,13 +590,17 @@ fn main(harness: Harness) {
                     .iter()
                     .map(|event| event["data"]["seq"].as_u64().expect("seq"))
                     .collect::<Vec<_>>(),
-                [1, 2, 3]
+                [1, 2, 3, 4]
             );
             assert_eq!(events[0]["data"]["event_type"], "stdout");
             assert_eq!(events[0]["data"]["payload"], stdout);
             assert_eq!(events[1]["data"]["event_type"], "stderr");
             assert_eq!(events[1]["data"]["payload"], stderr);
-            assert_eq!(events[2]["data"]["event_type"], "result");
+            assert_eq!(events[2]["data"]["event_type"], "evidence_persisted");
+            assert!(events[2]["data"]["execution_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("hxe-")));
+            assert_eq!(events[3]["data"]["event_type"], "result");
         };
         assert_stream(&alpha_events, "alpha-out\n", "alpha-err\n");
         assert_stream(&beta_events, "beta-out\n", "beta-err\n");

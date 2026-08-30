@@ -426,7 +426,7 @@ fn assemble_report(
                 });
             }
         }
-        for span in &record.trace_spans {
+        for span in &record.evidence.trace_spans {
             if span.kind != "llm_call" {
                 continue;
             }
@@ -1079,7 +1079,9 @@ mod tool_call_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::{save_run_record, RunChildRecord, RunTraceSpanRecord};
+    use crate::orchestration::{
+        save_run_record, ExecutionEvidenceRecord, RunChildRecord, RunTraceSpanRecord,
+    };
     use std::fs;
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -1339,7 +1341,10 @@ mod tests {
             type_name: "workflow_run".to_string(),
             id: "root".to_string(),
             status: "completed".to_string(),
-            trace_spans,
+            evidence: ExecutionEvidenceRecord {
+                trace_spans,
+                ..ExecutionEvidenceRecord::default()
+            },
             ..RunRecord::default()
         };
         save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();

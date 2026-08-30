@@ -565,22 +565,22 @@ mod tests {
     #[tokio::test]
     async fn guarded_resolver_private_host_allowlist_allows_configured_local_endpoint() {
         let resolver = stub_with_private_host_allow(
-            &[String::from("tornadough.local")],
-            &["127.0.0.1", "192.168.86.250", "fc00::1"],
+            &[String::from("example.internal")],
+            &["127.0.0.1", "10.0.0.2", "fc00::1"],
         );
-        let addrs = resolve_named_host(&resolver, "tornadough.local")
+        let addrs = resolve_named_host(&resolver, "example.internal")
             .await
             .expect("configured provider host may resolve to local inference addresses");
         let ips: Vec<IpAddr> = addrs.into_iter().map(|addr| addr.ip()).collect();
         assert!(ips.contains(&v4("127.0.0.1")));
-        assert!(ips.contains(&v4("192.168.86.250")));
+        assert!(ips.contains(&v4("10.0.0.2")));
         assert!(ips.contains(&v4("fc00::1")));
     }
 
     #[tokio::test]
     async fn guarded_resolver_private_host_allowlist_is_exact_host_only() {
         let resolver =
-            stub_with_private_host_allow(&[String::from("tornadough.local")], &["192.168.86.250"]);
+            stub_with_private_host_allow(&[String::from("example.internal")], &["10.0.0.2"]);
         let err = resolve_named_host(&resolver, "other.local")
             .await
             .expect_err("non-configured hosts remain SSRF-guarded");
@@ -590,11 +590,11 @@ mod tests {
     #[tokio::test]
     async fn guarded_resolver_private_host_allowlist_still_blocks_metadata() {
         let resolver =
-            stub_with_private_host_allow(&[String::from("tornadough.local")], &["169.254.169.254"]);
-        let err = resolve_named_host(&resolver, "tornadough.local")
+            stub_with_private_host_allow(&[String::from("example.internal")], &["169.254.169.254"]);
+        let err = resolve_named_host(&resolver, "example.internal")
             .await
             .expect_err("metadata endpoint stays blocked");
-        assert!(err.contains("tornadough.local"), "{err}");
+        assert!(err.contains("example.internal"), "{err}");
         assert!(
             !err.contains("169.254.169.254"),
             "must not leak address: {err}"

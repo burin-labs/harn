@@ -314,6 +314,14 @@ pub struct Vm {
     pub(crate) session_runtime: Arc<crate::agent_sessions::AgentSessionRuntime>,
     /// Structured spans owned by this VM tree.
     pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
+    /// Durable identity shared by every VM in this execution tree.
+    pub(crate) execution_id: Arc<str>,
+    /// Root VMs mint and close executions; child VMs only contribute evidence.
+    pub(crate) owns_execution: bool,
+    /// Exact source path recorder shared by this VM tree when explicitly enabled.
+    pub(crate) flight_recorder: Option<Arc<crate::flight_recorder::FlightRecorder>>,
+    /// Root-only configuration used to create a fresh recorder per execution.
+    pub(crate) flight_recorder_max_events: Option<usize>,
     /// Host-side agent-loop state owned by this VM tree.
     pub(crate) agent_host_session_runtime:
         Arc<crate::llm::agent_session_host::AgentHostSessionRuntime>,
@@ -565,6 +573,8 @@ impl VmBaseline {
             trigger_registry: crate::triggers::registry::active_trigger_registry(),
             session_runtime: crate::agent_sessions::active_session_runtime(),
             tracing_runtime: crate::tracing::active_tracing_runtime(),
+            execution_id: crate::observability::execution_scope::mint_execution_scope(),
+            owns_execution: true,
             agent_host_session_runtime:
                 crate::llm::agent_session_host::active_agent_host_session_runtime(),
             connector_clients: Arc::new(crate::connectors::VmConnectorClients::default()),
@@ -605,6 +615,8 @@ impl VmBaseline {
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
+            flight_recorder: None,
+            flight_recorder_max_events: None,
             bridge: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: None,
@@ -835,6 +847,8 @@ impl Vm {
             trigger_registry: crate::triggers::registry::active_trigger_registry(),
             session_runtime: crate::agent_sessions::active_session_runtime(),
             tracing_runtime: crate::tracing::active_tracing_runtime(),
+            execution_id: crate::observability::execution_scope::mint_execution_scope(),
+            owns_execution: true,
             agent_host_session_runtime:
                 crate::llm::agent_session_host::active_agent_host_session_runtime(),
             connector_clients: Arc::new(crate::connectors::VmConnectorClients::default()),
@@ -875,6 +889,8 @@ impl Vm {
             source_file: None,
             source_text: None,
             coverage: crate::coverage::for_primary(None),
+            flight_recorder: None,
+            flight_recorder_max_events: None,
             bridge: None,
             denied_builtins: Arc::new(HashSet::new()),
             cancel_token: None,
@@ -1106,6 +1122,8 @@ impl Vm {
             trigger_registry: self.trigger_registry.clone(),
             session_runtime: self.session_runtime.clone(),
             tracing_runtime: self.tracing_runtime.clone(),
+            execution_id: self.execution_id.clone(),
+            owns_execution: false,
             agent_host_session_runtime: self.agent_host_session_runtime.clone(),
             connector_clients: self.connector_clients.clone(),
             inline_cache_sets: Vec::new(),
@@ -1145,6 +1163,8 @@ impl Vm {
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
+            flight_recorder: self.flight_recorder.clone(),
+            flight_recorder_max_events: None,
             bridge: self.bridge.clone(),
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),

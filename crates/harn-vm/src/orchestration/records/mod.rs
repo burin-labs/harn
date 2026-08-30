@@ -38,7 +38,8 @@ pub use from_session::{
 pub(crate) use persistence::save_run_record_with_transcript;
 pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
-    normalize_run_record, save_run_record, AgentSessionReplayEvent,
+    normalize_run_record, prune_execution_run_records, save_execution_run_record, save_run_record,
+    AgentSessionReplayEvent, DEFAULT_EXECUTION_RUN_RETENTION,
 };
 pub(crate) use report::read_checked_run_report_bytes;
 pub use report::{
@@ -61,14 +62,15 @@ pub use types::{
     EvalPackReliabilityBreakdown, EvalPackReliabilityReport, EvalPackReport, EvalPackRubric,
     EvalPackRunState, EvalPackSplit, EvalPackSplitValidationReport, EvalPackStatsReport,
     EvalPackStatsRow, EvalPackThresholds, EvalPackTrialReport, EvalSuiteCase, EvalSuiteManifest,
-    LlmUsageRecord, ReplayEvalCaseReport, ReplayEvalReport, ReplayEvalSuiteReport, ReplayFixture,
-    ReplayStageAssertion, RunActionGraphEdgeRecord, RunActionGraphNodeRecord, RunCheckpointRecord,
-    RunChildRecord, RunDeliverableSummaryRecord, RunDiffReport, RunExecutionRecord,
-    RunHitlQuestionRecord, RunObservabilityDiffRecord, RunObservabilityRecord,
-    RunPersonaRuntimeRecord, RunPlannerRoundRecord, RunRecord, RunStageAttemptRecord,
-    RunStageDiffRecord, RunStageRecord, RunTaskLedgerSummaryRecord, RunTraceSpanRecord,
-    RunTranscriptArtifactDescriptor, RunTranscriptPointerRecord, RunTransitionRecord,
-    RunVerificationOutcomeRecord, RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
+    ExecutionEvidenceRecord, LlmUsageRecord, ReplayEvalCaseReport, ReplayEvalReport,
+    ReplayEvalSuiteReport, ReplayFixture, ReplayStageAssertion, RunActionGraphEdgeRecord,
+    RunActionGraphNodeRecord, RunCheckpointRecord, RunChildRecord, RunDeliverableSummaryRecord,
+    RunDiffReport, RunEvidenceGapRecord, RunExecutionRecord, RunHitlQuestionRecord,
+    RunObservabilityDiffRecord, RunObservabilityRecord, RunPersonaRuntimeRecord,
+    RunPlannerRoundRecord, RunRecord, RunStageAttemptRecord, RunStageDiffRecord, RunStageRecord,
+    RunTaskLedgerSummaryRecord, RunTraceSpanRecord, RunTranscriptArtifactDescriptor,
+    RunTranscriptPointerRecord, RunTransitionRecord, RunVerificationOutcomeRecord,
+    RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
     ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH, ACTION_GRAPH_EDGE_KIND_DELEGATES,
     ACTION_GRAPH_EDGE_KIND_DLQ_MOVE, ACTION_GRAPH_EDGE_KIND_ENTRY,
     ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,

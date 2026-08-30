@@ -5,10 +5,12 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
-# Pinned, never inherited: the same port serves a DIFFERENT model on this Mac's
-# localhost (another lane's server), so an ambient value silently swaps the box
-# under the measurement. No trailing /v1.
-export LLAMACPP_BASE_URL=http://tornadough:8001
+# Pinned, never inherited: the same port commonly serves a DIFFERENT model on
+# localhost, so an ambient LLAMACPP_BASE_URL silently swaps the box under the
+# measurement. Require an explicit, differently-named variable so nothing can be
+# picked up by accident. No trailing /v1.
+: "${DIAG_TIMING_BASE_URL:?set DIAG_TIMING_BASE_URL to the pinned server, e.g. http://server.example:8001}"
+export LLAMACPP_BASE_URL="$DIAG_TIMING_BASE_URL"
 # The tool channel comes from the catalog (preferred_tool_format for this
 # route), which is the authority on provider/model support: this route pins
 # json with tool_mode_parity=text_only from a receipted sweep, and forcing

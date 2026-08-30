@@ -61,6 +61,7 @@ pub struct RunView {
     pub schema_version: u32,
     pub producer: ViewProducer,
     pub run: RunViewRun,
+    pub evidence: super::ExecutionEvidenceRecord,
     pub projection: ProjectionInfo,
     pub visible_text: Option<String>,
     pub transcript: TranscriptSummary,
@@ -403,6 +404,7 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
             finished_at: run.finished_at.clone(),
             duration_ms: run_duration_ms(run),
         },
+        evidence: project_evidence(run, &policy),
         projection: ProjectionInfo {
             projection_id: String::new(),
             projection_hash: None,
@@ -453,6 +455,25 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
     };
     finalize_run_projection(&mut view);
     view
+}
+
+fn project_evidence(run: &RunRecord, policy: &RedactionPolicy) -> super::ExecutionEvidenceRecord {
+    let mut evidence = run.evidence.clone();
+    for span in &mut evidence.trace_spans {
+        span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
+        let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
+        policy.redact_json_in_place(&mut metadata);
+        if let Value::Object(metadata) = metadata {
+            span.metadata = metadata.into_iter().collect();
+        }
+    }
+    if let Some(recording) = &mut evidence.flight_recording {
+        recording.path = redact_bounded(&recording.path, policy, PREVIEW_LIMIT);
+    }
+    for gap in &mut evidence.gaps {
+        gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
+    }
+    evidence
 }
 
 pub fn build_session_view_from_run_views(
@@ -710,6 +731,7 @@ fn build_approval_view(
 fn provider_summary(run: &RunRecord) -> Vec<RunViewProvider> {
     let mut providers = BTreeMap::<(String, String), RunViewProvider>::new();
     for span in run
+        .evidence
         .trace_spans
         .iter()
         .filter(|span| span.kind == "llm_call")
@@ -949,6 +971,7 @@ fn run_duration_ms(run: &RunRecord) -> Option<u64> {
         .and_then(|usage| u64::try_from(usage.total_duration_ms).ok())
         .filter(|duration| *duration > 0);
     let from_spans = run
+        .evidence
         .trace_spans
         .iter()
         .map(trace_span_end_ms)
@@ -1003,7 +1026,7 @@ fn infer_run_session_id(run: &RunRecord) -> Option<String> {
             })
         })
         .or_else(|| {
-            run.trace_spans.iter().find_map(|span| {
+            run.evidence.trace_spans.iter().find_map(|span| {
                 metadata_string_any(&span.metadata, &["session_id", "agent_session_id"])
             })
         })
@@ -1237,7 +1260,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::orchestration::LlmUsageRecord;
+    use crate::orchestration::{ExecutionEvidenceRecord, LlmUsageRecord};
 
     fn sample_run() -> RunRecord {
         RunRecord {
@@ -1276,17 +1299,21 @@ mod tests {
                 ]),
                 ..RunStageRecord::default()
             }],
-            trace_spans: vec![RunTraceSpanRecord {
-                kind: "llm_call".to_string(),
-                metadata: BTreeMap::from([
-                    ("provider".to_string(), json!("test")),
-                    ("model".to_string(), json!("model-a")),
-                    ("input_tokens".to_string(), json!(10)),
-                    ("output_tokens".to_string(), json!(5)),
-                    ("cost_usd".to_string(), json!(0.01)),
-                ]),
-                ..RunTraceSpanRecord::default()
-            }],
+            evidence: ExecutionEvidenceRecord {
+                trace_spans: vec![RunTraceSpanRecord {
+                    kind: "llm_call".to_string(),
+                    metadata: BTreeMap::from([
+                        ("provider".to_string(), json!("test")),
+                        ("model".to_string(), json!("model-a")),
+                        ("input_tokens".to_string(), json!(10)),
+                        ("output_tokens".to_string(), json!(5)),
+                        ("cost_usd".to_string(), json!(0.01)),
+                        ("api_key".to_string(), json!("must-not-project")),
+                    ]),
+                    ..RunTraceSpanRecord::default()
+                }],
+                ..ExecutionEvidenceRecord::default()
+            },
             transcript: Some(json!({
                 "source": "inline",
                 "summary": "short",
@@ -1299,13 +1326,20 @@ mod tests {
 
     #[test]
     fn build_run_view_projects_stable_public_fields() {
-        let view = build_run_view_with_path(&sample_run(), Some("runs/run_1.json"));
+        let mut run = sample_run();
+        run.evidence.execution_id = Some("hxe-view".to_string());
+        let view = build_run_view_with_path(&run, Some("runs/run_1.json"));
         assert_eq!(view.schema, RUN_VIEW_SCHEMA);
         assert_eq!(view.schema_version, RUN_VIEW_SCHEMA_VERSION);
         assert_eq!(view.run.run_id, "run_1");
         assert_eq!(view.run.session_id.as_deref(), Some("session_1"));
         assert_eq!(view.run.run_path.as_deref(), Some("runs/run_1.json"));
         assert_eq!(view.run.duration_ms, Some(2000));
+        assert_eq!(view.evidence.execution_id.as_deref(), Some("hxe-view"));
+        assert_eq!(
+            view.evidence.trace_spans[0].metadata["api_key"],
+            json!(crate::redact::REDACTED_PLACEHOLDER)
+        );
         assert_eq!(view.visible_text.as_deref(), Some("done"));
         assert_eq!(view.transcript.message_count, 1);
         assert_eq!(view.usage.input_tokens, 10);

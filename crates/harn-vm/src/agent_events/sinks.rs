@@ -103,6 +103,10 @@ pub struct PersistedAgentEvent {
     /// can supply it. `None` for events emitted from a context where
     /// the VM frame stack isn't available.
     pub frame_depth: Option<u32>,
+    /// VM execution that owned this event. `None` means the event was emitted
+    /// outside an execution scope; projections preserve that as a gap instead
+    /// of substituting a session id.
+    pub execution_id: Option<String>,
     /// The raw event, flattened so `jq '.type'` works as expected.
     #[serde(flatten)]
     pub event: AgentEvent,
@@ -397,6 +401,7 @@ impl AgentEventSink for JsonlEventSink {
             index,
             emitted_at_ms,
             frame_depth: None,
+            execution_id: crate::current_execution_scope().map(|id| id.to_string()),
             event: event.clone(),
         };
         let mut envelope_json = match serde_json::to_value(&envelope) {
@@ -474,13 +479,18 @@ impl AgentEventSink for EventLogSink {
             .and_then(|value| value.as_str())
             .unwrap_or("agent_event")
             .to_string();
+        let execution_id = crate::current_execution_scope().map(|id| id.to_string());
         let payload = serde_json::json!({
             "index_hint": now_ms(),
             "session_id": self.session_id,
+            "execution_id": execution_id,
             "event": event_json,
         });
         let mut headers = std::collections::BTreeMap::new();
         headers.insert("session_id".to_string(), self.session_id.clone());
+        if let Some(execution_id) = execution_id {
+            headers.insert("execution_id".to_string(), execution_id);
+        }
         let mut record = EventLogRecord::new(event_kind, payload).with_headers(headers);
         record.redact_in_place(&crate::redact::current_policy());
         match &self.dispatch {

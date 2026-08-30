@@ -64,9 +64,10 @@ pub use sessions::{
     acp_persisted_session_item, resolve_acp_session_project_root, AcpSessionProjectRootError,
 };
 use sessions::{
-    apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,
-    ConcurrentSessionControls, Session, SessionBudget, SessionCancellation, SessionInfo,
+    apply_session_budget_rearm, cancel_session_command_handles, lookup_session_cancellation,
+    preempt_session_interruption, prepare_session_prompt, session_project_root_for_cwd,
+    ConcurrentSessionControl, ConcurrentSessionControls, Session, SessionBudget,
+    SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{

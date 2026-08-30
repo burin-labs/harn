@@ -1,6 +1,13 @@
 {
   "artifacts": [],
   "checkpoints": [],
+  "evidence": {
+    "execution_id": null,
+    "flight_recording": null,
+    "gaps": [],
+    "schema_version": 0,
+    "trace_spans": []
+  },
   "failure": {
     "message": null,
     "node_id": null,
@@ -33,8 +40,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:2d044aa116a02fe85473d35527ba5c42f47609b5b6d9619bd7929b4affe1d801",
-    "projection_id": "run_view:run_legacy_sparse:2d044aa116a0"
+    "projection_hash": "sha256:3f576d9f9c728afb804d9a97a82bf436c6beeb8dd8c02e3fb5d652e596e04432",
+    "projection_id": "run_view:run_legacy_sparse:3f576d9f9c72"
   },
   "providers": [],
   "run": {

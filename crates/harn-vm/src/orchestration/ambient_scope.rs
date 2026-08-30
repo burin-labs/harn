@@ -495,6 +495,34 @@ pub fn scope_fresh_trigger_registry<F: Future>(inner: F) -> impl Future<Output =
     scope_ambient(scope, inner)
 }
 
+/// Run one entrypoint future with an execution-owned span collector.
+///
+/// The collector is poll-scoped, so concurrent in-process runs that interleave
+/// on one executor thread cannot reset, parent, or persist each other's spans.
+pub fn scope_fresh_tracing_runtime<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope
+        .subtask
+        .set_tracing_runtime(crate::tracing::fresh_tracing_runtime());
+    scope_ambient(scope, inner)
+}
+
+/// Run one entrypoint with all run-owned ambient registries refreshed together.
+///
+/// Capturing once is essential: nesting independent fresh-scope wrappers lets
+/// the inner wrapper restore the caller's value for fields refreshed by the
+/// outer wrapper.
+pub fn scope_fresh_run_runtime<F: Future>(inner: F) -> impl Future<Output = F::Output> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope
+        .subtask
+        .set_trigger_registry(crate::triggers::registry::runtime::fresh_trigger_registry());
+    scope
+        .subtask
+        .set_tracing_runtime(crate::tracing::fresh_tracing_runtime());
+    scope_ambient(scope, inner)
+}
+
 pin_project! {
     /// A future that runs `inner` with `scope` installed as the ambient
     /// execution scope. See the module docs.
@@ -657,6 +685,58 @@ mod tests {
         assert!(Arc::ptr_eq(
             &caller,
             &crate::triggers::registry::active_trigger_registry(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn fresh_tracing_scopes_isolate_interleaved_runs_and_restore_the_caller() {
+        let caller = crate::tracing::active_tracing_runtime();
+        let run = |name: &'static str| {
+            scope_fresh_tracing_runtime(async move {
+                let owner = crate::tracing::active_tracing_runtime();
+                crate::tracing::set_tracing_enabled(true);
+                let span =
+                    crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, name.into());
+                tokio::task::yield_now().await;
+                crate::tracing::span_end(span);
+                (owner, crate::tracing::peek_spans())
+            })
+        };
+        let ((alpha_owner, alpha), (beta_owner, beta)) = tokio::join!(run("alpha"), run("beta"));
+
+        assert!(!Arc::ptr_eq(&alpha_owner, &beta_owner));
+        assert_eq!(alpha.len(), 1);
+        assert_eq!(alpha[0].name, "alpha");
+        assert_eq!(beta.len(), 1);
+        assert_eq!(beta[0].name, "beta");
+        assert!(Arc::ptr_eq(
+            &caller,
+            &crate::tracing::active_tracing_runtime(),
+        ));
+    }
+
+    #[tokio::test]
+    async fn fresh_run_scope_refreshes_both_registries_and_restores_the_caller() {
+        let caller_triggers = crate::triggers::registry::active_trigger_registry();
+        let caller_tracing = crate::tracing::active_tracing_runtime();
+
+        let (run_triggers, run_tracing) = scope_fresh_run_runtime(async {
+            (
+                crate::triggers::registry::active_trigger_registry(),
+                crate::tracing::active_tracing_runtime(),
+            )
+        })
+        .await;
+
+        assert!(!Arc::ptr_eq(&caller_triggers, &run_triggers));
+        assert!(!Arc::ptr_eq(&caller_tracing, &run_tracing));
+        assert!(Arc::ptr_eq(
+            &caller_triggers,
+            &crate::triggers::registry::active_trigger_registry(),
+        ));
+        assert!(Arc::ptr_eq(
+            &caller_tracing,
+            &crate::tracing::active_tracing_runtime(),
         ));
     }
 

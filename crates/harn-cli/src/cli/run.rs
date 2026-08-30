@@ -14,6 +14,39 @@ pub(crate) struct RunArgs {
         value_parser = clap::builder::BoolishValueParser::new()
     )]
     pub trace: bool,
+    /// Record the exact source-level VM code path to a bounded local file.
+    /// Values, arguments, and results are never included.
+    #[arg(
+        long = "flight-recorder",
+        env = "HARN_FLIGHT_RECORDER",
+        action = clap::ArgAction::SetTrue,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub flight_recorder: bool,
+    /// Write the flight recording to this file instead of the default under
+    /// `.harn-runs/flight-recordings/`.
+    #[arg(
+        long = "flight-recorder-out",
+        value_name = "PATH",
+        requires = "flight_recorder"
+    )]
+    pub flight_recorder_out: Option<PathBuf>,
+    /// Maximum exact VM events retained in the in-memory ring.
+    #[arg(
+        long = "flight-recorder-max-events",
+        value_name = "COUNT",
+        value_parser = clap::value_parser!(u32).range(1..=1_000_000),
+        requires = "flight_recorder"
+    )]
+    pub flight_recorder_max_events: Option<u32>,
+    /// Number of newest default-location flight recordings to retain.
+    #[arg(
+        long = "flight-recorder-retain",
+        value_name = "COUNT",
+        value_parser = clap::value_parser!(u32).range(1..=1_024),
+        requires = "flight_recorder"
+    )]
+    pub flight_recorder_retain: Option<u32>,
     #[command(flatten)]
     pub profile: ProfileArgs,
     /// Print static LLM token/cost estimates and do not execute the script.

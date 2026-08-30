@@ -924,6 +924,7 @@ fn replay_event(event_id: u64, occurred_at_ms: i64, event: AgentEvent) -> AgentS
         event_id,
         kind,
         occurred_at_ms,
+        execution_id: None,
         event,
     }
 }

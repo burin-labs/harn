@@ -155,6 +155,11 @@ HARN_OTEL_SERVICE_NAME=harn-orchestrator \
 harn orchestrator serve
 ```
 
+Harn also accepts the standard `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+and `OTEL_EXPORTER_OTLP_HEADERS` variables. A non-empty Harn-specific variable
+wins when both forms are set. The VM event exporter and orchestrator subscriber
+use this same configuration path.
+
 The orchestrator exports spans for webhook ingestion, queue append, and
 dispatch, attaches the Harn `trace_id` as a span attribute, and propagates W3C
 trace context through pending and inbox EventLog topics into dispatch spans.
