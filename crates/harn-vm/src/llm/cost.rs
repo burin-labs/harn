@@ -254,25 +254,6 @@ impl ProjectionBasis {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct LlmContextTokenBreakdown {
-    pub schema: &'static str,
-    pub segments: Vec<LlmContextTokenSegment>,
-    pub input_tokens: i64,
-    pub output_budget_tokens: i64,
-    pub context_tokens: i64,
-    pub message_count: usize,
-    pub native_tool_count: usize,
-    pub provider_tool_count: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(crate) struct LlmContextTokenSegment {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub tokens: i64,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BudgetLimitKind {
     PerCallCost,
@@ -371,152 +352,6 @@ pub(crate) fn parse_budget(
     Ok((!envelope.is_empty()).then_some(envelope))
 }
 
-pub(super) fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i64 {
-    match value {
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => 1,
-        serde_json::Value::String(s) => estimate_text_tokens_for_model(s, model),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .map(|item| estimate_json_tokens(item, model))
-            .sum(),
-        serde_json::Value::Object(map) => map
-            .iter()
-            .map(|(key, value)| {
-                estimate_text_tokens_for_model(key, model) + estimate_json_tokens(value, model)
-            })
-            .sum(),
-    }
-}
-
-fn estimate_text_tokens_for_model(text: &str, model: &str) -> i64 {
-    super::token_count::estimate_text_tokens(text, Some(model)).tokens
-}
-
-pub(crate) fn project_llm_call_tokens(opts: &super::api::LlmCallOptions) -> (i64, i64) {
-    let breakdown = project_llm_call_context_breakdown(opts);
-    (breakdown.input_tokens, breakdown.output_budget_tokens)
-}
-
-pub(crate) fn project_llm_call_context_breakdown(
-    opts: &super::api::LlmCallOptions,
-) -> LlmContextTokenBreakdown {
-    let system_tokens = opts
-        .system
-        .as_deref()
-        .map(|system| estimate_text_tokens_for_model(system, &opts.model))
-        .unwrap_or(0);
-    let mut user_message_tokens = 0;
-    let mut assistant_message_tokens = 0;
-    let mut tool_result_tokens = 0;
-    let mut other_message_tokens = 0;
-    for message in &opts.messages {
-        let tokens = estimate_json_tokens(message, &opts.model);
-        if super::context_breakdown::message_is_tool_result(message) {
-            tool_result_tokens += tokens;
-            continue;
-        }
-        match message.get("role").and_then(serde_json::Value::as_str) {
-            Some("user") => user_message_tokens += tokens,
-            Some("assistant") => assistant_message_tokens += tokens,
-            _ => other_message_tokens += tokens,
-        }
-    }
-    let tool_tokens: i64 = opts
-        .native_tools
-        .as_ref()
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| {
-                    estimate_text_tokens_for_model(
-                        &serde_json::to_string(tool).unwrap_or_default(),
-                        &opts.model,
-                    )
-                })
-                .sum()
-        })
-        .unwrap_or(0);
-    let provider_tool_tokens: i64 = opts
-        .provider_tools
-        .iter()
-        .map(|tool| {
-            estimate_text_tokens_for_model(
-                &serde_json::to_string(tool).unwrap_or_default(),
-                &opts.model,
-            )
-        })
-        .sum();
-    let projected_input_tokens = system_tokens
-        .saturating_add(user_message_tokens)
-        .saturating_add(assistant_message_tokens)
-        .saturating_add(tool_result_tokens)
-        .saturating_add(other_message_tokens)
-        .saturating_add(tool_tokens)
-        .saturating_add(provider_tool_tokens);
-    let projected_output_tokens = opts.max_tokens.max(0);
-    let segments = vec![
-        LlmContextTokenSegment {
-            id: "system_prompt",
-            label: "System prompt",
-            tokens: system_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "user_messages",
-            label: "User turns",
-            tokens: user_message_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "assistant_messages",
-            label: "Assistant turns",
-            tokens: assistant_message_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "tool_results",
-            label: "Tool results",
-            tokens: tool_result_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "other_messages",
-            label: "Other messages",
-            tokens: other_message_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "native_tool_schemas",
-            label: "Native tool schemas",
-            tokens: tool_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "provider_tools",
-            label: "Provider-hosted tools",
-            tokens: provider_tool_tokens,
-        },
-        LlmContextTokenSegment {
-            id: "output_budget",
-            label: "Output budget",
-            tokens: projected_output_tokens,
-        },
-    ];
-    LlmContextTokenBreakdown {
-        schema: "harn.llm.context_token_breakdown.v1",
-        segments,
-        input_tokens: projected_input_tokens,
-        output_budget_tokens: projected_output_tokens,
-        context_tokens: projected_input_tokens.saturating_add(projected_output_tokens),
-        message_count: opts.messages.len(),
-        native_tool_count: opts
-            .native_tools
-            .as_ref()
-            .map(|tools| tools.len())
-            .unwrap_or(0),
-        provider_tool_count: opts.provider_tools.len(),
-    }
-}
-
-pub(crate) fn project_llm_call_context_tokens(opts: &super::api::LlmCallOptions) -> u64 {
-    let (input, output) = project_llm_call_tokens(opts);
-    input.max(0) as u64 + output.max(0) as u64
-}
-
 /// Project what the next provider call will cost, in USD.
 ///
 /// Before any call completes there is no evidence, so the projection is the
@@ -541,7 +376,8 @@ pub(crate) fn project_llm_call_cost(
     opts: &super::api::LlmCallOptions,
     session_cost_usd: f64,
 ) -> LlmBudgetProjection {
-    let (projected_input_tokens, projected_output_tokens) = project_llm_call_tokens(opts);
+    let (projected_input_tokens, projected_output_tokens) =
+        super::cost_context::project_llm_call_tokens(opts);
     let output_budget_tokens = projected_output_tokens;
     let observed = peek_observed_session_usage();
     let (costed_output_tokens, projected_cost_usd, basis) = match observed.mean_output_tokens() {
