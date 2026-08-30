@@ -18,6 +18,8 @@
 2	agents/agent_sub_agent_anchor.harn	HARN-LNT-025
 10	agents/approval_reviewer.harn	HARN-LNT-025
 1	agents/approval_reviewer.harn	HARN-LNT-049
+1	agents/approval_reviewer_loop.harn	HARN-LNT-014
+1	agents/approval_reviewer_loop.harn	HARN-LNT-049
 4	agents/artifact_emit.harn	HARN-LNT-018
 1	agents/effects_inheritance_empty_child.harn	HARN-LNT-014
 1	agents/effects_inheritance_subset_allowed.harn	HARN-LNT-014

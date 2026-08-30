@@ -1,0 +1,5 @@
+control_refused=true
+control_output_absent=true
+status=done
+reviewed_refused=false
+reviewed_output_present=true

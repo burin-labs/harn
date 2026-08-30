@@ -376,6 +376,12 @@ pub type AgentCapabilitySpec = {
   policy?: dict,
   permissions?: dict,
   approval_policy?: any,
+  /**
+   * The AutoReview answerer: a closure the loop consults when a policy `ask`
+   * or `deny` has nobody present to reconsider it. See
+   * `std/agent/approval_review::approval_reviewer_for`.
+   */
+  approval_reviewer?: any,
   autonomy_budget?: dict,
   subagents?: bool,
   subagent_tools?: bool,
