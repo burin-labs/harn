@@ -1,8 +1,10 @@
 import {
   __response_compact_with_caller,
+  response_compact,
   response_compaction_read_exact,
 } from "std/agent/response_compaction"
 import { cache_put, fs_cache } from "std/cache"
+import { llm_text, with_llm_script } from "std/testing"
 
 type ExactResponse = {text: string, facts: list<string>}
 
@@ -442,4 +444,39 @@ pipeline test_schema_valid_exact_content_tamper_fails_digest_verification(
   )
   assert_eq(read.state, "broken")
   assert_eq(read.detail, "exact retained content failed digest verification")
+}
+
+pipeline test_public_response_compact_returns_scripted_structured_summary(
+  harness: Harness,
+  task: unknown,
+) {
+  const result = with_llm_script(
+    harness.llm,
+    [llm_text("{\"summary\":\"compact\",\"critical_facts\":[\"keep\"]}")],
+    { ->
+      return response_compact(
+        __caps(harness.fs, harness.llm),
+        {text: "large ".repeat(30), facts: ["keep"]},
+        schema_of(ExactResponse),
+        schema_of(Summary),
+        __options(
+          "response-compaction-production-" + harness.random.uuid(),
+          {summary: "fallback", critical_facts: []},
+        )
+          + {timeout_ms: 1000},
+      )
+    },
+  )
+  assert_eq(result.output.kind, "summarized")
+  assert_eq(result.output.value.summary, "compact")
+  assert_eq(result.output.value.critical_facts, ["keep"])
+  assert_eq(result.receipt.summary_call_count, 1)
+  assert_eq(result.receipt.summary_timeout_ms, 1000)
+  const retained = response_compaction_read_exact(
+    __caps(harness.fs, harness.llm),
+    result.receipt.exact_ref,
+    schema_of(ExactResponse),
+  )
+  assert_eq(retained.state, "found")
+  assert_eq(retained.value.facts, ["keep"])
 }
