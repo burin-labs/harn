@@ -7,6 +7,7 @@
 mod auth;
 mod completion;
 mod context_window;
+pub mod data_controls;
 mod dialect;
 mod errors;
 mod ollama;
@@ -32,6 +33,10 @@ use super::mock::{
 pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub use context_window::fetch_provider_max_context;
+pub use data_controls::{
+    declaration_for as provider_data_controls, AppliedDataControl, DataControlsOutcome,
+    DataControlsReceipt,
+};
 pub(crate) use dialect::{DialectContract, StreamProtocol};
 pub(crate) use errors::{
     classify_llm_error, classify_provider_stream_error, err_for_non_success,

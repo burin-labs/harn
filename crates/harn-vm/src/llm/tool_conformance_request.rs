@@ -195,6 +195,7 @@ pub(super) fn probe_request_payload_for_format(
     );
     let max_tokens = tool_probe_max_tokens(default_int("max_tokens"), &thinking);
     let mut payload = LlmRequestPayload {
+        data_controls: crate::llm_config::DataPosture::Default,
         provider: provider.to_string(),
         model: model.to_string(),
         region: None,

@@ -51,6 +51,16 @@ pub struct ProvidersConfig {
     /// owning source seam without changing the public artifact schema.
     #[serde(default)]
     pub usage_accounting_audit: Option<UsageAccountingAuditRegistry>,
+    /// Evidence and the expiring unresearched queue behind every provider's
+    /// `data_controls` declaration. Providers are never merely missing from
+    /// it: a provider is either researched or explicitly queued.
+    #[serde(default)]
+    pub data_controls_audit: Option<DataControlsAuditRegistry>,
+    /// The posture Harn requests when a caller names none. Shipped as
+    /// `default` on purpose — see [`DataPosture`]. An embedder that wants the
+    /// strictest available posture everywhere flips this one key in config.
+    #[serde(default)]
+    pub data_controls_policy: DataControlsPolicy,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.
@@ -134,6 +144,8 @@ impl ProvidersConfig {
             && self.model_ladders.is_empty()
             && self.presentation.is_empty()
             && self.usage_accounting_audit.is_none()
+            && self.data_controls_audit.is_none()
+            && self.data_controls_policy == DataControlsPolicy::default()
             && self.tier_defaults.default == default_mid()
     }
 
@@ -196,6 +208,12 @@ impl ProvidersConfig {
             self.default_provider = overlay.default_provider.clone();
         }
 
+        if overlay.data_controls_audit.is_some() {
+            self.data_controls_audit = overlay.data_controls_audit.clone();
+        }
+        if overlay.data_controls_policy != DataControlsPolicy::default() {
+            self.data_controls_policy = overlay.data_controls_policy;
+        }
         if overlay.usage_accounting_audit.is_some() {
             self.usage_accounting_audit = overlay.usage_accounting_audit.clone();
         }
