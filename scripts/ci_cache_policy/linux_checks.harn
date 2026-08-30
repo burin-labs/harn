@@ -420,7 +420,7 @@ fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
   const audit_command = trim(step_by_name(steps, "Run $" + "{{ matrix.step_name }}")?.run ?? "")
   if (audit?.needs ?? []) != ["changes"]
     || trim(audit?.if ?? "")
-      != "needs.changes.outputs.rust == 'true'"
+      != "needs.changes.outputs.run_slow_ci == 'true' && needs.changes.outputs.rust == 'true'"
     || trim(to_string(audit?.["timeout-minutes"] ?? ""))
       != HARN_AUDIT_TIMEOUT_MINUTES
     || wait_index < 0
