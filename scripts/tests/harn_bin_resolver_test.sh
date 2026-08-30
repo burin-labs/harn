@@ -765,6 +765,17 @@ echo "no-build freshness verification invoked Cargo" >&2
 exit 97
 SH
 chmod +x "$no_cargo_bin/cargo"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print-build-freshness \
+    > "$tmp_root/cargo-fixture-build-freshness.out"
+)
+if ! grep -Fxq "$(sed -n 's/^build-freshness=//p' "$cargo_fixture_bin.freshness")" \
+  "$tmp_root/cargo-fixture-build-freshness.out"; then
+  echo "verified build-freshness mode did not return the receipt-bound identity" >&2
+  exit 1
+fi
 binary_mtime_seconds() {
   local value=""
   if value="$(stat -c '%Y' "$1" 2>/dev/null)"; then

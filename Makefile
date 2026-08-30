@@ -48,6 +48,11 @@ HARN_CHROMEDRIVER ?=
 #        make all           (sequential, also works)
 all: fmt
 	@$(HARN_BIN_ASSIGN); \
+	build_freshness_id="$${HARN_BUILD_FRESHNESS_ID:-}"; \
+	if [ -z "$$build_freshness_id" ] && [ -z "$(strip $(HARN_BIN))" ]; then \
+		build_freshness_id="$$(HARN_BIN="$$harn_bin" ./scripts/harn_bin.sh --print-build-freshness)" || exit 1; \
+	fi; \
+	if [ -n "$$build_freshness_id" ]; then export HARN_BUILD_FRESHNESS_ID="$$build_freshness_id"; else unset HARN_BUILD_FRESHNESS_ID; fi; \
 	stable_root="$$(mktemp -d "$${TMPDIR:-/tmp}/harn-all-bin.XXXXXX")" || exit 1; \
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
