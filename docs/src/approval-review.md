@@ -53,6 +53,45 @@ make one merely presumed-denied — grantable when the goal plainly requires it 
 add it to `[denylist].categories` instead. The difference is real: a floor
 category never reaches the model at all.
 
+## Install a reviewer on a loop
+
+```harn
+import { approval_reviewer_for } from "std/agent/approval_review"
+
+agent_loop(harness, task, system, {
+  approval_policy: policy,
+  approval_reviewer: approval_reviewer_for(harness, review_policy, goal),
+})
+```
+
+`goal` is required, not optional. The reviewer's question is never "is this
+command dangerous" in the abstract — it is "does THIS goal authorize THIS
+action". A reviewer given no goal can only reason from the command, which is the
+weaker instrument and the one that produces both kinds of error.
+
+`approval_reviewer` is a closure taking the refusal record and returning a
+decision record. `approval_reviewer_for` adapts the runtime's shape to
+`approval_review_decide`; anything returning `{approved, reviewer_answered,
+rationale}` works.
+
+### Yolo is this seam, not a bypass
+
+```harn
+approval_reviewer: approval_allow_all_reviewer(review_policy)
+```
+
+`allow_all` is a reviewer that says yes. Routing it through the same seam rather
+than around it means it inherits the floor, the receipt, and the activity record
+— and there is exactly one place in the system where a refusal can be lifted. It
+does **not** lift the catastrophic floor.
+
+### It fails closed
+
+No reviewer, no VM context, a closure that raises, an unparseable verdict, or
+re-entrancy all leave the call denied exactly as it would have been. A bare
+`true` is explicitly not an approval: the contract is a decision record, and
+accepting a stray truthy value is how a seam like this stops meaning anything.
+
 ## Measure the reviewer before trusting it
 
 ```sh
