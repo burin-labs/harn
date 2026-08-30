@@ -75,7 +75,7 @@ impl JsonRunSession {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_run_error(
     stdout: String,
-    mut stderr: String,
+    stderr: String,
     json_session: Option<JsonRunSession>,
     summary: Option<&RunSummaryOptions>,
     phase: Option<&RunPhaseOptions>,
