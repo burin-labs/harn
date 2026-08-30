@@ -71,7 +71,10 @@ pub fn validate_execution_id(candidate: &str) -> Result<(), ExecutionEvidenceVal
 
 fn is_blake3_hash(candidate: &str) -> bool {
     candidate.strip_prefix("blake3:").is_some_and(|digest| {
-        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     })
 }
 
@@ -157,6 +160,14 @@ mod tests {
                 {
                     let mut artifact = artifact();
                     artifact.content_hash = "blake3:not-a-digest".to_string();
+                    artifact
+                },
+                ExecutionEvidenceValidationError::InvalidFlightRecordingHash,
+            ),
+            (
+                {
+                    let mut artifact = artifact();
+                    artifact.content_hash = format!("blake3:{}", "A".repeat(64));
                     artifact
                 },
                 ExecutionEvidenceValidationError::InvalidFlightRecordingHash,
