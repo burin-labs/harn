@@ -796,6 +796,8 @@ mod tests {
     #[test]
     fn released_session_waits_for_initialized_notification_before_server_notifications() {
         let mut session = McpServerSession::default();
+        session.mark_initialized();
+        assert!(!session.is_ready_for_notifications());
         session
             .initialize(
                 &json!({
