@@ -186,7 +186,19 @@ pub(crate) fn openai_message_content_block_types(message: &serde_json::Value) ->
     if message.get("refusal").is_some_and(|value| !value.is_null()) {
         types.push("refusal".to_string());
     }
+    if openai_reasoning_field_present(message) {
+        types.push("reasoning".to_string());
+    }
     types
+}
+
+/// Whether an OpenAI-compatible message or stream delta declares a separate
+/// reasoning channel. Presence is the fact: an empty string is materially
+/// different from a provider that never supplied the channel.
+pub(crate) fn openai_reasoning_field_present(value: &serde_json::Value) -> bool {
+    ["reasoning", "reasoning_content", "reasoning_details"]
+        .iter()
+        .any(|field| value.get(*field).is_some_and(|field| !field.is_null()))
 }
 
 fn json_shape(value: &serde_json::Value) -> &'static str {

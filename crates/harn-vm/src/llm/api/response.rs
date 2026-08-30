@@ -22,8 +22,8 @@ pub(crate) use cache_mapping::{extract_cache_read_tokens, extract_cache_write_to
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
     is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
-    openai_responses_content_block_types, provider_content_block_types, CompletionContractSignals,
-    ProviderResponseEnvelope,
+    openai_reasoning_field_present, openai_responses_content_block_types,
+    provider_content_block_types, CompletionContractSignals, ProviderResponseEnvelope,
 };
 pub(crate) use openai::parse_openai_responses_response;
 

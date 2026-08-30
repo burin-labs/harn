@@ -434,13 +434,13 @@ pub(crate) fn parse_openai_responses_response(
         telemetry.cache_accounting_declared,
         true,
     );
-    let stop_reason = json["status"]
-        .as_str()
-        .or_else(|| {
-            json.get("incomplete_details")
-                .and_then(|value| value.get("reason"))
-                .and_then(|value| value.as_str())
-        })
+    // `status: "incomplete"` says only that generation stopped early. Prefer
+    // its nested reason and retain status as the completed-response fallback.
+    let stop_reason = json
+        .get("incomplete_details")
+        .and_then(|value| value.get("reason"))
+        .and_then(|value| value.as_str())
+        .or_else(|| json["status"].as_str())
         .map(str::to_string);
     let has_blocks = !blocks.is_empty();
     if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
