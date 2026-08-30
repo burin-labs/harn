@@ -2,14 +2,20 @@ pipeline test(harness: Harness, task: unknown) {
   // `parallel each` shares `parallel`'s fail-fast semantics: an erroring
   // branch cancels in-flight siblings and queued branches never start.
   const survived = harness.runtime.atomic(0)
+  const sibling_started = harness.runtime.atomic(0)
   try {
     parallel each ["fail", "slow"] { item ->
       if item == "fail" {
+        while harness.runtime.atomic_get(sibling_started) == 0 {
+          harness.runtime.yield_now()
+        }
         throw "each boom"
       }
-      for _ in range(0, 64) {
-        harness.runtime.yield_now()
-      }
+      harness.runtime.atomic_set(sibling_started, 1)
+      // This branch cannot complete before the failure is observed. A
+      // run-to-completion regression waits for the clock and sets the flag;
+      // fail-fast cancellation interrupts the sleep and returns immediately.
+      harness.clock.sleep_ms(5000)
       harness.runtime.atomic_set(survived, 1)
       item
     }
