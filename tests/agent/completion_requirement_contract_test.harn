@@ -3,6 +3,7 @@ import { completion_requirement_evidence_packet } from "std/agent/completion_evi
 import {
   CompletionRequirementEvidencePacket,
   completion_requirement_contract,
+  completion_requirement_pending_feedback,
   completion_requirement_report,
 } from "std/agent/completion_requirements"
 import { agent_capture_events } from "std/agent/events"
@@ -553,4 +554,171 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
       assert_eq(requirement_receipts[0].requirements.rows[0].status, "unsupported")
     },
   )
+}
+
+// --- Regression: the turn-ender vetoing verified-green work -----------------
+// Reproduces eval-py-smoke-20260829-181741-76315a65-66f, where five completion
+// judge calls each returned `done` with `met: true` and were each forced to
+// `continue` because the cited evidence included the tool actions the packet
+// itself had listed.
+fn trial_shaped_packet(verification_measurement: string) -> CompletionRequirementEvidencePacket {
+  return {
+    // Positive indices: the actions the packet showed the judge.
+    actions: [{evidence_index: 12, name: "edit"}, {evidence_index: 15, name: "verify"}],
+    fallback_observations: [],
+    // Negative indices: the typed records the runtime appended.
+    requirement_evidence: [
+      {
+        evidence_index: -3,
+        role: "mutation_summary",
+        supports_completion: true,
+        summary: "Changed 1 artifact(s) across this session.",
+        representative_artifact_ids: ["tests/test_calc.py"],
+        artifact_count: 1,
+        artifact_set_digest: "sha256:fixture",
+      },
+      {
+        evidence_index: -1,
+        role: "assistant_output",
+        supports_completion: true,
+        summary: "##DONE##",
+        representative_artifact_ids: [],
+        measurement: "present",
+      },
+      {
+        evidence_index: -2,
+        role: "deterministic_verification",
+        supports_completion: verification_measurement == "passed",
+        summary: "Deterministic verification observed `" + verification_measurement + "`.",
+        representative_artifact_ids: [],
+        measurement: verification_measurement,
+      },
+    ],
+  }
+}
+
+// The whole-task catch-all Burin synthesizes when no acceptance items are
+// frozen: one requirement, no declared evidence roles, name = the task text.
+fn catch_all_contract() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {
+        requirement_id: "extend-tests-test-calc-py-so-mul-21d47e57",
+        name:
+          "Extend tests/test_calc.py so multiply and divide are covered alongside the existing add tests. Follow the existing pytest style: one top-level test function per case, two cases each — positive and negative — and add a third top-level test for divide that uses pytest.raises(ZeroDivisionError) to cover the error path.",
+      },
+    ],
+  }
+}
+
+pipeline test_action_citation_alongside_typed_evidence_is_not_a_veto(
+  harness: Harness,
+  task: unknown,
+) {
+  // The exact rows haiku emitted on all five judge calls.
+  const report = completion_requirement_report(
+    catch_all_contract(),
+    [
+      {
+        requirement_id: "extend-tests-test-calc-py-so-mul-21d47e57",
+        met: true,
+        evidence_refs: [12, 15, -1],
+      },
+    ],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(report.rows[0].status, "met")
+  assert(report.complete)
+  assert_eq(report.pending_count, 0)
+}
+
+pipeline test_execution_item_is_satisfied_by_the_passing_receipt(harness: Harness, task: unknown) {
+  const contract: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "behavior",
+        name: "The declared verifier passes.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  // Only an action index is cited, so nothing qualifies by citation. The
+  // recorded passing receipt settles the item instead.
+  const report = completion_requirement_report(
+    contract,
+    [{requirement_id: "behavior", met: true, evidence_refs: [15]}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(report.rows[0].status, "met")
+  assert(report.complete)
+}
+
+pipeline test_receipt_satisfaction_requires_a_passing_reading(harness: Harness, task: unknown) {
+  const contract: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "behavior",
+        name: "The declared verifier passes.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  // Negative control for the receipt path: a failing verifier must not satisfy
+  // the item, or the fix would accept anything.
+  const failed = completion_requirement_report(
+    contract,
+    [{requirement_id: "behavior", met: true, evidence_refs: [15]}],
+    trial_shaped_packet("failed"),
+  )
+  assert_eq(failed.rows[0].status, "unsupported")
+  assert(!failed.complete)
+  // And a model that reports the item not met is still believed.
+  const unmet = completion_requirement_report(
+    contract,
+    [{requirement_id: "behavior", met: false, evidence_refs: [-2]}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(unmet.rows[0].status, "unmet")
+  assert(!unmet.complete)
+}
+
+pipeline test_citation_of_nothing_still_fails_the_row(harness: Harness, task: unknown) {
+  const contract: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "source",
+        name: "Update the documented rationale.",
+        evidence_roles: ["mutation_summary"],
+      },
+    ],
+  }
+  // Control: an unaddressed source-kind item. There is no mutation_summary the
+  // model cited and no receipt for this role, so it stays pending — and the
+  // feedback has to name it.
+  const report = completion_requirement_report(
+    contract,
+    [{requirement_id: "source", met: true, evidence_refs: [999]}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(report.rows[0].status, "unsupported")
+  assert(!report.complete)
+  const feedback = completion_requirement_pending_feedback(report)
+  assert(feedback.contains("`source`"))
+  assert(feedback.contains("claimed met without usable evidence"))
+  assert(feedback.contains("Accepted evidence kinds: mutation_summary"))
+}
+
+pipeline test_pending_feedback_names_the_item_and_its_evidence_kind(
+  harness: Harness,
+  task: unknown,
+) {
+  const report = completion_requirement_report(
+    requirement_contract(),
+    [{requirement_id: "artifact", met: true, evidence_refs: [4]}],
+    evidence_packet(),
+  )
+  const feedback = completion_requirement_pending_feedback(report)
+  assert(feedback.contains("1 of 2 acceptance item(s) still pending"))
+  assert(feedback.contains("`behavior` is not assessed"))
+  assert(feedback.contains("Accepted evidence kinds: deterministic_verification"))
 }
