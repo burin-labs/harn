@@ -368,14 +368,22 @@ fn agent_session_control_plane_writes() -> Vec<&'static str> {
         "state_delete",
         "state_handoff",
     ];
-    let mut names: Vec<&'static str> = crate::stdlib::all_builtin_defs()
+    // `all_builtin_manifest()` and not `all_builtin_defs()`. The latter holds
+    // only the `#[harn_builtin]`-emitted VM defs, which is 17 of these 27 —
+    // the contract-only `capability_method!` declarations are absent from it,
+    // so a census built on it silently cannot see ten of the methods it exists
+    // to police. The manifest is the union the enforcement index is built
+    // from, so this censuses exactly what `contract_effect_allowed_by_ceiling`
+    // will later consult. Aliases repeat a primary's contract under a second
+    // name; only the canonical entry owns the capability method.
+    let mut names: Vec<&'static str> = crate::stdlib::all_builtin_manifest()
         .iter()
-        .filter_map(|def| match def.contract.exposure {
-            harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method }
-                if capability == harn_builtin_meta::CapabilityId::Agent =>
-            {
-                Some((method, def.contract.effects))
-            }
+        .filter(|entry| entry.is_canonical())
+        .filter_map(|entry| match entry.contract.exposure {
+            harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                capability: harn_builtin_meta::CapabilityId::Agent,
+                method,
+            } => Some((method, entry.contract.effects)),
             _ => None,
         })
         .filter(|(method, effects)| {
