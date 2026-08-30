@@ -30,7 +30,6 @@
     "crates/harn-vm/src/http/client.rs",
     "crates/harn-vm/src/llm/agent_host_primitives.rs",
     "crates/harn-vm/src/llm/agent_tools.rs",
-    "crates/harn-vm/src/llm/api/response.rs",
     "crates/harn-vm/src/llm/helpers/options/routing_tests.rs",
     "crates/harn-vm/src/llm/permissions.rs",
     "crates/harn-vm/src/llm/rate_limit.rs",
