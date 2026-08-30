@@ -167,6 +167,7 @@ pub fn register_composition_builtins(vm: &mut Vm) {
                 _ => None,
             });
             let mut request = CompositionExecutionRequest {
+                execution_id: Some(ctx.execution_id()),
                 snippet,
                 manifest: serde_json::from_value(manifest_value).map_err(|error| {
                     VmError::Runtime(format!("composition_execute: invalid manifest: {error}"))

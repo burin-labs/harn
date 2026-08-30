@@ -667,6 +667,7 @@ fn trace_from_run_record(run: RunRecord) -> CrystallizationTrace {
     CrystallizationTrace {
         version: TRACE_SCHEMA_VERSION,
         id: run.id.clone(),
+        execution_id: run.evidence.execution_id.clone(),
         workflow_id: Some(run.workflow_id.clone()),
         started_at: Some(run.started_at.clone()),
         finished_at: run.finished_at.clone(),

@@ -585,6 +585,36 @@ pipeline default(harness: Harness, task: unknown) {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn composition_report_preserves_the_owning_vm_execution_id() {
+    let outer_execution_id = Arc::new(std::sync::Mutex::new(None));
+    let captured_execution_id = Arc::clone(&outer_execution_id);
+    let report = run_composition_dispatcher_source(
+        r#"
+pipeline default(harness: Harness, task: unknown) {
+  return harness.tools.composition_execute(
+    "return 42",
+    composition_binding_manifest([]),
+    {run_id: "execution-identity"},
+  )
+}
+"#,
+        move |vm| {
+            *captured_execution_id.lock().unwrap() = Some(vm.execution_id().to_string());
+        },
+    )
+    .await
+    .expect("composition builtin should execute");
+    let expected = outer_execution_id
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("outer VM execution identity should be captured");
+
+    assert!(expected.starts_with("hxe-"));
+    assert_eq!(report["run"]["execution_id"], expected);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn harn_composition_dispatcher_closure_can_call_host_has() {
     let report = run_composition_dispatcher_source(
         r#"
@@ -1315,15 +1345,17 @@ async fn harn_composition_enforces_output_cap() {
 
 #[test]
 fn composition_report_can_be_projected_to_crystallization_trace() {
+    let mut run = CompositionRunEnvelope::read_only(
+        "run-crystal",
+        "harn",
+        "sha256:snippet",
+        "sha256:manifest",
+    );
+    run.execution_id = Some("hxe-composition-crystal".to_string());
     let report = CompositionExecutionReport {
         schema_version: COMPOSITION_EXECUTION_SCHEMA_VERSION,
         ok: true,
-        run: CompositionRunEnvelope::read_only(
-            "run-crystal",
-            "harn",
-            "sha256:snippet",
-            "sha256:manifest",
-        ),
+        run,
         child_calls: vec![CompositionChildCall {
             run_id: "run-crystal".into(),
             tool_call_id: "run-crystal:0".into(),
@@ -1352,6 +1384,7 @@ fn composition_report_can_be_projected_to_crystallization_trace() {
         summary: "ok".into(),
     };
     let trace = composition_crystallization_trace(&report, &serde_json::json!({}));
+    assert_eq!(trace["execution_id"], "hxe-composition-crystal");
     assert_eq!(trace["source"], "composition_run");
     assert_eq!(trace["actions"][0]["name"], "execute_composition");
     assert_eq!(trace["actions"][1]["name"], "read_file");

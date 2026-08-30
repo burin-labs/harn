@@ -90,6 +90,7 @@ fn composition_trace(id: &str, run_id: &str, path: &str, output: &str) -> Crysta
         "sha256:composition-snippet",
         "sha256:composition-manifest",
     );
+    run.execution_id = Some(format!("hxe-{id}"));
     run.result = Some(json!({"text": output}));
     run.stdout = Some(String::new());
     let report = CompositionExecutionReport {
@@ -175,6 +176,15 @@ fn composition_traces_crystallize_with_child_receipt_shadow_replay() {
         .source_traces
         .iter()
         .all(|trace| trace.source_url.as_deref() == Some("composition_run")));
+    assert_eq!(
+        bundle
+            .manifest
+            .source_traces
+            .iter()
+            .map(|trace| trace.execution_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("hxe-composition_a"), Some("hxe-composition_b")],
+    );
 
     let dir = tempfile::tempdir().unwrap();
     write_crystallization_bundle(&bundle, dir.path()).unwrap();
@@ -191,6 +201,32 @@ fn composition_traces_crystallize_with_child_receipt_shadow_replay() {
         .traces
         .iter()
         .all(|trace| trace.compared_receipts >= 2));
+}
+
+#[test]
+fn run_record_crystallization_preserves_execution_identity_without_inventing_legacy_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run.json");
+    let mut run = crate::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "run-execution-source".to_string(),
+        workflow_id: "execution-source".to_string(),
+        ..crate::orchestration::RunRecord::default()
+    };
+    run.evidence.execution_id = Some("hxe-run-crystal".to_string());
+    std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
+
+    let trace = load_crystallization_trace(&path).unwrap();
+    assert_eq!(trace.execution_id.as_deref(), Some("hxe-run-crystal"));
+
+    run.evidence.execution_id = None;
+    std::fs::write(&path, serde_json::to_vec(&run).unwrap()).unwrap();
+    let legacy = load_crystallization_trace(&path).unwrap();
+    assert_eq!(legacy.execution_id, None);
+    assert!(serde_json::to_value(legacy)
+        .unwrap()
+        .get("execution_id")
+        .is_none());
 }
 
 #[test]
