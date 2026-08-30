@@ -19,9 +19,8 @@
 //!    green when a provider is classified backwards. The validator therefore
 //!    also checks structural coherence per row — a `per_request` scope must
 //!    name at least one control, and an `account`/`none` scope must name
-//!    none — and `data_controls_direction_tests.rs` pins the specific
-//!    direction of the load-bearing rows against a control that fails when a
-//!    row is flipped.
+//!    none — and `data_controls_tests.rs` pins the specific direction of the
+//!    load-bearing rows against controls that fail when a row is flipped.
 
 use std::collections::BTreeSet;
 
