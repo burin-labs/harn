@@ -18,6 +18,7 @@ use super::liveness::StreamDeadlinePolicy;
 use super::sse::{consume_sse_lines, consume_sse_lines_with_policy};
 use crate::llm::api::DialectContract;
 use crate::llm::api::LlmResult;
+use crate::llm::api::ProviderResponseEnvelope;
 use crate::llm::capabilities::WireDialect;
 use crate::llm::usage::ProviderUsageReceipt;
 use crate::value::VmValue;
@@ -52,6 +53,15 @@ fn usage_chunk(fingerprint: Option<&str>) -> serde_json::Value {
         frame["system_fingerprint"] = serde_json::json!(fingerprint);
     }
     frame
+}
+
+fn empty_terminal_content_chunk() -> serde_json::Value {
+    serde_json::json!({
+        "choices": [{"finish_reason": "stop", "index": 0, "delta": {"content": ""}}],
+        "id": "chatcmpl-stream",
+        "model": "served-model",
+        "object": "chat.completion.chunk"
+    })
 }
 
 /// The trailing frame shape captured from llama-server b10603-c060ca974.
@@ -121,7 +131,7 @@ async fn streamed_system_fingerprint_reaches_telemetry() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn empty_openai_stream_keeps_provider_usage_receipt() {
-    let body = sse_body(&[usage_chunk(None)]);
+    let body = sse_body(&[empty_terminal_content_chunk(), usage_chunk(None)]);
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     let error = consume_sse_lines(
@@ -150,6 +160,12 @@ async fn empty_openai_stream_keeps_provider_usage_receipt() {
         fields.get("output_tokens").and_then(VmValue::as_int),
         Some(6)
     );
+    let response = ProviderResponseEnvelope::from_error(&error)
+        .expect("empty stream must retain its typed provider response");
+    assert_eq!(response.response_id(), Some("chatcmpl-stream"));
+    assert_eq!(response.stop_reason(), Some("stop"));
+    assert_eq!(response.content_block_count(), 1);
+    assert_eq!(response.content_block_types(), &["text".to_string()]);
 }
 
 #[tokio::test(flavor = "current_thread")]
