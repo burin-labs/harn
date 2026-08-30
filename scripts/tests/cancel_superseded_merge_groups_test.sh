@@ -149,6 +149,38 @@ for run_id in 101 102 103; do
 done
 
 : > "$calls"
+# GitHub returns an explicit null mergeQueue, with no GraphQL errors, when the
+# configured queue has no current entries. That is a measured empty queue, not
+# a missing read, and must behave exactly like the empty entries list above.
+null_queue_json='{"data":{"repository":{"mergeQueue":null}}}'
+null_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$null_queue_json" \
+    "$script" --repo burin-labs/harn --apply
+)"
+grep -Fq 'summary current_heads=0 stale_runs=3 cancelled=3 zombies=0 apply=true' <<< "$null_output"
+for run_id in 101 102 103; do
+  grep -Fq "api --method POST repos/burin-labs/harn/actions/runs/$run_id/cancel" "$calls"
+done
+
+# NEGATIVE CONTROL. A missing field is not the same observation as an explicit
+# null queue. It must still fail before any cancellation request is sent.
+: > "$calls"
+missing_queue_json='{"data":{"repository":{}}}'
+if PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$missing_queue_json" \
+    "$script" --repo burin-labs/harn --apply > /dev/null 2>&1; then
+  echo "missing mergeQueue field was accepted as an empty queue" >&2
+  exit 1
+fi
+if grep -Fq '/cancel' "$calls"; then
+  echo "missing mergeQueue field reached cancellation" >&2
+  exit 1
+fi
+
+: > "$calls"
 zombie_output="$(
   PATH="$fixture_root/bin:$PATH" \
   FAKE_GH_CALLS="$calls" \

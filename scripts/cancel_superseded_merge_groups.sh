@@ -70,22 +70,30 @@ if ! gh api graphql -F owner="$owner" -F name="$name" -f query="$queue_query" > 
 fi
 
 if ! jq -e '
-    .data.repository.mergeQueue.entries.pageInfo.hasNextPage == false
-    and (.data.repository.mergeQueue.entries.nodes | type == "array")
-    and all(
-      .data.repository.mergeQueue.entries.nodes[];
-      .headCommit == null
-        or (
-          (.headCommit.oid | type == "string")
-          and (.headCommit.oid | test("^[0-9a-fA-F]{40}$"))
+    ((.errors? // []) | length == 0)
+    and (.data.repository | type == "object")
+    and (.data.repository | has("mergeQueue"))
+    and (
+      .data.repository.mergeQueue == null
+      or (
+        .data.repository.mergeQueue.entries.pageInfo.hasNextPage == false
+        and (.data.repository.mergeQueue.entries.nodes | type == "array")
+        and all(
+          .data.repository.mergeQueue.entries.nodes[];
+          .headCommit == null
+            or (
+              (.headCommit.oid | type == "string")
+              and (.headCommit.oid | test("^[0-9a-fA-F]{40}$"))
+            )
         )
+      )
     )
   ' "$queue_json" >/dev/null; then
   die "merge-queue response was missing, paginated, or invalid; no runs were canceled"
 fi
 
 if ! jq -r '
-    .data.repository.mergeQueue.entries.nodes[]
+    (.data.repository.mergeQueue.entries.nodes // [])[]
     | .headCommit.oid? // empty
     | ascii_downcase
   ' "$queue_json" | sort -u > "$queue_shas"; then
