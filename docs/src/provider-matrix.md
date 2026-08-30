@@ -173,6 +173,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `gpt-4.1*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*codex*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-5.6*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-5.4* \| openai/gpt-5.4*` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openai` | `gpt-*` | `>=5.4` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*` | `>=5.1` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openai` | `gpt-*` | `>=5.0` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
