@@ -71,7 +71,7 @@ pipeline default(harness: Harness, task: unknown) {{
     tools: tick_tools(harness),
     tool_format: "native",
     loop_until_done: true,
-    max_iterations: {max_iterations},
+    max_iterations: {MAX_ITERATIONS},
     done_judge: nil,
   }})
   harness.fs.append("{tick}", "STATUS:" + to_string(result.status) + "\n")
@@ -79,8 +79,6 @@ pipeline default(harness: Harness, task: unknown) {{
 "#,
                 tick = tick_path.to_string_lossy(),
                 sleep = TICK_SLEEP_MS,
-                mocks = mocks,
-                max_iterations = MAX_ITERATIONS,
             );
             std::fs::write(&pipeline_path, source).expect("write cancel-loop pipeline");
 
@@ -127,8 +125,6 @@ pipeline default(harness: Harness, task: unknown) {{
                             .expect("send host capabilities response");
                     } else if message["id"] == 3 {
                         prompt_result_early = message["result"].clone();
-                    } else {
-                        eprintln!("REPRO: pre-cancel message: {}", message);
                     }
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -142,7 +138,6 @@ pipeline default(harness: Harness, task: unknown) {{
                 "agent loop never reached 2 ticks; saw {ticks_at_cancel}"
             );
 
-            eprintln!("REPRO: sending session/cancel notification at tick {ticks_at_cancel}");
             request_tx
                 .send(serde_json::json!({
                     "jsonrpc": "2.0",
@@ -172,18 +167,6 @@ pipeline default(harness: Harness, task: unknown) {{
 
             let ticks_total = count_ticks(&tick_path);
             let ticks_after_cancel = ticks_total.saturating_sub(ticks_at_cancel);
-            eprintln!(
-                "REPRO: ticks_at_cancel={ticks_at_cancel} ticks_total={ticks_total} \
-                 ticks_after_cancel={ticks_after_cancel}"
-            );
-            eprintln!(
-                "REPRO: tick file:\n{}",
-                std::fs::read_to_string(&tick_path).unwrap_or_default()
-            );
-            eprintln!(
-                "REPRO: prompt result = {}",
-                serde_json::to_string_pretty(&result).unwrap_or_default()
-            );
 
             drop(request_tx);
             let _ = server.await;
@@ -245,14 +228,12 @@ pipeline default(harness: Harness, task: unknown) {{
     provider: "mock",
     tool_format: "native",
     loop_until_done: true,
-    max_iterations: {max_iterations},
+    max_iterations: {MAX_ITERATIONS},
     done_judge: nil,
   }})
   harness.stdio.println("LOOP_STATUS:" + to_string(result.status))
 }}
 "#,
-                mocks = mocks,
-                max_iterations = MAX_ITERATIONS,
             );
             std::fs::write(&pipeline_path, source).expect("write bridge pipeline");
 
@@ -308,10 +289,6 @@ pipeline default(harness: Harness, task: unknown) {{
                 }
                 if method == "builtin_call" {
                     builtin_calls += 1;
-                    eprintln!(
-                        "REPRO2: builtin_call #{builtin_calls} {}",
-                        message["params"]
-                    );
                     // Answer slowly so a cancel can land mid-call.
                     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                     request_tx
@@ -322,7 +299,6 @@ pipeline default(harness: Harness, task: unknown) {{
                         }))
                         .expect("send builtin_call response");
                     if builtin_calls == 2 && builtin_calls_at_cancel.is_none() {
-                        eprintln!("REPRO2: sending session/cancel notification");
                         builtin_calls_at_cancel = Some(builtin_calls);
                         iteration_starts_at_cancel = Some(iteration_starts);
                         llm_call_starts_at_cancel = Some(llm_call_starts);
@@ -355,15 +331,6 @@ pipeline default(harness: Harness, task: unknown) {{
                 iteration_starts.saturating_sub(iteration_starts_at_cancel.unwrap_or(0));
             let after_llm = llm_call_starts.saturating_sub(llm_call_starts_at_cancel.unwrap_or(0));
             let after_tools = builtin_calls.saturating_sub(builtin_calls_at_cancel.unwrap_or(0));
-            eprintln!(
-                "REPRO2: after cancel -> iteration_start={after_iterations} \
-                 llm_call_start={after_llm} builtin_call={after_tools} \
-                 (totals: it={iteration_starts} llm={llm_call_starts} tools={builtin_calls})"
-            );
-            eprintln!(
-                "REPRO2: prompt result = {}",
-                serde_json::to_string_pretty(&result).unwrap_or_default()
-            );
 
             drop(request_tx);
             let _ = server.await;
@@ -480,7 +447,6 @@ pipeline default(harness: Harness, task: unknown) {{
                         .expect("send builtin_call response");
                     if builtin_calls == 2 && builtin_calls_at_cancel.is_none() {
                         builtin_calls_at_cancel = Some(builtin_calls);
-                        eprintln!("CONTROL: cancelling an UNKNOWN session id");
                         request_tx
                             .send(serde_json::json!({
                                 "jsonrpc": "2.0",
@@ -498,10 +464,6 @@ pipeline default(harness: Harness, task: unknown) {{
             }
 
             let after = builtin_calls.saturating_sub(builtin_calls_at_cancel.unwrap_or(0));
-            eprintln!(
-                "CONTROL: tool calls after the unknown-id cancel = {after} \
-                 (total {builtin_calls}); result = {result}"
-            );
 
             drop(request_tx);
             let _ = server.await;
