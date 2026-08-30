@@ -27,6 +27,16 @@ case "${1:-}" in
     [ "$#" -ge 3 ] || usage
     run_slow_ci=$2
     shift 2
+    expected_names=(
+      "Linux sandbox tests"
+      "Harn proof workers"
+      "Windows cross-compile check"
+      "Rust on macOS"
+    )
+    if [ "$#" -ne "${#expected_names[@]}" ]; then
+      echo "error: expected ${#expected_names[@]} slow-check readings, got $#" >&2
+      exit 1
+    fi
     case "$run_slow_ci" in
       true | false) ;;
       *)
@@ -37,6 +47,7 @@ case "${1:-}" in
 
     pending=()
     failing=()
+    reading_index=0
     for reading in "$@"; do
       name=${reading%%=*}
       result=${reading#*=}
@@ -44,6 +55,11 @@ case "${1:-}" in
         echo "error: malformed slow-check reading" >&2
         exit 1
       fi
+      if [ "$name" != "${expected_names[$reading_index]}" ]; then
+        echo "error: slow-check reading $((reading_index + 1)) must name ${expected_names[$reading_index]}" >&2
+        exit 1
+      fi
+      reading_index=$((reading_index + 1))
       case "$result" in
         success | skipped) ;;
         queued | in_progress | pending | requested | waiting | "") pending+=("$name") ;;

@@ -29,12 +29,27 @@ verify_output=$("$policy" verify false \
 [[ "$verify_output" == *"pending=0 failing=0"* ]] \
   || { echo "deferred census did not expose measured zeroes" >&2; exit 1; }
 
-if "$policy" verify false "Linux sandbox tests=failure" "Harn proof workers=skipped" >/dev/null; then
+if "$policy" verify false \
+  "Linux sandbox tests=failure" \
+  "Harn proof workers=skipped" \
+  "Windows cross-compile check=skipped" \
+  "Rust on macOS=skipped" >/dev/null; then
   echo "deferred verification accepted a failed slow check" >&2
   exit 1
 fi
-if "$policy" verify false "Linux sandbox tests=" "Harn proof workers=skipped" >/dev/null; then
+if "$policy" verify false \
+  "Linux sandbox tests=" \
+  "Harn proof workers=skipped" \
+  "Windows cross-compile check=skipped" \
+  "Rust on macOS=skipped" >/dev/null; then
   echo "deferred verification accepted a missing slow-check reading" >&2
+  exit 1
+fi
+if "$policy" verify false \
+  "Linux sandbox tests=skipped" \
+  "Harn proof workers=skipped" \
+  "Windows cross-compile check=skipped" >/dev/null 2>&1; then
+  echo "deferred verification accepted an absent required reading" >&2
   exit 1
 fi
 
