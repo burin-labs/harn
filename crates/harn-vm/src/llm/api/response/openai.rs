@@ -14,13 +14,15 @@ use super::super::openai_normalize::{
 use super::super::result::{LlmResult, RawProviderToolCall};
 use super::super::telemetry::ProviderTelemetry;
 use super::boundary;
-use super::item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
 use super::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
     extract_cache_write_tokens, is_billed_noncommittal_completion, is_length_stop_reason,
     openai_message_content_block_types, openai_responses_content_block_types,
     CompletionContractSignals, ProviderResponseEnvelope,
 };
+use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
+
+mod item_kinds;
 
 fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
     match value {

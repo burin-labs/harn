@@ -16,7 +16,6 @@ mod test_support;
 mod boundary;
 mod cache_mapping;
 mod completion_contract;
-mod item_kinds;
 mod openai;
 pub(crate) use cache_mapping::{extract_cache_read_tokens, extract_cache_write_tokens};
 pub(crate) use completion_contract::{
