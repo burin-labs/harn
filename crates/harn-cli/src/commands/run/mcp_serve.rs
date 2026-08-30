@@ -390,7 +390,7 @@ async fn run_reloadable_stdio(path: &str, card_source: Option<&str>, loaded: Loa
         match notify::recommended_watcher(move |result: notify::Result<notify::Event>| match result
         {
             Ok(event)
-                if !matches!(event.kind, EventKind::Access(_) | EventKind::Other)
+                if !matches!(event.kind, EventKind::Access(_))
                     && event.paths.iter().any(|path| {
                         path.extension().and_then(|extension| extension.to_str()) == Some("harn")
                             || path.file_name().and_then(|name| name.to_str()) == Some("harn.toml")
