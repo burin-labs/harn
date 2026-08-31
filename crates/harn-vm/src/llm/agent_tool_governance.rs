@@ -75,6 +75,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
+    use crate::agent_events::ToolExecutor;
     use crate::value::{DictMap, VmDictExt};
 
     fn literal_registry(name: &str, mut entry: DictMap) -> VmValue {

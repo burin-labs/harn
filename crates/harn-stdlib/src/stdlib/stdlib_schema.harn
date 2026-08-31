@@ -362,6 +362,63 @@ pub fn schema_strict_object(fields: dict, options: dict? = nil) -> dict {
   return schema_closed_object(fields, options)
 }
 
+fn __schema_deep_closed_node(value: unknown) -> unknown {
+  if type_of(value) != "dict" {
+    return value
+  }
+  const node: any = value
+  let out: dict = node
+  if type_of(node.properties) == "dict" {
+    let properties: dict = {}
+    for entry in node.properties {
+      properties = properties + {[entry.key]: __schema_deep_closed_node(entry.value)}
+    }
+    out = out + {properties: properties, additional_properties: false}
+  } else if type_of(node.additional_properties) == "dict" {
+    out = out + {additional_properties: __schema_deep_closed_node(node.additional_properties)}
+  } else if type_of(node.additionalProperties) == "dict" {
+    out = out + {additionalProperties: __schema_deep_closed_node(node.additionalProperties)}
+  }
+  if type_of(node.items) == "dict" {
+    out = out + {items: __schema_deep_closed_node(node.items)}
+  }
+  for branch_key in ["union", "oneOf", "anyOf", "all_of", "allOf"] {
+    if type_of(node[branch_key]) == "list" {
+      let branches: list<unknown> = []
+      for branch in node[branch_key] {
+        branches = branches + [__schema_deep_closed_node(branch)]
+      }
+      out = out + {[branch_key]: branches}
+    }
+  }
+  for definitions_key in ["definitions", "$defs"] {
+    if type_of(node[definitions_key]) == "dict" {
+      let definitions: dict = {}
+      for entry in node[definitions_key] {
+        definitions = definitions + {[entry.key]: __schema_deep_closed_node(entry.value)}
+      }
+      out = out + {[definitions_key]: definitions}
+    }
+  }
+  return out
+}
+
+/**
+ * Recursively reject unknown keys at every record-shaped node in `schema`.
+ *
+ * A record is any schema node with `properties`; even an explicitly open
+ * record becomes closed. Map-shaped dict nodes without `properties` retain
+ * their declared value schema. The result only narrows `schema`, preserving
+ * its `Schema<T>` witness.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_deep_closed<T>(schema: Schema<T>) -> Schema<T> {
+  const constraint: any = __schema_deep_closed_node(schema)
+  return schema_refine(schema, constraint)
+}
+
 /**
  * Build a union schema matching any one of `branches`.
  *

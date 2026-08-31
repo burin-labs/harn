@@ -216,7 +216,8 @@ literal schema).
 
 The lazy `std/schema` module provides ergonomic builders such as
 `schema_string()`, `schema_object(...)`, `schema_closed_object(...)`,
-`schema_strict_object(...)`, `schema_union(...)`, `schema_validator(...)`,
+`schema_strict_object(...)`, `schema_deep_closed(...)`, `schema_union(...)`,
+`schema_validator(...)`,
 `get_typed_result(...)`, `get_typed_report(...)`, `get_typed_issues(...)`,
 `get_typed_value(...)`, `parse_json_typed_report(...)`,
 `parse_json_typed(...)`, `validation_rule(...)`, `schema_contract(...)`,
@@ -224,6 +225,9 @@ The lazy `std/schema` module provides ergonomic builders such as
 Use `schema_closed_object(...)` / `schema_strict_object(...)` for option bags,
 receipts, structured LLM outputs, and host-contract payloads where unexpected
 keys should fail closed.
+Use `schema_deep_closed(...)` when a typed contract contains nested records:
+it rejects unknown keys at every record-shaped node while preserving deliberate
+map-shaped dicts that have no declared properties.
 The JSON helpers accept `Schema<T>` arguments, so aliases passed directly or via
 `schema_of(T)` preserve typed return values:
 

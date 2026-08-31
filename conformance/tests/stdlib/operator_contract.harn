@@ -16,6 +16,12 @@ type ActorArgs = {actor: string}
 
 type NestedActorArgs = {request: ActorArgs}
 
+type NestedSafeRequest = {note: string}
+
+type NestedSafeArgs = {request: NestedSafeRequest}
+
+type MapArgs = {metadata: dict}
+
 fn expect_failure(label: string, body: fn(nil) -> unknown, text: string) -> nil {
   const caught = try {
     body(nil)
@@ -168,6 +174,122 @@ pipeline test(harness: Harness, task: unknown) {
     },
     "reserved_args_property",
   )
+  const nested_safe_args_schema = schema_of(NestedSafeArgs)
+  const strict_nested_safe_args_schema = schema_refine(
+    nested_safe_args_schema,
+    schema_strict_object(nested_safe_args_schema.properties),
+  )
+  let nested_handler_calls = 0
+  const nested_safe_definition = operator_tool<NestedSafeArgs, MutateData>(
+    {
+      operation: "account.note",
+      description: "Read one nested note.",
+      audiences: ["cli"],
+      mode: "read",
+      input_classification: "internal",
+      output_classification: "internal",
+      args_schema: strict_nested_safe_args_schema,
+      data_schema: data_schema,
+      handler: { _ ->
+        nested_handler_calls = nested_handler_calls + 1
+        return {
+          schema: "harn.operator-result.v1",
+          operation: "account.note",
+          outcome: "read",
+          replayed: false,
+          data_classification: "internal",
+          data: {updated: false},
+          receipt_id: "receipt-nested-note",
+        }
+      },
+    },
+  )
+  const nested_safe = nested_safe_definition.handler(
+    {schema: "harn.operator-invocation.v1", mode: "read", args: {request: {note: "safe"}}},
+  )
+  assert(nested_safe.outcome == "read", "valid nested args reach the handler")
+  assert(nested_handler_calls == 1, "valid nested args reach the handler exactly once")
+  expect_failure(
+    "raw nested args.actor",
+    { _ ->
+      nested_safe_definition.handler(
+        {
+          schema: "harn.operator-invocation.v1",
+          mode: "read",
+          args: {request: {note: "safe", actor: "forged"}},
+        },
+      )
+    },
+    "reserved_args_property",
+  )
+  assert(nested_handler_calls == 1, "raw nested actor is rejected before the handler")
+  expect_failure(
+    "raw nested unknown field",
+    { _ ->
+      nested_safe_definition.handler(
+        {
+          schema: "harn.operator-invocation.v1",
+          mode: "read",
+          args: {request: {note: "safe", shadow: true}},
+        },
+      )
+    },
+    "shadow",
+  )
+  assert(nested_handler_calls == 1, "deep-closed nested args reject unknown fields before handler")
+  const map_args_schema = schema_of(MapArgs)
+  const strict_map_args_schema = schema_refine(
+    map_args_schema,
+    schema_strict_object(map_args_schema.properties),
+  )
+  let map_handler_calls = 0
+  const map_definition = operator_tool<MapArgs, MutateData>(
+    {
+      operation: "account.metadata",
+      description: "Read metadata from a deliberate extension map.",
+      audiences: ["cli"],
+      mode: "read",
+      input_classification: "internal",
+      output_classification: "internal",
+      args_schema: strict_map_args_schema,
+      data_schema: data_schema,
+      handler: { _ ->
+        map_handler_calls = map_handler_calls + 1
+        return {
+          schema: "harn.operator-result.v1",
+          operation: "account.metadata",
+          outcome: "read",
+          replayed: false,
+          data_classification: "internal",
+          data: {updated: false},
+          receipt_id: "receipt-map-metadata",
+        }
+      },
+    },
+  )
+  const map_result = map_definition.handler(
+    {
+      schema: "harn.operator-invocation.v1",
+      mode: "read",
+      args: {metadata: {region: "test", attempt: 2}},
+    },
+  )
+  assert(map_result.outcome == "read", "deliberate map-shaped args remain accepted")
+  assert(map_handler_calls == 1, "deliberate map-shaped args reach the handler exactly once")
+  expect_failure(
+    "raw actor inside deliberate map",
+    { _ ->
+      map_definition.handler(
+        {
+          schema: "harn.operator-invocation.v1",
+          mode: "read",
+          args: {metadata: {region: "test", actor: "forged"}},
+        },
+      )
+    },
+    "reserved_args_property",
+  )
+  assert(map_handler_calls == 1, "actor inside a deliberate map is rejected before the handler")
   const valid: OperatorMutateInvocation<MutateArgs> = {
     schema: "harn.operator-invocation.v1",
     mode: "mutate",

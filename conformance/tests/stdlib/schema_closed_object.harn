@@ -1,5 +1,13 @@
 import "std/schema"
 
+type NestedRecord = {request: {note: string}}
+
+type RecordWithMap = {metadata: dict}
+
+type PropertiesNamedField = {properties: {note: string}}
+
+type AliasRecord = {payload: dict}
+
 pipeline test(harness: Harness, task: unknown) {
   const user_schema = schema_closed_object(
     {
@@ -29,4 +37,40 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(alias_validator.is({mode: "fast"}))
   harness.stdio.println(!alias_validator.is({mode: "fast", extra: "disallowed"}))
   harness.stdio.println(alias_validator.json_schema().additionalProperties)
+  const nested_raw = schema_of(NestedRecord)
+  const explicitly_open_nested = schema_refine(
+    nested_raw,
+    schema_strict_object({request: nested_raw.properties.request + {additional_properties: true}}),
+  )
+  const nested_validator = schema_validator(schema_deep_closed(explicitly_open_nested))
+  harness.stdio.println(nested_validator.is({request: {note: "safe"}}))
+  harness.stdio.println(!nested_validator.is({request: {note: "safe", shadow: true}}))
+  const map_validator = schema_validator(schema_deep_closed(schema_of(RecordWithMap)))
+  harness.stdio.println(map_validator.is({metadata: {region: "test", attempt: 2}}))
+  const properties_named_validator = schema_validator(
+    schema_deep_closed(schema_of(PropertiesNamedField)),
+  )
+  harness.stdio.println(properties_named_validator.is({properties: {note: "safe"}}))
+  harness.stdio.println(!properties_named_validator.is({properties: {note: "safe", shadow: true}}))
+  const alias_raw = schema_of(AliasRecord)
+  const alias_record_schema = schema_refine(
+    alias_raw,
+    schema_strict_object(
+      {
+        payload: {
+          anyOf: [
+            {
+              type: "dict",
+              properties: {note: {type: "string"}},
+              required: ["note"],
+              additionalProperties: true,
+            },
+          ],
+        },
+      },
+    ),
+  )
+  const alias_record_validator = schema_validator(schema_deep_closed(alias_record_schema))
+  harness.stdio.println(alias_record_validator.is({payload: {note: "safe"}}))
+  harness.stdio.println(!alias_record_validator.is({payload: {note: "safe", shadow: true}}))
 }

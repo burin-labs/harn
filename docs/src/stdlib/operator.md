@@ -11,7 +11,9 @@ actor from trusted context, checks its own permission scopes, performs the
 effect, writes the domain audit row, and persists a canonical
 `harn.receipt.v1` envelope. Caller input never contains the actor.
 The constructor rejects an exact `actor` property anywhere in the argument
-schema; trusted host context is its only owner.
+schema and again in raw nested arguments before validation; trusted host
+context is its only owner. It recursively closes record-shaped argument and
+result schemas while preserving deliberate map-shaped dict fields.
 
 ## Constructor
 

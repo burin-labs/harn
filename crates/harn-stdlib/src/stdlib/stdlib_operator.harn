@@ -7,6 +7,7 @@
  * and couples its domain audit row to the effect.
  */
 import {
+  schema_deep_closed,
   schema_enum,
   schema_field,
   schema_int,
@@ -220,6 +221,44 @@ fn __schema_declares_actor(value: unknown) -> bool {
   return false
 }
 
+fn __value_contains_actor(value: unknown) -> bool {
+  if type_of(value) == "list" {
+    const items: any = value
+    for item in items {
+      if __value_contains_actor(item) {
+        return true
+      }
+    }
+    return false
+  }
+  if type_of(value) != "dict" {
+    return false
+  }
+  const node: any = value
+  if contains(node.keys(), "actor") {
+    return true
+  }
+  for key in node.keys() {
+    if __value_contains_actor(node[key]) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __reject_caller_actor(raw: unknown) -> nil {
+  if type_of(raw) != "dict" {
+    return nil
+  }
+  const invocation: any = raw
+  if contains(invocation.keys(), "args") && __value_contains_actor(invocation.args) {
+    __operator_error(
+      "reserved_args_property",
+      "args cannot contain actor; trusted host context owns authenticated identity",
+    )
+  }
+}
+
 fn __invocation_schema<Args>(
   operation: string,
   mode: OperatorMode,
@@ -399,16 +438,19 @@ fn __validate_result<Args, Data>(
  * Validate first, then adopt the declared closed type at this one owning seam.
  */
 fn __read_invocation<Args>(raw: unknown, schema: dict) -> OperatorReadInvocation<Args> {
+  __reject_caller_actor(raw)
   const validated: any = schema_expect(raw, schema)
   return validated
 }
 
 fn __reveal_invocation<Args>(raw: unknown, schema: dict) -> OperatorRevealInvocation<Args> {
+  __reject_caller_actor(raw)
   const validated: any = schema_expect(raw, schema)
   return validated
 }
 
 fn __mutate_invocation<Args>(raw: unknown, schema: dict) -> OperatorMutateInvocation<Args> {
+  __reject_caller_actor(raw)
   const validated: any = schema_expect(raw, schema)
   return validated
 }
@@ -461,6 +503,8 @@ pub fn operator_tool<Args, Data>(spec: OperatorToolSpec<Args, Data>) -> ToolDefi
   if spec.output_classification == "personal" && spec.mode != "reveal" {
     __operator_error("personal_output_mode", "personal output is allowed only for reveal tools")
   }
+  const args_schema = schema_deep_closed(spec.args_schema)
+  const data_schema = schema_deep_closed(spec.data_schema)
   let target_kind: string? = nil
   if spec.mode != "read" {
     const normalized_target_kind = trim(spec.target_kind)
@@ -469,8 +513,8 @@ pub fn operator_tool<Args, Data>(spec: OperatorToolSpec<Args, Data>) -> ToolDefi
     }
     target_kind = normalized_target_kind
   }
-  const input_schema = __invocation_schema(operation, spec.mode, target_kind, spec.args_schema)
-  const output_schema = __result_schema(operation, spec.data_schema, target_kind)
+  const input_schema = __invocation_schema(operation, spec.mode, target_kind, args_schema)
+  const output_schema = __result_schema(operation, data_schema, target_kind)
   const output_classification = spec.output_classification
   const handler = { raw ->
     if spec.mode == "read" {
