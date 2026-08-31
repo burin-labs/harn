@@ -1315,6 +1315,7 @@ mod tests {
     fn build_run_view_projects_stable_public_fields() {
         const EXECUTION_ID: &str = "hxe-019c13e0-8080-7000-8000-000000000001";
         let mut run = sample_run();
+        run.evidence.schema_version = EXECUTION_EVIDENCE_SCHEMA_VERSION;
         run.evidence.execution_id = Some(EXECUTION_ID.to_string());
         let view = build_run_view_with_path(&run, Some("runs/run_1.json"));
         assert_eq!(view.schema, RUN_VIEW_SCHEMA);
