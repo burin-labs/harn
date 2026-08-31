@@ -54,8 +54,15 @@ pub(super) fn project_evidence(
 fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
     use ExecutionEvidenceValidationError as ValidationError;
 
+    if evidence.schema_version == 0
+        && evidence.execution_id.is_none()
+        && evidence.flight_recording.is_none()
+    {
+        return;
+    }
+
     match crate::orchestration::validate_execution_evidence(evidence) {
-        Ok(()) => return,
+        Ok(()) => (),
         Err(ValidationError::MissingExecutionId) => {
             if evidence.flight_recording.take().is_some() {
                 push_gap_once(
