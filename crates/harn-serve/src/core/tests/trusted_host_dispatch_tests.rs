@@ -62,11 +62,9 @@ pub fn route(obs: HarnessObs, value: string) {
     )
     .expect("write script");
 
-    let ordinary = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let error = ordinary
-        .dispatch(request())
-        .await
-        .expect_err("ordinary dispatch must reject host_call");
+    let error = DispatchCore::new(DispatchCoreConfig::for_script(&script))
+        .err()
+        .expect("ordinary dispatch must reject host_call before serving");
     assert!(error.message().contains("host_call"), "{error:?}");
 
     harn_vm::set_host_call_bridge(Arc::new(EchoHostBridge));

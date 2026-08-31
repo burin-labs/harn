@@ -14,9 +14,12 @@ use super::{
     RunTraceSpanRecord,
 };
 
+mod evidence;
 mod usage;
 mod visible_transcript;
 
+use evidence::project_evidence;
+pub use evidence::ArtifactPathVisibility;
 pub use usage::RunViewUsage;
 use visible_transcript::public_assistant_transcript_text;
 
@@ -284,6 +287,7 @@ pub struct RunViewOptions {
     pub run_path: Option<String>,
     pub last_event_id: Option<EventId>,
     pub prefix_hash: Option<String>,
+    pub artifact_paths: ArtifactPathVisibility,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -331,6 +335,7 @@ pub fn build_run_view_with_path(run: &RunRecord, run_path: Option<impl Into<Stri
         run,
         RunViewOptions {
             run_path: run_path.map(Into::into),
+            artifact_paths: ArtifactPathVisibility::Local,
             ..RunViewOptions::default()
         },
     )
@@ -343,6 +348,7 @@ pub async fn build_run_view_with_event_log(
 ) -> Result<RunView, RunViewError> {
     let mut options = RunViewOptions {
         run_path: run_path.map(Into::into),
+        artifact_paths: ArtifactPathVisibility::Local,
         ..RunViewOptions::default()
     };
     if let Some(log) = log {
@@ -404,7 +410,7 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
             finished_at: run.finished_at.clone(),
             duration_ms: run_duration_ms(run),
         },
-        evidence: project_evidence(run, &policy),
+        evidence: project_evidence(run, &policy, options.artifact_paths),
         projection: ProjectionInfo {
             projection_id: String::new(),
             projection_hash: None,
@@ -455,25 +461,6 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
     };
     finalize_run_projection(&mut view);
     view
-}
-
-fn project_evidence(run: &RunRecord, policy: &RedactionPolicy) -> super::ExecutionEvidenceRecord {
-    let mut evidence = run.evidence.clone();
-    for span in &mut evidence.trace_spans {
-        span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
-        let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
-        policy.redact_json_in_place(&mut metadata);
-        if let Value::Object(metadata) = metadata {
-            span.metadata = metadata.into_iter().collect();
-        }
-    }
-    if let Some(recording) = &mut evidence.flight_recording {
-        recording.path = redact_bounded(&recording.path, policy, PREVIEW_LIMIT);
-    }
-    for gap in &mut evidence.gaps {
-        gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
-    }
-    evidence
 }
 
 pub fn build_session_view_from_run_views(

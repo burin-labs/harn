@@ -22,6 +22,17 @@ async fn run_composition_dispatcher_source(
     source: &str,
     configure: impl FnOnce(&mut crate::Vm),
 ) -> Result<Value, VmError> {
+    Ok(
+        run_composition_dispatcher_source_with_execution_id(source, configure)
+            .await?
+            .0,
+    )
+}
+
+async fn run_composition_dispatcher_source_with_execution_id(
+    source: &str,
+    configure: impl FnOnce(&mut crate::Vm),
+) -> Result<(Value, String), VmError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -39,7 +50,8 @@ async fn run_composition_dispatcher_source(
     vm.set_harness(crate::Harness::real());
     configure(&mut vm);
     let value = vm.execute(&chunk).await?;
-    Ok(crate::llm::vm_value_to_json(&value))
+    let execution_id = vm.execution_id().to_string();
+    Ok((crate::llm::vm_value_to_json(&value), execution_id))
 }
 
 #[test]
@@ -582,6 +594,27 @@ pipeline default(harness: Harness, task: unknown) {
     assert_eq!(result["state_manifest"]["max_total_bytes"], 64);
     assert_eq!(result["state_manifest"]["max_keys"], 2);
     crate::llm::fire_session_close_hooks("state-builtin-session");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composition_report_preserves_the_owning_vm_execution_id() {
+    let (report, expected) = run_composition_dispatcher_source_with_execution_id(
+        r#"
+pipeline default(harness: Harness, task: unknown) {
+  return harness.tools.composition_execute(
+    "return 42",
+    composition_binding_manifest([]),
+    {run_id: "execution-identity"},
+  )
+}
+"#,
+        |_| {},
+    )
+    .await
+    .expect("composition builtin should execute");
+
+    assert!(expected.starts_with("hxe-"));
+    assert_eq!(report["run"]["execution_id"], expected);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1315,15 +1348,17 @@ async fn harn_composition_enforces_output_cap() {
 
 #[test]
 fn composition_report_can_be_projected_to_crystallization_trace() {
+    let mut run = CompositionRunEnvelope::read_only(
+        "run-crystal",
+        "harn",
+        "sha256:snippet",
+        "sha256:manifest",
+    );
+    run.execution_id = Some("hxe-019c13e0-8080-7000-8000-000000000005".to_string());
     let report = CompositionExecutionReport {
         schema_version: COMPOSITION_EXECUTION_SCHEMA_VERSION,
         ok: true,
-        run: CompositionRunEnvelope::read_only(
-            "run-crystal",
-            "harn",
-            "sha256:snippet",
-            "sha256:manifest",
-        ),
+        run,
         child_calls: vec![CompositionChildCall {
             run_id: "run-crystal".into(),
             tool_call_id: "run-crystal:0".into(),
@@ -1352,6 +1387,10 @@ fn composition_report_can_be_projected_to_crystallization_trace() {
         summary: "ok".into(),
     };
     let trace = composition_crystallization_trace(&report, &serde_json::json!({}));
+    assert_eq!(
+        trace["execution_id"],
+        "hxe-019c13e0-8080-7000-8000-000000000005"
+    );
     assert_eq!(trace["source"], "composition_run");
     assert_eq!(trace["actions"][0]["name"], "execute_composition");
     assert_eq!(trace["actions"][1]["name"], "read_file");

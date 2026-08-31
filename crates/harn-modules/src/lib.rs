@@ -1489,7 +1489,9 @@ pub fn canonical_path(path: &Path) -> PathBuf {
                 .insert(path.to_path_buf(), canonical.clone());
             canonical
         }
-        Err(_) => path.to_path_buf(),
+        // A prepared generation may outlive its source tree, so preserve its
+        // lexical identity when the kernel can no longer resolve the path.
+        Err(_) => manifest_walk::normalize_lexically(path),
     }
 }
 

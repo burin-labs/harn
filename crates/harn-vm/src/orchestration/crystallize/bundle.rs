@@ -76,6 +76,9 @@ pub struct BundleWorkflowRef {
 #[serde(default)]
 pub struct BundleSourceTrace {
     pub trace_id: String,
+    /// Harn-owned execution identity retained from the source trace.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub source_hash: String,
     /// Optional human-visible URL (PR, issue, run record path) for the
     /// trace. `None` when the trace was loaded from an in-memory store.
@@ -425,6 +428,7 @@ pub fn build_crystallization_bundle(
             });
             source_traces.push(BundleSourceTrace {
                 trace_id: trace_id.clone(),
+                execution_id: trace.and_then(|trace| trace.execution_id.clone()),
                 source_hash: source_hash.clone(),
                 source_url: trace.and_then(|trace| trace.source.clone()),
                 source_receipt_id: trace

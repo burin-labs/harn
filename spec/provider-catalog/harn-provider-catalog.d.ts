@@ -3,7 +3,7 @@
 // Language: typescript declarations.
 
 export interface HarnProviderCatalog {
-  schema_version: 9
+  schema_version: 10
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -25,6 +25,7 @@ export interface HarnCatalogProvider {
   extra_headers?: Record<string, string>
   healthcheck?: HarnProviderHealthcheck
   cache_usage_accounting?: boolean
+  data_controls?: HarnProviderDataControls
   stream_usage_accounting?: boolean
   protocols: string[]
   features: string[]
@@ -94,6 +95,26 @@ export interface HarnProviderAuth {
   header?: string
   env: string[]
   required: boolean
+}
+
+export interface HarnProviderDataControls {
+  control_scope: "per_request" | "account" | "none"
+  retention_default: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  training_default: "trains" | "does_not_train" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+  request_controls?: HarnProviderDataControl[]
+}
+
+export interface HarnProviderDataControl {
+  location: "body" | "header"
+  name: string
+  value_kind: "bool" | "string"
+  value: string
+  effect: "retention" | "training"
+  applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
+  caveat?: string
 }
 
 export interface HarnProviderHealthcheck {

@@ -1,5 +1,5 @@
 pipeline main(harness: Harness) {
-  const good = run_record(
+  const good = harness.obs.run_record(
     {
       _type: "run_record",
       id: "run_good",
@@ -20,7 +20,7 @@ pipeline main(harness: Harness) {
       ],
     },
   )
-  const bad = run_record(
+  const bad = harness.obs.run_record(
     {
       _type: "run_record",
       id: "run_bad",

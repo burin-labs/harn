@@ -117,6 +117,33 @@ pub(super) fn opt_responses_store_field(
     }
 }
 
+/// `data_controls: "default" | "strictest_available"` — the caller-facing,
+/// provider-neutral posture request. Deliberately not a bool: "strictest
+/// available" is a request, and whether it was achievable is answered by the
+/// per-request receipt, not by the option's own name.
+pub(super) fn opt_data_posture_field(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Option<crate::llm_config::DataPosture>, VmError> {
+    match options.and_then(|o| o.get("data_controls")) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) => match value.as_str() {
+            "default" => Ok(Some(crate::llm_config::DataPosture::Default)),
+            "strictest_available" => Ok(Some(crate::llm_config::DataPosture::StrictestAvailable)),
+            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!(
+                    "data_controls: expected \"default\" or \"strictest_available\", got {other:?}"
+                ),
+            )))),
+        },
+        Some(other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!(
+                "data_controls: expected a string, got {}",
+                other.type_name()
+            ),
+        )))),
+    }
+}
+
 pub(super) fn parse_schema_value(
     raw: Option<&VmValue>,
     field: &str,

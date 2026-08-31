@@ -1,12 +1,17 @@
 //! Auto-compaction — transcript size management strategies.
 
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
-use crate::value::{VmDictExt, VmError, VmValue};
-use serde::{Deserialize, Serialize};
+use crate::value::{VmError, VmValue};
 
+mod policy;
 mod prompt;
 mod tool_output;
 use crate::vm::AsyncBuiltinCtx;
+pub use policy::{
+    compaction_policy_metadata_fields, compaction_policy_option_keys,
+    compaction_policy_to_vm_value, parse_compaction_policy_options, CompactionPolicy,
+    CompactionRequest,
+};
 use prompt::render_llm_compaction_prompt;
 pub use tool_output::{
     microcompact_tool_output, microcompact_tool_output_result, MicrocompactedToolOutput,
@@ -39,373 +44,6 @@ pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
         CompactStrategy::Custom => "custom",
         CompactStrategy::ObservationMask => "observation_mask",
     }
-}
-
-const COMPACTION_POLICY_KEYS: &[&str] = &[
-    "instructions",
-    "mode",
-    "scope",
-    "preserve",
-    "drop",
-    "extend_default_instructions",
-    "author",
-];
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CompactionPolicy {
-    pub instructions: Option<String>,
-    pub mode: Option<String>,
-    pub scope: Option<String>,
-    pub preserve: Vec<String>,
-    #[serde(rename = "drop")]
-    pub drop_items: Vec<String>,
-    pub extend_default_instructions: Option<bool>,
-    pub author: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CompactionRequest {
-    pub mode: Option<String>,
-    pub policy: CompactionPolicy,
-}
-
-impl CompactionPolicy {
-    pub fn has_metadata(&self) -> bool {
-        self.instructions.is_some()
-            || self.mode.is_some()
-            || self.scope.is_some()
-            || !self.preserve.is_empty()
-            || !self.drop_items.is_empty()
-            || self.extend_default_instructions.is_some()
-            || self.author.is_some()
-    }
-
-    fn has_prompt_directives(&self) -> bool {
-        self.instructions
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-            || !self.preserve.is_empty()
-            || !self.drop_items.is_empty()
-    }
-
-    pub fn instruction_mode(&self) -> &'static str {
-        if !self.has_prompt_directives() {
-            "default"
-        } else if self.extend_default_instructions == Some(false) {
-            "replace"
-        } else {
-            "extend"
-        }
-    }
-
-    pub fn instruction_source(&self) -> Option<&str> {
-        self.author
-            .as_deref()
-            .filter(|author| !author.trim().is_empty())
-    }
-
-    pub fn metadata_json(&self) -> Option<serde_json::Value> {
-        if !self.has_metadata() {
-            return None;
-        }
-        let mut map = serde_json::Map::new();
-        if let Some(instructions) = self.instructions.as_ref() {
-            map.insert(
-                "instructions".to_string(),
-                serde_json::Value::String(instructions.clone()),
-            );
-        }
-        if let Some(mode) = self.mode.as_ref() {
-            map.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
-        }
-        if let Some(scope) = self.scope.as_ref() {
-            map.insert(
-                "scope".to_string(),
-                serde_json::Value::String(scope.clone()),
-            );
-        }
-        if !self.preserve.is_empty() {
-            map.insert(
-                "preserve".to_string(),
-                serde_json::to_value(&self.preserve).unwrap_or_default(),
-            );
-        }
-        if !self.drop_items.is_empty() {
-            map.insert(
-                "drop".to_string(),
-                serde_json::to_value(&self.drop_items).unwrap_or_default(),
-            );
-        }
-        if let Some(extend_default_instructions) = self.extend_default_instructions {
-            map.insert(
-                "extend_default_instructions".to_string(),
-                serde_json::Value::Bool(extend_default_instructions),
-            );
-        }
-        if let Some(author) = self.author.as_ref() {
-            map.insert(
-                "author".to_string(),
-                serde_json::Value::String(author.clone()),
-            );
-        }
-        map.insert(
-            "instruction_mode".to_string(),
-            serde_json::Value::String(self.instruction_mode().to_string()),
-        );
-        if let Some(source) = self.instruction_source() {
-            map.insert(
-                "instruction_source".to_string(),
-                serde_json::Value::String(source.to_string()),
-            );
-        }
-        Some(serde_json::Value::Object(map))
-    }
-
-    fn prompt_directives(&self) -> Option<String> {
-        if !self.has_prompt_directives() {
-            return None;
-        }
-        let mut parts = Vec::new();
-        if let Some(instructions) = self
-            .instructions
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            parts.push(instructions.to_string());
-        }
-        if !self.preserve.is_empty() {
-            parts.push(format!("Preserve: {}.", self.preserve.join("; ")));
-        }
-        if !self.drop_items.is_empty() {
-            parts.push(format!("Drop: {}.", self.drop_items.join("; ")));
-        }
-        Some(parts.join("\n"))
-    }
-
-    fn is_model_visible_scope(&self) -> bool {
-        matches!(
-            self.scope.as_deref(),
-            Some("model_visible" | "summary" | "transcript")
-        )
-    }
-}
-
-pub fn compaction_policy_option_keys() -> &'static [&'static str] {
-    COMPACTION_POLICY_KEYS
-}
-
-pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
-    let mut map = crate::value::DictMap::new();
-    if let Some(instructions) = policy.instructions.as_ref() {
-        map.put_str("instructions", instructions.clone());
-    }
-    if let Some(mode) = policy.mode.as_ref() {
-        map.put_str("mode", mode.clone());
-    }
-    if let Some(scope) = policy.scope.as_ref() {
-        map.put_str("scope", scope.clone());
-    }
-    map.insert(
-        crate::value::intern_key("preserve"),
-        VmValue::List(std::sync::Arc::new(
-            policy
-                .preserve
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
-                .collect(),
-        )),
-    );
-    map.insert(
-        crate::value::intern_key("drop"),
-        VmValue::List(std::sync::Arc::new(
-            policy
-                .drop_items
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
-                .collect(),
-        )),
-    );
-    if let Some(extend_default_instructions) = policy.extend_default_instructions {
-        map.insert(
-            crate::value::intern_key("extend_default_instructions"),
-            VmValue::Bool(extend_default_instructions),
-        );
-    }
-    if let Some(author) = policy.author.as_ref() {
-        map.put_str("author", author.clone());
-    }
-    VmValue::dict(map)
-}
-
-pub fn parse_compaction_policy_options(
-    options: Option<&crate::value::DictMap>,
-    builtin: &str,
-) -> Result<CompactionPolicy, VmError> {
-    let mut policy = options
-        .and_then(|map| {
-            map.get("policy")
-                .or_else(|| map.get("compaction_policy"))
-                .or_else(|| map.get("compaction_request"))
-        })
-        .map(|value| parse_compaction_policy_value(value, builtin))
-        .transpose()?
-        .unwrap_or_default();
-    if let Some(options) = options {
-        apply_compaction_policy_fields(&mut policy, options, builtin)?;
-    }
-    Ok(policy)
-}
-
-fn parse_compaction_policy_value(
-    value: &VmValue,
-    builtin: &str,
-) -> Result<CompactionPolicy, VmError> {
-    match value {
-        VmValue::Nil => Ok(CompactionPolicy::default()),
-        VmValue::Dict(map) => {
-            if let Some(nested) = map
-                .get("policy")
-                .or_else(|| map.get("compaction_policy"))
-                .or_else(|| map.get("compaction_request"))
-            {
-                let mut policy = parse_compaction_policy_value(nested, builtin)?;
-                apply_compaction_policy_fields(&mut policy, map, builtin)?;
-                Ok(policy)
-            } else {
-                let mut policy = CompactionPolicy::default();
-                apply_compaction_policy_fields(&mut policy, map, builtin)?;
-                Ok(policy)
-            }
-        }
-        other => Err(VmError::Runtime(format!(
-            "{builtin}: compaction policy must be a dict or nil, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn apply_compaction_policy_fields(
-    policy: &mut CompactionPolicy,
-    map: &crate::value::DictMap,
-    builtin: &str,
-) -> Result<(), VmError> {
-    if let Some(value) = optional_policy_string(map, "instructions", builtin)? {
-        policy.instructions = Some(value);
-    }
-    if let Some(value) = optional_policy_string(map, "mode", builtin)? {
-        policy.mode = Some(value);
-    }
-    if let Some(value) = optional_policy_string(map, "scope", builtin)? {
-        policy.scope = Some(value);
-    }
-    if map.contains_key("preserve") {
-        policy.preserve = policy_string_list(map.get("preserve"), builtin, "preserve")?;
-    }
-    if map.contains_key("drop") {
-        policy.drop_items = policy_string_list(map.get("drop"), builtin, "drop")?;
-    }
-    if let Some(value) = optional_policy_bool(map, "extend_default_instructions", builtin)? {
-        policy.extend_default_instructions = Some(value);
-    }
-    if let Some(value) = optional_policy_string(map, "author", builtin)? {
-        policy.author = Some(value);
-    }
-    Ok(())
-}
-
-fn optional_policy_string(
-    map: &crate::value::DictMap,
-    key: &str,
-    builtin: &str,
-) -> Result<Option<String>, VmError> {
-    match map.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(text)) => {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(trimmed.to_string()))
-            }
-        }
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: compaction policy `{key}` must be a string, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn optional_policy_bool(
-    map: &crate::value::DictMap,
-    key: &str,
-    builtin: &str,
-) -> Result<Option<bool>, VmError> {
-    match map.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Bool(value)) => Ok(Some(*value)),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: compaction policy `{key}` must be a bool, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn policy_string_list(
-    value: Option<&VmValue>,
-    builtin: &str,
-    key: &str,
-) -> Result<Vec<String>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(Vec::new()),
-        Some(VmValue::String(text)) => {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                Ok(Vec::new())
-            } else {
-                Ok(vec![trimmed.to_string()])
-            }
-        }
-        Some(VmValue::List(items)) => items
-            .iter()
-            .map(|item| match item {
-                VmValue::String(text) => Ok(text.trim().to_string()),
-                other => Err(VmError::Runtime(format!(
-                    "{builtin}: compaction policy `{key}` entries must be strings, got {}",
-                    other.type_name()
-                ))),
-            })
-            .filter_map(|result| match result {
-                Ok(value) if value.is_empty() => None,
-                other => Some(other),
-            })
-            .collect(),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: compaction policy `{key}` must be a string or list, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-pub fn compaction_policy_metadata_fields(
-    policy: &CompactionPolicy,
-) -> Vec<(&'static str, serde_json::Value)> {
-    let mut fields = vec![(
-        "instruction_mode",
-        serde_json::Value::String(policy.instruction_mode().to_string()),
-    )];
-    if let Some(source) = policy.instruction_source() {
-        fields.push((
-            "instruction_source",
-            serde_json::Value::String(source.to_string()),
-        ));
-    }
-    if let Some(policy_json) = policy.metadata_json() {
-        fields.push(("compaction_policy", policy_json));
-    }
-    fields
 }
 
 /// Configuration for automatic transcript compaction in agent loops.
@@ -789,10 +427,81 @@ fn snap_to_line_start(s: &str, start_byte: usize) -> &str {
     }
 }
 
+/// A compaction summary plus the size of the scaffold the summarizer generated
+/// around it (headers, budget notices, drop markers).
+///
+/// `text.len() - scaffold_bytes` is `carried_source_bytes`: how many bytes of
+/// the archived source window actually survived into the summary. A summary can
+/// be hundreds of bytes long and still carry nothing — a bare
+/// `[auto-compacted N older messages]` header is the shape that silently
+/// destroys context — so the byte length of the summary is not a usable
+/// measurement on its own.
+#[derive(Debug)]
+pub(crate) struct CompactionSummary {
+    pub text: String,
+    pub scaffold_bytes: usize,
+}
+
+impl CompactionSummary {
+    fn new(text: String, scaffold_bytes: usize) -> Self {
+        let scaffold_bytes = scaffold_bytes.min(text.len());
+        Self {
+            text,
+            scaffold_bytes,
+        }
+    }
+
+    pub(crate) fn carried_source_bytes(&self) -> usize {
+        self.text.len().saturating_sub(self.scaffold_bytes)
+    }
+}
+
+/// Typed measurement of one compaction's source window against the summary that
+/// replaced it.
+///
+/// Every field is `Option` on purpose: `None` means the measurement was not
+/// taken on this path, `Some(0)` means it was taken and read zero. Collapsing
+/// the two would make an unmeasured compaction indistinguishable from one that
+/// provably carried nothing forward.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct CompactionSourceMeasurement {
+    /// Messages drained from the live transcript.
+    pub source_message_count: Option<usize>,
+    /// Plain-text content bytes in those messages, flattened across the string
+    /// and block-array `content` shapes.
+    pub source_bytes: Option<usize>,
+    /// Bytes of the summary that replaced them.
+    pub summary_bytes: Option<usize>,
+    /// Bytes of that summary that came from the source window rather than from
+    /// generated scaffold.
+    pub carried_source_bytes: Option<usize>,
+}
+
+impl CompactionSourceMeasurement {
+    /// A non-empty source window whose summary carried nothing forward is a
+    /// failed compaction, never a successful one.
+    pub fn discarded_source_context(&self) -> bool {
+        matches!(
+            (self.source_bytes, self.carried_source_bytes),
+            (Some(source), Some(0)) if source > 0
+        )
+    }
+}
+
+/// Plain-text content bytes of one message, across the string `content` shape
+/// and the block-array shape real agent transcripts carry.
+fn message_content_bytes(message: &serde_json::Value) -> usize {
+    message
+        .get("content")
+        .map(|content| super::repair_ledger::value_text(content).len())
+        .unwrap_or(0)
+}
+
 fn truncate_compaction_summary(
     old_messages: &[serde_json::Value],
     archived_count: usize,
-) -> String {
+) -> CompactionSummary {
     truncate_compaction_summary_with_context(old_messages, archived_count, false)
 }
 
@@ -800,13 +509,18 @@ fn truncate_compaction_summary_with_context(
     old_messages: &[serde_json::Value],
     archived_count: usize,
     is_llm_fallback: bool,
-) -> String {
+) -> CompactionSummary {
     let per_msg_limit = 500_usize;
+    // Flatten `content` through `value_text` rather than `as_str`: a real agent
+    // transcript carries tool results and multi-part turns as a block array, and
+    // reading only the string shape drops every one of them — leaving a bare
+    // header as the "summary" of a window that is being deleted.
+    let mut carried = 0_usize;
     let summary_parts: Vec<String> = old_messages
         .iter()
         .filter_map(|m| {
             let role = m.get("role")?.as_str()?;
-            let content = m.get("content")?.as_str()?;
+            let content = super::repair_ledger::value_text(m.get("content")?);
             if content.is_empty() {
                 return None;
             }
@@ -821,8 +535,9 @@ fn truncate_compaction_summary_with_context(
                     content.len()
                 )
             } else {
-                content.to_string()
+                content
             };
+            carried += truncated.len();
             Some(format!("[{role}] {truncated}"))
         })
         .take(15)
@@ -834,7 +549,7 @@ fn truncate_compaction_summary_with_context(
     } else {
         format!("[auto-compacted {archived_count} older messages via truncate strategy]")
     };
-    format!(
+    let text = format!(
         "{header}\n{}{}",
         summary_parts.join("\n"),
         if archived_count > 15 {
@@ -842,7 +557,12 @@ fn truncate_compaction_summary_with_context(
         } else {
             String::new()
         }
-    )
+    );
+    // `take(15)` can drop parts that `carried` already counted; clamp so the
+    // scaffold size can never be reported as negative work.
+    let carried = carried.min(text.len());
+    let scaffold_bytes = text.len() - carried;
+    CompactionSummary::new(text, scaffold_bytes)
 }
 
 fn compact_summary_text_from_value(value: &VmValue) -> Result<String, VmError> {
@@ -866,7 +586,7 @@ async fn llm_compaction_summary(
     llm_opts: &crate::llm::api::LlmCallOptions,
     summarize_prompt: Option<&str>,
     policy: &CompactionPolicy,
-) -> Result<String, VmError> {
+) -> Result<CompactionSummary, VmError> {
     let mut compact_opts = llm_opts.clone();
     compact_opts.system = None;
     compact_opts.transcript_summary = None;
@@ -891,14 +611,19 @@ async fn llm_compaction_summary(
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {
+        // Bounded retry: one deterministic pass over the same source window.
+        // The boundary still checks what that pass carried forward.
         Ok(truncate_compaction_summary_with_context(
             old_messages,
             archived_count,
             true,
         ))
     } else {
-        Ok(format!(
-            "[auto-compacted {archived_count} older messages]\n{summary}"
+        let header = format!("[auto-compacted {archived_count} older messages]\n");
+        let scaffold_bytes = header.len();
+        Ok(CompactionSummary::new(
+            format!("{header}{summary}"),
+            scaffold_bytes,
         ))
     }
 }
@@ -910,7 +635,7 @@ async fn custom_compaction_summary(
     callback: &VmValue,
     reminders: &[VmValue],
     policy: &CompactionPolicy,
-) -> Result<String, VmError> {
+) -> Result<CompactionSummary, VmError> {
     let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
         return Err(VmError::Runtime(
             "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
@@ -945,10 +670,14 @@ async fn custom_compaction_summary(
     let summary = compact_summary_text_from_value(&result?)?;
     ctx.forward_output(&vm.take_output());
     if summary.trim().is_empty() {
+        // Bounded retry, same contract as the LLM strategy.
         Ok(truncate_compaction_summary(old_messages, archived_count))
     } else {
-        Ok(format!(
-            "[auto-compacted {archived_count} older messages]\n{summary}"
+        let header = format!("[auto-compacted {archived_count} older messages]\n");
+        let scaffold_bytes = header.len();
+        Ok(CompactionSummary::new(
+            format!("{header}{summary}"),
+            scaffold_bytes,
         ))
     }
 }
@@ -1129,6 +858,7 @@ pub(crate) fn observation_mask_compaction(
         DEFAULT_RECAP_BUDGET_BYTES,
     )
     .0
+    .text
 }
 
 /// Test-only accessor exposing the recap body together with its
@@ -1139,7 +869,9 @@ pub(crate) fn observation_mask_compaction_for_test(
     archived_count: usize,
     budget_bytes: usize,
 ) -> (String, RecapMetrics) {
-    observation_mask_compaction_with_callback(old_messages, archived_count, None, budget_bytes)
+    let (summary, metrics) =
+        observation_mask_compaction_with_callback(old_messages, archived_count, None, budget_bytes);
+    (summary.text, metrics)
 }
 
 /// Build the observation-mask recap body under `budget_bytes`.
@@ -1162,7 +894,7 @@ fn observation_mask_compaction_with_callback(
     archived_count: usize,
     mask_results: Option<&[Option<String>]>,
     budget_bytes: usize,
-) -> (String, RecapMetrics) {
+) -> (CompactionSummary, RecapMetrics) {
     let header =
         format!("[auto-compacted {archived_count} older messages via observation masking]");
     let pinned = latest_pinned_indices(old_messages.iter(), |msg| {
@@ -1236,6 +968,7 @@ fn observation_mask_compaction_with_callback(
 
     let mut body: Vec<String> = rendered_rev.into_iter().rev().collect();
     body = collapse_repeats(body);
+    let carried: usize = body.iter().map(String::len).sum();
     let mut parts = vec![header];
     parts.append(&mut body);
     if metrics.dropped_count > 0 {
@@ -1246,7 +979,9 @@ fn observation_mask_compaction_with_callback(
     }
     let summary = parts.join("\n");
     metrics.recap_bytes = summary.len();
-    (summary, metrics)
+    let carried = carried.min(summary.len());
+    let scaffold_bytes = summary.len() - carried;
+    (CompactionSummary::new(summary, scaffold_bytes), metrics)
 }
 
 /// Invoke the mask_callback to get per-message custom masks.
@@ -1388,7 +1123,7 @@ struct CompactionStrategyInputs<'a> {
 /// `None`.
 async fn apply_compaction_strategy(
     input: CompactionStrategyInputs<'_>,
-) -> Result<(String, Option<RecapMetrics>), VmError> {
+) -> Result<(CompactionSummary, Option<RecapMetrics>), VmError> {
     let CompactionStrategyInputs {
         strategy,
         old_messages,
@@ -1456,7 +1191,7 @@ async fn apply_compaction_strategy(
 async fn apply_compaction_strategy_with_fallback(
     input: CompactionStrategyInputs<'_>,
     fallback_strategy: Option<&CompactStrategy>,
-) -> Result<(String, CompactStrategy, Option<RecapMetrics>), VmError> {
+) -> Result<(CompactionSummary, CompactStrategy, Option<RecapMetrics>), VmError> {
     match apply_compaction_strategy(input).await {
         Ok((summary, metrics)) => Ok((summary, input.strategy.clone(), metrics)),
         Err(primary_error) => {
@@ -1475,10 +1210,15 @@ async fn apply_compaction_strategy_with_fallback(
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct AutoCompactResult {
     pub summary: String,
     pub strategy: CompactStrategy,
     pub recap_metrics: Option<RecapMetrics>,
+    /// Typed source-window/summary measurement for this compaction. Always
+    /// populated on this path, so a `None` field downstream means the
+    /// measurement did not travel, never that it read zero.
+    pub measurement: CompactionSourceMeasurement,
 }
 
 /// Auto-compact a message list in place using two-tier compaction.
@@ -1576,14 +1316,14 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
     .await?;
 
     if let Some(hard_limit) = config.hard_limit_tokens {
-        let summary_msg = serde_json::json!({"role": "user", "content": &summary});
+        let summary_msg = serde_json::json!({"role": "user", "content": &summary.text});
         let mut estimate_msgs = vec![summary_msg];
         estimate_msgs.extend_from_slice(messages.as_slice());
         let estimated = estimate_message_tokens(&estimate_msgs);
         if estimated > hard_limit {
             let tier1_as_messages = vec![serde_json::json!({
                 "role": "user",
-                "content": summary,
+                "content": summary.text,
             })];
             let (hard_limit_summary, hard_limit_strategy, hard_limit_metrics) =
                 apply_compaction_strategy_with_fallback(
@@ -1612,8 +1352,36 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
         }
     }
 
-    summary = super::repair_ledger::append_repair_ledger_to_summary(
-        apply_model_visible_policy(summary, &config.policy),
+    // Measure the source window against what the summary actually carried,
+    // BEFORE the model-visible directives and the repair ledger are appended:
+    // both are generated scaffold, and counting them would let a summary that
+    // preserved nothing look substantial.
+    let source_bytes: usize = old_messages.iter().map(message_content_bytes).sum();
+    let measurement = CompactionSourceMeasurement {
+        source_message_count: Some(archived_count),
+        source_bytes: Some(source_bytes),
+        summary_bytes: Some(summary.text.len()),
+        carried_source_bytes: Some(summary.carried_source_bytes()),
+    };
+
+    // A non-empty source window whose summary carried zero source bytes is a
+    // failed compaction, not a small one. Every summarizer has already taken its
+    // one bounded deterministic retry by this point, so this is the terminal
+    // path: put the source window back exactly as it was drained and refuse,
+    // rather than replacing real context with a bare header.
+    if measurement.discarded_source_context() {
+        let restored = old_messages;
+        messages.splice(compact_start..compact_start, restored);
+        return Err(VmError::Runtime(format!(
+            "transcript compaction refused: the summary carried 0 of {source_bytes} source \
+             bytes across {archived_count} archived messages (summary was {} bytes, all \
+             generated scaffold); the source context was preserved",
+            summary.text.len()
+        )));
+    }
+
+    let summary = super::repair_ledger::append_repair_ledger_to_summary(
+        apply_model_visible_policy(summary.text, &config.policy),
         &old_messages,
     );
 
@@ -1628,6 +1396,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
         summary,
         strategy,
         recap_metrics,
+        measurement,
     }))
 }
 

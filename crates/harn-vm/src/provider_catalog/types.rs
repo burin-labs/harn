@@ -47,6 +47,15 @@ pub struct CatalogProvider {
     pub cache_usage_accounting: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_usage_accounting: Option<bool>,
+    /// Researched retention/training posture: what this provider lets a caller
+    /// decide per request, what happens when Harn sets nothing, and the
+    /// documentation behind both. Absent means the provider sits in the
+    /// registry's expiring unresearched queue — which is not the same claim as
+    /// a declared `control_scope: "none"`. Projecting it here lets a consumer
+    /// generate an accurate "what Harn sets per provider" table from the
+    /// binary instead of restating prose that drifts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_controls: Option<CatalogProviderDataControls>,
     pub protocols: Vec<String>,
     pub features: Vec<String>,
     pub caveats: Vec<String>,
@@ -60,6 +69,114 @@ pub struct CatalogProvider {
     pub latency_p50_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub performance: Option<ServingPerformanceDef>,
+}
+
+/// Catalog projection of a provider's researched retention/training posture.
+///
+/// Deliberately not the internal `DataControlsDef`. On the wire a control's
+/// value is a bool on one provider and a string on another, which the typed
+/// `.harn` binding cannot render as a union. The projection therefore carries
+/// the kind explicitly beside the literal's text, so a consumer can rebuild
+/// the exact wire value without the artifact schema needing a union — and
+/// `false` stays distinguishable from `"false"`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogProviderDataControls {
+    pub control_scope: llm_config::DataControlScope,
+    pub retention_default: llm_config::RetentionDefault,
+    pub training_default: llm_config::TrainingDefault,
+    pub checked_on: String,
+    pub sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub request_controls: Vec<CatalogProviderDataControl>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogProviderDataControl {
+    pub location: llm_config::DataControlLocation,
+    pub name: String,
+    pub value_kind: CatalogDataControlValueKind,
+    /// The literal as text. Pair with `value_kind` to rebuild the JSON value.
+    pub value: String,
+    pub effect: llm_config::DataControlEffect,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies_to: Vec<llm_config::DataControlDialect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caveat: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogDataControlValueKind {
+    Bool,
+    String,
+}
+
+impl CatalogProviderDataControls {
+    pub fn from_definition(definition: &llm_config::DataControlsDef) -> Self {
+        Self {
+            control_scope: definition.control_scope,
+            retention_default: definition.retention_default,
+            training_default: definition.training_default,
+            checked_on: definition.checked_on.clone(),
+            sources: definition.sources.clone(),
+            note: definition.note.clone(),
+            request_controls: definition
+                .request_controls
+                .iter()
+                .map(|control| CatalogProviderDataControl {
+                    location: control.location,
+                    name: control.name.clone(),
+                    value_kind: match control.value {
+                        llm_config::DataControlValue::Bool(_) => CatalogDataControlValueKind::Bool,
+                        llm_config::DataControlValue::Text(_) => {
+                            CatalogDataControlValueKind::String
+                        }
+                    },
+                    value: control.value.as_header_value(),
+                    effect: control.effect,
+                    applies_to: control.applies_to.clone(),
+                    caveat: control.caveat.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl CatalogProviderDataControls {
+    /// Inverse of [`Self::from_definition`], for rebuilding a `ProviderDef`
+    /// from a published artifact. The value's kind is carried explicitly, so
+    /// the round trip restores `false` as a bool rather than as `"false"`.
+    pub fn to_definition(&self) -> llm_config::DataControlsDef {
+        llm_config::DataControlsDef {
+            control_scope: self.control_scope,
+            retention_default: self.retention_default,
+            training_default: self.training_default,
+            checked_on: self.checked_on.clone(),
+            sources: self.sources.clone(),
+            note: self.note.clone(),
+            request_controls: self
+                .request_controls
+                .iter()
+                .map(|control| llm_config::DataControlDef {
+                    location: control.location,
+                    name: control.name.clone(),
+                    value: match control.value_kind {
+                        CatalogDataControlValueKind::Bool => {
+                            llm_config::DataControlValue::Bool(control.value == "true")
+                        }
+                        CatalogDataControlValueKind::String => {
+                            llm_config::DataControlValue::Text(control.value.clone())
+                        }
+                    },
+                    effect: control.effect,
+                    applies_to: control.applies_to.clone(),
+                    caveat: control.caveat.clone(),
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
