@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,6 +24,9 @@ pub struct DispatchCoreConfig {
     /// install [`LimitRegistry::in_memory`] (single-node default) or a
     /// cluster-aware impl that wraps a remote counter.
     pub limit_registry: Option<Arc<LimitRegistry>>,
+    /// Maximum number of isolated VM executions that explicitly safe exports
+    /// may run at once. Unknown or mutating exports remain globally ordered.
+    pub max_dispatch_workers: NonZeroUsize,
 }
 
 impl DispatchCoreConfig {
@@ -54,6 +58,13 @@ impl DispatchCoreConfig {
             vm_configurator: Arc::new(NoopVmConfigurator),
             trusted_host_dispatch: false,
             limit_registry: None,
+            max_dispatch_workers: NonZeroUsize::new(
+                std::thread::available_parallelism()
+                    .map(NonZeroUsize::get)
+                    .unwrap_or(1)
+                    .min(4),
+            )
+            .expect("dispatch worker ceiling is non-zero"),
         }
     }
 }

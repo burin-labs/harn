@@ -390,34 +390,63 @@ impl Vm {
         synthetic: PathBuf,
         source: &str,
     ) -> Result<Arc<LoadedModule>, VmError> {
+        self.load_module_from_source_with_preparation(synthetic, source, false)
+            .await
+    }
+
+    async fn load_module_from_source_with_preparation(
+        &mut self,
+        synthetic: PathBuf,
+        source: &str,
+        use_prepared_generation: bool,
+    ) -> Result<Arc<LoadedModule>, VmError> {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
-
-        let mut compile_span = self.module_compile_span();
-        let compiled = match self.module_provenance {
-            ModuleProvenance::EmbeddedStdlib => {
-                compile_embedded_stdlib_module_artifact_from_source(&synthetic, source)?
+        let source = Arc::new(ModuleSource::from_text(source));
+        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::clone(source.text()));
+        let artifact = if use_prepared_generation {
+            self.prepared_module_cache.prepare(
+                &synthetic,
+                &synthetic,
+                &source,
+                None,
+                self.module_phase_recorder.as_ref(),
+                self.module_provenance,
+                &self.prepared_module_validation,
+            )?
+        } else {
+            let mut compile_span = self.module_compile_span();
+            let compiled = match self.module_provenance {
+                ModuleProvenance::EmbeddedStdlib => {
+                    compile_embedded_stdlib_module_artifact_from_source(
+                        &synthetic,
+                        source.as_str(),
+                    )?
+                }
+                ModuleProvenance::TrustedHostDispatch => {
+                    compile_trusted_host_dispatch_module_artifact_from_source(
+                        &synthetic,
+                        source.as_str(),
+                    )?
+                }
+                ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
+                    compile_module_artifact_from_source(&synthetic, source.as_str())?
+                }
+            };
+            if let Some(span) = &mut compile_span {
+                span.mark_compile_succeeded();
             }
-            ModuleProvenance::TrustedHostDispatch => {
-                compile_trusted_host_dispatch_module_artifact_from_source(&synthetic, source)?
-            }
-            ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
-                compile_module_artifact_from_source(&synthetic, source)?
-            }
-        };
-        if let Some(span) = &mut compile_span {
-            span.mark_compile_succeeded();
-        }
-        drop(compile_span);
-        let artifact = {
+            drop(compile_span);
             let _load_span = self.module_load_span();
-            PreparedModuleArtifact::from_cached(compiled)
+            Arc::new(PreparedModuleArtifact::from_cached(compiled))
         };
 
         self.imported_paths.push(synthetic.clone());
-        let loaded = Arc::new(self.instantiate_module(None, &artifact).await?);
+        let source_dir = use_prepared_generation
+            .then(|| synthetic.parent().map(Path::to_path_buf))
+            .flatten();
+        let loaded = Arc::new(self.instantiate_module(source_dir, &artifact).await?);
         self.imported_paths.pop();
         {
             let _load_span = self.module_load_span();
@@ -934,9 +963,7 @@ impl Vm {
                 None
             };
 
-            let canonical = file_path
-                .canonicalize()
-                .unwrap_or_else(|_| file_path.clone());
+            let canonical = harn_modules::canonical_path(&file_path);
             if self.imported_paths.contains(&canonical) {
                 // Import cycle: `canonical` is still mid-load (it sits on the
                 // import stack), so its function closures don't exist yet and
@@ -1052,23 +1079,38 @@ impl Vm {
                         // Guard-verified package bytes are their own authority
                         // and never come from the shared on-disk memo.
                         Some(source) => Arc::new(ModuleSource::from_text(source)),
-                        None => module_source::read(&file_path).map_err(|e| {
-                            // Name the resolution base: relative imports resolve against
-                            // the importing file's dir (or CWD when unset), so an error
-                            // that prints only the joined path leaves the author guessing
-                            // which base was used.
-                            VmError::Runtime(format!(
-                                "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
-                                file_path.display(),
-                                base.display()
-                            ))
-                        })?,
+                        None => self
+                            .source_cache
+                            .get(&canonical)
+                            .cloned()
+                            .map(ModuleSource::from_text)
+                            .map(Arc::new)
+                            .map(Ok)
+                            .unwrap_or_else(|| module_source::read(&file_path))
+                            .map_err(|e| {
+                                // Name the resolution base: relative imports resolve against
+                                // the importing file's dir (or CWD when unset), so an error
+                                // that prints only the joined path leaves the author guessing
+                                // which base was used.
+                                VmError::Runtime(format!(
+                                    "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
+                                    file_path.display(),
+                                    base.display()
+                                ))
+                            })?,
                     }
                 };
                 {
-                    let source_cache = Arc::make_mut(&mut self.source_cache);
-                    source_cache.insert(canonical.clone(), Arc::clone(source.text()));
-                    source_cache.insert(file_path.clone(), Arc::clone(source.text()));
+                    let source_is_cached = |path: &Path| {
+                        self.source_cache
+                            .get(path)
+                            .is_some_and(|cached| cached.as_ref() == source.as_str())
+                    };
+                    if !source_is_cached(&canonical) || !source_is_cached(&file_path) {
+                        let source_cache = Arc::make_mut(&mut self.source_cache);
+                        source_cache.insert(canonical.clone(), Arc::clone(source.text()));
+                        source_cache.insert(file_path.clone(), Arc::clone(source.text()));
+                    }
                 }
 
                 match provenance {
@@ -1344,6 +1386,23 @@ impl Vm {
         let synthetic = source_key.into();
         let loaded = self
             .load_module_from_source(synthetic.clone(), source)
+            .await?;
+        exported_function_closures(&loaded, &synthetic)
+    }
+
+    /// Load exports from a source snapshot whose complete import generation
+    /// was installed through [`Vm::set_prepared_module_generation`]. The root
+    /// artifact and its imports are instantiated from that immutable
+    /// generation while runtime state remains local to this VM.
+    pub async fn load_prepared_module_exports_from_source(
+        &mut self,
+        source_key: impl Into<PathBuf>,
+        source: &str,
+    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+        self.ensure_execution_available()?;
+        let synthetic = source_key.into();
+        let loaded = self
+            .load_module_from_source_with_preparation(synthetic.clone(), source, true)
             .await?;
         exported_function_closures(&loaded, &synthetic)
     }
