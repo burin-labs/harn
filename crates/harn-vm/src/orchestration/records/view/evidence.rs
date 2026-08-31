@@ -123,7 +123,7 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
     for span in &mut evidence.trace_spans {
         if span
             .cost_usd
-            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+            .is_some_and(super::super::execution_evidence::cost_is_invalid)
         {
             span.cost_usd = None;
             invalid_span_cost = true;

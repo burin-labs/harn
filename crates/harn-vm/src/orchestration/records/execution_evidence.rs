@@ -60,7 +60,7 @@ pub fn validate_execution_evidence(
 
 pub(super) fn span_cost_is_invalid(span: &super::RunTraceSpanRecord) -> bool {
     match span.cost_usd {
-        Some(cost) => !cost.is_finite() || cost < 0.0,
+        Some(cost) => cost_is_invalid(cost),
         None => span
             .metadata
             .get(crate::tracing::meta::COST_USD)
@@ -68,10 +68,12 @@ pub(super) fn span_cost_is_invalid(span: &super::RunTraceSpanRecord) -> bool {
     }
 }
 
+pub(super) fn cost_is_invalid(cost: f64) -> bool {
+    !cost.is_finite() || cost < 0.0
+}
+
 pub(super) fn legacy_span_cost_is_invalid(value: &serde_json::Value) -> bool {
-    !value
-        .as_f64()
-        .is_some_and(|cost| cost.is_finite() && cost >= 0.0)
+    value.as_f64().is_none_or(cost_is_invalid)
 }
 
 /// Validate one claimed Harn-owned execution identity.
