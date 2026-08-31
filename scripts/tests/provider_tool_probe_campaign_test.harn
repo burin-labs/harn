@@ -1147,7 +1147,7 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
       request_count: 1,
       measured_count: 1,
       verdict: "accepted",
-      attempt: {verdict: "accepted", measured: true, cost_usd: 0.001},
+      attempt: {verdict: "accepted", measured: true, request_count: 1, cost_usd: 0.001},
     },
     diff: {status: "match", claimed_supported: true, observed_supported: true},
   }
@@ -1155,7 +1155,10 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
     + {
       catalog: {field: "temperature_supported", claimed_supported: false},
       probe: accepted_report.probe
-        + {verdict: "rejected", attempt: {verdict: "rejected", measured: true, cost_usd: 0.0}},
+        + {
+          verdict: "rejected",
+          attempt: {verdict: "rejected", measured: true, request_count: 1, cost_usd: 0.0},
+        },
       diff: {status: "match", claimed_supported: false, observed_supported: false},
     }
   const accepted = provider_tool_probe_campaign_option_probe_cell(

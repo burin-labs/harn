@@ -12,6 +12,7 @@ pub type ProviderOptionProbeVerdict = "accepted" | "rejected" | "inconclusive" |
 pub type ProviderOptionProbeAttempt = {
   verdict: ProviderOptionProbeVerdict,
   measured: bool,
+  request_count: int,
   failure_class?: string,
   reason?: string,
   error?: string,

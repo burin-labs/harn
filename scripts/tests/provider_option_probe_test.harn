@@ -33,6 +33,7 @@ pipeline test_provider_option_probe_distinguishes_wire_rejection_from_no_measure
   const accepted = provider_option_probe_classify(Ok({usage: {input_tokens: 3, output_tokens: 1}}))
   assert_eq(accepted.verdict, "accepted")
   assert_eq(accepted.measured, true)
+  assert_eq(accepted.request_count, 1)
   const rejected = provider_option_probe_classify(
     Err(
       {
@@ -45,6 +46,7 @@ pipeline test_provider_option_probe_distinguishes_wire_rejection_from_no_measure
   )
   assert_eq(rejected.verdict, "rejected")
   assert_eq(rejected.measured, true)
+  assert_eq(rejected.request_count, 1)
   const policy_block = provider_option_probe_classify(
     Err(
       {
@@ -58,11 +60,13 @@ pipeline test_provider_option_probe_distinguishes_wire_rejection_from_no_measure
   assert_eq(policy_block.verdict, "inconclusive")
   assert_eq(policy_block.measured, false)
   assert_eq(policy_block.failure_class, "unrelated")
+  assert_eq(policy_block.request_count, 1)
   const gated = provider_option_probe_classify(
     Err({origin: "local", kind: "terminal", reason: "invalid_request", message: "catalog gate"}),
   )
   assert_eq(gated.verdict, "gated_locally")
   assert_eq(gated.measured, false)
+  assert_eq(gated.request_count, 0)
 }
 
 @test
@@ -77,7 +81,7 @@ pipeline test_provider_option_probe_diff_cannot_turn_no_measurement_into_green(
     "temperature",
     false,
     true,
-    {verdict: "rejected", measured: true},
+    {verdict: "rejected", measured: true, request_count: 1},
   )
   assert_eq(matched.diff.status, "match")
   assert_eq(matched.probe.request_count, 1)
@@ -89,7 +93,7 @@ pipeline test_provider_option_probe_diff_cannot_turn_no_measurement_into_green(
     "temperature",
     true,
     true,
-    {verdict: "rejected", measured: true},
+    {verdict: "rejected", measured: true, request_count: 1},
   )
   assert_eq(drifted.diff.status, "drift")
   const unmeasured = provider_option_probe_report(
@@ -99,9 +103,9 @@ pipeline test_provider_option_probe_diff_cannot_turn_no_measurement_into_green(
     "temperature",
     false,
     false,
-    {verdict: "gated_locally", measured: false},
+    {verdict: "gated_locally", measured: false, request_count: 0},
   )
   assert_eq(unmeasured.diff.status, "unmeasured")
-  assert_eq(unmeasured.probe.request_count, 1)
+  assert_eq(unmeasured.probe.request_count, 0)
   assert_eq(unmeasured.probe.measured_count, 0)
 }

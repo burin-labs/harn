@@ -236,7 +236,9 @@ Authentication, throttling, missing models, and local admission failures are
 `unmeasured`; they cannot turn an absent provider observation into a match.
 So are unrelated terminal outcomes such as content-policy blocks. Only the
 provider error taxonomy's structured `invalid_request` reason proves that the
-wire shape was rejected.
+wire shape was rejected. The attempt owns its physical request count: a local
+gate reports zero requests and remains unmeasured, while a provider response or
+served-empty response reports one.
 
 Normal calls use the catalog to reject or remove unsupported options before
 egress. A truthful negative probe must let its selected option reach the
