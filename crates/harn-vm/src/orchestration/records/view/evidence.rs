@@ -22,7 +22,15 @@ pub(super) fn project_evidence(
 ) -> ExecutionEvidenceRecord {
     let mut evidence = run.evidence.clone();
     sanitize_untrusted_evidence(&mut evidence);
+    let execution_id = evidence.execution_id.clone();
     for span in &mut evidence.trace_spans {
+        span.metadata.remove(crate::tracing::meta::EXECUTION_ID);
+        if let Some(execution_id) = execution_id.as_ref() {
+            span.metadata.insert(
+                crate::tracing::meta::EXECUTION_ID.to_string(),
+                serde_json::json!(execution_id),
+            );
+        }
         span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
         let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
         policy.redact_json_in_place(&mut metadata);
@@ -47,13 +55,20 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
     use ExecutionEvidenceValidationError as ValidationError;
 
     match crate::orchestration::validate_execution_evidence(evidence) {
-        Ok(()) | Err(ValidationError::MissingExecutionId) => return,
+        Ok(()) => return,
+        Err(ValidationError::MissingExecutionId) => {
+            if evidence.flight_recording.take().is_some() {
+                push_gap_once(
+                    evidence,
+                    "execution_identity",
+                    "projection_invalid",
+                    "The persisted run contained unowned flight recording metadata.",
+                );
+            }
+        }
         Err(ValidationError::UnsupportedSchema | ValidationError::InvalidExecutionId) => {
             evidence.execution_id = None;
             evidence.flight_recording = None;
-            for span in &mut evidence.trace_spans {
-                span.metadata.remove(crate::tracing::meta::EXECUTION_ID);
-            }
             push_gap_once(
                 evidence,
                 "execution_identity",
@@ -192,11 +207,24 @@ mod tests {
     fn public_projection_keeps_valid_identity_when_recording_metadata_is_invalid() {
         let mut run = run_with_local_recording();
         run.evidence.flight_recording.as_mut().unwrap().content_hash = "blake3:invalid".to_string();
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                metadata: std::collections::BTreeMap::from([(
+                    crate::tracing::meta::EXECUTION_ID.to_string(),
+                    serde_json::json!("hxe-019c13e0-8080-7000-8000-000000000099"),
+                )]),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
 
         let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
 
         assert_eq!(projected.execution_id, run.evidence.execution_id);
         assert_eq!(projected.flight_recording, None);
+        assert_eq!(
+            projected.trace_spans[0].metadata[crate::tracing::meta::EXECUTION_ID],
+            serde_json::json!(run.evidence.execution_id.as_deref().unwrap())
+        );
         assert!(projected.gaps.iter().any(|gap| {
             gap.component == "flight_recording" && gap.code == "projection_invalid"
         }));
