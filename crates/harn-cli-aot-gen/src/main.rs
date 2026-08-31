@@ -3,8 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use harn_parser::{DiagnosticSeverity, PipelineError};
 use harn_vm::bytecode_cache::{serialize_chunk_artifact, CacheKey};
-use harn_vm::compile_source;
+use harn_vm::Compiler;
 
 #[path = "../../harn-cli/build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
@@ -241,7 +242,7 @@ fn build_expected(
             continue;
         }
 
-        let chunk = compile_source(&source)
+        let chunk = compile_cli_source(&source_disk_path, &source)
             .map_err(|error| format!("compile CLI script `{}`: {error}", script.name))?;
         let safe_name = safe_filename(script.name);
         let synthetic_source = PathBuf::from("stdlib-cli").join(format!("{safe_name}.harn"));
@@ -280,6 +281,26 @@ fn build_expected(
         manifest: canonical_manifest_bytes(&manifest)?,
         artifacts,
     })
+}
+
+fn compile_cli_source(source_path: &Path, source: &str) -> Result<harn_vm::Chunk, String> {
+    harn_vm::stdlib::force_link();
+    harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
+    let program = harn_parser::parse_source(source).map_err(|error| error.to_string())?;
+    let graph = harn_modules::build_with_standalone_source(source_path, source);
+    let config = graph
+        .typecheck_import_config_for_file(source_path)
+        .with_strict_types(true);
+    let diagnostics = config.check_with_facts(&program, source).diagnostics;
+    if let Some(diagnostic) = diagnostics
+        .into_iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
+        return Err(PipelineError::TypeCheck(Box::new(diagnostic)).to_string());
+    }
+    Compiler::new()
+        .compile(&program)
+        .map_err(|error| error.to_string())
 }
 
 fn check_expected(manifest_dir: &Path, expected: &ExpectedArtifacts) -> Result<(), String> {
@@ -466,6 +487,30 @@ mod tests {
         .expect("mutate workspace version");
         let after_version = checkout_contract(workspace.path()).expect("version contract");
         assert_eq!(after_version.harn_version, "4.5.6");
+    }
+
+    #[test]
+    fn cli_compiler_resolves_imported_literal_union_contracts() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let contracts = workspace.path().join("contracts.harn");
+        let consumer = workspace.path().join("consumer.harn");
+        fs::write(
+            contracts,
+            "pub type Verdict = \"accepted\" | \"rejected\"\n",
+        )
+        .expect("write contracts");
+
+        let accepted =
+            "import { Verdict } from \"./contracts\"\nfn classify() -> Verdict { return \"accepted\" }\n";
+        fs::write(&consumer, accepted).expect("write accepted consumer");
+        compile_cli_source(&consumer, accepted).expect("imported literal union compiles");
+
+        let invalid =
+            "import { Verdict } from \"./contracts\"\nfn classify() -> Verdict { return 1 }\n";
+        fs::write(&consumer, invalid).expect("write invalid consumer");
+        let error =
+            compile_cli_source(&consumer, invalid).expect_err("invalid literal is rejected");
+        assert!(error.contains("expected Verdict, found int"), "{error}");
     }
 
     fn test_workspace(version: &str, compiler_source: &str) -> tempfile::TempDir {
