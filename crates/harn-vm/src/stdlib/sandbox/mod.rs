@@ -64,7 +64,7 @@ mod paths;
 mod process_config;
 mod process_output;
 mod refusal;
-pub(crate) use process_config::apply_active_rustc_wrapper_policy;
+pub use process_config::apply_active_rustc_wrapper_policy;
 use process_config::neutralize_rustc_wrapper;
 pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
