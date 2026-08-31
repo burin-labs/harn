@@ -216,6 +216,12 @@ mod tests {
             serde_json::to_string(&ExecutionId::parse(valid).unwrap()).unwrap(),
             format!("\"{valid}\"")
         );
+        assert_eq!(
+            serde_json::from_str::<ExecutionId>(&format!("\"{valid}\""))
+                .unwrap()
+                .as_str(),
+            valid
+        );
 
         for invalid in [
             "cloud-run-id",
