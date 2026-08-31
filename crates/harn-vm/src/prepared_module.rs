@@ -17,6 +17,7 @@ use quick_cache::{DefaultHashBuilder, Lifecycle, UnitWeighter};
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::context_manifest::{ContextManifest, ManifestCheck};
 use crate::module_artifact::{
+    compile_embedded_stdlib_module_artifact_from_source_with_context,
     compile_module_artifact_from_source_with_context,
     compile_trusted_host_dispatch_module_artifact_from_source_with_context, ModuleArtifact,
     ModuleCompilationContext, ModuleImportSpec, ModuleProvenance,
@@ -29,6 +30,9 @@ const DEFAULT_MAX_ENTRIES: usize = 512;
 /// worth keeping for every module a tree contains, not just for the artifacts
 /// that fit in the bounded cache.
 const MAX_REMEMBERED_INTERFACES: usize = 8192;
+
+mod generation;
+pub use generation::PreparedModuleGenerationStats;
 
 /// Immutable runtime form of one compiled module artifact.
 pub(crate) struct PreparedModuleArtifact {
@@ -202,6 +206,14 @@ pub struct PreparedModuleCache {
     /// from a freshly walked graph, so a run that re-prepares its graph starts
     /// from current interfaces rather than a previous generation's.
     interfaces: Arc<Mutex<HashMap<InterfaceMemoKey, InterfaceMemoEntry>>>,
+    /// Exact source bytes captured with the most recently prepared graph.
+    ///
+    /// A long-lived host can install this closed snapshot into each fresh VM
+    /// alongside the immutable bytecode templates. Runtime instantiation then
+    /// performs no source reads while still creating fresh module state. The
+    /// snapshot is generation-scoped and replaced, never extended, on a new
+    /// graph preparation.
+    sources: Arc<Mutex<BTreeMap<PathBuf, Arc<str>>>>,
 }
 
 /// One module's bytes under one authority — everything a derived interface is
@@ -342,6 +354,7 @@ impl PreparedModuleCache {
             )),
             counters,
             interfaces: Arc::new(Mutex::new(HashMap::new())),
+            sources: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -437,7 +450,8 @@ impl PreparedModuleCache {
     /// their transitive import closure is prepared. Invalid modules are left
     /// uncached for the canonical VM load to diagnose.
     pub fn prepare_import_graph(&self, roots: &[PathBuf]) -> ModulePhaseStats {
-        self.prepare_import_graph_with_provenance(roots, ModuleProvenance::User)
+        self.prepare_graph_with_provenance(roots, ModuleProvenance::User, false)
+            .unwrap_or_default()
     }
 
     /// Prepare a Rust-embedder-selected host-dispatch graph without making its
@@ -448,16 +462,18 @@ impl PreparedModuleCache {
         &self,
         roots: &[PathBuf],
     ) -> ModulePhaseStats {
-        self.prepare_import_graph_with_provenance(roots, ModuleProvenance::TrustedHostDispatch)
+        self.prepare_graph_with_provenance(roots, ModuleProvenance::TrustedHostDispatch, false)
+            .unwrap_or_default()
     }
 
-    fn prepare_import_graph_with_provenance(
+    fn prepare_graph_with_provenance(
         &self,
         roots: &[PathBuf],
         provenance: ModuleProvenance,
-    ) -> ModulePhaseStats {
+        include_roots: bool,
+    ) -> Result<ModulePhaseStats, VmError> {
         if roots.is_empty() {
-            return ModulePhaseStats::default();
+            return Ok(ModulePhaseStats::default());
         }
 
         // This walk reads every reachable file, so the interfaces it derives
@@ -466,6 +482,10 @@ impl PreparedModuleCache {
         self.interfaces
             .lock()
             .expect("interface memo lock poisoned")
+            .clear();
+        self.sources
+            .lock()
+            .expect("prepared-module source lock poisoned")
             .clear();
         let graph = harn_modules::build(roots);
         let root_paths = roots
@@ -476,7 +496,7 @@ impl PreparedModuleCache {
         let validation = PreparedModuleValidation::default();
 
         for path in graph.module_paths() {
-            if root_paths.contains(&harn_modules::canonical_path(&path)) {
+            if !include_roots && root_paths.contains(&harn_modules::canonical_path(&path)) {
                 continue;
             }
             if path.to_str().is_some_and(|path| path.starts_with("<std>/")) {
@@ -488,16 +508,28 @@ impl PreparedModuleCache {
                 let _load_span = recorder.load_span();
                 match crate::module_source::read(&path) {
                     Ok(source) => source,
+                    Err(error) if include_roots => {
+                        return Err(VmError::Runtime(format!(
+                            "cannot prepare module generation source {}: {error}",
+                            path.display()
+                        )))
+                    }
                     Err(_) => continue,
                 }
             };
-            let Ok(compilation_context) =
-                ModuleCompilationContext::for_source_in_graph(&graph, &path, source.as_str())
-            else {
-                continue;
-            };
+            let compilation_context =
+                match ModuleCompilationContext::for_source_in_graph(&graph, &path, source.as_str())
+                {
+                    Ok(context) => context,
+                    Err(error) if include_roots => return Err(error),
+                    Err(_) => continue,
+                };
             let canonical = harn_modules::canonical_path(&path);
-            let _ = self.prepare(
+            self.sources
+                .lock()
+                .expect("prepared-module source lock poisoned")
+                .insert(canonical.clone(), Arc::clone(source.text()));
+            let prepared = self.prepare(
                 &path,
                 &canonical,
                 &source,
@@ -506,9 +538,61 @@ impl PreparedModuleCache {
                 provenance,
                 &validation,
             );
+            if include_roots {
+                prepared?;
+            }
         }
 
-        recorder.snapshot()
+        if include_roots {
+            // A root may be spelled through a filesystem alias (for example,
+            // macOS `/var` and `/private/var`). Runtime relative imports retain
+            // the caller's root spelling after the source files disappear, so
+            // seed that lexical spelling beside the canonical graph identity.
+            // Both names point at the same immutable bytes.
+            let mut sources = self
+                .sources
+                .lock()
+                .expect("prepared-module source lock poisoned");
+            let canonical_sources = sources
+                .iter()
+                .map(|(path, source)| (path.clone(), Arc::clone(source)))
+                .collect::<Vec<_>>();
+            for root in roots {
+                let Some(raw_parent) = root.parent() else {
+                    continue;
+                };
+                let canonical_root = harn_modules::canonical_path(root);
+                let Some(canonical_parent) = canonical_root.parent() else {
+                    continue;
+                };
+                for (path, source) in &canonical_sources {
+                    if let Ok(relative) = path.strip_prefix(canonical_parent) {
+                        sources
+                            .entry(raw_parent.join(relative))
+                            .or_insert_with(|| Arc::clone(source));
+                    }
+                }
+            }
+        }
+
+        if include_roots {
+            // A complete generation is immutable by construction. Its source
+            // snapshot, interfaces, and artifacts were captured by this one
+            // graph walk and are swapped together by the owning host. Do not
+            // revalidate those interfaces against a later filesystem state on
+            // every invocation; a watcher prepares a replacement generation
+            // when source changes.
+            for entry in self
+                .interfaces
+                .lock()
+                .expect("interface memo lock poisoned")
+                .values_mut()
+            {
+                entry.manifest = None;
+            }
+        }
+
+        Ok(recorder.snapshot())
     }
 
     #[cfg(test)]
@@ -697,18 +781,28 @@ impl PreparedModuleCache {
                     // Same `provenance` that keyed the lookup above, so the
                     // artifact stored on a miss can only be found by a reader
                     // asking for the authority it was compiled under.
-                    let compiled = if provenance == ModuleProvenance::TrustedHostDispatch {
-                        compile_trusted_host_dispatch_module_artifact_from_source_with_context(
-                            source_path,
-                            source.as_str(),
-                            &compilation_context,
-                        )?
-                    } else {
-                        compile_module_artifact_from_source_with_context(
-                            source_path,
-                            source.as_str(),
-                            &compilation_context,
-                        )?
+                    let compiled = match provenance {
+                        ModuleProvenance::TrustedHostDispatch => {
+                            compile_trusted_host_dispatch_module_artifact_from_source_with_context(
+                                source_path,
+                                source.as_str(),
+                                &compilation_context,
+                            )?
+                        }
+                        ModuleProvenance::EmbeddedStdlib => {
+                            compile_embedded_stdlib_module_artifact_from_source_with_context(
+                                source_path,
+                                source.as_str(),
+                                &compilation_context,
+                            )?
+                        }
+                        ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
+                            compile_module_artifact_from_source_with_context(
+                                source_path,
+                                source.as_str(),
+                                &compilation_context,
+                            )?
+                        }
                     };
                     if let Some(span) = &mut compile_span {
                         span.mark_compile_succeeded();

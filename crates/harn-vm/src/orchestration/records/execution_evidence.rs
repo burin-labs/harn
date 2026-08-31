@@ -89,7 +89,7 @@ mod tests {
             schema_version: FLIGHT_RECORDING_SCHEMA_VERSION,
             execution_id: EXECUTION_ID.to_string(),
             format: FLIGHT_RECORDING_FORMAT.to_string(),
-            path: ".harn/receipts/run.flight.json".to_string(),
+            path: Some(".harn/receipts/run.flight.json".to_string()),
             content_hash: format!("blake3:{}", "a".repeat(64)),
             byte_length: 10,
             retained_events: 1,

@@ -240,6 +240,7 @@
 - [Generated protocol artifacts](./protocol-artifacts.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
 - [ACP over WebSocket](./acp/websocket.md)
+- [Remote session control](./remote-session-control.md)
 - [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md)
 - [MCP Apps UI resources](./interop/ui-resource.md)
 - [Agents Protocol v1](./spec/agents-protocol/v1.md)
