@@ -44,7 +44,9 @@ impl Vm {
         crate::orchestration::ExecutionEvidenceRecord {
             schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
             execution_id: Some(self.execution_id.to_string()),
-            trace_spans: crate::tracing::peek_spans()
+            trace_spans: self
+                .tracing_runtime
+                .completed_spans()
                 .iter()
                 .map(crate::orchestration::RunTraceSpanRecord::from)
                 .collect(),
@@ -56,6 +58,20 @@ impl Vm {
 
 #[cfg(test)]
 mod tests {
+    struct TracingRuntimeGuard(std::sync::Arc<crate::tracing::TracingRuntime>);
+
+    impl Drop for TracingRuntimeGuard {
+        fn drop(&mut self) {
+            crate::tracing::swap_active_tracing_runtime(self.0.clone());
+        }
+    }
+
+    fn enter_tracing_runtime(
+        runtime: std::sync::Arc<crate::tracing::TracingRuntime>,
+    ) -> TracingRuntimeGuard {
+        TracingRuntimeGuard(crate::tracing::swap_active_tracing_runtime(runtime))
+    }
+
     #[test]
     fn vm_owns_the_execution_evidence_envelope() {
         let vm = super::Vm::new();
@@ -76,5 +92,34 @@ mod tests {
             crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION
         );
         assert_eq!(evidence.gaps, vec![gap]);
+    }
+
+    #[test]
+    fn vm_evidence_cannot_capture_the_callers_tracing_runtime() {
+        let vm = super::Vm::new();
+        {
+            let _runtime = enter_tracing_runtime(vm.tracing_runtime.clone());
+            crate::tracing::set_tracing_enabled(true);
+            let span =
+                crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "owned".to_string());
+            crate::tracing::span_end(span);
+        }
+
+        let caller_runtime = crate::tracing::fresh_tracing_runtime();
+        let _caller = enter_tracing_runtime(caller_runtime);
+        crate::tracing::set_tracing_enabled(true);
+        let span =
+            crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "caller".to_string());
+        crate::tracing::span_end(span);
+
+        let evidence = vm.execution_evidence(None, Vec::new());
+        assert_eq!(
+            evidence
+                .trace_spans
+                .iter()
+                .map(|span| span.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["owned"]
+        );
     }
 }

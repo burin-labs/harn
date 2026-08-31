@@ -543,6 +543,12 @@ impl Default for TracingRuntime {
     }
 }
 
+impl TracingRuntime {
+    pub(crate) fn completed_spans(&self) -> Vec<Span> {
+        self.collector.borrow().spans().to_vec()
+    }
+}
+
 thread_local! {
     static ACTIVE_TRACING_RUNTIME: RefCell<Arc<TracingRuntime>> =
         RefCell::new(fresh_tracing_runtime());
