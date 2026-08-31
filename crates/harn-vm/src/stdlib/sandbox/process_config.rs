@@ -1,6 +1,11 @@
 use std::path::PathBuf;
 
-const RUSTC_WRAPPER_ENV_KEYS: [&str; 2] = ["RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER"];
+const RUSTC_WRAPPER_ENV_KEYS: [&str; 4] = [
+    "RUSTC_WRAPPER",
+    "CARGO_BUILD_RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+];
 
 /// Exact bytes supplied to a child process.
 ///
@@ -28,7 +33,7 @@ pub struct ProcessCommandConfig {
     pub closed_env: bool,
 }
 
-/// Disable Cargo `rustc` wrappers for a spawn governed by an active sandbox.
+/// Disable Cargo `rustc` and workspace wrappers for a spawn governed by an active sandbox.
 ///
 /// A wrapper such as `sccache` is a shared per-user daemon. If a sandboxed
 /// Cargo invocation starts it, the daemon inherits that confinement and can

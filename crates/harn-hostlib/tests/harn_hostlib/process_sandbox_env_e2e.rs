@@ -29,7 +29,7 @@ fn command_request(cwd: &str) -> harn_vm::value::DictMap {
             [
                 "sh",
                 "-c",
-                "printf '<%s>|<%s>' \"$RUSTC_WRAPPER\" \"$CARGO_BUILD_RUSTC_WRAPPER\"",
+                "printf '<%s>|<%s>|<%s>|<%s>' \"$RUSTC_WRAPPER\" \"$CARGO_BUILD_RUSTC_WRAPPER\" \"$RUSTC_WORKSPACE_WRAPPER\" \"$CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER\"",
             ]
             .into_iter()
             .map(value)
@@ -58,17 +58,27 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     // `warn` keeps the Worktree process policy active while allowing hosts
     // without an OS confinement backend to exercise the environment contract.
     // SAFETY: the shared lock serializes every environment-mutating test in
-    // this binary, and all three variables are restored before the guard drops.
+    // this binary, and all five variables are restored before the guard drops.
     let _env_guard = super::process_tools_e2e::lock_env();
     let old_handler_sandbox = std::env::var_os("HARN_HANDLER_SANDBOX");
     let old_rustc_wrapper = std::env::var_os("RUSTC_WRAPPER");
     let old_cargo_wrapper = std::env::var_os("CARGO_BUILD_RUSTC_WRAPPER");
+    let old_workspace_wrapper = std::env::var_os("RUSTC_WORKSPACE_WRAPPER");
+    let old_cargo_workspace_wrapper = std::env::var_os("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER");
     unsafe {
         std::env::set_var("HARN_HANDLER_SANDBOX", "warn");
         std::env::set_var("RUSTC_WRAPPER", "/outside/sandbox/sccache");
         std::env::set_var(
             "CARGO_BUILD_RUSTC_WRAPPER",
             "/outside/sandbox/cargo-sccache",
+        );
+        std::env::set_var(
+            "RUSTC_WORKSPACE_WRAPPER",
+            "/outside/sandbox/workspace-sccache",
+        );
+        std::env::set_var(
+            "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+            "/outside/sandbox/cargo-workspace-sccache",
         );
     }
     push_execution_policy(CapabilityPolicy {
@@ -87,14 +97,27 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         "CARGO_BUILD_RUSTC_WRAPPER".into(),
         value("/caller/cargo-sccache"),
     );
+    caller_env.insert(
+        "RUSTC_WORKSPACE_WRAPPER".into(),
+        value("/caller/workspace-sccache"),
+    );
+    caller_env.insert(
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER".into(),
+        value("/caller/cargo-workspace-sccache"),
+    );
     caller_request.insert("env".into(), VmValue::dict(caller_env));
     caller_request.insert(
         "env_remove".into(),
         VmValue::List(Arc::new(
-            ["rustc_wrapper", "cargo_build_rustc_wrapper"]
-                .into_iter()
-                .map(value)
-                .collect(),
+            [
+                "rustc_wrapper",
+                "cargo_build_rustc_wrapper",
+                "rustc_workspace_wrapper",
+                "cargo_build_rustc_workspace_wrapper",
+            ]
+            .into_iter()
+            .map(value)
+            .collect(),
         )),
     );
     caller_request.insert("env_mode".into(), value("patch"));
@@ -114,6 +137,14 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
             Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WRAPPER", value),
             None => std::env::remove_var("CARGO_BUILD_RUSTC_WRAPPER"),
         }
+        match old_workspace_wrapper {
+            Some(value) => std::env::set_var("RUSTC_WORKSPACE_WRAPPER", value),
+            None => std::env::remove_var("RUSTC_WORKSPACE_WRAPPER"),
+        }
+        match old_cargo_workspace_wrapper {
+            Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", value),
+            None => std::env::remove_var("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"),
+        }
     }
 
     for (source, response) in [
@@ -125,7 +156,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         };
         assert_eq!(
             response_string(&response, "stdout"),
-            "<>|<>",
+            "<>|<>|<>|<>",
             "the real host-process path must override {source} and Cargo-configured wrappers"
         );
     }
