@@ -80,9 +80,9 @@ impl crate::vm::Vm {
     /// Mint the opaque `VerdictReceipt` VM-side from the host validator's plain
     /// dict. On any non-`"pass"` outcome the dict passes through unchanged (no
     /// receipt), so the `.harn` side maps outcome -> fail / indeterminate. The
-    /// run identity is the host-controlled ambient request id — a caller cannot
-    /// forge it — which, with the host-captured content hash, closes the cross-run
-    /// replay class on top of the execution-provenance floor the hostlib enforces.
+    /// run identity is the VM-owned execution scope — a caller cannot forge it —
+    /// which, with the host-captured content hash, closes the cross-run replay
+    /// class on top of the execution-provenance floor the hostlib enforces.
     fn mint_verdict_receipt(raw: &VmValue) -> VmValue {
         let Some(dict) = raw.as_dict() else {
             return raw.clone();
