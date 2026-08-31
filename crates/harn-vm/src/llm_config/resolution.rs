@@ -433,10 +433,11 @@ fn resolve_model_request_with_config(
     });
     if let Some((provider, model)) = qualified_parts.filter(|_| qualified.is_none()) {
         let suggestions = provider_suggestions(config, provider);
-        if config.aliases.contains_key(model)
-            || config.models.contains_key(model)
-            || (explicit_provider.is_none() && !suggestions.is_empty())
-        {
+        let suffix_is_catalogued =
+            config.aliases.contains_key(model) || config.models.contains_key(model);
+        let unqualified_prefix_looks_misspelled =
+            explicit_provider.is_none() && !suggestions.is_empty();
+        if suffix_is_catalogued || unqualified_prefix_looks_misspelled {
             return Err(ModelResolutionError::UnknownProvider {
                 provider: provider.to_string(),
                 catalog_version: catalog_version(),
