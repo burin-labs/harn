@@ -686,6 +686,17 @@ fn json_schema_unique_items_validates_lists_without_requiring_harn_set() {
 }
 
 #[test]
+fn json_schema_fractional_multiple_of_accepts_and_rejects_consistently() {
+    let schema = make_vm_dict(vec![
+        ("type", s("number")),
+        ("multipleOf", VmValue::Float(0.25)),
+    ]);
+
+    assert!(schema_is_value(&VmValue::Float(1.5), &schema).unwrap());
+    assert!(!schema_is_value(&VmValue::Float(1.3), &schema).unwrap());
+}
+
+#[test]
 fn export_set_schema_keeps_harn_marker() {
     let schema = make_vm_dict(vec![("type", s("set"))]);
     let exported = schema_to_json_schema_value(&schema).unwrap();
