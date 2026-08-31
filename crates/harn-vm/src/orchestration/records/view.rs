@@ -1226,7 +1226,7 @@ fn projection_hash<T: Serialize>(schema: &str, value: &T) -> Option<String> {
         projection.remove("projection_id");
         projection.remove("projection_hash");
     }
-    let bytes = serde_json::to_vec(&value).ok()?;
+    let bytes = crate::canonical_json::to_vec(&value);
     let mut hasher = Sha256::new();
     hasher.update(schema.as_bytes());
     hasher.update([0]);

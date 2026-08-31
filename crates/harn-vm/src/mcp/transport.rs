@@ -374,7 +374,7 @@ pub(crate) fn parse_http_response_body(
     if body.trim_start().starts_with("event:") || body.trim_start().starts_with("data:") {
         return parse_sse_jsonrpc_body(server_name, body, request_id);
     }
-    serde_json::from_str(body).map_err(|e| {
+    parse_jsonrpc_message(body.as_bytes()).map_err(|e| {
         VmError::Runtime(format!(
             "MCP HTTP response parse error (status {status}): {e}"
         ))
@@ -407,7 +407,7 @@ pub(crate) fn parse_sse_jsonrpc_body(
 
     let mut fallback = None;
     for message in messages {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) {
+        if let Ok(value) = parse_jsonrpc_message(message.as_bytes()) {
             if request_id.is_some()
                 && value["id"].as_u64() == request_id
                 && (value.get("result").is_some() || value.get("error").is_some())

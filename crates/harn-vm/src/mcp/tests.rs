@@ -444,16 +444,10 @@ async fn stable_input_required_result_dispatches_and_retries() {
                 requested_schema["$schema"],
                 serde_json::json!("https://json-schema.org/draft/2020-12/schema")
             );
-            let property_names = requested_schema["properties"]
-                .as_object()
-                .expect("elicitation schema properties")
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
             assert_eq!(
-                property_names,
-                ["zeta", "alpha"],
-                "typed RMCP conversion must preserve declared property order"
+                elicitation_requests[0]["requestedSchemaPropertyOrder"],
+                serde_json::json!(["zeta", "alpha"]),
+                "typed RMCP conversion must project declared property order explicitly"
             );
             assert_eq!(
                 requested_schema["properties"]["zeta"]["type"],
@@ -668,8 +662,15 @@ async fn spawn_stable_http_mcp_server() -> (String, mpsc::UnboundedReceiver<Reco
                 body: request.clone(),
             });
             let method = request.get("method").and_then(|value| value.as_str());
-            let response = stable_http_response(&request, method);
-            let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+            if stable_http_needs_input_round(&request) {
+                let body = stable_http_input_required_body(
+                    request.get("id").unwrap_or(&serde_json::Value::Null),
+                );
+                let _ = write_http_json_text(&mut stream, "200 OK", &[], &body).await;
+            } else {
+                let response = stable_http_response(&request, method);
+                let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+            }
         }
     });
 
@@ -863,44 +864,6 @@ fn stable_http_tool_call_response(
             }
         });
     }
-    if name == Some("needs_input") && params.get("inputResponses").is_none() {
-        return serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "resultType": "input_required",
-                "requestState": "state-1",
-                "inputRequests": {
-                    "roots": {"method": "roots/list", "params": {}},
-                    "elicitation": {
-                        "method": "elicitation/create",
-                        "params": {
-                            "mode": "form",
-                            "message": "Need input",
-                            "requestedSchema": {
-                                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                                "type": "object",
-                                "properties": {
-                                    "zeta": {"type": "string"},
-                                    "alpha": {"type": "integer"}
-                                }
-                            }
-                        }
-                    },
-                    "sampling": {
-                        "method": "sampling/createMessage",
-                        "params": {
-                            "messages": [{
-                                "role": "user",
-                                "content": {"type": "text", "text": "sample"}
-                            }],
-                            "maxTokens": 4
-                        }
-                    }
-                }
-            }
-        });
-    }
     let text = if name == Some("needs_input") {
         "done"
     } else {
@@ -918,6 +881,57 @@ fn stable_http_tool_call_response(
             "isError": false
         }
     })
+}
+
+fn stable_http_needs_input_round(request: &serde_json::Value) -> bool {
+    request.get("method").and_then(serde_json::Value::as_str) == Some("tools/call")
+        && request["params"].get("inputResponses").is_none()
+        && request["params"]
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            == Some("needs_input")
+}
+
+fn stable_http_input_required_body(id: &serde_json::Value) -> String {
+    let id = serde_json::to_string(id).expect("JSON-RPC id is JSON");
+    format!(
+        r#"{{
+  "jsonrpc": "2.0",
+  "id": {id},
+  "result": {{
+    "resultType": "input_required",
+    "requestState": "state-1",
+    "inputRequests": {{
+      "roots": {{"method": "roots/list", "params": {{}}}},
+      "elicitation": {{
+        "method": "elicitation/create",
+        "params": {{
+          "mode": "form",
+          "message": "Need input",
+          "requestedSchema": {{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {{
+              "zeta": {{"type": "string"}},
+              "alpha": {{"type": "integer"}}
+            }}
+          }}
+        }}
+      }},
+      "sampling": {{
+        "method": "sampling/createMessage",
+        "params": {{
+          "messages": [{{
+            "role": "user",
+            "content": {{"type": "text", "text": "sample"}}
+          }}],
+          "maxTokens": 4
+        }}
+      }}
+    }}
+  }}
+}}"#
+    )
 }
 
 async fn spawn_recording_http_mcp_server() -> (String, mpsc::UnboundedReceiver<serde_json::Value>) {
@@ -1017,6 +1031,15 @@ async fn write_http_json(
     body: serde_json::Value,
 ) -> Result<(), std::io::Error> {
     let body = serde_json::to_string(&body).unwrap();
+    write_http_json_text(stream, status, headers, &body).await
+}
+
+async fn write_http_json_text(
+    stream: &mut TcpStream,
+    status: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Result<(), std::io::Error> {
     let mut response = format!(
         "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n",
         body.len()
@@ -1028,7 +1051,7 @@ async fn write_http_json(
         response.push_str("\r\n");
     }
     response.push_str("\r\n");
-    response.push_str(&body);
+    response.push_str(body);
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await
 }

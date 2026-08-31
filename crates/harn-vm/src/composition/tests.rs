@@ -63,18 +63,18 @@ fn snippet_hash_includes_language() {
 }
 
 #[test]
-fn binding_manifest_hash_is_stable_for_identical_values() {
-    let manifest = serde_json::json!({
-        "bindings": [
-            {
-                "name": "read_file",
-                "annotations": {"side_effect_level": "read_only"}
-            }
-        ]
-    });
+fn binding_manifest_hash_ignores_object_key_order() {
+    let first: serde_json::Value = serde_json::from_str(
+        r#"{"bindings":[{"name":"read_file","annotations":{"zeta":1,"alpha":2}}]}"#,
+    )
+    .unwrap();
+    let second: serde_json::Value = serde_json::from_str(
+        r#"{"bindings":[{"annotations":{"alpha":2,"zeta":1},"name":"read_file"}]}"#,
+    )
+    .unwrap();
     assert_eq!(
-        binding_manifest_hash(&manifest).unwrap(),
-        binding_manifest_hash(&manifest).unwrap()
+        binding_manifest_hash(&first).unwrap(),
+        binding_manifest_hash(&second).unwrap()
     );
 }
 
@@ -1090,9 +1090,10 @@ fn retry_delay_honors_retry_after_caps_and_deterministic_jitter() {
         max_delay_ms: 1_000,
         ..policy
     };
-    let input = serde_json::json!({"query": "runtime"});
-    let first = compute_retry_delay_ms(&binding, &input, 2, &jitter_policy, "HTTP 503");
-    let second = compute_retry_delay_ms(&binding, &input, 2, &jitter_policy, "HTTP 503");
+    let first_input: serde_json::Value = serde_json::from_str(r#"{"zeta":1,"alpha":2}"#).unwrap();
+    let second_input: serde_json::Value = serde_json::from_str(r#"{"alpha":2,"zeta":1}"#).unwrap();
+    let first = compute_retry_delay_ms(&binding, &first_input, 2, &jitter_policy, "HTTP 503");
+    let second = compute_retry_delay_ms(&binding, &second_input, 2, &jitter_policy, "HTTP 503");
     assert_eq!(first, second);
     assert!((200..=300).contains(&first), "delay was {first}");
 }

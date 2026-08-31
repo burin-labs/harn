@@ -89,13 +89,12 @@ pub(crate) async fn register_auto_resume_trigger(
     spec.handler = TriggerHandlerSpec::AutoResume {
         worker_id: worker_id.to_string(),
     };
-    spec.definition_fingerprint = serde_json::to_string(&serde_json::json!({
+    spec.definition_fingerprint = crate::canonical_json::to_string(&serde_json::json!({
         "kind": "auto_resume",
         "worker_id": worker_id,
         "trigger": crate::llm::vm_value_to_json(trigger),
         "match_events": spec.match_events,
-    }))
-    .unwrap_or_else(|_| format!("auto_resume:{worker_id}"));
+    }));
 
     let timeout = auto_resume_timeout_spec(conditions)?;
     let id = dynamic_register(spec).await.map_err(|error| {

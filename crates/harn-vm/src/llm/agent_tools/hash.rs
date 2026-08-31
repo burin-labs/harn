@@ -1,7 +1,9 @@
 pub(in crate::llm) fn stable_hash(val: &serde_json::Value) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let canonical = crate::canonical_json::to_vec(val);
+    // Keep the historical String hash domain while making object order
+    // independent of the caller's JSON representation.
+    let canonical = crate::canonical_json::to_string(val);
     canonical.hash(&mut hasher);
     hasher.finish()
 }

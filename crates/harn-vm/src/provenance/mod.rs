@@ -476,7 +476,7 @@ fn canonical_unsigned_receipt(receipt: &ProvenanceReceipt) -> Result<String, Log
     let mut unsigned = receipt.clone();
     unsigned.chain.receipt_hash.clear();
     unsigned.signatures.clear();
-    crate::canonical_json::of(&unsigned)
+    serde_json::to_string(&unsigned)
         .map_err(|error| LogError::Serde(format!("receipt canonicalize error: {error}")))
 }
 
@@ -559,6 +559,51 @@ mod tests {
         assert_eq!(
             compute_event_record_hash("run.test", 7, &first).unwrap(),
             compute_event_record_hash("run.test", 7, &second).unwrap()
+        );
+    }
+
+    #[test]
+    fn receipt_v1_unsigned_bytes_remain_backward_compatible() {
+        let receipt = ProvenanceReceipt {
+            schema: RECEIPT_SCHEMA.to_string(),
+            receipt_id: "receipt-1".to_string(),
+            issued_at: OffsetDateTime::UNIX_EPOCH,
+            producer: ReceiptProducer {
+                name: "harn".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            run: ReceiptRun {
+                pipeline: "main.harn".to_string(),
+                status: "ok".to_string(),
+                started_at_ms: 1,
+                finished_at_ms: 2,
+                exit_code: 0,
+            },
+            event_log: ReceiptEventLog {
+                backend: "memory".to_string(),
+                topics: vec!["run.provenance".to_string()],
+                events: vec![ReceiptEvent {
+                    topic: "run.provenance".to_string(),
+                    event_id: 1,
+                    kind: "started".to_string(),
+                    payload: serde_json::from_str(r#"{"zeta":1,"alpha":2}"#).unwrap(),
+                    headers: BTreeMap::new(),
+                    occurred_at_ms: 1,
+                    prev_hash: None,
+                    record_hash: "sha256:event".to_string(),
+                }],
+            },
+            chain: ReceiptChain {
+                algorithm: "sha256".to_string(),
+                event_root_hash: "sha256:root".to_string(),
+                receipt_hash: "cleared-before-signing".to_string(),
+            },
+            signatures: vec![],
+        };
+
+        assert_eq!(
+            canonical_unsigned_receipt(&receipt).unwrap(),
+            r#"{"schema":"harn-provenance-receipt-v1","receipt_id":"receipt-1","issued_at":"1970-01-01T00:00:00Z","producer":{"name":"harn","version":"0.1.0"},"run":{"pipeline":"main.harn","status":"ok","started_at_ms":1,"finished_at_ms":2,"exit_code":0},"event_log":{"backend":"memory","topics":["run.provenance"],"events":[{"topic":"run.provenance","event_id":1,"kind":"started","payload":{"alpha":2,"zeta":1},"headers":{},"occurred_at_ms":1,"prev_hash":null,"record_hash":"sha256:event"}]},"chain":{"algorithm":"sha256","event_root_hash":"sha256:root","receipt_hash":""},"signatures":[]}"#
         );
     }
 

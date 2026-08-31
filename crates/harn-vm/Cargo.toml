@@ -108,7 +108,7 @@ chrono-tz = "0.10.4"
 croner = "3.0.1"
 regex = "1"
 scraper = { version = "0.27", optional = true }
-serde_json = { version = "1", features = ["preserve_order", "unbounded_depth"] }
+serde_json = { version = "1", features = ["unbounded_depth"] }
 rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }

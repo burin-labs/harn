@@ -197,7 +197,7 @@ pub(super) fn parse_trigger_config(
         })
     });
 
-    let fingerprint = serde_json::to_string(&serde_json::json!({
+    let fingerprint = crate::canonical_json::to_string(&serde_json::json!({
         "id": id,
         "kind": kind,
         "provider": provider.as_str(),
@@ -222,8 +222,7 @@ pub(super) fn parse_trigger_config(
         "aggregation": aggregation_fingerprint,
         "manifest_path": manifest_path.as_ref().map(|path| path.display().to_string()),
         "package_name": package_name,
-    }))
-    .unwrap_or_else(|_| format!("{}:{}:{}", id, kind, provider.as_str()));
+    }));
 
     // CH-02 (#1872): channel-source triggers parse their selector strings
     // at registration so malformed selectors fail loudly before any emit.

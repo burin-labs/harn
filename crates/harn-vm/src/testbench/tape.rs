@@ -667,7 +667,7 @@ pub fn record_model_job_event(payload: &serde_json::Value) {
     };
     let policy = crate::redact::current_policy();
     let redacted = policy.redact_json(payload);
-    let event_bytes = serde_json::to_vec(&redacted).unwrap_or_default();
+    let event_bytes = crate::canonical_json::to_vec(&redacted);
     let event = recorder.payload_from_bytes(event_bytes);
     let job_id = redacted
         .get("job_id")
@@ -748,8 +748,8 @@ pub fn record_mcp_json_rpc(
     let policy = crate::redact::current_policy();
     let request = policy.redact_json(request);
     let response = policy.redact_json(response);
-    let request_bytes = serde_json::to_vec(&request).unwrap_or_default();
-    let response_bytes = serde_json::to_vec(&response).unwrap_or_default();
+    let request_bytes = crate::canonical_json::to_vec(&request);
+    let response_bytes = crate::canonical_json::to_vec(&response);
     let request_digest = content_hash(&request_bytes);
     let response_digest = content_hash(&response_bytes);
     let request_payload = recorder.payload_from_bytes(request_bytes);

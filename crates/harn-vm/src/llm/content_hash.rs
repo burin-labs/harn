@@ -8,7 +8,7 @@ pub(crate) fn stable_redacted_string_hash(value: &str) -> String {
     let policy = crate::redact::current_policy();
     let redacted = match policy.redact_json(&serde_json::Value::String(value.to_string())) {
         serde_json::Value::String(redacted) => redacted,
-        other => serde_json::to_string(&other).unwrap_or_default(),
+        other => crate::canonical_json::to_string(&other),
     };
     stable_content_hash(redacted.as_bytes())
 }
