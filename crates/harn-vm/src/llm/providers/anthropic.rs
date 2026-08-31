@@ -276,13 +276,60 @@ fn warn_sampling_stripped(model: &str) {
 /// a caller override belong here rather than in `build_request_body`.
 pub(crate) fn reconcile_request_body(
     body: &mut serde_json::Value,
-    model: &str,
+    provider: &str,
+    fallback_model: &str,
     thinking: &ThinkingConfig,
 ) {
-    strip_unsupported_sampling_params(body, model, thinking);
+    // Provider overrides are merged before this seam and may replace `model`
+    // alongside messages. Every model-dependent guard must therefore read the
+    // value that will actually be sent. An invalid non-string override maps to
+    // the empty unknown model and fails closed instead of inheriting an older,
+    // more permissive catalog row.
+    let wire_model = body.get("model").map_or_else(
+        || fallback_model.to_owned(),
+        |value| value.as_str().unwrap_or_default().to_owned(),
+    );
+    remove_unsupported_assistant_prefill(body, provider, &wire_model);
+    strip_unsupported_sampling_params(body, &wire_model, thinking);
     if crate::llm::catalog_may_shape_requested_reasoning() {
-        clamp_effort_for_disabled_thinking(body, model);
+        clamp_effort_for_disabled_thinking(body, &wire_model);
     }
+}
+
+fn remove_unsupported_assistant_prefill(body: &mut serde_json::Value, provider: &str, model: &str) {
+    let supports_prefill =
+        crate::llm::capabilities::lookup(provider, model).supports_assistant_prefill;
+    let uses_native_schema = body
+        .pointer("/output_config/format/type")
+        .and_then(serde_json::Value::as_str)
+        == Some("json_schema");
+    if supports_prefill && !uses_native_schema {
+        return;
+    }
+    let Some(messages) = body
+        .get_mut("messages")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let original_len = messages.len();
+    // At the Messages API boundary, every trailing assistant turn is a
+    // response prefill regardless of how it entered durable history. Remove
+    // the complete trailing run, not just a caller's `prefill` option: loop
+    // continuation, replay, direct messages, and provider overrides can all
+    // produce the same wire shape. The durable transcript remains unchanged.
+    while messages.last().and_then(|message| message["role"].as_str()) == Some("assistant") {
+        messages.pop();
+    }
+    if messages.len() == original_len {
+        return;
+    }
+    let reason = if uses_native_schema {
+        "Anthropic native structured output is incompatible with prefill"
+    } else {
+        "this Anthropic model does not support prefill"
+    };
+    warn_anthropic_prefill_skipped(model, reason);
 }
 
 /// Remove Anthropic sampling parameters when the resolved Claude request
@@ -696,6 +743,7 @@ impl AnthropicProvider {
             }
         }
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
+        remove_unsupported_assistant_prefill(&mut body, &opts.provider, &opts.model);
         body
     }
 

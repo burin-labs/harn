@@ -813,6 +813,10 @@ fn output_format_json_schema_uses_native_format_with_thinking_and_tools() {
     payload.thinking = crate::llm::api::ThinkingConfig::Enabled {
         budget_tokens: Some(1024),
     };
+    payload.messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": "persisted JSON opener",
+    }));
     payload.prefill = Some("begin JSON".to_string());
     payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
         schema: serde_json::json!({
@@ -845,7 +849,8 @@ fn output_format_json_schema_uses_native_format_with_thinking_and_tools() {
     assert!(
         body["messages"].as_array().is_some_and(|messages| messages
             .iter()
-            .all(|message| message["content"] != "begin JSON")),
+            .all(|message| message["content"] != "begin JSON"
+                && message["content"] != "persisted JSON opener")),
         "Anthropic rejects assistant prefill alongside native schema output"
     );
     let tools = body["tools"].as_array().expect("tools array");
@@ -912,6 +917,97 @@ fn native_tool_followup_prefill_respects_catalog_capability() {
         })),
         "a route that supports assistant prefill must retain the opener"
     );
+}
+
+#[test]
+fn persisted_assistant_prefill_respects_catalog_capability() {
+    let signed_thinking = serde_json::json!({
+        "type": "thinking",
+        "thinking": "I should inspect the workspace.",
+        "signature": "opaque-signed-continuation",
+    });
+    let history = vec![
+        serde_json::json!({"role": "user", "content": "Inspect the workspace"}),
+        serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "provider_continuation": {
+                "anthropic": {"content_blocks": [signed_thinking.clone()]},
+            },
+        }),
+    ];
+
+    let mut unsupported = base_payload();
+    unsupported.model = "claude-sonnet-5".to_string();
+    unsupported.messages = history.clone();
+    let unsupported_body = AnthropicProvider::build_request_body(&unsupported);
+    let unsupported_messages = unsupported_body["messages"]
+        .as_array()
+        .expect("messages array");
+    assert_eq!(
+        unsupported_messages
+            .last()
+            .and_then(|message| message["role"].as_str()),
+        Some("user"),
+        "a persisted assistant prefill must not bypass the route capability gate"
+    );
+
+    let mut supported = base_payload();
+    supported.model = "claude-opus-3-5".to_string();
+    supported.messages = history;
+    let mut supported_body = AnthropicProvider::build_request_body(&supported);
+    let before_final_reconciliation = supported_body.clone();
+    reconcile_request_body(
+        &mut supported_body,
+        &supported.provider,
+        &supported.model,
+        &supported.thinking,
+    );
+    assert_eq!(
+        supported_body, before_final_reconciliation,
+        "final reconciliation must preserve a supported wire-model prefill"
+    );
+    assert_eq!(
+        supported_body["messages"]
+            .as_array()
+            .and_then(|messages| messages.last()),
+        Some(&serde_json::json!({
+            "role": "assistant",
+            "content": [signed_thinking],
+        })),
+        "a route that supports assistant prefill must preserve signed continuation history"
+    );
+}
+
+#[test]
+fn final_reconciliation_removes_override_assistant_prefill() {
+    let mut body = serde_json::json!({
+        "messages": [
+            {"role": "user", "content": "Inspect the workspace"},
+            {"role": "assistant", "content": "I will continue by"},
+        ],
+    });
+
+    reconcile_request_body(
+        &mut body,
+        "anthropic",
+        "claude-sonnet-5",
+        &crate::llm::api::ThinkingConfig::Disabled,
+    );
+    let once = body.clone();
+    reconcile_request_body(
+        &mut body,
+        "anthropic",
+        "claude-sonnet-5",
+        &crate::llm::api::ThinkingConfig::Disabled,
+    );
+
+    assert_eq!(
+        body["messages"],
+        serde_json::json!([{"role": "user", "content": "Inspect the workspace"}]),
+        "final reconciliation must restore the invariant after provider overrides"
+    );
+    assert_eq!(body, once, "final reconciliation must be idempotent");
 }
 
 #[test]

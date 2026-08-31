@@ -95,7 +95,7 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
             "thinking": {"type": "disabled"},
             "output_config": {"effort": effort},
         });
-        reconcile_request_body(&mut body, model, &ThinkingConfig::Disabled);
+        reconcile_request_body(&mut body, "anthropic", model, &ThinkingConfig::Disabled);
         body
     };
 
@@ -122,6 +122,7 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
     });
     reconcile_request_body(
         &mut thinking_on,
+        "anthropic",
         "claude-opus-5",
         &ThinkingConfig::Effort {
             level: ReasoningEffort::XHigh,
