@@ -2922,7 +2922,7 @@ These builtins expose Harn's typed orchestration runtime.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `workflow_execute(task, graph, artifacts?, options?)` | task, graph, artifacts, options | dict | Execute a workflow and persist a run record |
-| `harness.obs.run_record(payload)` | payload: dict | run record | Construct or normalize a run record; newly constructed records inherit the active VM execution identity |
+| `harness.obs.run_record(payload)` | payload: dict | run record | Construct or normalize a run record. Harn replaces any input execution identity with the active VM owner and rejects invalid evidence or a missing owner. |
 | `harness.fs.run_record_save(run, path?)` | run, path | dict | Persist a run record |
 | `harness.fs.run_record_load(path)` | path: string | run record | Load a run record from disk |
 | `harness.fs.load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |
