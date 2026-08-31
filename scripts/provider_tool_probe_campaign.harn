@@ -71,7 +71,7 @@ fn __campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
     || (summary.error ?? 0) > 0
     || report.spend?.budget_status == "stopped_unpriced"
     || (tool_scorecard_required && report.artifacts?.scorecard_status != "complete")
-    || report.claim_controls?.status == "incomplete"
+    || report.claim_controls.status == "incomplete"
 }
 
 fn main(harness: Harness) {
