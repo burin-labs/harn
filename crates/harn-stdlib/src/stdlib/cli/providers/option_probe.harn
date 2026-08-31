@@ -29,6 +29,14 @@ const __OPTIONS = [
   "stop",
 ]
 
+const __VERDICT_ACCEPTED: ProviderOptionProbeVerdict = "accepted"
+
+const __VERDICT_GATED_LOCALLY: ProviderOptionProbeVerdict = "gated_locally"
+
+const __VERDICT_INCONCLUSIVE: ProviderOptionProbeVerdict = "inconclusive"
+
+const __VERDICT_REJECTED: ProviderOptionProbeVerdict = "rejected"
+
 fn __attempt(
   llm: HarnessLlm,
   provider: string,
@@ -148,23 +156,17 @@ fn __failure_class(error: unknown) -> string {
 pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAttempt {
   if !is_err(outcome) {
     const usage = unwrap(outcome)?.usage
-    const attempt: ProviderOptionProbeAttempt = {
-      verdict: "accepted",
+    return {
+      verdict: __VERDICT_ACCEPTED,
       measured: true,
-      input_tokens: usage?.input_tokens,
-      output_tokens: usage?.output_tokens,
-      cost_usd: usage?.cost_usd,
+      input_tokens: to_int(usage?.input_tokens),
+      output_tokens: to_int(usage?.output_tokens),
+      cost_usd: to_float(usage?.cost_usd),
     }
-    return attempt
   }
   const raw = unwrap_err(outcome)
   if type_of(raw) == "dict" && to_string(raw?.reason ?? "") == "empty_generation" {
-    const attempt: ProviderOptionProbeAttempt = {
-      verdict: "accepted",
-      measured: true,
-      reason: "served_empty",
-    }
-    return attempt
+    return {verdict: __VERDICT_ACCEPTED, measured: true, reason: "served_empty"}
   }
   const message = if type_of(raw) == "dict" {
     to_string(raw?.message ?? raw)
@@ -173,26 +175,19 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
   }
   const class = __failure_class(raw)
   if class == "local" {
-    const attempt: ProviderOptionProbeAttempt = {
-      verdict: "gated_locally",
-      measured: false,
-      failure_class: class,
-      error: message,
-    }
-    return attempt
+    return {verdict: __VERDICT_GATED_LOCALLY, measured: false, failure_class: class, error: message}
   }
   if class == "rejected" {
-    const attempt: ProviderOptionProbeAttempt = {
-      verdict: "rejected",
+    return {
+      verdict: __VERDICT_REJECTED,
       measured: true,
       reason: to_string(raw?.reason ?? "invalid_request"),
       error: message,
       cost_usd: 0.0,
     }
-    return attempt
   }
-  const attempt: ProviderOptionProbeAttempt = {
-    verdict: "inconclusive",
+  return {
+    verdict: __VERDICT_INCONCLUSIVE,
     measured: false,
     failure_class: class,
     reason: if type_of(raw) == "dict" {
@@ -202,7 +197,6 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
     },
     error: message,
   }
-  return attempt
 }
 
 /**
