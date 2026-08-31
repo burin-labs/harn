@@ -527,6 +527,102 @@ fn real_run_command_reports_sandboxed_missing_program_as_typed_not_found() {
 }
 
 #[test]
+fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+
+    let workspace = tempfile::tempdir().expect("workspace");
+
+    // `warn` keeps the Worktree process policy active while allowing hosts
+    // without an OS confinement backend to exercise the environment contract.
+    // SAFETY: `ENV_LOCK` serializes every environment-mutating test in this
+    // binary, and all three variables are restored before the guard drops.
+    let _env_guard = lock_env();
+    let old_handler_sandbox = std::env::var_os("HARN_HANDLER_SANDBOX");
+    let old_rustc_wrapper = std::env::var_os("RUSTC_WRAPPER");
+    let old_cargo_wrapper = std::env::var_os("CARGO_BUILD_RUSTC_WRAPPER");
+    unsafe {
+        std::env::set_var("HARN_HANDLER_SANDBOX", "warn");
+        std::env::set_var("RUSTC_WRAPPER", "/outside/sandbox/sccache");
+        std::env::set_var(
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "/outside/sandbox/cargo-sccache",
+        );
+    }
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&[
+            "sh",
+            "-c",
+            "printf '<%s>|<%s>' \"$RUSTC_WRAPPER\" \"$CARGO_BUILD_RUSTC_WRAPPER\"",
+        ]),
+    );
+    req.insert("cwd".into(), vstr(&workspace.path().to_string_lossy()));
+    let inherited_response = call("hostlib_tools_run_command", req);
+
+    let mut caller_req = dict();
+    caller_req.insert(
+        "argv".into(),
+        vlist_str(&[
+            "sh",
+            "-c",
+            "printf '<%s>|<%s>' \"$RUSTC_WRAPPER\" \"$CARGO_BUILD_RUSTC_WRAPPER\"",
+        ]),
+    );
+    caller_req.insert("cwd".into(), vstr(&workspace.path().to_string_lossy()));
+    let mut caller_env = dict();
+    caller_env.insert("RUSTC_WRAPPER".into(), vstr("/caller/sccache"));
+    caller_env.insert(
+        "CARGO_BUILD_RUSTC_WRAPPER".into(),
+        vstr("/caller/cargo-sccache"),
+    );
+    caller_req.insert("env".into(), VmValue::dict(caller_env));
+    caller_req.insert(
+        "env_remove".into(),
+        vlist_str(&["rustc_wrapper", "cargo_build_rustc_wrapper"]),
+    );
+    caller_req.insert("env_mode".into(), vstr("patch"));
+    let caller_response = call("hostlib_tools_run_command", caller_req);
+
+    pop_execution_policy();
+    unsafe {
+        match old_handler_sandbox {
+            Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
+            None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
+        }
+        match old_rustc_wrapper {
+            Some(value) => std::env::set_var("RUSTC_WRAPPER", value),
+            None => std::env::remove_var("RUSTC_WRAPPER"),
+        }
+        match old_cargo_wrapper {
+            Some(value) => std::env::set_var("CARGO_BUILD_RUSTC_WRAPPER", value),
+            None => std::env::remove_var("CARGO_BUILD_RUSTC_WRAPPER"),
+        }
+    }
+
+    for (source, response) in [
+        ("inherited", inherited_response),
+        ("caller-supplied", caller_response),
+    ] {
+        let response = require_dict(response.expect("sandboxed command should run"));
+        assert_eq!(require_int(&response, "exit_code"), 0);
+        assert_eq!(
+            require_str(&response, "stdout"),
+            "<>|<>",
+            "the real host-process path must override {source} and Cargo-configured wrappers"
+        );
+    }
+}
+
+#[test]
 fn real_run_command_preserves_genuine_exit_71_as_a_result() {
     let workspace = tempfile::tempdir().expect("workspace");
     let mut req = dict();

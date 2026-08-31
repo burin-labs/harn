@@ -34,7 +34,7 @@ pub struct ProcessCommandConfig {
 /// Cargo invocation starts it, the daemon inherits that confinement and can
 /// poison later builds outside the workspace. Empty wrapper values override
 /// Cargo configuration while leaving unsandboxed builds and caches unchanged.
-pub(crate) fn apply_active_rustc_wrapper_policy(
+pub fn apply_active_rustc_wrapper_policy(
     env: &mut Vec<(String, String)>,
     env_remove: &mut Vec<String>,
 ) {
