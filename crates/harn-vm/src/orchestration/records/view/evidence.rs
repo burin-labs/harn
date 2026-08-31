@@ -107,8 +107,29 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
     if evidence.schema_version == 0
         && evidence.execution_id.is_none()
         && evidence.flight_recording.is_none()
+        && evidence.trace_spans.is_empty()
+        && evidence.gaps.is_empty()
     {
         return;
+    }
+
+    let mut invalid_span_cost = false;
+    for span in &mut evidence.trace_spans {
+        if span
+            .cost_usd
+            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+        {
+            span.cost_usd = None;
+            invalid_span_cost = true;
+        }
+    }
+    if invalid_span_cost {
+        push_gap_once(
+            evidence,
+            "trace_spans",
+            "projection_invalid",
+            "The persisted run contained an invalid span cost.",
+        );
     }
 
     match crate::orchestration::validate_execution_evidence(evidence) {
@@ -132,22 +153,9 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
                 "The persisted run contained invalid Harn execution evidence.",
             );
         }
-        Err(ValidationError::InvalidSpanCost) => {
-            for span in &mut evidence.trace_spans {
-                if span
-                    .cost_usd
-                    .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
-                {
-                    span.cost_usd = None;
-                }
-            }
-            push_gap_once(
-                evidence,
-                "trace_spans",
-                "projection_invalid",
-                "The persisted run contained an invalid span cost.",
-            );
-        }
+        // Costs are repaired before envelope validation so a record with more
+        // than one invalid field cannot leave a non-finite float behind.
+        Err(ValidationError::InvalidSpanCost) => {}
         Err(
             ValidationError::UnsupportedFlightRecordingSchema
             | ValidationError::FlightRecordingIdentityMismatch
@@ -323,12 +331,16 @@ mod tests {
             Err(ExecutionEvidenceValidationError::InvalidSpanCost)
         );
 
+        run.evidence.schema_version += 1;
         let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
         assert_eq!(projected.trace_spans[0].cost_usd, None);
         assert!(projected
             .gaps
             .iter()
             .any(|gap| gap.component == "trace_spans" && gap.code == "projection_invalid"));
+        assert!(projected.gaps.iter().any(|gap| {
+            gap.component == "execution_identity" && gap.code == "projection_invalid"
+        }));
     }
 
     #[test]
