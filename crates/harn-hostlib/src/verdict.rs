@@ -360,7 +360,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
     /// cross-scope / no-active-scope NEGATIVES (the POSITIVE below deliberately
     /// drives the real execution path instead).
     fn record_in_scope(
-        scope: &Arc<str>,
+        scope: &harn_vm::ExecutionId,
         arts: RawArtifacts,
         summary: Option<TestSummaryData>,
     ) -> String {
@@ -490,7 +490,7 @@ pipeline default(harness: Harness, _task) {{
     /// issued while run B is active — the owner does not match the active scope.
     #[test]
     fn cross_scope_handle_is_rejected() {
-        let scope_a: Arc<str> = mint_execution_scope();
+        let scope_a = mint_execution_scope();
         let handle = record_in_scope(
             &scope_a,
             artifacts("test result: ok. 2 passed; 0 failed", 0),
@@ -509,7 +509,7 @@ pipeline default(harness: Harness, _task) {{
     /// scope — issuance outside any owning run is refused.
     #[test]
     fn no_active_scope_is_rejected() {
-        let scope_a: Arc<str> = mint_execution_scope();
+        let scope_a = mint_execution_scope();
         let handle = record_in_scope(
             &scope_a,
             artifacts("test result: ok. 1 passed; 0 failed", 0),
