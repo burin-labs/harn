@@ -827,7 +827,13 @@ fn output_format_json_schema_uses_native_format_with_thinking_and_tools() {
         strict: true,
     };
 
-    let body = AnthropicProvider::build_request_body(&payload);
+    let mut body = AnthropicProvider::build_request_body(&payload);
+    reconcile_request_body(
+        &mut body,
+        &payload.provider,
+        &payload.model,
+        &payload.thinking,
+    );
 
     assert_eq!(
         body["output_config"]["format"]["type"],
@@ -880,10 +886,34 @@ fn native_tool_followup_prefill_respects_catalog_capability() {
     ];
 
     let mut unsupported = base_payload();
-    unsupported.model = "claude-sonnet-5".to_string();
+    unsupported.model = "claude-opus-4-6".to_string();
     unsupported.messages = tool_history.clone();
     unsupported.prefill = Some("I will continue by".to_string());
-    let unsupported_body = AnthropicProvider::build_request_body(&unsupported);
+    let mut unsupported_body = AnthropicProvider::build_request_body(&unsupported);
+    let mut supported_override_body = unsupported_body.clone();
+    supported_override_body["model"] = serde_json::json!("claude-opus-4-5");
+    reconcile_request_body(
+        &mut supported_override_body,
+        &unsupported.provider,
+        &unsupported.model,
+        &unsupported.thinking,
+    );
+    assert_eq!(
+        supported_override_body["messages"]
+            .as_array()
+            .and_then(|messages| messages.last()),
+        Some(&serde_json::json!({
+            "role": "assistant",
+            "content": "I will continue by",
+        })),
+        "a supported final wire model must preserve caller prefill even when the typed model was unsupported"
+    );
+    reconcile_request_body(
+        &mut unsupported_body,
+        &unsupported.provider,
+        &unsupported.model,
+        &unsupported.thinking,
+    );
     let unsupported_messages = unsupported_body["messages"]
         .as_array()
         .expect("messages array");
@@ -902,10 +932,16 @@ fn native_tool_followup_prefill_respects_catalog_capability() {
     );
 
     let mut supported = base_payload();
-    supported.model = "claude-opus-3-5".to_string();
+    supported.model = "claude-opus-4-5".to_string();
     supported.messages = tool_history;
     supported.prefill = Some("I will continue by".to_string());
-    let supported_body = AnthropicProvider::build_request_body(&supported);
+    let mut supported_body = AnthropicProvider::build_request_body(&supported);
+    reconcile_request_body(
+        &mut supported_body,
+        &supported.provider,
+        &supported.model,
+        &supported.thinking,
+    );
     let supported_messages = supported_body["messages"]
         .as_array()
         .expect("messages array");
@@ -938,9 +974,16 @@ fn persisted_assistant_prefill_respects_catalog_capability() {
     ];
 
     let mut unsupported = base_payload();
-    unsupported.model = "claude-sonnet-5".to_string();
+    unsupported.model = "claude-opus-4-6".to_string();
     unsupported.messages = history.clone();
-    let unsupported_body = AnthropicProvider::build_request_body(&unsupported);
+    let mut unsupported_body = AnthropicProvider::build_request_body(&unsupported);
+    let unsupported_before_reconciliation = unsupported_body.clone();
+    reconcile_request_body(
+        &mut unsupported_body,
+        &unsupported.provider,
+        &unsupported.model,
+        &unsupported.thinking,
+    );
     let unsupported_messages = unsupported_body["messages"]
         .as_array()
         .expect("messages array");
@@ -952,8 +995,22 @@ fn persisted_assistant_prefill_respects_catalog_capability() {
         "a persisted assistant prefill must not bypass the route capability gate"
     );
 
+    let mut supported_override_body = unsupported_before_reconciliation;
+    supported_override_body["model"] = serde_json::json!("claude-opus-4-5");
+    let expected_supported_override = supported_override_body.clone();
+    reconcile_request_body(
+        &mut supported_override_body,
+        &unsupported.provider,
+        &unsupported.model,
+        &unsupported.thinking,
+    );
+    assert_eq!(
+        supported_override_body, expected_supported_override,
+        "a supported final wire model must preserve history even when the typed model was unsupported"
+    );
+
     let mut supported = base_payload();
-    supported.model = "claude-opus-3-5".to_string();
+    supported.model = "claude-opus-4-5".to_string();
     supported.messages = history;
     let mut supported_body = AnthropicProvider::build_request_body(&supported);
     let before_final_reconciliation = supported_body.clone();
@@ -1008,6 +1065,65 @@ fn final_reconciliation_removes_override_assistant_prefill() {
         "final reconciliation must restore the invariant after provider overrides"
     );
     assert_eq!(body, once, "final reconciliation must be idempotent");
+}
+
+#[test]
+fn final_reconciliation_rejects_prefill_only_while_thinking_is_on() {
+    let messages = serde_json::json!([
+        {"role": "user", "content": "Inspect the workspace"},
+        {"role": "assistant", "content": "I will continue by"},
+    ]);
+    let mut thinking_on = serde_json::json!({
+        "model": "claude-opus-4-5",
+        "messages": messages,
+        "thinking": {"type": "enabled", "budget_tokens": 1024},
+    });
+    reconcile_request_body(
+        &mut thinking_on,
+        "anthropic",
+        "claude-opus-4-5",
+        &crate::llm::api::ThinkingConfig::Enabled {
+            budget_tokens: Some(1024),
+        },
+    );
+    assert_eq!(
+        thinking_on["messages"],
+        serde_json::json!([{"role": "user", "content": "Inspect the workspace"}]),
+        "thinking-enabled requests must not carry assistant prefill"
+    );
+
+    let mut thinking_off = serde_json::json!({
+        "model": "claude-opus-4-5",
+        "messages": messages,
+    });
+    let expected = thinking_off.clone();
+    reconcile_request_body(
+        &mut thinking_off,
+        "anthropic",
+        "claude-opus-4-5",
+        &crate::llm::api::ThinkingConfig::Disabled,
+    );
+    assert_eq!(
+        thinking_off, expected,
+        "the same prefill-capable route must preserve prefill with thinking disabled"
+    );
+
+    let mut unknown_thinking = serde_json::json!({
+        "model": "claude-opus-4-5",
+        "messages": messages,
+        "thinking": {},
+    });
+    reconcile_request_body(
+        &mut unknown_thinking,
+        "anthropic",
+        "claude-opus-4-5",
+        &crate::llm::api::ThinkingConfig::Disabled,
+    );
+    assert_eq!(
+        unknown_thinking["messages"],
+        serde_json::json!([{"role": "user", "content": "Inspect the workspace"}]),
+        "an unknown authored thinking mode must fail closed"
+    );
 }
 
 #[test]

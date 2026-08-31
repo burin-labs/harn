@@ -534,17 +534,17 @@ fn anthropic_override_cannot_restore_unsupported_prefill_at_egress() {
         crate::llm_config::set_user_overrides(Some(overlay));
 
         let mut opts = base_opts("anthropic");
-        // The builder sees a legacy prefill-capable route. The caller then
+        // The builder sees a prefill-capable route. The caller then
         // replaces both model and messages at the wire-override boundary, so
         // final reconciliation must read the model the request will send.
-        opts.model = "claude-opus-3-5".to_string();
+        opts.model = "claude-opus-4-5".to_string();
         opts.stream = false;
         opts.output_format = OutputFormat::Text;
         opts.output_schema = None;
         opts.native_tools = None;
         opts.tool_choice = None;
         opts.provider_overrides = Some(serde_json::json!({
-            "model": "claude-sonnet-5",
+            "model": "claude-opus-4-6",
             "messages": [
                 {"role": "user", "content": "Inspect the workspace"},
                 {"role": "assistant", "content": "I will continue by"},
@@ -566,7 +566,7 @@ fn anthropic_override_cannot_restore_unsupported_prefill_at_egress() {
         let body = request.split("\r\n\r\n").nth(1).expect("request body");
         let body: serde_json::Value = serde_json::from_str(body).expect("request JSON");
         assert_eq!(
-            body["model"], "claude-sonnet-5",
+            body["model"], "claude-opus-4-6",
             "the negative control must reach the overridden unsupported model"
         );
         assert_eq!(

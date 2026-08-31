@@ -303,7 +303,13 @@ fn remove_unsupported_assistant_prefill(body: &mut serde_json::Value, provider: 
         .pointer("/output_config/format/type")
         .and_then(serde_json::Value::as_str)
         == Some("json_schema");
-    if supports_prefill && !uses_native_schema {
+    // Anthropic also rejects response prefill whenever thinking is on. Treat
+    // an authored but unknown thinking shape as enabled so a future wire mode
+    // cannot silently bypass this compatibility boundary.
+    let thinking_on = body.get("thinking").is_some_and(|thinking| {
+        thinking.get("type").and_then(serde_json::Value::as_str) != Some("disabled")
+    });
+    if supports_prefill && !uses_native_schema && !thinking_on {
         return;
     }
     let Some(messages) = body
@@ -326,6 +332,8 @@ fn remove_unsupported_assistant_prefill(body: &mut serde_json::Value, provider: 
     }
     let reason = if uses_native_schema {
         "Anthropic native structured output is incompatible with prefill"
+    } else if thinking_on {
+        "Anthropic thinking is incompatible with prefill"
     } else {
         "this Anthropic model does not support prefill"
     };
@@ -500,7 +508,11 @@ impl LlmProviderChat for AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// Build the Anthropic-style request body.
+    /// Build the Anthropic-style pre-override request body.
+    ///
+    /// Every live sender must apply caller/provider overrides and then call
+    /// [`reconcile_request_body`] before serialization. That final seam owns
+    /// lossy capability admission against the actual wire model and shape.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let anthropic_max = if opts.max_tokens > 0 {
@@ -577,30 +589,14 @@ impl AnthropicProvider {
         let mut messages = enforce_tool_result_adjacency(messages);
         preserve_orphan_results_as_text(&mut messages);
         if let Some(ref prefill) = opts.prefill {
-            let uses_native_schema = matches!(
-                &opts.output_format,
-                crate::llm::api::OutputFormat::JsonSchema { .. }
-            ) && caps.structured_output.as_deref() == Some("native");
-            // Anthropic rejects message prefill both on models that removed
-            // the feature and on requests using native structured output.
-            // The capability catalog is the semantic owner of model support;
-            // the request shape adds the one per-call incompatibility.
-            if caps.supports_assistant_prefill && !uses_native_schema {
-                messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": prefill,
-                }));
-            } else if uses_native_schema {
-                warn_anthropic_prefill_skipped(
-                    &opts.model,
-                    "Anthropic native structured output is incompatible with prefill",
-                );
-            } else {
-                warn_anthropic_prefill_skipped(
-                    &opts.model,
-                    "this Anthropic model does not support prefill",
-                );
-            }
+            // Admission is intentionally deferred until after provider
+            // overrides. The final wire model and output shape, rather than
+            // this pre-override payload, own whether the request may end in an
+            // assistant turn.
+            messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": prefill,
+            }));
         }
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
@@ -743,7 +739,6 @@ impl AnthropicProvider {
             }
         }
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
-        remove_unsupported_assistant_prefill(&mut body, &opts.provider, &opts.model);
         body
     }
 
