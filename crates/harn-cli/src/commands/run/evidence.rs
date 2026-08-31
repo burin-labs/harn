@@ -137,7 +137,7 @@ pub(super) fn persist_execution_run_record(
         status: status.to_string(),
         started_at,
         finished_at: Some(finished_at),
-        root_run_id: Some(execution_id.clone()),
+        root_run_id: Some(execution_id),
         execution: Some(harn_vm::orchestration::RunExecutionRecord {
             cwd: std::env::current_dir()
                 .ok()
