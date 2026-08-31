@@ -1,4 +1,17 @@
+import "std/schema"
 import "../check_dependabot_groups.harn"
+
+type VscodePackageManifest = {
+  engines: {vscode: string, ...dict<string, unknown>},
+  devDependencies: dict<string, string>,
+  ...dict<string, unknown>,
+}
+
+type VscodePackageLock = {packages: dict<string, unknown>, ...dict<string, unknown>}
+
+type VscodePackageLockManifest = {devDependencies: dict<string, string>, ...dict<string, unknown>}
+
+type VscodePackageLockResolution = {version: string, ...dict<string, unknown>}
 
 fn group(patterns: list<string>, excludes: list<string> = [], updates: list<string> = []) {
   return {patterns: patterns, exclude_patterns: excludes, update_types: updates}
@@ -57,8 +70,19 @@ fn valid_groups() {
 pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
   const text = harness.fs.read_text("../../.github/dependabot.yml")
   const entries = groups_from_text(text)
-  const package = json_parse(harness.fs.read_text("../../editors/vscode/package.json"))
-  const lock = json_parse(harness.fs.read_text("../../editors/vscode/package-lock.json"))
+  const package = schema_expect(
+    json_parse(harness.fs.read_text("../../editors/vscode/package.json")),
+    schema_of(VscodePackageManifest),
+  )
+  const lock = schema_expect(
+    json_parse(harness.fs.read_text("../../editors/vscode/package-lock.json")),
+    schema_of(VscodePackageLock),
+  )
+  const lock_manifest = schema_expect(lock.packages.get(""), schema_of(VscodePackageLockManifest))
+  const lock_resolution = schema_expect(
+    lock.packages.get("node_modules/@types/vscode"),
+    schema_of(VscodePackageLockResolution),
+  )
   assert_eq(group_errors(entries), [])
   // The extension may compile only against the oldest VS Code API it claims
   // to support. Dependabot cannot move that API surface independently.
@@ -67,8 +91,8 @@ pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
       {
         engine_range: package.engines.vscode,
         manifest_types: package.devDependencies.get("@types/vscode"),
-        lock_manifest_types: lock.packages.get("").devDependencies.get("@types/vscode"),
-        lock_resolved_types: lock.packages.get("node_modules/@types/vscode").version,
+        lock_manifest_types: lock_manifest.devDependencies.get("@types/vscode"),
+        lock_resolved_types: lock_resolution.version,
         dependabot_ignored: dependabot_ignores(
           entry_for(entries, "npm", "/editors/vscode"),
           "@types/vscode",
