@@ -689,6 +689,7 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     // agent.host
     &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_OWN_LIFECYCLE_REGISTRY_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,

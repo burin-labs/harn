@@ -8,7 +8,56 @@
 //! builtin surface.
 
 use super::agent_tools::ToolDispatchOutcome;
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmError, VmResourceHandle, VmValue};
+
+const REGISTRY_PROVENANCE_KEY: &str = "_agent_registry_provenance";
+const AMBIENT_PROVENANCE_LABEL: &str = "agent_registry_ambient_host";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum AgentRegistryOrigin {
+    Explicit,
+    AmbientHost,
+}
+
+impl AgentRegistryOrigin {
+    pub(super) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "explicit" => Some(Self::Explicit),
+            "ambient_host" => Some(Self::AmbientHost),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct AmbientHostRegistryProvenance;
+
+pub(super) fn own_lifecycle_registry(
+    registry: &VmValue,
+    origin: AgentRegistryOrigin,
+) -> Result<VmValue, VmError> {
+    crate::tool_registry::tool_registry_catalog(registry)?;
+    let mut owned = registry
+        .as_dict()
+        .expect("validated tool registry must be a dictionary")
+        .as_ref()
+        .clone();
+    match origin {
+        AgentRegistryOrigin::Explicit => {
+            owned.remove(REGISTRY_PROVENANCE_KEY);
+        }
+        AgentRegistryOrigin::AmbientHost => {
+            owned.insert(
+                REGISTRY_PROVENANCE_KEY.into(),
+                VmValue::resource(VmResourceHandle::new(
+                    AMBIENT_PROVENANCE_LABEL,
+                    AmbientHostRegistryProvenance,
+                )),
+            );
+        }
+    }
+    Ok(VmValue::dict(owned))
+}
 
 pub(super) fn registry_dispatch_rejection(
     tools_val: Option<&VmValue>,
@@ -32,15 +81,32 @@ fn require_registry_membership(tools_val: Option<&VmValue>, tool_name: &str) -> 
     let Some(dict) = tools_val.as_dict() else {
         return Err(malformed_registry_message(tool_name));
     };
+    let origin = match dict.get(REGISTRY_PROVENANCE_KEY) {
+        None => AgentRegistryOrigin::Explicit,
+        Some(VmValue::Resource(handle))
+            if handle.downcast::<AmbientHostRegistryProvenance>().is_some() =>
+        {
+            AgentRegistryOrigin::AmbientHost
+        }
+        Some(_) => return Err(malformed_registry_message(tool_name)),
+    };
     let Some(VmValue::List(tools)) = dict.get("tools") else {
         return Err(malformed_registry_message(tool_name));
     };
-    let Some(entry) = tools.iter().find_map(|tool| {
+    let entry = tools.iter().find_map(|tool| {
         let VmValue::Dict(entry) = tool else {
             return None;
         };
         (entry.get("name").map(VmValue::display).as_deref() == Some(tool_name)).then_some(entry)
-    }) else {
+    });
+    let Some(entry) = entry else {
+        if origin == AgentRegistryOrigin::AmbientHost {
+            // `agent_loop` adds lifecycle controls to an otherwise absent
+            // registry. That synthesized registry is not a declaration that
+            // the host bridge has no other tools. Explicit caller registries
+            // remain closed and cannot take this compatibility path.
+            return Ok(());
+        }
         return Err(format!(
             "tool '{tool_name}' is not present in the active agent tool registry"
         ));
@@ -69,7 +135,7 @@ fn malformed_registry_message(tool_name: &str) -> String {
 mod tests {
     use std::sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex as StdMutex,
     };
 
     use tokio::sync::Mutex;
@@ -99,6 +165,127 @@ mod tests {
             crate::tool_registry::ToolAudience::Agent,
         )
         .expect("project registry")
+    }
+
+    fn registry(entries: Vec<VmValue>) -> VmValue {
+        let mut registry = DictMap::new();
+        registry.put_str("_type", "tool_registry");
+        registry.insert("tools".into(), VmValue::List(Arc::new(entries)));
+        VmValue::dict(registry)
+    }
+
+    fn responding_bridge(
+        requests: Arc<StdMutex<Vec<serde_json::Value>>>,
+    ) -> Arc<crate::bridge::HostBridge> {
+        let pending = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let response_pending = Arc::clone(&pending);
+        let writer = Arc::new(move |line: &str| {
+            let request: serde_json::Value = serde_json::from_str(line)
+                .map_err(|error| format!("invalid bridge request: {error}"))?;
+            requests
+                .lock()
+                .map_err(|_| "request lock poisoned".to_string())?
+                .push(request.clone());
+            let id = request["id"]
+                .as_u64()
+                .ok_or_else(|| "missing request id".to_string())?;
+            let sender = response_pending
+                .try_lock()
+                .map_err(|_| "pending lock busy".to_string())?
+                .remove(&id)
+                .ok_or_else(|| "request was not pending".to_string())?;
+            sender
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {"status": "stopped"},
+                }))
+                .map_err(|_| "bridge caller dropped".to_string())
+        });
+        Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
+            pending,
+            Arc::new(AtomicBool::new(false)),
+            writer,
+            1,
+        ))
+    }
+
+    fn tool_entry(name: &str) -> VmValue {
+        let mut entry = DictMap::new();
+        entry.put_str("name", name);
+        VmValue::dict(entry)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lifecycle_owned_ambient_registry_reaches_host_but_explicit_empty_stays_closed() {
+        let ambient = own_lifecycle_registry(
+            &registry(vec![tool_entry("agent_await_resumption")]),
+            AgentRegistryOrigin::AmbientHost,
+        )
+        .expect("own ambient lifecycle registry");
+        let explicit_empty =
+            own_lifecycle_registry(&registry(Vec::new()), AgentRegistryOrigin::Explicit)
+                .expect("own explicit empty registry");
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let bridge = responding_bridge(Arc::clone(&requests));
+
+        let reached = super::super::agent_tools::dispatch_tool_execution_with_mcp(
+            None,
+            "session_stop",
+            &serde_json::json!({"reason": "operator stop"}),
+            Some(&ambient),
+            None,
+            Some(&bridge),
+            0,
+            0,
+        )
+        .await;
+        assert!(
+            reached.result.is_ok(),
+            "ambient host call failed: {:?}",
+            reached.result
+        );
+        assert_eq!(
+            reached.executor,
+            Some(crate::agent_events::ToolExecutor::HostBridge)
+        );
+        let reached_count = requests.lock().expect("request lock").len();
+        assert_eq!(
+            reached_count, 1,
+            "known-positive ambient call did not reach host"
+        );
+
+        let denied = super::super::agent_tools::dispatch_tool_execution_with_mcp(
+            None,
+            "session_stop",
+            &serde_json::json!({"reason": "operator stop"}),
+            Some(&explicit_empty),
+            None,
+            Some(&bridge),
+            0,
+            0,
+        )
+        .await;
+        assert!(denied.result.is_err());
+        assert!(denied.executor.is_none());
+        assert_eq!(
+            requests.lock().expect("request lock").len(),
+            reached_count,
+            "explicit empty registry reached the host after the known-positive control"
+        );
+    }
+
+    #[test]
+    fn script_visible_marker_shapes_cannot_downgrade_an_explicit_registry() {
+        for forged in [VmValue::Bool(false), VmValue::String("ambient_host".into())] {
+            let registry = registry(Vec::new());
+            let mut forged_registry = registry.as_dict().expect("registry dict").as_ref().clone();
+            forged_registry.insert(REGISTRY_PROVENANCE_KEY.into(), forged);
+            let error =
+                require_registry_membership(Some(&VmValue::dict(forged_registry)), "session_stop")
+                    .expect_err("script-visible marker must fail closed");
+            assert!(error.contains("malformed"));
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
