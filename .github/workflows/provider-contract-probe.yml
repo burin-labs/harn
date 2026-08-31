@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825a76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/rust-cache
@@ -105,6 +105,9 @@ jobs:
         id: campaign
         shell: bash
         env:
+          LIVE_INPUT: ${{ inputs.live && 'true' || 'false' }}
+          MAX_COST_USD_INPUT: ${{ inputs.max_cost_usd || '5' }}
+          MAX_PROBES_INPUT: ${{ inputs.max_probes || '500' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -128,10 +131,10 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
             live=true
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            live="${{ inputs.live }}"
+            live="$LIVE_INPUT"
           fi
-          max_cost="${{ inputs.max_cost_usd || '5' }}"
-          max_probes="${{ inputs.max_probes || '500' }}"
+          max_cost="$MAX_COST_USD_INPUT"
+          max_probes="$MAX_PROBES_INPUT"
           args=(
             --catalog-routes
             --exclude-local
