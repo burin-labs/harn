@@ -1170,7 +1170,10 @@ mod tests {
             Ok(_) => panic!("native structured transport should be unsupported"),
             Err(err) => err,
         };
-        assert!(is_unsupported_structured_transport_error(&err));
+        assert!(
+            is_unsupported_structured_transport_error(&err),
+            "expected unsupported structured transport, got: {err}"
+        );
 
         apply_prompt_mode_structured_transport(&mut args, &schema);
         let opts = extract_llm_options(&args).expect("prompt-mode structured call should parse");

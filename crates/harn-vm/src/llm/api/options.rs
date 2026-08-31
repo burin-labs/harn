@@ -386,6 +386,10 @@ pub(crate) struct LlmCallOptions {
     // --- Routing ---
     pub provider: String,
     pub model: String,
+    /// Typed origin-to-route decision. Script-facing extraction always sets
+    /// this before credential lookup; hand-built internal options may leave it
+    /// absent and receive a route-local projection at the transport boundary.
+    pub model_resolution: Option<crate::llm_config::ModelResolution>,
     pub api_key: String,
     pub api_mode: LlmApiMode,
     pub route_policy: LlmRoutePolicy,
@@ -610,6 +614,7 @@ impl Default for LlmCallOptions {
         Self {
             provider: String::new(),
             model: String::new(),
+            model_resolution: None,
             api_key: String::new(),
             api_mode: LlmApiMode::default(),
             route_policy: LlmRoutePolicy::default(),

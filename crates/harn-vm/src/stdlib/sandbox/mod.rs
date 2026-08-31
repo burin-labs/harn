@@ -64,6 +64,8 @@ mod paths;
 mod process_config;
 mod process_output;
 mod refusal;
+pub(crate) use process_config::apply_active_rustc_wrapper_policy;
+use process_config::neutralize_rustc_wrapper;
 pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 #[cfg(target_os = "windows")]
@@ -1466,7 +1468,7 @@ fn sandboxed_process_config(
     } else {
         resolved.cwd = Some(policy_process_cwd(policy, None)?);
     }
-    neutralize_rustc_wrapper(&mut resolved.env);
+    neutralize_rustc_wrapper(&mut resolved.env, &mut resolved.env_remove);
     inject_workspace_process_env(&mut resolved.env, policy);
     resolved.env.retain(|(key, _)| {
         !resolved
@@ -1475,29 +1477,6 @@ fn sandboxed_process_config(
             .any(|removed| key.eq_ignore_ascii_case(removed))
     });
     Ok(resolved)
-}
-
-/// Disable any Cargo `rustc` wrapper (e.g. `sccache`) for a sandboxed spawn.
-///
-/// `sccache` is a single shared, long-lived per-user daemon. If a sandboxed
-/// cargo build is the first caller to spawn it, the daemon inherits the
-/// `sandbox-exec` confinement permanently — even after it reparents to
-/// launchd — and then fails *every* later build machine-wide with
-/// `Operation not permitted` (it can no longer read build inputs outside the
-/// sandbox root nor write its cache dir under `~/Library/Caches`). A
-/// per-command sandbox must never be allowed to poison a cross-workspace
-/// daemon, so sandboxed builds bypass the wrapper entirely. Cargo treats an
-/// empty `CARGO_BUILD_RUSTC_WRAPPER` / `RUSTC_WRAPPER` as "no wrapper", which
-/// overrides any `build.rustc-wrapper` set in `.cargo/config.toml`. The
-/// on-disk cache and all unsandboxed builds are unaffected.
-fn neutralize_rustc_wrapper(env: &mut Vec<(String, String)>) {
-    for key in ["RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER"] {
-        if let Some(entry) = env.iter_mut().find(|(existing, _)| existing == key) {
-            entry.1.clear();
-        } else {
-            env.push((key.to_string(), String::new()));
-        }
-    }
 }
 
 fn build_std_command<B: SandboxBackend + ?Sized>(

@@ -410,6 +410,15 @@ pub(crate) async fn observed_llm_call(
     streaming_detector: Option<StreamingDetectorContext>,
     delta_sink: Option<DeltaSender>,
 ) -> Result<super::api::LlmResult, VmError> {
+    if let Some(resolution) = opts.model_resolution.as_ref() {
+        resolution
+            .assert_resolved_route(&opts.provider, &opts.model)
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                    "model resolution invariant failed before provider call: {error}"
+                ))))
+            })?;
+    }
     if !super::mock::cli_llm_mock_replay_active() && !super::mock::builtin_llm_mock_active() {
         super::helpers::validate_options(opts)?;
     }
