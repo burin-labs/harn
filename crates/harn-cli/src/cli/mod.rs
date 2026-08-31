@@ -204,8 +204,6 @@ pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::ProviderToolProbeFormatArg;
-#[cfg(test)]
-pub(crate) use provider::ProviderToolProbeModeArg;
 pub(crate) use provider::{
     refresh_provider_catalog_if_requested, ProviderArgs, ProviderCacheProbeArgs,
     ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
@@ -214,6 +212,8 @@ pub(crate) use provider::{
     ProviderOptionProbeArgs, ProviderProbeArgs, ProviderToolCalibrateArgs, ProviderToolProbeArgs,
     ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg, ProviderToolScorecardArgs,
 };
+#[cfg(test)]
+pub(crate) use provider::{ProviderPortableOptionArg, ProviderToolProbeModeArg};
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersExportArgs, ProvidersGenerateArgs, ProvidersMatrixArgs,
     ProvidersOverlayAuditArgs, ProvidersRecommendArgs, ProvidersRefreshArgs, ProvidersSupportArgs,
