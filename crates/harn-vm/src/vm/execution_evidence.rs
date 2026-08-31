@@ -46,7 +46,7 @@ impl Vm {
             execution_id: Some(self.execution_id.to_string()),
             trace_spans: self
                 .tracing_runtime
-                .completed_spans()
+                .completed_spans_for_execution(&self.execution_id)
                 .iter()
                 .map(crate::orchestration::RunTraceSpanRecord::from)
                 .collect(),
@@ -99,6 +99,7 @@ mod tests {
         let mut vm = super::Vm::new();
         vm.tracing_runtime = crate::tracing::fresh_tracing_runtime();
         {
+            let _execution = crate::enter_execution_scope(vm.execution_id().clone());
             let _runtime = enter_tracing_runtime(vm.tracing_runtime.clone());
             crate::tracing::set_tracing_enabled(true);
             let span =
@@ -107,6 +108,8 @@ mod tests {
         }
 
         let caller_runtime = crate::tracing::fresh_tracing_runtime();
+        let caller_execution = crate::ExecutionId::mint();
+        let _execution = crate::enter_execution_scope(caller_execution);
         let _caller = enter_tracing_runtime(caller_runtime);
         crate::tracing::set_tracing_enabled(true);
         let span =
@@ -121,6 +124,56 @@ mod tests {
                 .map(|span| span.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["owned"]
+        );
+    }
+
+    #[test]
+    fn vm_evidence_selects_its_execution_from_a_reused_tracing_runtime() {
+        let mut vm = super::Vm::new();
+        vm.tracing_runtime = crate::tracing::fresh_tracing_runtime();
+        let _runtime = enter_tracing_runtime(vm.tracing_runtime.clone());
+        crate::tracing::set_tracing_enabled(true);
+
+        let earlier_execution = crate::ExecutionId::mint();
+        {
+            let _execution = crate::enter_execution_scope(earlier_execution);
+            let span = crate::tracing::span_start(
+                crate::tracing::SpanKind::Pipeline,
+                "earlier".to_string(),
+            );
+            crate::tracing::span_set_metadata(
+                span,
+                crate::tracing::meta::EXECUTION_ID,
+                serde_json::json!(vm.execution_id()),
+            );
+            crate::tracing::span_end(span);
+        }
+        {
+            let _execution = crate::enter_execution_scope(vm.execution_id().clone());
+            let span = crate::tracing::span_start(
+                crate::tracing::SpanKind::Pipeline,
+                "current".to_string(),
+            );
+            crate::tracing::span_set_metadata(
+                span,
+                crate::tracing::meta::EXECUTION_ID,
+                serde_json::json!("hxe-019c13e0-8080-7000-8000-000000000099"),
+            );
+            crate::tracing::span_end(span);
+        }
+
+        let evidence = vm.execution_evidence(None, Vec::new());
+        assert_eq!(
+            evidence
+                .trace_spans
+                .iter()
+                .map(|span| span.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["current"]
+        );
+        assert_eq!(
+            evidence.trace_spans[0].metadata[crate::tracing::meta::EXECUTION_ID],
+            serde_json::json!(vm.execution_id())
         );
     }
 }

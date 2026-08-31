@@ -243,6 +243,9 @@ pub struct SpanEvent {
 /// A completed tracing span.
 #[derive(Debug, Clone)]
 pub struct Span {
+    /// Runtime-owned identity used for evidence selection. The matching
+    /// metadata attribute is only its wire projection.
+    pub(crate) execution_id: Option<crate::ExecutionId>,
     pub trace_id: String,
     pub span_id: u64,
     pub parent_id: Option<u64>,
@@ -262,6 +265,7 @@ pub struct Span {
 
 /// An in-flight span (not yet completed).
 struct OpenSpan {
+    execution_id: Option<crate::ExecutionId>,
     trace_id: String,
     span_id: u64,
     parent_id: Option<u64>,
@@ -362,6 +366,7 @@ impl SpanCollector {
         self.open.insert(
             id,
             OpenSpan {
+                execution_id: execution_id.clone(),
                 trace_id: self.trace_id.clone(),
                 span_id: id,
                 parent_id,
@@ -386,15 +391,22 @@ impl SpanCollector {
         id
     }
 
-    /// Attach metadata to an open span.
+    /// Attach metadata to an open span. Runtime identity is immutable.
     pub fn set_metadata(&mut self, span_id: u64, key: &str, value: serde_json::Value) {
+        if key == meta::EXECUTION_ID {
+            return;
+        }
         if let Some(span) = self.open.get_mut(&span_id) {
             span.metadata.insert(key.to_string(), value);
         }
     }
 
     /// Attach metadata to an open or completed span unless the key exists.
+    /// Runtime identity is immutable.
     pub fn attach_metadata_if_absent(&mut self, span_id: u64, key: &str, value: serde_json::Value) {
+        if key == meta::EXECUTION_ID {
+            return;
+        }
         if let Some(span) = self.open.get_mut(&span_id) {
             span.metadata.entry(key.to_string()).or_insert(value);
             return;
@@ -458,6 +470,7 @@ impl SpanCollector {
         crate::events::emit_span_end(span_id, end_meta);
 
         let completed = Span {
+            execution_id: span.execution_id,
             trace_id: span.trace_id,
             span_id: span.span_id,
             parent_id: span.parent_id,
@@ -544,8 +557,17 @@ impl Default for TracingRuntime {
 }
 
 impl TracingRuntime {
-    pub(crate) fn completed_spans(&self) -> Vec<Span> {
-        self.collector.borrow().spans().to_vec()
+    pub(crate) fn completed_spans_for_execution(
+        &self,
+        execution_id: &crate::ExecutionId,
+    ) -> Vec<Span> {
+        self.collector
+            .borrow()
+            .spans()
+            .iter()
+            .filter(|span| span.execution_id.as_ref() == Some(execution_id))
+            .cloned()
+            .collect()
     }
 }
 
