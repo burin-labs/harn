@@ -6,21 +6,26 @@ fn group(patterns: list<string>, excludes: list<string> = [], updates: list<stri
 
 /** One update entry, the unit `ecosystem_errors` checks. */
 fn entry(ecosystem: string, groups: any, directories: list<string> = ["/"]) -> EcosystemGroups {
-  return {ecosystem: ecosystem, directories: directories, groups: groups}
+  return {ecosystem: ecosystem, directories: directories, groups: groups, ignores: []}
 }
 
 fn yaml(lines: list<string>) -> string {
   return lines.join("\n") + "\n"
 }
 
-/** The groups of the entry covering `directory`, so a test can name one. */
-fn groups_for(entries: list<EcosystemGroups>, ecosystem: string, directory: string = "/") {
+/** The update entry covering `directory`, so a test can name one. */
+fn entry_for(entries: list<EcosystemGroups>, ecosystem: string, directory: string = "/") {
   for candidate in entries {
     if candidate.ecosystem == ecosystem && candidate.directories.contains(directory) {
-      return candidate.groups
+      return candidate
     }
   }
   throw "no ${ecosystem} entry covers ${directory}"
+}
+
+/** The groups of the entry covering `directory`, so a test can name one. */
+fn groups_for(entries: list<EcosystemGroups>, ecosystem: string, directory: string = "/") {
+  return entry_for(entries, ecosystem, directory).groups
 }
 
 fn cargo_policy() {
@@ -52,7 +57,26 @@ fn valid_groups() {
 pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
   const text = harness.fs.read_text("../../.github/dependabot.yml")
   const entries = groups_from_text(text)
+  const package = json_parse(harness.fs.read_text("../../editors/vscode/package.json"))
+  const lock = json_parse(harness.fs.read_text("../../editors/vscode/package-lock.json"))
   assert_eq(group_errors(entries), [])
+  // The extension may compile only against the oldest VS Code API it claims
+  // to support. Dependabot cannot move that API surface independently.
+  assert_eq(
+    vscode_api_contract_errors(
+      {
+        engine_range: package.engines.vscode,
+        manifest_types: package.devDependencies.get("@types/vscode"),
+        lock_manifest_types: lock.packages.get("").devDependencies.get("@types/vscode"),
+        lock_resolved_types: lock.packages.get("node_modules/@types/vscode").version,
+        dependabot_ignored: dependabot_ignores(
+          entry_for(entries, "npm", "/editors/vscode"),
+          "@types/vscode",
+        ),
+      },
+    ),
+    [],
+  )
   // A routine dependency lands in the batch rather than opening its own PR.
   assert_eq(matching_groups(groups_for(entries, "cargo"), "serde"), ["cargo-minor-patch"])
   assert_eq(matching_groups(groups_for(entries, "npm"), "vite"), ["npm-minor-patch"])
@@ -69,6 +93,37 @@ pipeline test_actual_dependabot_document(harness: Harness, task: unknown) {
   assert_eq(
     matching_groups(groups_for(entries, "npm", "/editors/vscode"), "react-dom"),
     ["react-runtime"],
+  )
+}
+
+@test
+pipeline test_vscode_types_cannot_exceed_the_engine_minimum(harness: Harness, task: unknown) {
+  const errors = vscode_api_contract_errors(
+    {
+      engine_range: "^1.125.0",
+      manifest_types: "1.134.0",
+      lock_manifest_types: "1.134.0",
+      lock_resolved_types: "1.134.0",
+      dependabot_ignored: true,
+    },
+  )
+  assert_eq(errors.count, 3)
+  assert_eq(errors.all({ error -> error.contains("engine minimum") }), true)
+}
+
+@test
+pipeline test_vscode_types_ignore_is_required(harness: Harness, task: unknown) {
+  assert_eq(
+    vscode_api_contract_errors(
+      {
+        engine_range: "^1.125.0",
+        manifest_types: "1.125.0",
+        lock_manifest_types: "1.125.0",
+        lock_resolved_types: "1.125.0",
+        dependabot_ignored: false,
+      },
+    ),
+    ["Dependabot must ignore @types/vscode"],
   )
 }
 
