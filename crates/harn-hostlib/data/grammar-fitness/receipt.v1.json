@@ -486,5 +486,5 @@
     }
   ],
   "schema_version": 1,
-  "tree_sitter_runtime": "0.26.12"
+  "tree_sitter_runtime": "0.26.13"
 }
