@@ -36,6 +36,7 @@ mod fs_watch;
 mod host_conditions;
 mod parser_agreement_corpus;
 mod process_artifact_retention;
+mod process_sandbox_env_e2e;
 mod process_tools;
 mod process_tools_background_schema;
 mod process_tools_capture_transport;
