@@ -17,6 +17,7 @@
 //! stable, documented surface to depend on without reaching into
 //! `stdlib::*` plumbing.
 
+pub(crate) use crate::stdlib::sandbox::apply_active_rustc_wrapper_policy;
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_name, active_workspace_process_env,
     check_fs_path_scope, command_output, deterministic_message_locale_env, enforce_process_cwd,
