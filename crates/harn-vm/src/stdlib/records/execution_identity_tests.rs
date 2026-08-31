@@ -39,20 +39,67 @@ fn run_record_constructor_inherits_one_active_execution_identity() {
 }
 
 #[test]
-fn run_record_constructor_preserves_an_explicit_execution_identity() {
-    let _scope =
-        crate::observability::execution_scope::enter_execution_scope(crate::mint_execution_scope());
+fn run_record_constructor_replaces_a_callers_execution_identity() {
+    let owner = crate::mint_execution_scope();
+    let _scope = crate::observability::execution_scope::enter_execution_scope(owner.clone());
     let run = constructed_run_json(serde_json::json!({
         "evidence": {
             "schema_version": EXECUTION_EVIDENCE_SCHEMA_VERSION,
-            "execution_id": "hxe-explicit"
+            "execution_id": "hxe-019c13e0-8080-7000-8000-000000000099"
         }
     }));
 
     assert_eq!(
         run["evidence"]["execution_id"].as_str(),
-        Some("hxe-explicit")
+        Some(owner.as_ref())
     );
+}
+
+#[test]
+fn run_record_constructor_rejects_a_missing_execution_owner() {
+    let error = run_record_impl(
+        &[crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "evidence": {
+                "schema_version": EXECUTION_EVIDENCE_SCHEMA_VERSION,
+                "execution_id": "hxe-019c13e0-8080-7000-8000-000000000099"
+            }
+        }))],
+        &mut String::new(),
+    )
+    .expect_err("scope-less construction must fail closed");
+
+    assert!(error
+        .to_string()
+        .contains("run_record: active execution scope unavailable"));
+}
+
+#[test]
+fn run_record_constructor_rejects_evidence_owned_by_another_execution() {
+    let _scope = crate::enter_execution_scope(crate::mint_execution_scope());
+    let error = run_record_impl(
+        &[crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "evidence": {
+                "schema_version": EXECUTION_EVIDENCE_SCHEMA_VERSION,
+                "flight_recording": {
+                    "schema_version": crate::flight_recorder::FLIGHT_RECORDING_SCHEMA_VERSION,
+                    "execution_id": "hxe-019c13e0-8080-7000-8000-000000000099",
+                    "format": crate::flight_recorder::FLIGHT_RECORDING_FORMAT,
+                    "path": null,
+                    "content_hash": format!("blake3:{}", "a".repeat(64)),
+                    "byte_length": 0,
+                    "retained_events": 0,
+                    "dropped_events": 0,
+                    "value_policy": "omitted"
+                }
+            }
+        }))],
+        &mut String::new(),
+    )
+    .expect_err("cross-execution artifact must fail closed");
+
+    assert!(error
+        .to_string()
+        .contains("flight recording identity does not match"));
 }
 
 #[test]
