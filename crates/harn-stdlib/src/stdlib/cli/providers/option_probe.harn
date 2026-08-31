@@ -148,17 +148,23 @@ fn __failure_class(error: unknown) -> string {
 pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAttempt {
   if !is_err(outcome) {
     const usage = unwrap(outcome)?.usage
-    return {
+    const attempt: ProviderOptionProbeAttempt = {
       verdict: "accepted",
       measured: true,
       input_tokens: usage?.input_tokens,
       output_tokens: usage?.output_tokens,
       cost_usd: usage?.cost_usd,
     }
+    return attempt
   }
   const raw = unwrap_err(outcome)
   if type_of(raw) == "dict" && to_string(raw?.reason ?? "") == "empty_generation" {
-    return {verdict: "accepted", measured: true, reason: "served_empty"}
+    const attempt: ProviderOptionProbeAttempt = {
+      verdict: "accepted",
+      measured: true,
+      reason: "served_empty",
+    }
+    return attempt
   }
   const message = if type_of(raw) == "dict" {
     to_string(raw?.message ?? raw)
@@ -167,18 +173,25 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
   }
   const class = __failure_class(raw)
   if class == "local" {
-    return {verdict: "gated_locally", measured: false, failure_class: class, error: message}
+    const attempt: ProviderOptionProbeAttempt = {
+      verdict: "gated_locally",
+      measured: false,
+      failure_class: class,
+      error: message,
+    }
+    return attempt
   }
   if class == "rejected" {
-    return {
+    const attempt: ProviderOptionProbeAttempt = {
       verdict: "rejected",
       measured: true,
       reason: to_string(raw?.reason ?? "invalid_request"),
       error: message,
       cost_usd: 0.0,
     }
+    return attempt
   }
-  return {
+  const attempt: ProviderOptionProbeAttempt = {
     verdict: "inconclusive",
     measured: false,
     failure_class: class,
@@ -189,6 +202,7 @@ pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAt
     },
     error: message,
   }
+  return attempt
 }
 
 /**

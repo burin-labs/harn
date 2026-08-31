@@ -64,8 +64,10 @@ mod tests {
         let (temperature_task, top_p_task) = tokio::join!(
             with_portable_option_probe(Temperature, async {
                 tokio::task::yield_now().await;
-                let mut opts = crate::llm::api::LlmCallOptions::default();
-                opts.provider_contract_probe = current_portable_option();
+                let opts = crate::llm::api::LlmCallOptions {
+                    provider_contract_probe: current_portable_option(),
+                    ..Default::default()
+                };
                 let payload = crate::llm::api::LlmRequestPayload::from(&opts);
                 assert_eq!(payload.provider_contract_probe, Some(Temperature));
                 (
