@@ -30,24 +30,15 @@ meta_scratch/
 # can leak it).
 harn-spec-verify-*/
 
-# Conformance skill fixtures deliberately ship a .harn/ subdir so the
-# project-layer loader (issue #73) has something to discover. The blanket
-# `.harn/` ignore above would drop them otherwise.
+# Conformance fixtures deliberately ship reviewed contracts inside `.harn/` so
+# runtime discovery can be tested in place. Re-include only those contracts;
+# caches, journals, locks, and future runtime namespaces stay ignored without
+# requiring a growing denylist.
 !conformance/tests/**/.harn/
-!conformance/tests/**/.harn/**
-
-# Per-run metadata shards from project_deep_scan tests are ephemeral. Runtime
-# SQLite DBs, checkpoint/workflow dirs, and per-suite timing caches under
-# fixture .harn/ dirs must stay ignored without shadowing shipped manifests.
-conformance/tests/**/.harn/metadata/
-conformance/tests/**/.harn/memory/
-conformance/tests/**/.harn/checkpoints/
-conformance/tests/**/.harn/workflows/
-conformance/tests/**/.harn/*.sqlite
-conformance/tests/**/.harn/*.sqlite-shm
-conformance/tests/**/.harn/*.sqlite-wal
-conformance/tests/**/.harn/*.harn-init.lock
-conformance/tests/**/.harn/test-timings.json
+conformance/tests/**/.harn/*
+!conformance/tests/**/.harn/skills/
+!conformance/tests/**/.harn/skills/**
+!conformance/tests/stdlib/.harn/store.json
 
 # Shared Claude skill definitions are tracked; local Claude state is not.
 .claude/*
