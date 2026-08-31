@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use crate::redact::RedactionPolicy;
@@ -31,11 +33,18 @@ pub(super) fn project_evidence(
                 serde_json::json!(execution_id),
             );
         }
+        span.trace_id = redact_bounded(&span.trace_id, policy, PREVIEW_LIMIT);
+        span.kind = redact_bounded(&span.kind, policy, PREVIEW_LIMIT);
         span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
-        let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
-        policy.redact_json_in_place(&mut metadata);
-        if let Value::Object(metadata) = metadata {
-            span.metadata = metadata.into_iter().collect();
+        redact_json_map(&mut span.metadata, policy);
+        for link in &mut span.links {
+            link.trace_id = redact_bounded(&link.trace_id, policy, PREVIEW_LIMIT);
+            link.span_id = redact_bounded(&link.span_id, policy, PREVIEW_LIMIT);
+            redact_string_map(&mut link.attributes, policy);
+        }
+        for event in &mut span.events {
+            event.name = redact_bounded(&event.name, policy, PREVIEW_LIMIT);
+            redact_json_map(&mut event.attributes, policy);
         }
     }
     if let Some(recording) = &mut evidence.flight_recording {
@@ -46,9 +55,25 @@ pub(super) fn project_evidence(
         }
     }
     for gap in &mut evidence.gaps {
+        gap.component = redact_bounded(&gap.component, policy, PREVIEW_LIMIT);
+        gap.code = redact_bounded(&gap.code, policy, PREVIEW_LIMIT);
         gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
     }
     evidence
+}
+
+fn redact_json_map(values: &mut BTreeMap<String, Value>, policy: &RedactionPolicy) {
+    let mut object = Value::Object(std::mem::take(values).into_iter().collect());
+    policy.redact_json_in_place(&mut object);
+    if let Value::Object(redacted) = object {
+        *values = redacted.into_iter().collect();
+    }
+}
+
+fn redact_string_map(values: &mut BTreeMap<String, String>, policy: &RedactionPolicy) {
+    let mut object = serde_json::to_value(std::mem::take(values)).unwrap_or(Value::Null);
+    policy.redact_json_in_place(&mut object);
+    *values = serde_json::from_value(object).unwrap_or_default();
 }
 
 fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
@@ -181,6 +206,49 @@ mod tests {
                 .and_then(|recording| recording.path.as_deref()),
             Some("/private/workspace/.harn/flight.json")
         );
+    }
+
+    #[test]
+    fn public_projection_redacts_every_nested_span_and_gap_text_field() {
+        const SECRET: &str = "projection-secret";
+        let secret_url = format!("https://api.example.com/v1?api_key={SECRET}");
+        let mut run = run_with_local_recording();
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                trace_id: secret_url.clone(),
+                kind: secret_url.clone(),
+                name: secret_url.clone(),
+                metadata: BTreeMap::from([("api_key".to_string(), serde_json::json!(SECRET))]),
+                links: vec![crate::tracing::SpanLink {
+                    trace_id: secret_url.clone(),
+                    span_id: secret_url.clone(),
+                    attributes: BTreeMap::from([("api_key".to_string(), SECRET.to_string())]),
+                }],
+                events: vec![crate::tracing::SpanEvent {
+                    name: secret_url.clone(),
+                    attributes: BTreeMap::from([(
+                        "api_key".to_string(),
+                        serde_json::json!(SECRET),
+                    )]),
+                    ..crate::tracing::SpanEvent::default()
+                }],
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+        run.evidence
+            .gaps
+            .push(crate::orchestration::RunEvidenceGapRecord {
+                component: secret_url.clone(),
+                code: secret_url.clone(),
+                message: secret_url,
+            });
+
+        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+        let rendered = serde_json::to_string(&projected).unwrap();
+
+        assert!(!rendered.contains(SECRET), "projected evidence: {rendered}");
+        assert_eq!(projected.trace_spans[0].events.len(), 1);
+        assert_eq!(run.evidence.trace_spans[0].metadata["api_key"], SECRET);
     }
 
     #[test]
