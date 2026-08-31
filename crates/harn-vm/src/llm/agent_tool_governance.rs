@@ -8,6 +8,7 @@
 //! builtin surface.
 
 use super::agent_tools::ToolDispatchOutcome;
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{ErrorCategory, VmError, VmResourceHandle, VmValue};
 
 const REGISTRY_PROVENANCE_KEY: &str = "_agent_registry_provenance";
@@ -57,6 +58,36 @@ pub(super) fn own_lifecycle_registry(
         }
     }
     Ok(VmValue::dict(owned))
+}
+
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_agent_own_lifecycle_registry(registry: dict, origin: \"explicit\" | \"ambient_host\") -> dict",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_own_lifecycle_registry_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let registry = args.first().ok_or_else(|| {
+        VmError::Runtime("__host_agent_own_lifecycle_registry: missing registry".into())
+    })?;
+    let origin = args
+        .get(1)
+        .and_then(|value| match value {
+            VmValue::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .and_then(AgentRegistryOrigin::parse)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "__host_agent_own_lifecycle_registry: origin must be explicit or ambient_host"
+                    .into(),
+            )
+        })?;
+    own_lifecycle_registry(registry, origin)
 }
 
 pub(super) fn registry_dispatch_rejection(

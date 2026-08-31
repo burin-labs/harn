@@ -1695,36 +1695,6 @@ pub(super) async fn host_agent_dispatch_tool_call(
     }
 }
 
-#[harn_builtin(
-    exposure = "runtime_internal",
-    effects = [],
-    sig = "__host_agent_own_lifecycle_registry(registry: dict, origin: \"explicit\" | \"ambient_host\") -> dict",
-    category = "agent.host",
-    runtime_only = true
-)]
-fn host_agent_own_lifecycle_registry_impl(
-    args: &[VmValue],
-    _out: &mut String,
-) -> Result<VmValue, VmError> {
-    let registry = args.first().ok_or_else(|| {
-        VmError::Runtime("__host_agent_own_lifecycle_registry: missing registry".into())
-    })?;
-    let origin = args
-        .get(1)
-        .and_then(|value| match value {
-            VmValue::String(value) => Some(value.as_str()),
-            _ => None,
-        })
-        .and_then(super::agent_tool_governance::AgentRegistryOrigin::parse)
-        .ok_or_else(|| {
-            VmError::Runtime(
-                "__host_agent_own_lifecycle_registry: origin must be explicit or ambient_host"
-                    .into(),
-            )
-        })?;
-    super::agent_tool_governance::own_lifecycle_registry(registry, origin)
-}
-
 /// Connect to each MCP server in specs, list their tools (prefixed with
 /// server_name__), store handles keyed by session_id, and return
 /// Tag a single MCP tool descriptor for the agent tool surface.
