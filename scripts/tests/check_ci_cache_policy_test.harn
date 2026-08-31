@@ -15,12 +15,88 @@ import {
   release_warm_cache_prune_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  sccache_action_cache_size_errors,
   windows_pr_native_feedback_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+fn sccache_action(
+  default_size: string = "",
+  configure_run: string = "\"$GITHUB_ACTION_PATH/configure-env.sh\"",
+) -> dict {
+  return {
+    inputs: {"cache-size": {default: default_size}},
+    runs: {
+      steps: [
+        {
+          env: {HARN_SCCACHE_CACHE_SIZE_INPUT: gha_expression("inputs.cache-size")},
+          run: configure_run,
+        },
+      ],
+    },
+  }
+}
+
+@test
+pipeline test_sccache_action_preserves_the_callers_cache_size_contract(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(sccache_action_cache_size_errors(sccache_action()), [])
+}
+
+@test
+pipeline test_sccache_action_rejects_a_default_that_overwrites_the_caller(
+  harness: Harness,
+  task: unknown,
+) {
+  const errors = sccache_action_cache_size_errors(sccache_action("2G"))
+  assert_eq(len(errors), 1)
+  assert_eq(contains(errors[0] ?? "", "default empty"), true)
+}
+
+@test
+pipeline test_sccache_action_requires_one_unparameterized_environment_owner(
+  harness: Harness,
+  task: unknown,
+) {
+  const command = "\"$GITHUB_ACTION_PATH/configure-env.sh\""
+  const invalid_runs = [
+    "echo \"SCCACHE_CACHE_SIZE=15G\"",
+    command + "\n" + command,
+    command + " \"$SCCACHE_CACHE_SIZE\" \"$HARN_SCCACHE_CACHE_SIZE_INPUT\"",
+  ]
+  for run in invalid_runs {
+    const errors = sccache_action_cache_size_errors(sccache_action("", run))
+    assert_eq(len(errors), 1)
+    assert_eq(contains(errors[0] ?? "", "exactly once"), true)
+  }
+}
+
+@test
+pipeline test_sccache_action_rejects_a_second_helper_step(harness: Harness, task: unknown) {
+  let action = sccache_action()
+  action.runs.steps = action.runs.steps
+    + [{run: "\"$GITHUB_ACTION_PATH/configure-env.sh\" reversed args"}]
+  const errors = sccache_action_cache_size_errors(action)
+  assert_eq(len(errors), 1)
+  assert_eq(contains(errors[0] ?? "", "exactly once"), true)
+}
+
+@test
+pipeline test_sccache_action_rejects_a_step_local_inherited_size_override(
+  harness: Harness,
+  task: unknown,
+) {
+  let action = sccache_action()
+  action.runs.steps[0].env.SCCACHE_CACHE_SIZE = "2G"
+  const errors = sccache_action_cache_size_errors(action)
+  assert_eq(len(errors), 1)
+  assert_eq(contains(errors[0] ?? "", "instead of shadowing"), true)
+}
 
 @test
 pipeline test_ci_concurrency_preserves_every_main_commit(harness: Harness, task: unknown) {
