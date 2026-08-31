@@ -455,14 +455,8 @@ fn ok_result_failure_category_object(value: &serde_json::Value) -> Option<&'stat
     None
 }
 
-pub(super) fn next_call_id() -> String {
-    uuid::Uuid::now_v7().to_string()
-}
-
 /// Outcome of a single tool dispatch — pairs the result with the
-/// backend that actually ran it (harn#691). The agent loop reads the
-/// `executor` value when emitting `AgentEvent::ToolCallUpdate` so
-/// clients can render "via mcp:linear" / "via host bridge" badges.
+/// backend that ran it for projection through `AgentEvent::ToolCallUpdate`.
 pub(super) struct ToolDispatchOutcome {
     pub result: Result<serde_json::Value, VmError>,
     pub executor: Option<ToolExecutor>,
@@ -507,6 +501,12 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     tool_backoff_ms: u64,
 ) -> ToolDispatchOutcome {
     use super::tools::handle_tool_locally;
+
+    if let Some(outcome) =
+        super::agent_tool_governance::registry_dispatch_rejection(tools_val, tool_name)
+    {
+        return outcome;
+    }
 
     // Honor the declared executor (harn#743) ahead of the historic
     // heuristic so a tool defined as `executor: "host_bridge"` always

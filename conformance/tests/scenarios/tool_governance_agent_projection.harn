@@ -1,0 +1,110 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * The agent loop projects one governed registry before any model-facing
+ * consumer can inspect it. A CLI/catalog-only row must not leak through
+ * prompt guidance, client tool search, promoted schemas, or forged dispatch.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "look",
+    "Read public files",
+    {parameters: {path: {type: "string"}}, handler: { args -> args.path }},
+  )
+  registry = tool_define(
+    registry,
+    "agent_inspect",
+    "PUBLIC_AGENT_CONTROL operator inspection",
+    {
+      parameters: {account_id: {type: "string"}},
+      defer_loading: true,
+      governance: {audiences: ["agent"]},
+      handler: { args -> "public " + args.account_id },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "operator_inspect",
+    "PRIVATE_OPERATOR_CONTROL description",
+    {
+      parameters: {account_id: {type: "string", description: "PRIVATE_OPERATOR_CONTROL parameter"}},
+      guidance: "PRIVATE_OPERATOR_CONTROL guidance",
+      defer_loading: true,
+      governance: {audiences: ["cli", "catalog"]},
+      handler: { _args -> "EXECUTED_FORBIDDEN_HANDLER" },
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "Search operator tools.",
+        tool_calls: [{id: "search1", name: "__harn_tool_search", arguments: {query: "operator"}}],
+      },
+      {
+        text: "Try the hidden name directly.",
+        tool_calls: [
+          {id: "forged1", name: "operator_inspect", arguments: {account_id: "acct_123"}},
+        ],
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        tools: registry,
+        tool_search: {variant: "bm25", mode: "client"},
+        loop_until_done: true,
+        max_iterations: 4,
+      }
+      const result = agent_loop(harness, "Inspect available operator tools", nil, options)
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) >= 3, "search, forged dispatch, and completion turns ran")
+      assert(contains(calls[0].system ?? "", "look"), "allowed eager tool reaches turn one")
+      for call in calls {
+        assert(
+          !contains(call.system ?? "", "PRIVATE_OPERATOR_CONTROL"),
+          "excluded description, parameters, and guidance stay out of assembled prompts",
+        )
+        assert(
+          !contains(call.system ?? "", "operator_inspect"),
+          "excluded schema is never served or promoted",
+        )
+      }
+      const search_observation = json_stringify(calls[1].messages)
+      assert(
+        contains(search_observation, "agent_inspect"),
+        "measured search result contains the allowed deferred tool",
+      )
+      assert(
+        contains(search_observation, "PUBLIC_AGENT_CONTROL"),
+        "measured search result retains allowed metadata",
+      )
+      assert(
+        contains(calls[1].system ?? "", "agent_inspect"),
+        "allowed deferred schema is promoted on the next turn",
+      )
+      assert(
+        !contains(search_observation, "PRIVATE_OPERATOR_CONTROL"),
+        "excluded metadata stays out of client search snippets",
+      )
+      assert(
+        !contains(search_observation, "operator_inspect"),
+        "excluded name stays out of client search results",
+      )
+      assert(
+        contains(result.tools?.rejected ?? [], "operator_inspect"),
+        "forged direct invocation is rejected",
+      )
+      assert(
+        !contains(json_stringify(result.transcript), "EXECUTED_FORBIDDEN_HANDLER"),
+        "excluded handler never executes",
+      )
+      harness.stdio.log("tool_governance_agent_projection tests passed")
+    },
+  )
+}

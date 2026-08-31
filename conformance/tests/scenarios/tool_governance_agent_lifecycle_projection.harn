@@ -1,0 +1,133 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_lifecycle_tools } from "std/agent/workers"
+import { llm_text, with_llm_script } from "std/testing"
+import { ToolRegistry } from "std/tools"
+
+fn define_tool(
+  registry: ToolRegistry,
+  name: string,
+  description: string,
+  audiences: list<string>,
+) -> ToolRegistry {
+  return tool_define(
+    registry,
+    name,
+    description,
+    {governance: {audiences: audiences}, handler: { _args -> "unused" }},
+  )
+}
+
+fn run_agent(harness: Harness, registry: ToolRegistry) {
+  const options: AgentSpec = {
+    provider: "mock",
+    tools: registry,
+    loop_until_done: true,
+    max_iterations: 1,
+  }
+  return agent_loop(harness, "Inspect lifecycle controls", nil, options)
+}
+
+/**
+ * Lifecycle derivation consumes the governed agent projection, not the raw
+ * registry. Excluded triggers cannot add controls or suppress a canonical
+ * control through a name collision, while included triggers still work.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  const synthesized = agent_lifecycle_tools(harness.agent, tool_registry(), {subagents: true})
+  const catalog_controls: ToolRegistry = schema_expect(
+    tool_project(synthesized, "catalog"),
+    schema_of(ToolRegistry),
+  )
+  assert_eq(
+    tool_count(catalog_controls),
+    0,
+    "synthesized agent-only lifecycle tools stay out of catalog projection",
+  )
+  const agent_controls: ToolRegistry = schema_expect(
+    tool_project(synthesized, "agent"),
+    schema_of(ToolRegistry),
+  )
+  assert(tool_find(agent_controls, "agent_await_resumption") != nil)
+  assert(tool_find(agent_controls, "subagent_pause") != nil)
+  assert(tool_find(agent_controls, "subagent_resume") != nil)
+  assert(tool_find(agent_controls, "subagent_stop") != nil)
+  let excluded_trigger = tool_registry()
+  excluded_trigger = define_tool(
+    excluded_trigger,
+    "spawn_agent",
+    "EXCLUDED_LIFECYCLE_TRIGGER",
+    ["cli"],
+  )
+  let excluded_collision = tool_registry()
+  excluded_collision = define_tool(
+    excluded_collision,
+    "sub_agent_run",
+    "INCLUDED_LIFECYCLE_TRIGGER",
+    ["agent"],
+  )
+  excluded_collision = define_tool(
+    excluded_collision,
+    "subagent_pause",
+    "EXCLUDED_LIFECYCLE_COLLISION",
+    ["cli"],
+  )
+  let included_trigger = tool_registry()
+  included_trigger = define_tool(
+    included_trigger,
+    "spawn_agent",
+    "INCLUDED_SPAWN_TRIGGER",
+    ["agent"],
+  )
+  // Exercise the public precomposition path documented for scripts that
+  // assemble registries before passing them to agent_loop.
+  const excluded_precomposed = agent_lifecycle_tools(harness.agent, excluded_trigger)
+  const collision_precomposed = agent_lifecycle_tools(harness.agent, excluded_collision)
+  const included_precomposed = agent_lifecycle_tools(harness.agent, included_trigger)
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<done>excluded trigger measured</done>"),
+      llm_text("<done>excluded collision measured</done>"),
+      llm_text("<done>included trigger measured</done>"),
+    ],
+    { ->
+      run_agent(harness, excluded_precomposed)
+      run_agent(harness, collision_precomposed)
+      run_agent(harness, included_precomposed)
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 3, "all three production-shaped agent paths reached the model")
+      const excluded_system = calls[0].system ?? ""
+      assert(
+        !contains(excluded_system, "EXCLUDED_LIFECYCLE_TRIGGER"),
+        "excluded lifecycle trigger is absent from the model surface",
+      )
+      assert(
+        !contains(excluded_system, "subagent_pause"),
+        "excluded lifecycle trigger does not add parent controls",
+      )
+      assert(!contains(excluded_system, "subagent_resume"))
+      assert(!contains(excluded_system, "subagent_stop"))
+      const collision_system = calls[1].system ?? ""
+      assert(
+        !contains(collision_system, "EXCLUDED_LIFECYCLE_COLLISION"),
+        "excluded collision metadata is absent",
+      )
+      assert(
+        contains(collision_system, "Cooperatively pause a running subagent"),
+        "excluded collision cannot suppress the canonical pause control",
+      )
+      assert(contains(collision_system, "subagent_resume"))
+      assert(contains(collision_system, "subagent_stop"))
+      const included_system = calls[2].system ?? ""
+      assert(
+        contains(included_system, "INCLUDED_SPAWN_TRIGGER"),
+        "included lifecycle trigger remains model-visible",
+      )
+      assert(contains(included_system, "subagent_pause"))
+      assert(contains(included_system, "subagent_resume"))
+      assert(contains(included_system, "subagent_stop"))
+      harness.stdio.log("tool_governance_agent_lifecycle_projection tests passed")
+    },
+  )
+}

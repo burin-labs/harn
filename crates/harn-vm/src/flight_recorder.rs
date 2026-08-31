@@ -59,7 +59,9 @@ pub struct FlightRecordingArtifact {
     pub schema_version: u32,
     pub execution_id: String,
     pub format: String,
-    pub path: String,
+    /// Local locator for the recording payload. Public projections omit it;
+    /// local hosts may opt in when they can actually open the artifact.
+    pub path: Option<String>,
     pub content_hash: String,
     pub byte_length: u64,
     pub retained_events: usize,
@@ -239,7 +241,7 @@ pub fn persist_recording(
         schema_version: recording.schema_version,
         execution_id: recording.execution_id.clone(),
         format: FLIGHT_RECORDING_FORMAT.to_string(),
-        path: path.to_string_lossy().into_owned(),
+        path: Some(path.to_string_lossy().into_owned()),
         content_hash: format!("blake3:{}", blake3::hash(&bytes).to_hex()),
         byte_length: bytes.len() as u64,
         retained_events: recording.events.len(),

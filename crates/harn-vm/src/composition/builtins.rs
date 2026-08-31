@@ -265,7 +265,9 @@ pub fn register_composition_builtins(vm: &mut Vm) {
                 Some(closure) => Arc::new(ClosureCompositionToolHost::new(closure, ctx.clone())),
                 None => Arc::new(StaticCompositionToolHost::new(BTreeMap::new())),
             };
-            let report = execute_harn_composition(request, host).await;
+            let execution_id = ctx.execution_id();
+            let mut report = execute_harn_composition(request, host).await;
+            report.run.execution_id = Some(execution_id);
             Ok(crate::json_to_vm_value(
                 &serde_json::to_value(report).unwrap_or_else(|_| serde_json::json!({"ok": false})),
             ))

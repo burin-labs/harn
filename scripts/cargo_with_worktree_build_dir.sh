@@ -8,6 +8,34 @@ unset HARN_CARGO_LEASE_WORKSPACE
 # shellcheck source=scripts/lib/cargo_env.sh
 source "$script_dir/lib/cargo_env.sh"
 
+# A rustc earlier on PATH than the rustup shim shadows rust-toolchain.toml, so
+# a local gate silently compiles under a different compiler than CI and its
+# green or red is not comparable. Refuse before Cargo starts, naming both
+# versions and the correction.
+harn_require_pinned_rustc() {
+  local pin_file="$workspace/rust-toolchain.toml"
+  local pinned resolved
+  [[ -f "$pin_file" ]] || return 0
+  pinned="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$pin_file" | head -n 1)"
+  # Only an exact version pin is comparable; a channel name resolves per host.
+  [[ "$pinned" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 0
+  # A rustc that cannot report a version is Cargo's problem to fail on, loudly
+  # and by itself. This guard only answers "which compiler", never "is there one".
+  resolved="$(rustc --version 2>/dev/null | awk '{print $2}')" || return 0
+  [[ -n "$resolved" && "$resolved" != "$pinned" ]] || return 0
+  echo "error: rust-toolchain.toml pins rustc $pinned but $(command -v rustc) resolves to $resolved" >&2
+  echo "       local results under $resolved are not comparable to CI" >&2
+  # PATH order is the fix, not RUSTUP_TOOLCHAIN: a shadowing compiler that is
+  # not a rustup shim ignores that variable entirely, so suggesting it first
+  # would send the reader in a circle.
+  echo "       fix: put the rustup shim directory (usually \$HOME/.cargo/bin) ahead of $(dirname "$(command -v rustc)") on PATH" >&2
+  echo "       RUSTUP_TOOLCHAIN=$pinned only helps once the shim resolves first" >&2
+  exit 1
+}
+if [[ "${HARN_ALLOW_TOOLCHAIN_MISMATCH:-0}" != "1" ]]; then
+  harn_require_pinned_rustc
+fi
+
 lease_runner_request="${HARN_CARGO_LEASE_RUNNER:-}"
 lease_owner="${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
 lease_host="${HARN_CARGO_LEASE_HOST:-}"

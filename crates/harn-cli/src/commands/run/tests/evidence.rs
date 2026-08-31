@@ -79,7 +79,7 @@ async fn canonical_run_persists_one_identity_across_record_spans_and_flight_arti
     }));
     let artifact = run.evidence.flight_recording.unwrap();
     assert_eq!(artifact.execution_id, run.id);
-    assert_eq!(artifact.path, flight_path.to_string_lossy());
+    assert_eq!(artifact.path.as_deref(), flight_path.to_str());
     assert!(artifact.retained_events > 0);
     let flight_bytes = std::fs::read(&flight_path).unwrap();
     assert_eq!(artifact.byte_length, flight_bytes.len() as u64);

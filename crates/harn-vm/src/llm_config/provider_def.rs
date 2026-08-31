@@ -75,6 +75,12 @@ pub struct ProviderDef {
     /// deliberately fail-closed for hosted adapters: an undocumented field
     /// must not be guessed onto a third-party wire.
     pub stream_usage_accounting: Option<bool>,
+    /// Researched retention/training posture for this provider: what control
+    /// it exposes per request, if any, and what happens when Harn sets
+    /// nothing. `None` means the provider sits in the audit registry's
+    /// expiring unresearched queue — deliberately not the same claim as a
+    /// declared `control_scope = "none"`.
+    pub data_controls: Option<DataControlsDef>,
     pub features: Vec<String>,
     /// Fallback provider name to try if this provider fails.
     pub fallback: Option<String>,
@@ -166,6 +172,8 @@ struct ProviderDefWire {
     #[serde(default)]
     stream_usage_accounting: Option<bool>,
     #[serde(default)]
+    data_controls: Option<DataControlsDef>,
+    #[serde(default)]
     features: Vec<String>,
     #[serde(default)]
     fallback: Option<String>,
@@ -222,6 +230,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             local_runtime: wire.local_runtime,
             cache_usage_accounting: wire.cache_usage_accounting,
             stream_usage_accounting: wire.stream_usage_accounting,
+            data_controls: wire.data_controls,
             features: wire.features,
             fallback: wire.fallback,
             retry_count: wire.retry_count,
@@ -265,6 +274,7 @@ impl Default for ProviderDef {
             local_runtime: None,
             cache_usage_accounting: None,
             stream_usage_accounting: None,
+            data_controls: None,
             features: Vec::new(),
             fallback: None,
             retry_count: None,
@@ -325,6 +335,7 @@ impl ProviderDef {
             &mut self.stream_usage_accounting,
             &overlay.stream_usage_accounting,
         );
+        merge_option(&mut self.data_controls, &overlay.data_controls);
         merge_vec(&mut self.features, &overlay.features);
         merge_option(&mut self.fallback, &overlay.fallback);
         merge_option(&mut self.retry_count, &overlay.retry_count);

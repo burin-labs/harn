@@ -35,6 +35,7 @@ mod agent_terminal_class;
 /// and this is the owner of what those status strings mean.
 pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
+mod agent_tool_governance;
 mod agent_tools;
 pub mod api;
 #[cfg(test)]
@@ -604,10 +605,14 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
         }
         None => String::new(),
     };
-    let registry = args
-        .get(1)
-        .map(helpers::vm_value_to_json)
-        .unwrap_or(serde_json::Value::Null);
+    let registry = match args.get(1) {
+        Some(registry) => crate::tool_registry::project_tools_for_audience(
+            registry,
+            crate::tool_registry::ToolAudience::Agent,
+        )
+        .map(|registry| helpers::vm_value_to_json(&registry))?,
+        None => serde_json::Value::Null,
+    };
     let opts = args
         .get(2)
         .map(helpers::vm_value_to_json)
@@ -684,6 +689,7 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     // agent.host
     &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
+    &agent_tool_governance::HOST_AGENT_OWN_LIFECYCLE_REGISTRY_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,

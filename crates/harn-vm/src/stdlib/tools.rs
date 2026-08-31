@@ -502,20 +502,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "tool_schema: requires a tool registry",
         )))
     })?;
-    let catalog = crate::tool_registry::tool_registry_catalog(registry)?;
-    let mut schema = serde_json::to_value(catalog)
-        .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
-    if let Some(components) = args.get(1).and_then(VmValue::as_dict) {
-        let components = crate::tool_registry::result_to_json(&VmValue::dict(components.clone()))
-            .map_err(|error| {
-            VmError::Runtime(format!(
-                "tool_schema: components are not portable JSON: {error}"
-            ))
-        })?;
-        schema["components"] = serde_json::json!({
-            "schemas": components
-        });
-    }
+    let schema = crate::tool_registry::tool_registry_schema(registry, args.get(1))?;
     Ok(crate::schema::json_to_vm_value(&schema))
 }
 

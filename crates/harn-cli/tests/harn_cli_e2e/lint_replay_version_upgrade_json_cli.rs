@@ -115,6 +115,10 @@ fn replay_json_loads_persisted_run_record() {
         ],
         "transitions": [],
         "transcript": { "events": [] },
+        "evidence": {
+            "schema_version": 1,
+            "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001"
+        },
         "replay_fixture": null
     });
     std::fs::write(&path, serde_json::to_string(&run).unwrap()).expect("write");
@@ -137,6 +141,10 @@ fn replay_json_loads_persisted_run_record() {
         "data should be present even on fixture-fail"
     );
     assert_eq!(data["run_id"], "test-run-1");
+    assert_eq!(
+        data["execution_id"],
+        "hxe-019c13e0-8080-7000-8000-000000000001"
+    );
     assert_eq!(data["stage_count"], 1);
     assert_eq!(data["stages"][0]["node_id"], "main");
     assert!(

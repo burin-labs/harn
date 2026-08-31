@@ -26,6 +26,7 @@ mod builtins;
 mod connect;
 mod notifications;
 mod protocol;
+mod raw_stdio;
 mod roots;
 mod sdk;
 mod transport;
@@ -52,6 +53,7 @@ const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = rmcp::model::DEFAULT_MRTR_MAX_ROUND
 /// task/progress-polling pattern rather than a call held open for minutes
 /// (harn#4390).
 const MCP_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
+const MCP_CHILD_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -284,6 +286,13 @@ impl VmMcpClientHandle {
             match inner {
                 McpClientInner::Sdk(mut inner) => {
                     let _ = inner.running.close_with_timeout(MCP_TIMEOUT).await;
+                    if !matches!(
+                        tokio::time::timeout(MCP_CHILD_SHUTDOWN_TIMEOUT, inner.child.wait()).await,
+                        Ok(Ok(_))
+                    ) {
+                        let _ = inner.child.kill().await;
+                        let _ = inner.child.wait().await;
+                    }
                 }
                 McpClientInner::Http(_) => {}
             }
