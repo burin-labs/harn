@@ -21,7 +21,9 @@ pub(crate) use options::{
 };
 #[cfg(test)]
 pub(crate) use options::{strip_directive_commit_metadata, tracked_directive_envelope_message};
-pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
+pub(crate) use provider::{
+    vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider, ResolvedProvider,
+};
 #[cfg(test)]
 pub(crate) use transcript::transcript_to_vm_with_events;
 pub(crate) use transcript::{
