@@ -58,6 +58,12 @@ fn redact_execution_evidence_with_policy(
                 serde_json::json!(execution_id),
             );
         }
+        if let Some(cost_usd) = span.cost_usd {
+            span.metadata.insert(
+                crate::tracing::meta::COST_USD.to_string(),
+                serde_json::json!(cost_usd),
+            );
+        }
         span.trace_id = redact_bounded(&span.trace_id, policy, PREVIEW_LIMIT);
         span.kind = redact_bounded(&span.kind, policy, PREVIEW_LIMIT);
         span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
@@ -120,6 +126,15 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
             .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
         {
             span.cost_usd = None;
+            invalid_span_cost = true;
+        }
+        if span
+            .metadata
+            .get(crate::tracing::meta::COST_USD)
+            .and_then(Value::as_f64)
+            .is_some_and(|cost| cost < 0.0)
+        {
+            span.metadata.remove(crate::tracing::meta::COST_USD);
             invalid_span_cost = true;
         }
     }
@@ -268,7 +283,13 @@ mod tests {
                 trace_id: secret_url.clone(),
                 kind: secret_url.clone(),
                 name: secret_url.clone(),
-                metadata: BTreeMap::from([("api_key".to_string(), serde_json::json!(SECRET))]),
+                metadata: BTreeMap::from([
+                    ("api_key".to_string(), serde_json::json!(SECRET)),
+                    (
+                        crate::tracing::meta::COST_USD.to_string(),
+                        serde_json::json!(99.0),
+                    ),
+                ]),
                 links: vec![crate::tracing::SpanLink {
                     trace_id: secret_url.clone(),
                     span_id: secret_url.clone(),
@@ -282,6 +303,7 @@ mod tests {
                     )]),
                     ..crate::tracing::SpanEvent::default()
                 }],
+                cost_usd: Some(0.25),
                 ..crate::orchestration::RunTraceSpanRecord::default()
             });
         run.evidence
@@ -301,7 +323,15 @@ mod tests {
 
         assert!(!rendered.contains(SECRET), "projected evidence: {rendered}");
         assert_eq!(projected.trace_spans[0].events.len(), 1);
+        assert_eq!(
+            projected.trace_spans[0].metadata[crate::tracing::meta::COST_USD],
+            serde_json::json!(0.25)
+        );
         assert_eq!(run.evidence.trace_spans[0].metadata["api_key"], SECRET);
+        assert_eq!(
+            run.evidence.trace_spans[0].metadata[crate::tracing::meta::COST_USD],
+            serde_json::json!(99.0)
+        );
         crate::orchestration::validate_execution_evidence(&projected).unwrap();
     }
 
@@ -323,6 +353,10 @@ mod tests {
             .trace_spans
             .push(crate::orchestration::RunTraceSpanRecord {
                 cost_usd: Some(f64::NAN),
+                metadata: BTreeMap::from([(
+                    crate::tracing::meta::COST_USD.to_string(),
+                    serde_json::json!(-0.01),
+                )]),
                 ..crate::orchestration::RunTraceSpanRecord::default()
             });
 
@@ -339,6 +373,9 @@ mod tests {
             ArtifactPathVisibility::Hidden,
         );
         assert_eq!(projected.trace_spans[0].cost_usd, None);
+        assert!(!projected.trace_spans[0]
+            .metadata
+            .contains_key(crate::tracing::meta::COST_USD));
         assert!(projected
             .gaps
             .iter()

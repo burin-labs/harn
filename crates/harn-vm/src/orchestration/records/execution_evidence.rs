@@ -37,12 +37,15 @@ pub fn validate_execution_evidence(
         return Err(ExecutionEvidenceValidationError::MissingExecutionId);
     };
     validate_execution_id(execution_id)?;
-    if evidence
-        .trace_spans
-        .iter()
-        .filter_map(|span| span.cost_usd)
-        .any(|cost| !cost.is_finite() || cost < 0.0)
-    {
+    if evidence.trace_spans.iter().any(|span| {
+        span.cost_usd
+            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+            || span
+                .metadata
+                .get(crate::tracing::meta::COST_USD)
+                .and_then(serde_json::Value::as_f64)
+                .is_some_and(|cost| cost < 0.0)
+    }) {
         return Err(ExecutionEvidenceValidationError::InvalidSpanCost);
     }
     let Some(recording) = evidence.flight_recording.as_ref() else {
@@ -194,5 +197,18 @@ mod tests {
                 Err(ExecutionEvidenceValidationError::InvalidSpanCost)
             );
         }
+
+        let mut evidence = evidence();
+        evidence.trace_spans.push(super::super::RunTraceSpanRecord {
+            metadata: std::collections::BTreeMap::from([(
+                crate::tracing::meta::COST_USD.to_string(),
+                serde_json::json!(-0.01),
+            )]),
+            ..super::super::RunTraceSpanRecord::default()
+        });
+        assert_eq!(
+            validate_execution_evidence(&evidence),
+            Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+        );
     }
 }
