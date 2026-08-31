@@ -159,6 +159,20 @@ fn canonicalize_schema_dict(
     if let Some(max) = schema.get("max").or_else(|| schema.get("maximum")) {
         out.insert(crate::value::intern_key("max"), max.clone());
     }
+    if let Some(multiple_of) = schema
+        .get("multiple_of")
+        .or_else(|| schema.get("multipleOf"))
+    {
+        let valid = match multiple_of {
+            VmValue::Int(value) => *value > 0,
+            VmValue::Float(value) => value.is_finite() && *value > 0.0,
+            _ => false,
+        };
+        if !valid {
+            return Err("multipleOf must be a finite number greater than zero".to_string());
+        }
+        out.insert(crate::value::intern_key("multiple_of"), multiple_of.clone());
+    }
     if let Some(min_length) = schema.get("min_length").or_else(|| schema.get("minLength")) {
         out.insert(crate::value::intern_key("min_length"), min_length.clone());
     }
@@ -554,6 +568,9 @@ fn canonical_to_json_schema_with(
         }
         if let Some(max) = schema_number(schema_dict, "max") {
             out.insert("maximum".to_string(), serde_json::json!(max));
+        }
+        if let Some(multiple_of) = schema_number(schema_dict, "multiple_of") {
+            out.insert("multipleOf".to_string(), serde_json::json!(multiple_of));
         }
         if let Some(min_length) = schema_i64(schema_dict, "min_length") {
             out.insert("minLength".to_string(), serde_json::json!(min_length));

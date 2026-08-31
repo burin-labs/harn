@@ -694,6 +694,12 @@ fn json_schema_fractional_multiple_of_accepts_and_rejects_consistently() {
 
     assert!(schema_is_value(&VmValue::Float(1.5), &schema).unwrap());
     assert!(!schema_is_value(&VmValue::Float(1.3), &schema).unwrap());
+
+    let invalid = make_vm_dict(vec![
+        ("type", s("number")),
+        ("multipleOf", VmValue::Float(0.0)),
+    ]);
+    assert_schema_error_contains(&invalid, "greater than zero");
 }
 
 #[test]
