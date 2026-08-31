@@ -357,6 +357,10 @@ async fn stable_input_required_result_dispatches_and_retries() {
         .run_until(async {
             let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
             let handle = stable_http_handle(&base_url).await;
+            let session_id =
+                crate::agent_sessions::open_or_create(Some("mcp-input-required".to_string()));
+            let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+            let captured_events = install_capturing_agent_sink(&session_id);
             install_sampling_mock().await;
             let result = call_mcp_tool(
                 &handle,
@@ -388,6 +392,61 @@ async fn stable_input_required_result_dispatches_and_retries() {
                 retry_call.body["params"]["requestState"],
                 serde_json::json!("state-1")
             );
+
+            // The schema belongs to the embedded input request and is not
+            // echoed in the protocol retry. This event is emitted after the
+            // production InputRequests decode and re-serialization boundary;
+            // the retry assertions above prove that the same round completed.
+            let events = captured_events.lock().unwrap();
+            let elicitation_requests = events
+                .iter()
+                .filter_map(|event| match event {
+                    crate::agent_events::AgentEvent::McpNotification {
+                        server,
+                        method,
+                        direction,
+                        params,
+                        ..
+                    } if server == "stable-http"
+                        && method == crate::mcp_elicit::ELICITATION_METHOD
+                        && direction == "request" =>
+                    {
+                        Some(params)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                elicitation_requests.len(),
+                1,
+                "expected one decoded elicitation request, got {events:?}"
+            );
+            let requested_schema = &elicitation_requests[0]["requestedSchema"];
+            assert_eq!(
+                requested_schema["$schema"],
+                serde_json::json!("https://json-schema.org/draft/2020-12/schema")
+            );
+            let property_names = requested_schema["properties"]
+                .as_object()
+                .expect("elicitation schema properties")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                property_names,
+                ["zeta", "alpha"],
+                "typed RMCP conversion must preserve declared property order"
+            );
+            assert_eq!(
+                requested_schema["properties"]["zeta"]["type"],
+                serde_json::json!("string")
+            );
+            assert_eq!(
+                requested_schema["properties"]["alpha"]["type"],
+                serde_json::json!("integer")
+            );
+            drop(events);
+            crate::agent_events::clear_session_sinks(&session_id);
             clear_sampling_mock().await;
         })
         .await;
@@ -804,8 +863,12 @@ fn stable_http_tool_call_response(
                             "mode": "form",
                             "message": "Need input",
                             "requestedSchema": {
+                                "$schema": "https://json-schema.org/draft/2020-12/schema",
                                 "type": "object",
-                                "properties": {"answer": {"type": "string"}}
+                                "properties": {
+                                    "zeta": {"type": "string"},
+                                    "alpha": {"type": "integer"}
+                                }
                             }
                         }
                     },
