@@ -3509,6 +3509,8 @@ dependencies = [
 name = "harn-cli-aot-gen"
 version = "0.10.125-dev"
 dependencies = [
+ "harn-modules",
+ "harn-parser",
  "harn-stdlib",
  "harn-vm",
  "serde",

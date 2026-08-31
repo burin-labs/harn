@@ -35,29 +35,32 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             )
             .await;
 
-            push_llm_mock(LlmMock {
-                text: "yes".to_string(),
-                tool_calls: Vec::new(),
-                raw_tool_calls: Vec::new(),
-                match_pattern: None,
-                scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-                entry_id: String::new(),
-                sticky: false,
-                input_tokens: Some(3_000),
-                output_tokens: Some(4_000),
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                simulated_cost_usd: Some(0.002),
-                thinking: None,
-                thinking_summary: None,
-                stop_reason: None,
-                model: "gpt-4o-mini".to_string(),
-                provider: Some("mock".to_string()),
-                blocks: None,
-                logprobs: Vec::new(),
-                error: None,
-                stream_chunks: Vec::new(),
-            });
+            push_dispatcher_llm_mock(
+                &dispatcher,
+                LlmMock {
+                    text: "yes".to_string(),
+                    tool_calls: Vec::new(),
+                    raw_tool_calls: Vec::new(),
+                    match_pattern: None,
+                    scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+                    entry_id: String::new(),
+                    sticky: false,
+                    input_tokens: Some(3_000),
+                    output_tokens: Some(4_000),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    simulated_cost_usd: Some(0.002),
+                    thinking: None,
+                    thinking_summary: None,
+                    stop_reason: None,
+                    model: "gpt-4o-mini".to_string(),
+                    provider: Some("mock".to_string()),
+                    blocks: None,
+                    logprobs: Vec::new(),
+                    error: None,
+                    stream_chunks: Vec::new(),
+                },
+            );
 
             let outcome = dispatcher
                 .dispatch_event(trigger_event("issues.opened", "delivery-budget"))
@@ -89,7 +92,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             assert!(!outbox
                 .iter()
                 .any(|(_, event)| event.kind == "dispatch_started"));
-            assert_eq!(get_llm_mock_calls().len(), 1);
+            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
         })
         .await;
 }
@@ -125,29 +128,32 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             )
             .await;
 
-            push_llm_mock(LlmMock {
-                text: "yes".to_string(),
-                tool_calls: Vec::new(),
-                raw_tool_calls: Vec::new(),
-                match_pattern: None,
-                scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-                entry_id: String::new(),
-                sticky: false,
-                input_tokens: Some(3_000),
-                output_tokens: Some(4_000),
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                simulated_cost_usd: Some(0.002),
-                thinking: None,
-                thinking_summary: None,
-                stop_reason: None,
-                model: "gpt-4o-mini".to_string(),
-                provider: Some("mock".to_string()),
-                blocks: None,
-                logprobs: Vec::new(),
-                error: None,
-                stream_chunks: Vec::new(),
-            });
+            push_dispatcher_llm_mock(
+                &dispatcher,
+                LlmMock {
+                    text: "yes".to_string(),
+                    tool_calls: Vec::new(),
+                    raw_tool_calls: Vec::new(),
+                    match_pattern: None,
+                    scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+                    entry_id: String::new(),
+                    sticky: false,
+                    input_tokens: Some(3_000),
+                    output_tokens: Some(4_000),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    simulated_cost_usd: Some(0.002),
+                    thinking: None,
+                    thinking_summary: None,
+                    stop_reason: None,
+                    model: "gpt-4o-mini".to_string(),
+                    provider: Some("mock".to_string()),
+                    blocks: None,
+                    logprobs: Vec::new(),
+                    error: None,
+                    stream_chunks: Vec::new(),
+                },
+            );
 
             let first = dispatcher
                 .dispatch_event(trigger_event("issues.opened", "delivery-daily-1"))
@@ -180,7 +186,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
                     .and_then(|result| result["reason"].as_str()),
                 Some("daily_budget_exceeded")
             );
-            assert_eq!(get_llm_mock_calls().len(), 1);
+            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
 
             let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
             let daily_events = lifecycle_payloads(&lifecycle, "predicate.daily_budget_exceeded");
@@ -245,7 +251,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
                 .expect("dispatch outcome");
 
             assert_eq!(outcome.status, DispatchStatus::Succeeded);
-            assert_eq!(get_llm_mock_calls().len(), 0);
+            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 0);
             let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
             let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
             assert_eq!(evaluated[0]["result"], serde_json::json!(true));
@@ -383,29 +389,32 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
             )
             .await;
 
-            push_llm_mock(LlmMock {
-                text: "yes".to_string(),
-                tool_calls: Vec::new(),
-                raw_tool_calls: Vec::new(),
-                match_pattern: None,
-                scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-                entry_id: String::new(),
-                sticky: false,
-                input_tokens: Some(10),
-                output_tokens: Some(5),
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                simulated_cost_usd: None,
-                thinking: None,
-                thinking_summary: None,
-                stop_reason: None,
-                model: "gpt-4o-mini".to_string(),
-                provider: Some("mock".to_string()),
-                blocks: None,
-                logprobs: Vec::new(),
-                error: None,
-                stream_chunks: Vec::new(),
-            });
+            push_dispatcher_llm_mock(
+                &dispatcher,
+                LlmMock {
+                    text: "yes".to_string(),
+                    tool_calls: Vec::new(),
+                    raw_tool_calls: Vec::new(),
+                    match_pattern: None,
+                    scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+                    entry_id: String::new(),
+                    sticky: false,
+                    input_tokens: Some(10),
+                    output_tokens: Some(5),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    simulated_cost_usd: None,
+                    thinking: None,
+                    thinking_summary: None,
+                    stop_reason: None,
+                    model: "gpt-4o-mini".to_string(),
+                    provider: Some("mock".to_string()),
+                    blocks: None,
+                    logprobs: Vec::new(),
+                    error: None,
+                    stream_chunks: Vec::new(),
+                },
+            );
 
             let event = trigger_event("issues.opened", "delivery-replay-cache");
             let first = dispatcher
@@ -416,9 +425,9 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
                 .next()
                 .expect("first outcome");
             assert_eq!(first.status, DispatchStatus::Succeeded);
-            assert_eq!(get_llm_mock_calls().len(), 1);
+            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
 
-            crate::llm::reset_llm_state();
+            reset_dispatcher_llm_mocks(&dispatcher);
 
             let binding =
                 resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
@@ -427,7 +436,7 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
                 .await
                 .expect("replay succeeds");
             assert_eq!(replay.status, DispatchStatus::Succeeded);
-            assert!(get_llm_mock_calls().is_empty());
+            assert!(dispatcher_llm_mock_calls(&dispatcher).is_empty());
 
             let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
             let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
