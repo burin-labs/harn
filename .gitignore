@@ -43,6 +43,8 @@ conformance/tests/**/.harn/metadata/
 conformance/tests/**/.harn/memory/
 conformance/tests/**/.harn/checkpoints/
 conformance/tests/**/.harn/workflows/
+conformance/tests/**/.harn/agent-run-writers/
+conformance/tests/**/.harn/fs-cas-locks/
 conformance/tests/**/.harn/*.sqlite
 conformance/tests/**/.harn/*.sqlite-shm
 conformance/tests/**/.harn/*.sqlite-wal
