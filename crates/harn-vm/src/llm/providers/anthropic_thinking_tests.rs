@@ -4,9 +4,8 @@
 
 use super::anthropic::{
     claude_generation, claude_model_supports_tool_search, model_defaults_to_adaptive_thinking,
-    reconcile_request_body, reconcile_request_body_with_option_probe,
-    strip_unsupported_bedrock_converse_sampling_params, strip_unsupported_sampling_params,
-    AnthropicProvider,
+    reconcile_request_body, strip_unsupported_bedrock_converse_sampling_params,
+    strip_unsupported_sampling_params, AnthropicProvider,
 };
 use super::anthropic_test_support::base_payload;
 use crate::llm::api::{ReasoningEffort, ThinkingConfig};
@@ -97,7 +96,13 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
             "thinking": {"type": "disabled"},
             "output_config": {"effort": effort},
         });
-        reconcile_request_body(&mut body, "anthropic", model, &ThinkingConfig::Disabled);
+        reconcile_request_body(
+            &mut body,
+            "anthropic",
+            model,
+            &ThinkingConfig::Disabled,
+            None,
+        );
         body
     };
 
@@ -302,7 +307,7 @@ fn final_reconciliation_preserves_probe_option_and_removes_rejected_prefill() {
         "temperature": 0.2,
         "top_p": 0.9,
     });
-    reconcile_request_body_with_option_probe(
+    reconcile_request_body(
         &mut body,
         "anthropic",
         "claude-opus-5",

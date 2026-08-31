@@ -279,15 +279,6 @@ pub(crate) fn reconcile_request_body(
     provider: &str,
     fallback_model: &str,
     thinking: &ThinkingConfig,
-) {
-    reconcile_request_body_with_option_probe(body, provider, fallback_model, thinking, None);
-}
-
-pub(crate) fn reconcile_request_body_with_option_probe(
-    body: &mut serde_json::Value,
-    provider: &str,
-    fallback_model: &str,
-    thinking: &ThinkingConfig,
     provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
     // Provider overrides are merged before this seam and may replace `model`
