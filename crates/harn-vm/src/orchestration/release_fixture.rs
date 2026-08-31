@@ -270,6 +270,7 @@ pub fn release_fixture_to_trace(fixture: &ReleaseFixture) -> CrystallizationTrac
     CrystallizationTrace {
         version: 1,
         id: trace_id,
+        execution_id: None,
         source: Some(format!(
             "release_harn.harn run {} ({} -> {})",
             fixture.manifest.run_id, release.current_version, release.next_version

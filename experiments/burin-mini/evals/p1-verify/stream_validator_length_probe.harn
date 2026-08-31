@@ -1,0 +1,60 @@
+// harn#7324 instrument check ($0, no inference).
+//
+// The live probe could not make a PRE-FIX binary abort mid-stream on an
+// over-length `detail`, on either a local grammar-constrained route or the
+// hosted Anthropic route where the original population was observed. Before
+// concluding anything from that, force a known non-null read through the same
+// component the mid-stream watcher uses: std/json's partial-JSON validator.
+//
+// If this reports `invalid` on an over-length but structurally complete string,
+// the watcher SHOULD have aborted and the live probe missed for another reason.
+// If it reports `pending`/`valid`, the incremental validator never enforced the
+// length constraint mid-stream, and the abort in the issue had a different
+// trigger than a plain over-length string.
+import { stream_validator } from "std/json/stream"
+
+fn cap_schema() -> dict {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["verdict", "detail"],
+    properties: {
+      verdict: {type: "string", enum: ["done", "not_done"]},
+      detail: {type: "string", minLength: 1, maxLength: 240},
+    },
+  }
+}
+
+fn main(harness: Harness) -> dict {
+  const unit = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  const long_detail = unit + unit + unit + unit + unit
+  // Chunked exactly the way a stream arrives: the `detail` string closes
+  // before the document does, which is the moment the watcher could fire.
+  const v = stream_validator(harness.runtime, cap_schema())
+  v.feed("{\"detail\": \"")
+  const during = to_string(v.status())
+  v.feed(long_detail)
+  const after_overshoot = to_string(v.status())
+  v.feed("\", ")
+  const after_string_closed = to_string(v.status())
+  v.feed("\"verdict\": \"done\"}")
+  const after_document_closed = to_string(v.status())
+  // Direction control: the same shapes with a SHORT detail must never go
+  // invalid, so an "invalid" above cannot be an artifact of the chunking.
+  const c = stream_validator(harness.runtime, cap_schema())
+  c.feed("{\"detail\": \"")
+  c.feed("short")
+  c.feed("\", ")
+  c.feed("\"verdict\": \"done\"}")
+  const control_final = to_string(c.status())
+  return {
+    probe: "harn7324_stream_validator_length",
+    detail_chars: len(long_detail),
+    cap: 240,
+    status_open_string: during,
+    status_after_overshoot: after_overshoot,
+    status_after_string_closed: after_string_closed,
+    status_after_document_closed: after_document_closed,
+    control_short_detail_final: control_final,
+  }
+}

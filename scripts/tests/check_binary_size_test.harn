@@ -383,15 +383,21 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   assert_eq(target.growth.warn_percent_hundredths, 200)
   assert_eq(target.baseline.build_identity.codegen_units, 8)
   assert_eq(target.baseline.build_identity.rustc, "1.95.0")
-  assert_eq(target.accepted_growth.count, 0)
+  assert_eq(target.accepted_growth.count, 1)
+  const acceptance = unwrap(target.accepted_growth[0])
+  assert_eq(acceptance.against_baseline_sha, target.baseline.source_sha)
+  assert_eq(acceptance.bytes, 6937672)
   const baseline = evaluate_release_binary_size(target, measurement(242554944))
   assert_eq(baseline.growth, "ok")
   assert_eq(baseline.failures, [])
-  // Prove that the empty acceptance list still exposes a real regression.
-  const grown = evaluate_release_binary_size(target, measurement(247797824))
-  assert_eq(grown.growth, "warn")
-  assert_eq(grown.failures.count, 1)
-  assert(grown.failures[0]?.starts_with("growth signal:"))
+  const measured_candidate = evaluate_release_binary_size(target, measurement(248968328))
+  assert_eq(measured_candidate.growth, "accepted")
+  assert_eq(measured_candidate.failures, [])
+  // The decision is bounded: one byte beyond its allowance still fails.
+  const beyond_acceptance = evaluate_release_binary_size(target, measurement(249492617))
+  assert_eq(beyond_acceptance.growth, "warn")
+  assert_eq(beyond_acceptance.failures.count, 1)
+  assert(beyond_acceptance.failures[0]?.starts_with("growth signal:"))
   assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
 }
 
