@@ -1004,6 +1004,16 @@ fn direct_vm_call_entrypoint_honors_routing_policy() {
         );
         assert_eq!(requests[0]["model"], "fake-primary");
         assert_eq!(requests[1]["model"], "fake-backup");
+        for request in &requests {
+            assert_eq!(request["requested_model"], request["model"]);
+            assert_eq!(request["alias_chain"], serde_json::json!([]));
+            assert_eq!(request["resolved_provider"], request["provider"]);
+            assert_eq!(request["resolved_model"], request["model"]);
+            assert_eq!(
+                request["model_catalog_version"],
+                crate::llm_config::MODEL_CATALOG_VERSION
+            );
+        }
     });
 }
 
