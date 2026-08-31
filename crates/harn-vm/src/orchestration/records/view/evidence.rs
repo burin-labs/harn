@@ -17,12 +17,36 @@ pub enum ArtifactPathVisibility {
     Local,
 }
 
+/// Produce a redacted, defensively validated copy of execution evidence.
+///
+/// This is the owning boundary for evidence exposed outside the Harn runtime or
+/// persisted by a host. The source record is never mutated. Host-local flight
+/// recording paths are included only when `artifact_paths` permits them.
+pub fn project_execution_evidence(
+    evidence: &ExecutionEvidenceRecord,
+    artifact_paths: ArtifactPathVisibility,
+) -> ExecutionEvidenceRecord {
+    project_execution_evidence_with_policy(
+        evidence,
+        &crate::redact::current_policy(),
+        artifact_paths,
+    )
+}
+
 pub(super) fn project_evidence(
     run: &RunRecord,
     policy: &RedactionPolicy,
     artifact_paths: ArtifactPathVisibility,
 ) -> ExecutionEvidenceRecord {
-    let mut evidence = run.evidence.clone();
+    project_execution_evidence_with_policy(&run.evidence, policy, artifact_paths)
+}
+
+fn project_execution_evidence_with_policy(
+    evidence: &ExecutionEvidenceRecord,
+    policy: &RedactionPolicy,
+    artifact_paths: ArtifactPathVisibility,
+) -> ExecutionEvidenceRecord {
+    let mut evidence = evidence.clone();
     sanitize_untrusted_evidence(&mut evidence);
     let execution_id = evidence.execution_id.clone();
     for span in &mut evidence.trace_spans {
@@ -243,12 +267,16 @@ mod tests {
                 message: secret_url,
             });
 
-        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+        let projected = crate::orchestration::project_execution_evidence(
+            &run.evidence,
+            crate::orchestration::ArtifactPathVisibility::Hidden,
+        );
         let rendered = serde_json::to_string(&projected).unwrap();
 
         assert!(!rendered.contains(SECRET), "projected evidence: {rendered}");
         assert_eq!(projected.trace_spans[0].events.len(), 1);
         assert_eq!(run.evidence.trace_spans[0].metadata["api_key"], SECRET);
+        crate::orchestration::validate_execution_evidence(&projected).unwrap();
     }
 
     #[test]
