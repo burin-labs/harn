@@ -402,7 +402,11 @@ pub fn agent_lifecycle_tools(
   // or only adds lifecycle controls to the ambient host surface. The runtime
   // seals that fact with an opaque host value; callers cannot manufacture or
   // downgrade it through an options dictionary.
-  const registry_origin = if registry == nil {"ambient_host"} else {"explicit"}
+  const registry_origin = if registry == nil {
+    "ambient_host"
+  } else {
+    "explicit"
+  }
   // Project before any name-derived decision. This public function is also a
   // documented precomposition seam, so relying on agent_loop to project its
   // result would let excluded triggers add controls or suppress a canonical
