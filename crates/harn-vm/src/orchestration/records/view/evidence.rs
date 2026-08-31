@@ -366,9 +366,10 @@ mod tests {
             Err(ExecutionEvidenceValidationError::InvalidSpanCost)
         );
 
-        run.evidence.trace_spans[0]
-            .metadata
-            .insert(crate::tracing::meta::COST_USD.to_string(), json!("invalid"));
+        run.evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!("invalid"),
+        );
 
         let mut historical = RunRecord::default();
         historical.evidence.trace_spans = run.evidence.trace_spans;
