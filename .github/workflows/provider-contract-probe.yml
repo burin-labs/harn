@@ -68,6 +68,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
+  HARN_BUILD_REVISION: ${{ github.sha }}
   RUSTFLAGS: "-D warnings"
 
 jobs:

@@ -83,4 +83,35 @@ mod tests {
             ]
         );
     }
+
+    #[tokio::test]
+    async fn embedded_probe_plan_resolves_shared_contracts() {
+        let outcome = crate::dispatch::run_embedded_script(
+            "providers/option_probe",
+            vec![
+                "--provider".into(),
+                "anthropic".into(),
+                "--model".into(),
+                "claude-opus-5".into(),
+                "--option".into(),
+                "temperature".into(),
+                "--max-tokens".into(),
+                "8".into(),
+                "--plan".into(),
+                "--ungated".into(),
+            ],
+            true,
+        )
+        .await;
+        assert_eq!(outcome.exit_code, 0, "stderr={}", outcome.stderr);
+        assert!(outcome.stderr.is_empty(), "stderr={}", outcome.stderr);
+        let report: serde_json::Value =
+            serde_json::from_str(&outcome.stdout).expect("option probe plan JSON");
+        assert_eq!(
+            report["schema_version"],
+            "harn.provider_option_probe_plan.v1"
+        );
+        assert_eq!(report["catalog"]["field"], "temperature_supported");
+        assert_eq!(report["request_count"], 1);
+    }
 }

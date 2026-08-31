@@ -16,8 +16,8 @@ pub import {
   ProviderPortableProbeOption,
   provider_option_probe_catalog_claim,
   provider_option_probe_route,
-} from "./contracts"
-import { provider_portable_option_catalog_field } from "./contracts"
+} from "std/cli/providers/contracts"
+import { provider_portable_option_catalog_field } from "std/cli/providers/contracts"
 
 const __OPTIONS = [
   "temperature",
