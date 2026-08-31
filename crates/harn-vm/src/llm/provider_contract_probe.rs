@@ -3,8 +3,9 @@
 //! Production dispatch lets the capability catalog reject or rewrite options
 //! that a route declares unsupported. A contract probe must send exactly one
 //! selected option through those local guards so the provider, rather than the
-//! catalog, supplies the observation. The exception is typed and task-local so
-//! concurrent calls cannot inherit it.
+//! catalog, supplies the observation. Selection is typed and task-local so
+//! concurrent calls cannot inherit it; extraction then carries the selected
+//! option in the resolved call across spawned transport work.
 
 use super::capabilities::PortableOption;
 
@@ -21,15 +22,16 @@ where
     PORTABLE_OPTION.scope(option, future).await
 }
 
+/// Return the typed probe selection while call options are being extracted.
+pub(crate) fn current_portable_option() -> Option<PortableOption> {
+    PORTABLE_OPTION.try_with(|selected| *selected).ok()
+}
+
 /// Whether catalog policy may reject, omit, or rewrite an explicit portable
 /// option before the provider sees it.
 ///
 /// Production calls always return true. A probe returns false only for its
 /// selected option; every unrelated guard remains active.
-pub(crate) fn current_portable_option() -> Option<PortableOption> {
-    PORTABLE_OPTION.try_with(|selected| *selected).ok()
-}
-
 pub(crate) fn catalog_may_shape_requested_portable_option(
     selected: Option<PortableOption>,
     option: PortableOption,

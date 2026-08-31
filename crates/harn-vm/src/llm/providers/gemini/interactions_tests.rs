@@ -75,7 +75,6 @@ fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
         payload.temperature = Some(0.2);
         payload.top_p = Some(0.8);
         payload.top_k = Some(20);
-        payload.provider_contract_probe = Some(PortableOption::TopK);
         let body =
             crate::llm::api::DialectContract::for_request(&payload).build_request_body(&payload);
         assert_eq!(body["generation_config"]["thinking_level"], "medium");
