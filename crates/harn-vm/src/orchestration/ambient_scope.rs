@@ -130,7 +130,7 @@ pub(crate) struct AmbientExecutionScope {
     /// SAME program run, so a `run_test` executed in a fan-out body must record
     /// (and later issue) under the run's owner. Without this, a verdict issued
     /// from inside `parallel` would fail closed (the owner would read empty).
-    execution_scope: Vec<std::sync::Arc<str>>,
+    execution_scope: Vec<crate::ExecutionId>,
     /// Ordered observable events for this execution tree. JSON runs install a
     /// sink once; inline and spawned work inherit it without exposing sibling
     /// executions to the stream.

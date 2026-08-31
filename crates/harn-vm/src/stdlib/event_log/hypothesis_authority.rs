@@ -55,7 +55,7 @@ pub(super) struct HypothesisEventAuthorityProof {
     pub(super) plan_fingerprint: Arc<str>,
     pub(super) hypothesis_id: Arc<str>,
     pub(super) run_id: Option<Arc<str>>,
-    pub(super) execution_scope: Option<Arc<str>>,
+    pub(super) execution_scope: Option<crate::ExecutionId>,
 }
 
 /// Host-issued, non-serializable evidence that a registered native adapter
