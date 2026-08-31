@@ -2,10 +2,6 @@ use std::path::{Path, PathBuf};
 
 use super::FlightRecorderOptions;
 
-pub(super) struct PersistedExecutionEvidence {
-    pub(super) flight_recording: Option<harn_vm::flight_recorder::FlightRecordingArtifact>,
-}
-
 pub(super) struct ExecutionEvidencePersistFailure {
     pub(super) stage: &'static str,
     pub(super) summary: String,
@@ -21,7 +17,10 @@ pub(super) fn persist_execution_evidence(
     status: &str,
     started_at: String,
     finished_at: String,
-) -> Result<PersistedExecutionEvidence, ExecutionEvidencePersistFailure> {
+) -> Result<
+    Option<harn_vm::flight_recorder::FlightRecordingArtifact>,
+    ExecutionEvidencePersistFailure,
+> {
     let flight_recording = match persist_flight_recording(vm, options, store_base) {
         Ok(recording) => recording,
         Err(error) => {
@@ -66,7 +65,7 @@ pub(super) fn persist_execution_evidence(
         diagnostics: vec![error],
     })?;
     emit_persisted(vm, &run_record_path, flight_recording.clone());
-    Ok(PersistedExecutionEvidence { flight_recording })
+    Ok(flight_recording)
 }
 
 fn emit_persisted(
