@@ -473,6 +473,16 @@ pub(super) fn dump_llm_request(
             "alternatives": decision.alternatives.clone(),
         }));
     }
+    let model_resolution =
+        opts.model_resolution
+            .clone()
+            .unwrap_or_else(|| crate::llm_config::ModelResolution {
+                requested_model: payload.model.clone(),
+                alias_chain: Vec::new(),
+                resolved_provider: payload.provider.clone(),
+                resolved_model: payload.model.clone(),
+                catalog_version: crate::llm_config::MODEL_CATALOG_VERSION.to_string(),
+            });
     let mut request_event = serde_json::json!({
         "type": "provider_call_request",
         "iteration": iteration,
@@ -481,6 +491,11 @@ pub(super) fn dump_llm_request(
         "timestamp": chrono_now(),
         "model": payload.model,
         "provider": payload.provider,
+        "requested_model": model_resolution.requested_model,
+        "alias_chain": model_resolution.alias_chain,
+        "resolved_provider": model_resolution.resolved_provider,
+        "resolved_model": model_resolution.resolved_model,
+        "model_catalog_version": model_resolution.catalog_version,
         "call_role": served_manifest.call_role(),
         "actor_chain": served_manifest.actor_chain(),
         "max_tokens": payload.max_tokens,

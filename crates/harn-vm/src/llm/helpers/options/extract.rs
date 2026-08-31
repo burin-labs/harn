@@ -1,7 +1,7 @@
 use super::*;
 use super::{
-    defaults::*, generation::*, json::*, output::*, reminders::*, routing::*, system_prompt::*,
-    thinking::*, tool_search::*,
+    defaults::*, generation::*, json::*, model_resolution::resolve_model_selection, output::*,
+    reminders::*, routing::*, system_prompt::*, thinking::*, tool_search::*,
 };
 use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
 
@@ -83,8 +83,7 @@ pub(crate) fn extract_llm_options(
         ))));
     }
     let route_policy = parse_route_policy_option(options.as_ref())?;
-    let mut provider = vm_resolve_provider(&options);
-    let mut model = vm_resolve_model(&options, &provider);
+    let (mut provider, mut model, mut model_resolution) = resolve_model_selection(&options)?;
     let routing_decision = resolve_route_policy(&route_policy, &provider, &model)?;
     if let Some(decision) = routing_decision.as_ref() {
         provider = decision.selected_provider.clone();
@@ -143,6 +142,9 @@ pub(crate) fn extract_llm_options(
             model = first.model.clone();
         }
     }
+    model_resolution
+        .resolve_route(&provider, &model)
+        .map_err(super::model_resolution::model_resolution_error)?;
     let (capability_provider, capability_model) =
         crate::llm::managed_supply::logical_route(&provider, &model)?;
     let selection_source = if routing_policy.is_some() || routing_decision.is_some() {
@@ -895,6 +897,7 @@ pub(crate) fn extract_llm_options(
     let mut opts = LlmCallOptions {
         provider,
         model,
+        model_resolution: Some(model_resolution),
         api_key: String::new(),
         api_mode,
         route_policy,

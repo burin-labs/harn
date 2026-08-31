@@ -1,4 +1,5 @@
 import { ModelLadderStep } from "std/llm/options"
+import { get_typed_value } from "std/schema"
 // @harn-entrypoint-category llm.stdlib
 //
 // std/llm/catalog — thin Harn wrappers over the runtime model catalog.
@@ -10,6 +11,21 @@ import { ModelLadderStep } from "std/llm/options"
 import { render_table } from "std/table"
 
 pub type NamedModelLadder = {label?: string, steps: list<ModelLadderStep>}
+
+pub type ModelExecutionContract = {
+  schema: "harn.llm.execution-contract/v2",
+  requested_model: string,
+  alias_chain: list<string>,
+  resolved_provider: string,
+  resolved_model: string,
+  catalog_version: string,
+  wire_model: string,
+  tool_format: string,
+  tier: string,
+  family: string,
+  lineage: string,
+  generation_defaults: dict<string, unknown>,
+}
 
 /**
  * Wraps the harness.llm.model_info(selector) Rust builtin. The runtime always
@@ -27,13 +43,15 @@ pub fn model_info(llm: HarnessLlm, selector: any) {
  * Return the resolved model-route facts that are safe to persist in eval,
  * replay, cost, and audit receipts. The runtime omits arbitrary
  * operator-specific route overlay fields; `generation_defaults` contains only
- * Harn's validated generation-default schema.
+ * Harn's validated generation-default schema. The v2 record includes
+ * requested_model, alias_chain, resolved_provider, resolved_model, and the
+ * compiled catalog_version used for the decision.
  *
  * @effects: []
- * @errors: ["llm_execution_contract: selector is required"]
+ * @errors: ["llm_execution_contract: selector is required", "llm_execution_contract: model resolution failed"]
  */
-pub fn execution_contract(llm: HarnessLlm, selector: any) -> dict {
-  return llm.execution_contract(selector)
+pub fn execution_contract(llm: HarnessLlm, selector: string) -> ModelExecutionContract {
+  return get_typed_value(llm.execution_contract(selector), schema_of(ModelExecutionContract))
 }
 
 /**

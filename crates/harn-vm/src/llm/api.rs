@@ -520,6 +520,8 @@ async fn vm_call_llm_full_inner_offthread(
 }
 
 #[cfg(test)]
+mod model_resolution_tests;
+#[cfg(test)]
 mod request_shaping_tests;
 #[cfg(test)]
 mod test_support;

@@ -1299,6 +1299,44 @@ harness.llm.call("...", nil, {model: "claude-sonnet-5"})
 The `HARN_LLM_MODEL` environment variable sets the default model when none
 is specified in the script.
 
+### Model resolution guarantees
+
+Harn resolves a model selector and its provider as one decision before a
+provider call. A qualified selector such as `openai:gpt-5.6-sol` is a hard
+provider constraint. Harn rejects it if the catalog assigns the model to a
+different provider, if a separate `provider` option disagrees, or if a later
+routing step changes the provider. It does not fall through to the default or
+local provider.
+
+An explicit provider can still name a private or newly released model that is
+not in Harn's catalog:
+
+```harn
+harness.llm.call("...", nil, {
+  provider: "my_proxy",
+  model: "private-model-2026-08"
+})
+```
+
+An unqualified name close to a known alias fails with the compiled catalog
+version and suggested names. This catches alias drift while leaving explicit
+provider-native IDs extensible.
+
+Every provider-call request receipt records:
+
+- `requested_model`
+- `alias_chain`
+- `resolved_provider`
+- `resolved_model`
+- `model_catalog_version`
+
+The runtime compares that receipt identity with the transport route before
+dispatch. A mismatch fails without making a provider request. Use
+`std/llm/catalog.execution_contract` to inspect the same secret-free decision;
+its `harn.llm.execution-contract/v2` record uses `catalog_version` for the
+catalog field and also includes wire-model, tool-format, taxonomy, and validated
+generation defaults.
+
 ### Serverless vs. dedicated routes
 
 Each catalog row carries an `availability` field that distinguishes the
