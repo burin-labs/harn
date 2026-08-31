@@ -591,6 +591,7 @@ fn stage_verification_contracts_can_scope_to_local_contract_only() {
 #[test]
 fn reset_drains_interned_workflow_run_state() {
     crate::reset_thread_local_state();
+    let _scope = crate::enter_execution_scope(crate::mint_execution_scope());
     let graph = WorkflowGraph {
         entry: "act".to_string(),
         nodes: std::collections::BTreeMap::from_iter([(
@@ -626,6 +627,37 @@ fn reset_drains_interned_workflow_run_state() {
     // Belt-and-suspenders: the direct reset also drains.
     reset_workflow_run_states();
     assert_eq!(workflow_run_state_count(), 0);
+}
+
+#[test]
+fn workflow_run_rejects_a_missing_execution_owner() {
+    crate::reset_thread_local_state();
+    let graph = WorkflowGraph {
+        entry: "act".to_string(),
+        nodes: std::collections::BTreeMap::from_iter([(
+            "act".to_string(),
+            WorkflowNode {
+                id: Some("act".to_string()),
+                kind: "act".to_string(),
+                ..Default::default()
+            },
+        )]),
+        ..Default::default()
+    };
+
+    let error = match prepare_workflow_state(
+        "owner-probe".to_string(),
+        graph,
+        Vec::new(),
+        &crate::value::DictMap::new(),
+    ) {
+        Ok(_) => panic!("scope-less workflow construction must fail closed"),
+        Err(error) => error,
+    };
+
+    assert!(error
+        .to_string()
+        .contains("workflow_execute: active execution scope unavailable"));
 }
 
 #[test]

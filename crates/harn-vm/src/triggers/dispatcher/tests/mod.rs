@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 
 use crate::event_log::{install_memory_for_current_thread, EventLog, Topic};
 use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
-use crate::llm::mock::{get_llm_mock_calls, push_llm_mock, LlmMock};
+use crate::llm::mock::{LlmMock, LlmMockCall};
 use crate::register_vm_stdlib;
 use crate::triggers::event::ExtensionProviderPayload;
 use crate::triggers::registry::{
@@ -44,3 +44,15 @@ mod lazy_callable;
 mod persona;
 mod predicate;
 mod retry;
+
+fn push_dispatcher_llm_mock(dispatcher: &Dispatcher, mock: LlmMock) {
+    dispatcher.base_vm.llm_mock_context.push_mock(mock);
+}
+
+fn dispatcher_llm_mock_calls(dispatcher: &Dispatcher) -> Vec<LlmMockCall> {
+    dispatcher.base_vm.llm_mock_context.calls()
+}
+
+fn reset_dispatcher_llm_mocks(dispatcher: &Dispatcher) {
+    dispatcher.base_vm.llm_mock_context.reset();
+}

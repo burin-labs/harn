@@ -833,6 +833,7 @@ fn output_format_json_schema_uses_native_format_with_thinking_and_tools() {
         &payload.provider,
         &payload.model,
         &payload.thinking,
+        None,
     );
 
     assert_eq!(
@@ -897,6 +898,7 @@ fn native_tool_followup_prefill_respects_catalog_capability() {
         &unsupported.provider,
         &unsupported.model,
         &unsupported.thinking,
+        None,
     );
     assert_eq!(
         supported_override_body["messages"]
@@ -913,6 +915,7 @@ fn native_tool_followup_prefill_respects_catalog_capability() {
         &unsupported.provider,
         &unsupported.model,
         &unsupported.thinking,
+        None,
     );
     let unsupported_messages = unsupported_body["messages"]
         .as_array()
@@ -941,6 +944,7 @@ fn native_tool_followup_prefill_respects_catalog_capability() {
         &supported.provider,
         &supported.model,
         &supported.thinking,
+        None,
     );
     let supported_messages = supported_body["messages"]
         .as_array()
@@ -983,6 +987,7 @@ fn persisted_assistant_prefill_respects_catalog_capability() {
         &unsupported.provider,
         &unsupported.model,
         &unsupported.thinking,
+        None,
     );
     let unsupported_messages = unsupported_body["messages"]
         .as_array()
@@ -1003,6 +1008,7 @@ fn persisted_assistant_prefill_respects_catalog_capability() {
         &unsupported.provider,
         &unsupported.model,
         &unsupported.thinking,
+        None,
     );
     assert_eq!(
         supported_override_body, expected_supported_override,
@@ -1019,6 +1025,7 @@ fn persisted_assistant_prefill_respects_catalog_capability() {
         &supported.provider,
         &supported.model,
         &supported.thinking,
+        None,
     );
     assert_eq!(
         supported_body, before_final_reconciliation,
@@ -1050,6 +1057,7 @@ fn final_reconciliation_removes_override_assistant_prefill() {
         "anthropic",
         "claude-sonnet-5",
         &crate::llm::api::ThinkingConfig::Disabled,
+        None,
     );
     let once = body.clone();
     reconcile_request_body(
@@ -1057,6 +1065,7 @@ fn final_reconciliation_removes_override_assistant_prefill() {
         "anthropic",
         "claude-sonnet-5",
         &crate::llm::api::ThinkingConfig::Disabled,
+        None,
     );
 
     assert_eq!(
@@ -1085,6 +1094,7 @@ fn final_reconciliation_rejects_prefill_only_while_thinking_is_on() {
         &crate::llm::api::ThinkingConfig::Enabled {
             budget_tokens: Some(1024),
         },
+        None,
     );
     assert_eq!(
         thinking_on["messages"],
@@ -1102,6 +1112,7 @@ fn final_reconciliation_rejects_prefill_only_while_thinking_is_on() {
         "anthropic",
         "claude-opus-4-5",
         &crate::llm::api::ThinkingConfig::Disabled,
+        None,
     );
     assert_eq!(
         thinking_off, expected,
@@ -1118,6 +1129,7 @@ fn final_reconciliation_rejects_prefill_only_while_thinking_is_on() {
         "anthropic",
         "claude-opus-4-5",
         &crate::llm::api::ThinkingConfig::Disabled,
+        None,
     );
     assert_eq!(
         unknown_thinking["messages"],

@@ -41,6 +41,11 @@ pub(crate) enum ProviderCommand {
     /// credentials.
     #[command(name = "effort-probe")]
     EffortProbe(ProviderEffortProbeArgs),
+    /// Probe whether one portable generation option is accepted by a concrete
+    /// provider endpoint and diff the observation against the catalog claim.
+    /// Sends one small live call, so it costs money and needs credentials.
+    #[command(name = "option-probe")]
+    OptionProbe(ProviderOptionProbeArgs),
     /// Classify prompt-cache conformance from a saved repeat-run usage fixture:
     /// resolve capability support, normalize each run's usage, and emit one
     /// cache verdict. Live repeat probing is not yet wired; pass
@@ -745,4 +750,75 @@ pub(crate) struct ProviderEffortProbeArgs {
     /// Emit the JSON envelope instead of human-readable output.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Empirically test one catalogued portable generation-option claim.
+#[derive(Debug, Args)]
+pub(crate) struct ProviderOptionProbeArgs {
+    /// Provider id naming the concrete endpoint under test.
+    #[arg(value_parser = llm_provider_completion_parser(), hide_possible_values = true)]
+    pub provider: String,
+    /// Provider-native model id. Endpoint identity is provider plus this model;
+    /// aliases are resolved before dispatch.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub model: String,
+    /// Portable option whose catalog claim and wire behavior should be compared.
+    #[arg(long, value_enum)]
+    pub option: ProviderPortableOptionArg,
+    /// Response cap for the minimal probe call.
+    #[arg(long = "max-tokens", default_value_t = 8)]
+    pub max_tokens: i64,
+    /// Print the typed request plan without making a provider call.
+    #[arg(long)]
+    pub plan: bool,
+    /// Exit non-zero for catalog drift and with a distinct code when the wire
+    /// was not measured at all.
+    #[arg(long = "fail-on-drift")]
+    pub fail_on_drift: bool,
+    /// Keep normal catalog admission and adapter shaping enabled. This can
+    /// confirm a positive claim but cannot falsify a negative one.
+    #[arg(long)]
+    pub gated: bool,
+    /// Emit the structured report.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ProviderPortableOptionArg {
+    Temperature,
+    TopP,
+    TopK,
+    Seed,
+    FrequencyPenalty,
+    PresencePenalty,
+    Stop,
+}
+
+impl ProviderPortableOptionArg {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Temperature => "temperature",
+            Self::TopP => "top_p",
+            Self::TopK => "top_k",
+            Self::Seed => "seed",
+            Self::FrequencyPenalty => "frequency_penalty",
+            Self::PresencePenalty => "presence_penalty",
+            Self::Stop => "stop",
+        }
+    }
+
+    pub(crate) const fn portable_option(self) -> harn_vm::llm::capabilities::PortableOption {
+        use harn_vm::llm::capabilities::PortableOption;
+
+        match self {
+            Self::Temperature => PortableOption::Temperature,
+            Self::TopP => PortableOption::TopP,
+            Self::TopK => PortableOption::TopK,
+            Self::Seed => PortableOption::Seed,
+            Self::FrequencyPenalty => PortableOption::FrequencyPenalty,
+            Self::PresencePenalty => PortableOption::PresencePenalty,
+            Self::Stop => PortableOption::Stop,
+        }
+    }
 }
