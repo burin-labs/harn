@@ -37,15 +37,7 @@ pub fn validate_execution_evidence(
         return Err(ExecutionEvidenceValidationError::MissingExecutionId);
     };
     validate_execution_id(execution_id)?;
-    if evidence.trace_spans.iter().any(|span| {
-        span.cost_usd
-            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
-            || span
-                .metadata
-                .get(crate::tracing::meta::COST_USD)
-                .and_then(serde_json::Value::as_f64)
-                .is_some_and(|cost| cost < 0.0)
-    }) {
+    if evidence.trace_spans.iter().any(span_cost_is_invalid) {
         return Err(ExecutionEvidenceValidationError::InvalidSpanCost);
     }
     let Some(recording) = evidence.flight_recording.as_ref() else {
@@ -64,6 +56,22 @@ pub fn validate_execution_evidence(
         return Err(ExecutionEvidenceValidationError::InvalidFlightRecordingHash);
     }
     Ok(())
+}
+
+pub(super) fn span_cost_is_invalid(span: &super::RunTraceSpanRecord) -> bool {
+    match span.cost_usd {
+        Some(cost) => !cost.is_finite() || cost < 0.0,
+        None => span
+            .metadata
+            .get(crate::tracing::meta::COST_USD)
+            .is_some_and(legacy_span_cost_is_invalid),
+    }
+}
+
+pub(super) fn legacy_span_cost_is_invalid(value: &serde_json::Value) -> bool {
+    !value
+        .as_f64()
+        .is_some_and(|cost| cost.is_finite() && cost >= 0.0)
 }
 
 /// Validate one claimed Harn-owned execution identity.
@@ -210,5 +218,17 @@ mod tests {
             validate_execution_evidence(&evidence),
             Err(ExecutionEvidenceValidationError::InvalidSpanCost)
         );
+
+        evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!("not-a-cost"),
+        );
+        assert_eq!(
+            validate_execution_evidence(&evidence),
+            Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+        );
+
+        evidence.trace_spans[0].cost_usd = Some(0.25);
+        assert_eq!(validate_execution_evidence(&evidence), Ok(()));
     }
 }

@@ -128,14 +128,15 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
             span.cost_usd = None;
             invalid_span_cost = true;
         }
-        if span
-            .metadata
-            .get(crate::tracing::meta::COST_USD)
-            .and_then(Value::as_f64)
-            .is_some_and(|cost| cost < 0.0)
-        {
-            span.metadata.remove(crate::tracing::meta::COST_USD);
-            invalid_span_cost = true;
+        if span.cost_usd.is_none() {
+            let legacy_cost_is_invalid = span
+                .metadata
+                .get(crate::tracing::meta::COST_USD)
+                .is_some_and(super::super::execution_evidence::legacy_span_cost_is_invalid);
+            if legacy_cost_is_invalid {
+                span.metadata.remove(crate::tracing::meta::COST_USD);
+                invalid_span_cost = true;
+            }
         }
     }
     if invalid_span_cost {
@@ -364,6 +365,10 @@ mod tests {
             project_execution_evidence(&run.evidence, ArtifactPathVisibility::Hidden),
             Err(ExecutionEvidenceValidationError::InvalidSpanCost)
         );
+
+        run.evidence.trace_spans[0]
+            .metadata
+            .insert(crate::tracing::meta::COST_USD.to_string(), json!("invalid"));
 
         let mut historical = RunRecord::default();
         historical.evidence.trace_spans = run.evidence.trace_spans;
