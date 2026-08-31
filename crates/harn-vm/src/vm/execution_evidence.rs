@@ -32,4 +32,49 @@ impl Vm {
             .as_ref()
             .map(|recorder| recorder.snapshot())
     }
+
+    /// Snapshot the canonical evidence envelope for this execution tree.
+    /// Hosts provide persistence outcomes; Harn owns identity, schema, spans,
+    /// and the relationship between those facts.
+    pub fn execution_evidence(
+        &self,
+        flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
+        gaps: Vec<crate::orchestration::RunEvidenceGapRecord>,
+    ) -> crate::orchestration::ExecutionEvidenceRecord {
+        crate::orchestration::ExecutionEvidenceRecord {
+            schema_version: crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+            execution_id: Some(self.execution_id.to_string()),
+            trace_spans: crate::tracing::peek_spans()
+                .iter()
+                .map(crate::orchestration::RunTraceSpanRecord::from)
+                .collect(),
+            flight_recording,
+            gaps,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn vm_owns_the_execution_evidence_envelope() {
+        let vm = super::Vm::new();
+        let gap = crate::orchestration::RunEvidenceGapRecord {
+            component: "test".to_string(),
+            code: "named_gap".to_string(),
+            message: "named limit".to_string(),
+        };
+
+        let evidence = vm.execution_evidence(None, vec![gap.clone()]);
+
+        assert_eq!(
+            evidence.execution_id.as_deref(),
+            Some(vm.execution_id().as_str())
+        );
+        assert_eq!(
+            evidence.schema_version,
+            crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION
+        );
+        assert_eq!(evidence.gaps, vec![gap]);
+    }
 }

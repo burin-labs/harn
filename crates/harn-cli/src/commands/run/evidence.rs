@@ -150,16 +150,7 @@ pub(super) fn persist_execution_run_record(
             adapter: Some("harn_cli".to_string()),
             ..harn_vm::orchestration::RunExecutionRecord::default()
         }),
-        evidence: harn_vm::orchestration::ExecutionEvidenceRecord {
-            schema_version: harn_vm::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
-            execution_id: Some(execution_id),
-            trace_spans: harn_vm::tracing::peek_spans()
-                .iter()
-                .map(harn_vm::orchestration::RunTraceSpanRecord::from)
-                .collect(),
-            flight_recording: flight_recording.cloned(),
-            gaps,
-        },
+        evidence: vm.execution_evidence(flight_recording.cloned(), gaps),
         ..harn_vm::orchestration::RunRecord::default()
     };
     harn_vm::orchestration::save_execution_run_record(&run, &run_path)
