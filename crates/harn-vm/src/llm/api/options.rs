@@ -500,6 +500,10 @@ pub(crate) struct LlmCallOptions {
     /// wire field. Runtime admission checks this set for every resolved route.
     pub(crate) portable_option_intent:
         std::collections::BTreeSet<crate::llm::capabilities::PortableOption>,
+    /// Internal empirical-probe contract captured at option extraction. This
+    /// travels with spawned transport work so async task boundaries cannot
+    /// silently restore catalog shaping or bounded retries.
+    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 
     // --- Serving tier ---
     /// Opt into the model's accelerated-serving ("fast mode") tier. Maps to
@@ -656,6 +660,7 @@ impl Default for LlmCallOptions {
             presence_penalty: None,
             parallel_tool_calls: None,
             portable_option_intent: std::collections::BTreeSet::new(),
+            provider_contract_probe: None,
             fast: false,
             output_format: OutputFormat::default(),
             output_schema: None,
@@ -852,6 +857,9 @@ pub(crate) struct LlmRequestPayload {
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
     pub parallel_tool_calls: Option<bool>,
+    /// See [`LlmCallOptions::provider_contract_probe`].
+    #[serde(skip_serializing)]
+    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
     /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
@@ -1023,6 +1031,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
             parallel_tool_calls: opts.parallel_tool_calls,
+            provider_contract_probe: opts.provider_contract_probe,
             fast: opts.fast,
             output_format,
             output_schema,

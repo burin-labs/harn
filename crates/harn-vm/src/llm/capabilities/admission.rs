@@ -210,6 +210,7 @@ pub fn admit_portable_option(
         model,
         &crate::llm::api::ThinkingConfig::Disabled,
         option,
+        None,
     )
 }
 
@@ -221,8 +222,15 @@ pub(crate) fn admit_portable_option_for_thinking(
     model: &str,
     thinking: &crate::llm::api::ThinkingConfig,
     option: PortableOption,
+    provider_contract_probe: Option<PortableOption>,
 ) -> Result<(), CapabilityAdmissionError> {
     debug_assert_ne!(option, PortableOption::PromptCacheTtl);
+    if !crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+        provider_contract_probe,
+        option,
+    ) {
+        return Ok(());
+    }
     let user = current_user_overrides();
     let builtin = super::lookup::builtin();
     let (supported, _) =
