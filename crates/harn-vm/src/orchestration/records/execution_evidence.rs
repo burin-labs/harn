@@ -34,9 +34,7 @@ pub fn validate_execution_evidence(
     let Some(execution_id) = evidence.execution_id.as_deref() else {
         return Err(ExecutionEvidenceValidationError::MissingExecutionId);
     };
-    if !is_valid_execution_id(execution_id) {
-        return Err(ExecutionEvidenceValidationError::InvalidExecutionId);
-    }
+    validate_execution_id(execution_id)?;
     let Some(recording) = evidence.flight_recording.as_ref() else {
         return Ok(());
     };
@@ -55,18 +53,28 @@ pub fn validate_execution_evidence(
     Ok(())
 }
 
-fn is_valid_execution_id(candidate: &str) -> bool {
-    candidate
+/// Validate one claimed Harn-owned execution identity.
+pub fn validate_execution_id(candidate: &str) -> Result<(), ExecutionEvidenceValidationError> {
+    let valid = candidate
         .strip_prefix(EXECUTION_ID_PREFIX)
-        .and_then(|value| uuid::Uuid::parse_str(value).ok())
-        .is_some_and(|value| {
-            value.get_version_num() == 7 && value.get_variant() == uuid::Variant::RFC4122
-        })
+        .is_some_and(|raw| {
+            uuid::Uuid::parse_str(raw).is_ok_and(|value| {
+                raw == value.hyphenated().to_string()
+                    && value.get_version_num() == 7
+                    && value.get_variant() == uuid::Variant::RFC4122
+            })
+        });
+    valid
+        .then_some(())
+        .ok_or(ExecutionEvidenceValidationError::InvalidExecutionId)
 }
 
 fn is_blake3_hash(candidate: &str) -> bool {
     candidate.strip_prefix("blake3:").is_some_and(|digest| {
-        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     })
 }
 
@@ -90,7 +98,7 @@ mod tests {
             schema_version: FLIGHT_RECORDING_SCHEMA_VERSION,
             execution_id: EXECUTION_ID.to_string(),
             format: FLIGHT_RECORDING_FORMAT.to_string(),
-            path: ".harn/receipts/run.flight.json".to_string(),
+            path: Some(".harn/receipts/run.flight.json".to_string()),
             content_hash: format!("blake3:{}", "a".repeat(64)),
             byte_length: 10,
             retained_events: 1,
@@ -103,6 +111,7 @@ mod tests {
     fn accepts_harn_owned_identity_and_matching_flight_artifact() {
         let mut evidence = evidence();
         evidence.flight_recording = Some(artifact());
+        assert_eq!(validate_execution_id(EXECUTION_ID), Ok(()));
         assert_eq!(validate_execution_evidence(&evidence), Ok(()));
     }
 
@@ -110,9 +119,15 @@ mod tests {
     fn rejects_non_v7_and_non_rfc_execution_ids() {
         for invalid in [
             "cloud-run-id",
+            "hxe-019C13E0-8080-7000-8000-000000000001",
+            "hxe-019c13e0808070008000000000000001",
             "hxe-019c13e0-8080-4000-8000-000000000001",
             "hxe-019c13e0-8080-7000-c000-000000000001",
         ] {
+            assert_eq!(
+                validate_execution_id(invalid),
+                Err(ExecutionEvidenceValidationError::InvalidExecutionId)
+            );
             let mut evidence = evidence();
             evidence.execution_id = Some(invalid.to_string());
             assert_eq!(
@@ -145,6 +160,14 @@ mod tests {
                 {
                     let mut artifact = artifact();
                     artifact.content_hash = "blake3:not-a-digest".to_string();
+                    artifact
+                },
+                ExecutionEvidenceValidationError::InvalidFlightRecordingHash,
+            ),
+            (
+                {
+                    let mut artifact = artifact();
+                    artifact.content_hash = format!("blake3:{}", "A".repeat(64));
                     artifact
                 },
                 ExecutionEvidenceValidationError::InvalidFlightRecordingHash,

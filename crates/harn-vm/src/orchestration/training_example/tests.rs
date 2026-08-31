@@ -245,6 +245,7 @@ fn projects_a_text_channel_run_into_canonical_messages() {
     assert_eq!(example.provenance.provider, "llamacpp");
     assert_eq!(example.provenance.model, "qwen3.6-35b");
     assert_eq!(example.provenance.session_id, "sess-1");
+    assert_eq!(example.provenance.execution_id, None);
     assert_eq!(example.provenance.tool_catalog_hash, "schema-hash-1");
     assert_eq!(example.provenance.terminal_status.as_str(), "completed");
     assert_eq!(example.provenance.usage.provider_calls, 2);
@@ -530,6 +531,21 @@ fn rejects_a_wrong_run_identity() {
     request.run_id = Some("run-other".to_string());
     let error = project_agent_training_example(&request).unwrap_err();
     assert_eq!(error.kind, "run_id_mismatch");
+}
+
+#[test]
+fn rejects_a_claimed_non_harn_execution_identity() {
+    let artifact = artifact("run-1", &text_channel_rows());
+    let mut run: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&artifact.run_path).unwrap()).unwrap();
+    run["evidence"] = json!({
+        "schema_version": crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+        "execution_id": "external-run-1",
+    });
+    std::fs::write(&artifact.run_path, serde_json::to_vec_pretty(&run).unwrap()).unwrap();
+
+    let error = project_path(&artifact.run_path).unwrap_err();
+    assert_eq!(error.kind, "invalid_execution_evidence");
 }
 
 #[test]

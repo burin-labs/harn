@@ -133,6 +133,7 @@ pub fn composition_crystallization_trace(
     serde_json::json!({
         "version": 1,
         "id": trace_id,
+        "execution_id": report.run.execution_id,
         "source": "composition_run",
         "source_hash": report.run.snippet_hash,
         "workflow_id": options.get("workflow_id").and_then(Value::as_str).unwrap_or("composition_candidate"),

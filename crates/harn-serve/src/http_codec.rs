@@ -622,6 +622,7 @@ mod tests {
             trace_id: TraceId::default(),
             cached: false,
             duration_ms: 0,
+            dispatch: crate::DispatchCallReceipt::default(),
         }
     }
 
