@@ -16,6 +16,10 @@ pub fn __increment_key(counts: dict, key: string) -> dict {
   return counts + {[key]: (counts[key] ?? 0) + 1}
 }
 
+pub fn __campaign_runner_is_executable(runner: string) -> bool {
+  return runner == "provider_tool_probe" || runner == "provider_option_probe"
+}
+
 pub fn __campaign_slice_selects_unit(ordinal: int, shard_count: int, shard_index: int) -> bool {
   if shard_count <= 1 {
     return true

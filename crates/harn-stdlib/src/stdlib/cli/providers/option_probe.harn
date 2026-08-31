@@ -1,0 +1,320 @@
+/**
+ * `harn provider option-probe` empirically binds one portable generation
+ * option claim to one concrete provider endpoint.
+ *
+ * The normal runtime admits and shapes options from the capability catalog.
+ * That is correct for product calls and circular evidence for a probe. The
+ * Rust dispatch shim therefore selects a typed probe contract for exactly the
+ * chosen option. Option extraction carries that contract through spawned
+ * transport work. Every unrelated catalog guard remains active.
+ */
+import { parse, parser } from "std/cli/argparse"
+pub import {
+  ProviderOptionProbeAttempt,
+  ProviderOptionProbeReport,
+  ProviderOptionProbeVerdict,
+  ProviderPortableProbeOption,
+  provider_option_probe_catalog_claim,
+  provider_option_probe_route,
+} from "./contracts"
+import { provider_portable_option_catalog_field } from "./contracts"
+
+const __OPTIONS = [
+  "temperature",
+  "top_p",
+  "top_k",
+  "seed",
+  "frequency_penalty",
+  "presence_penalty",
+  "stop",
+]
+
+fn __attempt(
+  llm: HarnessLlm,
+  provider: string,
+  model: string,
+  option: ProviderPortableProbeOption,
+  max_tokens: int,
+) -> unknown {
+  const prompt = "Reply with the single word: ok"
+  if option == "temperature" {
+    return try {
+      llm.call(
+        prompt,
+        nil,
+        {provider: provider, model: model, max_tokens: max_tokens, stream: false, temperature: 0.2},
+      )
+    }
+  }
+  if option == "top_p" {
+    return try {
+      llm.call(
+        prompt,
+        nil,
+        {provider: provider, model: model, max_tokens: max_tokens, stream: false, top_p: 0.9},
+      )
+    }
+  }
+  if option == "top_k" {
+    return try {
+      llm.call(
+        prompt,
+        nil,
+        {provider: provider, model: model, max_tokens: max_tokens, stream: false, top_k: 1},
+      )
+    }
+  }
+  if option == "seed" {
+    return try {
+      llm.call(
+        prompt,
+        nil,
+        {provider: provider, model: model, max_tokens: max_tokens, stream: false, seed: 1},
+      )
+    }
+  }
+  if option == "frequency_penalty" {
+    return try {
+      llm.call(
+        prompt,
+        nil,
+        {
+          provider: provider,
+          model: model,
+          max_tokens: max_tokens,
+          stream: false,
+          frequency_penalty: 0.1,
+        },
+      )
+    }
+  }
+  if option == "presence_penalty" {
+    return try {
+      llm.call(
+        prompt,
+        nil,
+        {
+          provider: provider,
+          model: model,
+          max_tokens: max_tokens,
+          stream: false,
+          presence_penalty: 0.1,
+        },
+      )
+    }
+  }
+  return try {
+    llm.call(
+      prompt,
+      nil,
+      {
+        provider: provider,
+        model: model,
+        max_tokens: max_tokens,
+        stream: false,
+        stop: ["harn-option-probe-stop"],
+      },
+    )
+  }
+}
+
+fn __failure_class(error: unknown) -> string {
+  if type_of(error) != "dict" || to_string(error?.origin ?? "") == "local" {
+    return "local"
+  }
+  const kind = to_string(error?.kind ?? "")
+  const reason = to_string(error?.reason ?? "")
+  if reason == "auth_failure" {
+    return "unauthorized"
+  }
+  if kind == "transient" {
+    return "transient"
+  }
+  if contains(["model_unavailable", "context_overflow", "invalid_response"], reason) {
+    return "unrelated"
+  }
+  if kind == "terminal" {
+    return "rejected"
+  }
+  return "unrelated"
+}
+
+/**
+ * Classifies whether a request reached the provider and whether it accepted the selected option.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_classify(outcome: unknown) -> ProviderOptionProbeAttempt {
+  if !is_err(outcome) {
+    const usage = unwrap(outcome)?.usage
+    return {
+      verdict: "accepted",
+      measured: true,
+      input_tokens: usage?.input_tokens,
+      output_tokens: usage?.output_tokens,
+      cost_usd: usage?.cost_usd,
+    }
+  }
+  const raw = unwrap_err(outcome)
+  if type_of(raw) == "dict" && to_string(raw?.reason ?? "") == "empty_generation" {
+    return {verdict: "accepted", measured: true, reason: "served_empty"}
+  }
+  const message = if type_of(raw) == "dict" {
+    to_string(raw?.message ?? raw)
+  } else {
+    to_string(raw)
+  }
+  const class = __failure_class(raw)
+  if class == "local" {
+    return {verdict: "gated_locally", measured: false, failure_class: class, error: message}
+  }
+  if class == "rejected" {
+    return {
+      verdict: "rejected",
+      measured: true,
+      reason: to_string(raw?.reason ?? "invalid_request"),
+      error: message,
+      cost_usd: 0.0,
+    }
+  }
+  return {
+    verdict: "inconclusive",
+    measured: false,
+    failure_class: class,
+    reason: if type_of(raw) == "dict" {
+      to_string(raw?.reason ?? "")
+    } else {
+      ""
+    },
+    error: message,
+  }
+}
+
+/**
+ * Builds the endpoint-keyed claim, observation, and drift receipt for one measured request.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_report(
+  provider: string,
+  model: string,
+  route: string,
+  option: ProviderPortableProbeOption,
+  claimed: bool,
+  ungated: bool,
+  attempt: ProviderOptionProbeAttempt,
+) -> ProviderOptionProbeReport {
+  const observed = if attempt.verdict == "accepted" {
+    true
+  } else if attempt.verdict == "rejected" {
+    false
+  } else {
+    nil
+  }
+  const status: "match" | "drift" | "unmeasured" = if observed == nil {
+    "unmeasured"
+  } else if observed == claimed {
+    "match"
+  } else {
+    "drift"
+  }
+  return {
+    schema_version: "harn.provider_option_probe.v1",
+    endpoint: {provider: provider, model: model, route: route},
+    option: option,
+    catalog: {field: provider_portable_option_catalog_field(option), claimed_supported: claimed},
+    probe: {
+      ungated: ungated,
+      request_count: 1,
+      measured_count: if attempt.measured {
+        1
+      } else {
+        0
+      },
+      verdict: attempt.verdict,
+      attempt: attempt,
+    },
+    diff: {status: status, claimed_supported: claimed, observed_supported: observed},
+  }
+}
+
+fn __render(report: ProviderOptionProbeReport) -> string {
+  return report.endpoint.provider + ":" + report.endpoint.model + " " + report.option + " claim="
+    + to_string(report.diff.claimed_supported)
+    + " observed="
+    + to_string(report.diff.observed_supported)
+    + " "
+    + report.diff.status
+}
+
+fn main(harness: Harness) {
+  const parsed = parse(
+    parser(
+      {
+        name: "provider_option_probe",
+        args: [
+          {kind: "flag", name: "provider", long: "--provider", required: true},
+          {kind: "flag", name: "model", long: "--model", required: true},
+          {kind: "flag", name: "option", long: "--option", required: true},
+          {kind: "flag", name: "max_tokens", long: "--max-tokens", parse: "int", default: 8},
+          {kind: "switch", name: "plan", long: "--plan"},
+          {kind: "switch", name: "ungated", long: "--ungated"},
+          {kind: "switch", name: "fail_on_drift", long: "--fail-on-drift"},
+        ],
+      },
+    ),
+    argv,
+  )
+  if is_err(parsed) {
+    throw unwrap_err(parsed).message
+  }
+  const args = unwrap(parsed).options
+  const option_text = to_string(args.option)
+  if !contains(__OPTIONS, option_text) {
+    throw "option-probe: --option must be one of: " + join(__OPTIONS, ", ")
+  }
+  const option: ProviderPortableProbeOption = option_text
+  const provider = to_string(args.provider)
+  const model = to_string(args.model)
+  const caps = harness.llm.provider_capabilities(provider, model)
+  const route = provider_option_probe_route(caps)
+  const claimed = provider_option_probe_catalog_claim(caps, option)
+  const ungated = args.ungated ?? false
+  if args.plan {
+    const plan = {
+      schema_version: "harn.provider_option_probe_plan.v1",
+      endpoint: {provider: provider, model: model, route: route},
+      option: option,
+      catalog: {field: provider_portable_option_catalog_field(option), claimed_supported: claimed},
+      request_count: 1,
+      ungated: ungated,
+    }
+    harness.stdio.println(json_stringify_pretty(plan))
+    return
+  }
+  const outcome = __attempt(harness.llm, provider, model, option, args.max_tokens)
+  const report = provider_option_probe_report(
+    provider,
+    model,
+    route,
+    option,
+    claimed,
+    ungated,
+    provider_option_probe_classify(outcome),
+  )
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    harness.stdio.println(__render(report))
+  }
+  if args.fail_on_drift {
+    if report.diff.status == "drift" {
+      harness.runtime.exit(1)
+    }
+    if report.diff.status == "unmeasured" {
+      harness.runtime.exit(2)
+    }
+  }
+}

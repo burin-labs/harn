@@ -278,8 +278,9 @@ pub(crate) fn reconcile_request_body(
     body: &mut serde_json::Value,
     model: &str,
     thinking: &ThinkingConfig,
+    provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
-    strip_unsupported_sampling_params(body, model, thinking);
+    strip_unsupported_sampling_params(body, model, thinking, provider_contract_probe);
     if crate::llm::catalog_may_shape_requested_reasoning() {
         clamp_effort_for_disabled_thinking(body, model);
     }
@@ -292,6 +293,7 @@ pub(crate) fn strip_unsupported_sampling_params(
     body: &mut serde_json::Value,
     model: &str,
     thinking: &ThinkingConfig,
+    provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
     let strip_sampling = model_rejects_sampling_params(model)
         || !thinking.is_disabled()
@@ -303,14 +305,24 @@ pub(crate) fn strip_unsupported_sampling_params(
     let Some(object) = body.as_object_mut() else {
         return;
     };
-    let had_sampling = object.contains_key("temperature")
-        || object.contains_key("top_p")
-        || object.contains_key("top_k");
+    let mut had_sampling = false;
+    for (field, option) in [
+        (
+            "temperature",
+            crate::llm::capabilities::PortableOption::Temperature,
+        ),
+        ("top_p", crate::llm::capabilities::PortableOption::TopP),
+        ("top_k", crate::llm::capabilities::PortableOption::TopK),
+    ] {
+        if crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            provider_contract_probe,
+            option,
+        ) {
+            had_sampling = object.remove(field).is_some() || had_sampling;
+        }
+    }
     if had_sampling {
         warn_sampling_stripped(model);
-        object.remove("temperature");
-        object.remove("top_p");
-        object.remove("top_k");
     }
 }
 
@@ -321,6 +333,7 @@ pub(crate) fn strip_unsupported_bedrock_converse_sampling_params(
     body: &mut serde_json::Value,
     model: &str,
     thinking: &ThinkingConfig,
+    provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
     if !is_claude_model_id(model) {
         return;
@@ -342,9 +355,19 @@ pub(crate) fn strip_unsupported_bedrock_converse_sampling_params(
         return;
     };
 
-    let had_temperature = inference.remove("temperature").is_some();
-    let had_top_p = inference.remove("topP").is_some();
-    let had_top_k = inference.remove("topK").is_some();
+    let had_temperature =
+        crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            provider_contract_probe,
+            crate::llm::capabilities::PortableOption::Temperature,
+        ) && inference.remove("temperature").is_some();
+    let had_top_p = crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+        provider_contract_probe,
+        crate::llm::capabilities::PortableOption::TopP,
+    ) && inference.remove("topP").is_some();
+    let had_top_k = crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+        provider_contract_probe,
+        crate::llm::capabilities::PortableOption::TopK,
+    ) && inference.remove("topK").is_some();
     let had_sampling = had_temperature || had_top_p || had_top_k;
     if had_sampling {
         warn_sampling_stripped(model);
@@ -573,7 +596,12 @@ impl AnthropicProvider {
         if let Some(top_k) = opts.top_k {
             body["top_k"] = serde_json::json!(top_k);
         }
-        strip_unsupported_sampling_params(&mut body, &opts.model, &opts.thinking);
+        strip_unsupported_sampling_params(
+            &mut body,
+            &opts.model,
+            &opts.thinking,
+            opts.provider_contract_probe,
+        );
         if let Some(ref stop) = opts.stop {
             body["stop_sequences"] = serde_json::json!(stop);
         }

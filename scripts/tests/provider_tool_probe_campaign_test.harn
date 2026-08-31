@@ -1,5 +1,7 @@
-import { RuntimeContentFingerprint } from "std/runtime/content_fingerprint"
 import { assert_contains, assert_false, assert_true } from "std/testing"
+import {
+  RuntimeContentFingerprint,
+} from "../../crates/harn-stdlib/src/stdlib/runtime/content_fingerprint"
 import "../provider_tool_probe_campaign.harn"
 
 fn runtime_content_fingerprint() -> RuntimeContentFingerprint {
@@ -584,6 +586,44 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_prefer_routing_routes(
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_route_filters_are_structural(
+  harness: Harness,
+  task: unknown,
+) {
+  const routes = [
+    {
+      id: "hosted-a",
+      provider: "a",
+      model: "one",
+      env_keys: ["A_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {},
+    },
+    {
+      id: "hosted-b",
+      provider: "b",
+      model: "two",
+      env_keys: ["B_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {},
+    },
+    {
+      id: "local-b",
+      provider: "b",
+      model: "local",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {},
+    },
+  ]
+  assert_eq(provider_tool_probe_campaign_filter_routes(routes, ["b"], true), [routes[1]])
+  assert_eq(provider_tool_probe_campaign_filter_routes(routes, [], true), routes[0:2])
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_env_aliases_are_alternatives(
   harness: Harness,
   task: unknown,
@@ -620,9 +660,11 @@ pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_
 ) {
   const tool_calls = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
   const executable = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const options = provider_tool_probe_campaign_select_behaviors(["provider_option_probe"])
   const parser = provider_tool_probe_campaign_select_behaviors(["parser"])
   assert_eq(len(tool_calls), 2)
   assert_eq(len(executable), 8)
+  assert_eq(len(options), 7)
   assert_true(len(parser) >= 2, "parser behaviors are selected by category")
 }
 
@@ -741,12 +783,11 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(
     false,
     ".out",
     1,
-    {},
-    {checked: false},
+    {env: {}, env_source: {checked: false}},
     verified_runtime(),
     verified_catalog(),
   )
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v9")
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v10")
   assert_eq(report.runtime, verified_runtime())
   assert_eq(report.catalog, verified_catalog())
   assert_eq(report.summary.planned, 3)
@@ -829,11 +870,9 @@ pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(
     false,
     ".out",
     3,
-    {},
-    {checked: true},
+    {env: {}, env_source: {checked: true}, campaign_slice: plan.slice},
     verified_runtime(),
     verified_catalog(),
-    plan.slice,
   )
   assert_eq(report.campaign_slice.max_probes, 2)
   assert_eq(report.spend.executable_probe_count, 18)
@@ -860,8 +899,7 @@ pipeline test_provider_tool_probe_campaign_live_spend_fails_closed_without_case_
     false,
     ".out",
     2,
-    {},
-    {checked: true},
+    {env: {}, env_source: {checked: true}},
     verified_runtime(),
     verified_catalog(),
   )
@@ -1022,11 +1060,9 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(
     false,
     ".out",
     1,
-    {},
-    {checked: true},
+    {env: {}, env_source: {checked: true}},
     verified_runtime(),
     verified_catalog(),
-    {},
     0.01,
   )
   assert_eq(report.spend.actual_usd_known, true)
@@ -1036,7 +1072,7 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(
+pipeline test_provider_tool_probe_campaign_option_claims_are_executable(
   harness: Harness,
   task: unknown,
 ) {
@@ -1051,16 +1087,111 @@ pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(
     false,
     ".out",
     1,
-    {},
-    {checked: false},
+    {env: {}, env_source: {checked: false}},
     verified_runtime(),
     verified_catalog(),
   )
-  assert_eq(report.runner_summary.planned_llm_call.total, 1)
-  assert_eq(report.executable_gap.executable_cells, 0)
-  assert_eq(report.executable_gap.executable_commands, 0)
-  assert_eq(report.executable_gap.missing_runner, 1)
-  assert_eq(report.executable_gap.missing_runner_by_behavior.stop_sequences, 1)
+  assert_eq(report.runner_summary.provider_option_probe.total, 1)
+  assert_eq(report.executable_gap.executable_cells, 1)
+  assert_eq(report.executable_gap.executable_commands, 1)
+  assert_eq(report.executable_gap.missing_runner, 0)
+  assert_eq(report.claim_controls.status, "dry_run")
+  assert_eq(
+    cells[0]?.command,
+    [
+      "harn",
+      "provider",
+      "option-probe",
+      "ollama",
+      "--model",
+      "gemma4:e4b",
+      "--option",
+      "stop",
+      "--max-tokens",
+      "8",
+      "--fail-on-drift",
+      "--json",
+    ],
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_controls(
+  harness: Harness,
+  task: unknown,
+) {
+  const route = provider_tool_probe_campaign_routes(["anthropic:claude-opus-4-7"])[0]
+  const behavior = provider_tool_probe_campaign_select_behaviors(["temperature"])[0]
+  const command = ["harn", "provider", "option-probe"]
+  const accepted_report = {
+    schema_version: "harn.provider_option_probe.v1",
+    endpoint: {provider: route.provider, model: route.model, route: "anthropic:default"},
+    option: "temperature",
+    catalog: {field: "temperature_supported", claimed_supported: true},
+    probe: {
+      ungated: true,
+      request_count: 1,
+      measured_count: 1,
+      verdict: "accepted",
+      attempt: {verdict: "accepted", measured: true, cost_usd: 0.001},
+    },
+    diff: {status: "match", claimed_supported: true, observed_supported: true},
+  }
+  const rejected_report = accepted_report
+    + {
+      catalog: {field: "temperature_supported", claimed_supported: false},
+      probe: accepted_report.probe
+        + {verdict: "rejected", attempt: {verdict: "rejected", measured: true, cost_usd: 0.0}},
+      diff: {status: "match", claimed_supported: false, observed_supported: false},
+    }
+  const accepted = provider_tool_probe_campaign_option_probe_cell(
+    harness.llm,
+    route,
+    behavior,
+    accepted_report,
+    "accepted.json",
+    command,
+    0,
+  )
+  const rejected = provider_tool_probe_campaign_option_probe_cell(
+    harness.llm,
+    route,
+    behavior,
+    rejected_report,
+    "rejected.json",
+    command,
+    0,
+  )
+  const only_positive = provider_tool_probe_campaign_report(
+    [route],
+    [behavior],
+    [accepted],
+    true,
+    false,
+    ".out",
+    1,
+    {env: {}, env_source: {checked: false}},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  const both = provider_tool_probe_campaign_report(
+    [route],
+    [behavior],
+    [accepted, rejected],
+    true,
+    false,
+    ".out",
+    1,
+    {env: {}, env_source: {checked: false}},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(only_positive.claim_controls.status, "incomplete")
+  assert_eq(only_positive.claim_controls.measured_supported_count, 1)
+  assert_eq(only_positive.claim_controls.measured_unsupported_count, 0)
+  assert_eq(both.claim_controls.status, "complete")
+  assert_eq(both.claim_controls.measured_supported_count, 1)
+  assert_eq(both.claim_controls.measured_unsupported_count, 1)
 }
 
 @test
@@ -1079,8 +1210,7 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(
     false,
     ".out",
     1,
-    {},
-    {checked: false},
+    {env: {}, env_source: {checked: false}},
     verified_runtime(),
     verified_catalog(),
   )
@@ -1156,8 +1286,10 @@ pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without
     false,
     ".out",
     1,
-    {KIMI_API_KEY: "present"},
-    {checked: true, loaded: true, parsed_key_count: 1, reason: "loaded"},
+    {
+      env: {KIMI_API_KEY: "present"},
+      env_source: {checked: true, loaded: true, parsed_key_count: 1, reason: "loaded"},
+    },
     verified_runtime(),
     verified_catalog(),
   )
@@ -1309,8 +1441,7 @@ pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(
     false,
     ".out",
     1,
-    {},
-    {checked: false},
+    {env: {}, env_source: {checked: false}},
     verified_runtime(),
     verified_catalog(),
   )

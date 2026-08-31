@@ -1,0 +1,103 @@
+/** Shared typed vocabulary for executable provider capability contracts. */
+pub type ProviderPortableProbeOption = "temperature" \
+  | "top_p" \
+  | "top_k" \
+  | "seed" \
+  | "frequency_penalty" \
+  | "presence_penalty" \
+  | "stop"
+
+pub type ProviderOptionProbeVerdict = "accepted" | "rejected" | "inconclusive" | "gated_locally"
+
+pub type ProviderOptionProbeAttempt = {
+  verdict: ProviderOptionProbeVerdict,
+  measured: bool,
+  failure_class?: string,
+  reason?: string,
+  error?: string,
+  input_tokens?: int,
+  output_tokens?: int,
+  cost_usd?: float,
+}
+
+pub type ProviderOptionProbeReport = {
+  schema_version: "harn.provider_option_probe.v1",
+  endpoint: {provider: string, model: string, route: string},
+  option: ProviderPortableProbeOption,
+  catalog: {field: string, claimed_supported: bool},
+  probe: {
+    ungated: bool,
+    request_count: int,
+    measured_count: int,
+    verdict: ProviderOptionProbeVerdict,
+    attempt: ProviderOptionProbeAttempt,
+  },
+  diff: {
+    status: "match" | "drift" | "unmeasured",
+    claimed_supported: bool,
+    observed_supported: bool?,
+  },
+}
+
+/**
+ * Returns the capability-catalog field owned by one portable option.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_portable_option_catalog_field(option: ProviderPortableProbeOption) -> string {
+  return "${option}_supported"
+}
+
+/**
+ * Returns the capability-selected wire route that makes an endpoint claim specific.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_route(caps: dict) -> string {
+  const wire = trim(to_string(caps?.message_wire_format ?? "default"))
+  const family = trim(to_string(caps?.live_endpoint_family ?? "default"))
+  return if wire == "" {
+    "default"
+  } else {
+    wire
+  }
+    + ":"
+    + if family == "" {
+      "default"
+    } else {
+      family
+    }
+}
+
+/**
+ * Reads one portable option claim, defaulting an absent catalog declaration to unsupported.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn provider_option_probe_catalog_claim(
+  caps: dict,
+  option: ProviderPortableProbeOption,
+) -> bool {
+  if option == "temperature" {
+    return caps?.temperature_supported ?? false
+  }
+  if option == "top_p" {
+    return caps?.top_p_supported ?? false
+  }
+  if option == "top_k" {
+    return caps?.top_k_supported ?? false
+  }
+  if option == "seed" {
+    return caps?.seed_supported ?? false
+  }
+  if option == "frequency_penalty" {
+    return caps?.frequency_penalty_supported ?? false
+  }
+  if option == "presence_penalty" {
+    return caps?.presence_penalty_supported ?? false
+  }
+  return caps?.stop_supported ?? false
+}

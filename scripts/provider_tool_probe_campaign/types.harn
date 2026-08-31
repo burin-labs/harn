@@ -1,4 +1,10 @@
-import { RuntimeContentFingerprint } from "std/runtime/content_fingerprint"
+pub import {
+  ProviderOptionProbeReport,
+  ProviderPortableProbeOption,
+} from "../../crates/harn-stdlib/src/stdlib/cli/providers/contracts"
+import {
+  RuntimeContentFingerprint,
+} from "../../crates/harn-stdlib/src/stdlib/runtime/content_fingerprint"
 
 pub type ProviderToolProbeRoute = {
   id: string,
@@ -16,6 +22,7 @@ pub type ProviderToolProbeBehavior = {
   description: string,
   runner: string,
   probe_case?: string,
+  probe_option?: ProviderPortableProbeOption,
   modes: list<string>,
   tool_formats: list<string>,
   cheap: bool,
@@ -85,7 +92,7 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v9",
+  schema_version: "harn.provider_tool_probe_campaign.v10",
   runtime: ProviderToolProbeRuntimeReceipt,
   catalog: ProviderToolProbeCatalogReceipt,
   live: bool,
@@ -96,6 +103,7 @@ pub type ProviderToolProbeCampaignReport = {
   summary: dict,
   runner_summary: dict,
   executable_gap: dict,
+  claim_controls: dict,
   auth_readiness: dict,
   spend: dict,
   campaign_slice: dict,

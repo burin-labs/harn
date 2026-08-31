@@ -75,6 +75,7 @@ fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
         payload.temperature = Some(0.2);
         payload.top_p = Some(0.8);
         payload.top_k = Some(20);
+        payload.provider_contract_probe = Some(PortableOption::TopK);
         let body =
             crate::llm::api::DialectContract::for_request(&payload).build_request_body(&payload);
         assert_eq!(body["generation_config"]["thinking_level"], "medium");
@@ -84,6 +85,27 @@ fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
         assert!(body.get("contents").is_none());
         assert!(body.get("tools").is_none(), "fixture has no tools");
     }
+}
+
+#[test]
+fn option_probe_preserves_only_the_selected_interactions_sampling_field() {
+    use crate::llm::capabilities::PortableOption;
+
+    let mut payload = gemini_payload(
+        "gemini-3.6-flash",
+        ThinkingConfig::Effort {
+            level: ReasoningEffort::Medium,
+        },
+    );
+    payload.temperature = Some(0.2);
+    payload.top_p = Some(0.8);
+    payload.top_k = Some(20);
+    payload.provider_contract_probe = Some(PortableOption::TopK);
+    let body = crate::llm::api::DialectContract::for_request(&payload).build_request_body(&payload);
+
+    assert!(body["generation_config"].get("temperature").is_none());
+    assert!(body["generation_config"].get("top_p").is_none());
+    assert_eq!(body["generation_config"]["top_k"], json!(20));
 }
 
 #[test]

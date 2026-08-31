@@ -5,6 +5,7 @@ pub import {
   provider_tool_probe_campaign_catalog_snapshot,
   provider_tool_probe_campaign_default_routes,
   provider_tool_probe_campaign_filter_behavior_modes,
+  provider_tool_probe_campaign_filter_routes,
   provider_tool_probe_campaign_modes,
   provider_tool_probe_campaign_providers_config_text_error,
   provider_tool_probe_campaign_routes,
@@ -21,12 +22,15 @@ import {
 pub import {
   provider_tool_probe_campaign_env_file,
   provider_tool_probe_campaign_env_from_dotenv_text,
+  provider_tool_probe_campaign_env_from_host,
   provider_tool_probe_campaign_parse_args,
 } from "./provider_tool_probe_campaign/env"
 pub import {
   provider_tool_probe_campaign_artifact_path,
   provider_tool_probe_campaign_case_status,
   provider_tool_probe_campaign_missing_env_keys,
+  provider_tool_probe_campaign_option_probe_cell,
+  provider_tool_probe_campaign_option_probe_telemetry,
   provider_tool_probe_campaign_probe_telemetry,
   provider_tool_probe_campaign_scorecard_inputs,
   provider_tool_probe_campaign_source_receipt,
@@ -59,6 +63,16 @@ pub import {
 } from "./provider_tool_probe_campaign/types"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
+
+fn __campaign_failed(report: ProviderToolProbeCampaignReport) -> bool {
+  const summary = report.summary
+  const tool_scorecard_required = (report.runner_summary?.provider_tool_probe?.total ?? 0) > 0
+  return (summary.fail ?? 0) > 0
+    || (summary.error ?? 0) > 0
+    || report.spend?.budget_status == "stopped_unpriced"
+    || (tool_scorecard_required && report.artifacts?.scorecard_status != "complete")
+    || report.claim_controls?.status == "incomplete"
+}
 
 fn main(harness: Harness) {
   if help_requested(argv) {
@@ -129,13 +143,18 @@ fn main(harness: Harness) {
   const providers_config = target.providers_config
   const runtime = target.runtime
   const catalog_receipt = target.catalog
-  const routes = if catalog_routes {
+  const unfiltered_routes = if catalog_routes {
     provider_tool_probe_campaign_catalog_routes(target.catalog_payload, include_expensive)
   } else if len(route_specs) == 0 {
     provider_tool_probe_campaign_default_routes(include_expensive)
   } else {
     provider_tool_probe_campaign_routes(route_specs)
   }
+  const routes = provider_tool_probe_campaign_filter_routes(
+    unfiltered_routes,
+    __as_string_list(parsed?.provider),
+    parsed?.exclude_local ?? false,
+  )
   if len(routes) == 0 {
     harness.stdio.eprintln("no provider routes selected")
     harness.runtime.exit(2)
@@ -149,7 +168,8 @@ fn main(harness: Harness) {
     harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""),
   )
   const env_load = __load_env_file(harness.fs, env_file_path)
-  const auth_env = env_load.env ?? {}
+  const ambient_env = provider_tool_probe_campaign_env_from_host(harness.env, routes)
+  const auth_env = ambient_env + (env_load.env ?? {})
   const command_env = provider_tool_probe_campaign_command_env(providers_config)
   const env = auth_env + command_env
   const cell_plan = if live {
@@ -209,13 +229,15 @@ fn main(harness: Harness) {
     include_expensive,
     output_dir,
     repeat,
-    auth_env,
-    env_load.source ?? {},
+    {
+      env: auth_env,
+      env_source: (env_load.source ?? {}) + {ambient_key_count: len(ambient_env.keys())},
+      campaign_slice: cell_plan.slice ?? {},
+      scorecard_artifacts: scorecard_artifacts,
+    },
     runtime,
     catalog_receipt,
-    cell_plan.slice ?? {},
     max_cost_usd,
-    scorecard_artifacts,
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
   harness.fs.write_text(
@@ -227,13 +249,7 @@ fn main(harness: Harness) {
   } else {
     harness.stdio.println(json_stringify_pretty(report))
   }
-  const summary = report.summary
-  if live
-    && ((summary.fail ?? 0) > 0 || (summary.error ?? 0) > 0
-      || report.spend?.budget_status
-        == "stopped_unpriced"
-      || report.artifacts?.scorecard_status
-        != "complete") {
+  if live && __campaign_failed(report) {
     harness.runtime.exit(1)
   }
   return nil

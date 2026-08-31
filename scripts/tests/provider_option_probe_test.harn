@@ -1,0 +1,94 @@
+import { assert_eq } from "std/testing"
+import {
+  provider_option_probe_catalog_claim,
+  provider_option_probe_classify,
+  provider_option_probe_report,
+} from "../../crates/harn-stdlib/src/stdlib/cli/providers/option_probe"
+
+@test
+pipeline test_provider_option_probe_reads_each_catalog_field(harness: Harness, task: unknown) {
+  const caps = {
+    temperature_supported: false,
+    top_p_supported: true,
+    top_k_supported: false,
+    seed_supported: true,
+    frequency_penalty_supported: false,
+    presence_penalty_supported: true,
+    stop_supported: false,
+  }
+  assert_eq(provider_option_probe_catalog_claim(caps, "temperature"), false)
+  assert_eq(provider_option_probe_catalog_claim(caps, "top_p"), true)
+  assert_eq(provider_option_probe_catalog_claim(caps, "top_k"), false)
+  assert_eq(provider_option_probe_catalog_claim(caps, "seed"), true)
+  assert_eq(provider_option_probe_catalog_claim(caps, "frequency_penalty"), false)
+  assert_eq(provider_option_probe_catalog_claim(caps, "presence_penalty"), true)
+  assert_eq(provider_option_probe_catalog_claim(caps, "stop"), false)
+}
+
+@test
+pipeline test_provider_option_probe_distinguishes_wire_rejection_from_no_measurement(
+  harness: Harness,
+  task: unknown,
+) {
+  const accepted = provider_option_probe_classify(Ok({usage: {input_tokens: 3, output_tokens: 1}}))
+  assert_eq(accepted.verdict, "accepted")
+  assert_eq(accepted.measured, true)
+  const rejected = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "invalid_request",
+        message: "unsupported option",
+      },
+    ),
+  )
+  assert_eq(rejected.verdict, "rejected")
+  assert_eq(rejected.measured, true)
+  const gated = provider_option_probe_classify(
+    Err({origin: "local", kind: "terminal", reason: "invalid_request", message: "catalog gate"}),
+  )
+  assert_eq(gated.verdict, "gated_locally")
+  assert_eq(gated.measured, false)
+}
+
+@test
+pipeline test_provider_option_probe_diff_cannot_turn_no_measurement_into_green(
+  harness: Harness,
+  task: unknown,
+) {
+  const matched = provider_option_probe_report(
+    "anthropic",
+    "claude-sonnet-5",
+    "anthropic:default",
+    "temperature",
+    false,
+    true,
+    {verdict: "rejected", measured: true},
+  )
+  assert_eq(matched.diff.status, "match")
+  assert_eq(matched.probe.request_count, 1)
+  assert_eq(matched.probe.measured_count, 1)
+  const drifted = provider_option_probe_report(
+    "anthropic",
+    "claude-sonnet-5",
+    "anthropic:default",
+    "temperature",
+    true,
+    true,
+    {verdict: "rejected", measured: true},
+  )
+  assert_eq(drifted.diff.status, "drift")
+  const unmeasured = provider_option_probe_report(
+    "anthropic",
+    "claude-sonnet-5",
+    "anthropic:default",
+    "temperature",
+    false,
+    false,
+    {verdict: "gated_locally", measured: false},
+  )
+  assert_eq(unmeasured.diff.status, "unmeasured")
+  assert_eq(unmeasured.probe.request_count, 1)
+  assert_eq(unmeasured.probe.measured_count, 0)
+}
