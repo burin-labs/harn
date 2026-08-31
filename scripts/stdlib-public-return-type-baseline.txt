@@ -397,7 +397,6 @@ crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format_over
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format_resolution
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__autonomy_tier
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__normalize_iteration_budget
-crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_capabilities
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_configured_model_options
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_dict
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_env_prefixes
@@ -407,7 +406,6 @@ crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_first_non_empty
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_list
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_non_empty_string
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_pack_options
-crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_provider_model_pair
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_sanitize_mode
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_sanitize_result
 crates/harn-stdlib/src/stdlib/agent/options_public.harn::__stack_strip_option_keys

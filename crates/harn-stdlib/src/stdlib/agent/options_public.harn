@@ -420,34 +420,52 @@ pub fn __stack_first_env(env: HarnessEnv, prefixes: list, suffix: string) {
   return nil
 }
 
-pub fn __stack_provider_model_pair(llm: HarnessLlm, opts: dict) {
+type AgentRouteIdentity = {provider: string, model: string}
+
+fn __agent_route_identity(llm: HarnessLlm, opts: dict) -> AgentRouteIdentity? {
   const provider = __stack_non_empty_string(opts?.provider)
   const model = __stack_non_empty_string(opts?.model)
-  if provider != nil && model != nil {
-    return {provider: provider, model: model}
+  if model == nil {
+    return nil
   }
-  if model != nil {
-    const info = try {
-      llm.model_info(model)
+  const info = try {
+    llm.model_info(model)
+  }
+  if !is_err(info) && type_of(unwrap(info)) == "dict" {
+    const resolved = unwrap(info)
+    const explicit_provider = if provider == "auto" {
+      nil
+    } else {
+      provider
     }
-    if !is_err(info) && type_of(unwrap(info)) == "dict" {
-      const resolved = unwrap(info)
-      return {
-        provider: __stack_non_empty_string(resolved?.provider) ?? provider ?? "auto",
-        model: __stack_non_empty_string(resolved?.id ?? resolved?.model) ?? model,
-      }
+    return {
+      provider: explicit_provider
+        ?? __stack_non_empty_string(resolved?.provider)
+        ?? provider
+        ?? "auto",
+      model: __stack_non_empty_string(resolved?.id ?? resolved?.model) ?? model,
     }
+  }
+  if provider != nil {
+    return {provider: provider, model: model}
   }
   return nil
 }
 
-pub fn __stack_capabilities(llm: HarnessLlm, opts: dict) {
-  const pair = __stack_provider_model_pair(llm, opts)
+/**
+ * Resolve the catalog capability row for one normalized agent route.
+ *
+ * @effects: [llm]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_route_capabilities(llm: HarnessLlm, opts: dict) -> dict? {
+  const pair = __agent_route_identity(llm, opts)
   if pair == nil {
     return nil
   }
   const caps = try {
-    llm.provider_capabilities(pair.provider ?? "auto", pair.model ?? "")
+    llm.provider_capabilities(pair.provider, pair.model)
   }
   if is_err(caps) || type_of(unwrap(caps)) != "dict" {
     return nil
@@ -539,7 +557,7 @@ pub fn __stack_sanitize_result(llm: HarnessLlm, options: any, policy: any = nil)
     out = deliberation.options
     stripped = deliberation.stripped
   }
-  const caps = __stack_capabilities(llm, out)
+  const caps = agent_route_capabilities(llm, out)
   if caps == nil {
     return {options: out, stripped: stripped}
   }
