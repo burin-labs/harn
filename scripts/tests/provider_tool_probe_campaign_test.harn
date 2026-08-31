@@ -1134,9 +1134,7 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   harness: Harness,
   task: unknown,
 ) {
-  const route = first_route(
-    provider_tool_probe_campaign_routes(["anthropic:claude-opus-4-7"]),
-  )
+  const route = first_route(provider_tool_probe_campaign_routes(["anthropic:claude-opus-4-7"]))
   const behavior = first_behavior(provider_tool_probe_campaign_select_behaviors(["temperature"]))
   const command = ["harn", "provider", "option-probe"]
   const accepted_report = {
