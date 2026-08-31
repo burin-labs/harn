@@ -1,8 +1,8 @@
 # Allowed long Rust string literals in protected orchestration paths.
 # Format: crates/path/file.rs:line # one-line justification
 crates/harn-vm/src/llm/agent_session_host/lifecycle.rs:9 # primitive signature: typed agent-init control wire contract, not model-facing prose
-crates/harn-vm/src/llm/api/transport_stub_tests.rs:220 # test fixture: successful OpenAI-compatible response wire JSON, not model-facing prose
-crates/harn-vm/src/llm/api/transport_stub_tests.rs:246 # test fixture: empty OpenAI-compatible response wire JSON, not model-facing prose
+crates/harn-vm/src/llm/api/transport_stub_tests.rs:221 # test fixture: successful OpenAI-compatible response wire JSON, not model-facing prose
+crates/harn-vm/src/llm/api/transport_stub_tests.rs:247 # test fixture: empty OpenAI-compatible response wire JSON, not model-facing prose
 crates/harn-vm/src/llm/api/transport/sse_read_error_tests.rs:131 # test fixture: terminal Together usage wire JSON, not model-facing prose
 crates/harn-vm/src/llm/code_mode.rs:318 # test fixture: fake connector Harn script (returns JSON text), not model-facing prose
 crates/harn-vm/src/llm/code_mode.rs:339 # test fixture: code-mode composition Harn script, not model-facing prose
