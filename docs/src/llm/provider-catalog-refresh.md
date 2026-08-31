@@ -234,6 +234,9 @@ provider and model endpoint, catalog field, declared value, request count,
 measured count, provider verdict, and one of `match`, `drift`, or `unmeasured`.
 Authentication, throttling, missing models, and local admission failures are
 `unmeasured`; they cannot turn an absent provider observation into a match.
+So are unrelated terminal outcomes such as content-policy blocks. Only the
+provider error taxonomy's structured `invalid_request` reason proves that the
+wire shape was rejected.
 
 Normal calls use the catalog to reject or remove unsupported options before
 egress. A truthful negative probe must let its selected option reach the
@@ -277,6 +280,8 @@ control. Its `claim_controls` receipt prints both counts and the unmeasured
 count, so zero observations cannot read as healthy. Individual
 `option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
 sharding, credential-name readiness, and budget ledger as tool-call receipts.
+Credential-missing and otherwise skipped option cells count as unmeasured in a
+live campaign, so partial endpoint coverage cannot satisfy the control.
 
 Fixture mode intentionally covers only deterministic public sources.
 Live mode adds provider-owned `/models` sources across the hosted
