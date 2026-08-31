@@ -96,7 +96,8 @@ mod tests {
 
     #[test]
     fn vm_evidence_cannot_capture_the_callers_tracing_runtime() {
-        let vm = super::Vm::new();
+        let mut vm = super::Vm::new();
+        vm.tracing_runtime = crate::tracing::fresh_tracing_runtime();
         {
             let _runtime = enter_tracing_runtime(vm.tracing_runtime.clone());
             crate::tracing::set_tracing_enabled(true);
