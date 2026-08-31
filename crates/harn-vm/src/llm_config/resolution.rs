@@ -414,16 +414,14 @@ fn resolve_model_request_with_config(
         .or_else(|| {
             alias_provider.map(|expected| (expected, catalog_provider.or(inferred_provider)))
         });
-    if let Some((expected, actual)) = provider_expectation {
-        if let Some(actual) = actual {
-            if provider_selector_target(actual) != expected {
-                return Err(ModelResolutionError::ProviderModelMismatch {
-                    provider: expected.to_string(),
-                    model: current,
-                    catalog_provider: provider_selector_target(actual).to_string(),
-                    catalog_version: catalog_version(),
-                });
-            }
+    if let Some((expected, Some(actual))) = provider_expectation {
+        if provider_selector_target(actual) != expected {
+            return Err(ModelResolutionError::ProviderModelMismatch {
+                provider: expected.to_string(),
+                model: current,
+                catalog_provider: provider_selector_target(actual).to_string(),
+                catalog_version: catalog_version(),
+            });
         }
     }
 
