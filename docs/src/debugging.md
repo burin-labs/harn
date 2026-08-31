@@ -93,7 +93,10 @@ harn runs view --json .harn-runs/<run-id>.json
 ```
 
 The view command shows a structured summary: stages executed, tools called,
-token usage, timing, and final output.
+token usage, timing, final output, and redacted execution evidence. Its
+`evidence.trace_spans` tree preserves ordered span events, so an IDE or trace
+viewer can show named sub-phases without reading Harn's private run-record
+format.
 
 ## Record the exact code path
 
