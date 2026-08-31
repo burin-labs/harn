@@ -27,8 +27,8 @@ pub fn project_execution_evidence(
     artifact_paths: ArtifactPathVisibility,
 ) -> Result<ExecutionEvidenceRecord, ExecutionEvidenceValidationError> {
     crate::orchestration::validate_execution_evidence(evidence)?;
-    Ok(project_execution_evidence_with_policy(
-        evidence,
+    Ok(redact_execution_evidence_with_policy(
+        evidence.clone(),
         &crate::redact::current_policy(),
         artifact_paths,
     ))
@@ -39,16 +39,16 @@ pub(super) fn project_evidence(
     policy: &RedactionPolicy,
     artifact_paths: ArtifactPathVisibility,
 ) -> ExecutionEvidenceRecord {
-    project_execution_evidence_with_policy(&run.evidence, policy, artifact_paths)
+    let mut evidence = run.evidence.clone();
+    sanitize_untrusted_evidence(&mut evidence);
+    redact_execution_evidence_with_policy(evidence, policy, artifact_paths)
 }
 
-fn project_execution_evidence_with_policy(
-    evidence: &ExecutionEvidenceRecord,
+fn redact_execution_evidence_with_policy(
+    mut evidence: ExecutionEvidenceRecord,
     policy: &RedactionPolicy,
     artifact_paths: ArtifactPathVisibility,
 ) -> ExecutionEvidenceRecord {
-    let mut evidence = evidence.clone();
-    sanitize_untrusted_evidence(&mut evidence);
     let execution_id = evidence.execution_id.clone();
     for span in &mut evidence.trace_spans {
         span.metadata.remove(crate::tracing::meta::EXECUTION_ID);
@@ -331,8 +331,13 @@ mod tests {
             Err(ExecutionEvidenceValidationError::InvalidSpanCost)
         );
 
-        run.evidence.schema_version += 1;
-        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+        let mut historical = RunRecord::default();
+        historical.evidence.trace_spans = run.evidence.trace_spans;
+        let projected = project_evidence(
+            &historical,
+            &current_policy(),
+            ArtifactPathVisibility::Hidden,
+        );
         assert_eq!(projected.trace_spans[0].cost_usd, None);
         assert!(projected
             .gaps
