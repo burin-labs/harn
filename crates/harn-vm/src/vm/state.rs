@@ -315,7 +315,7 @@ pub struct Vm {
     /// Structured spans owned by this VM tree.
     pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
     /// Durable identity shared by every VM in this execution tree.
-    pub(crate) execution_id: Arc<str>,
+    pub(crate) execution_id: crate::ExecutionId,
     /// Root VMs mint and close executions; child VMs only contribute evidence.
     pub(crate) owns_execution: bool,
     /// Exact source path recorder shared by this VM tree when explicitly enabled.

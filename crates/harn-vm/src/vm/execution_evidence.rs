@@ -6,7 +6,7 @@ impl Vm {
     pub fn enable_flight_recorder(&mut self, max_events: usize) {
         self.flight_recorder_max_events = Some(max_events.max(1));
         self.flight_recorder = Some(crate::flight_recorder::FlightRecorder::new(
-            self.execution_id.to_string(),
+            self.execution_id.clone(),
             max_events,
         ));
     }
@@ -17,12 +17,12 @@ impl Vm {
         }
         self.execution_id = crate::observability::execution_scope::mint_execution_scope();
         self.flight_recorder = self.flight_recorder_max_events.map(|max_events| {
-            crate::flight_recorder::FlightRecorder::new(self.execution_id.to_string(), max_events)
+            crate::flight_recorder::FlightRecorder::new(self.execution_id.clone(), max_events)
         });
     }
 
     /// Durable identity of the current or most recently completed execution.
-    pub fn execution_id(&self) -> &str {
+    pub fn execution_id(&self) -> &crate::ExecutionId {
         &self.execution_id
     }
 

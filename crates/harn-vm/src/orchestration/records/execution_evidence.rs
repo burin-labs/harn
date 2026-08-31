@@ -1,6 +1,6 @@
 use super::ExecutionEvidenceRecord;
 use crate::flight_recorder::{FLIGHT_RECORDING_FORMAT, FLIGHT_RECORDING_SCHEMA_VERSION};
-use crate::observability::execution_scope::EXECUTION_ID_PREFIX;
+use crate::observability::execution_scope::ExecutionId;
 
 pub const EXECUTION_EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
@@ -55,18 +55,9 @@ pub fn validate_execution_evidence(
 
 /// Validate one claimed Harn-owned execution identity.
 pub fn validate_execution_id(candidate: &str) -> Result<(), ExecutionEvidenceValidationError> {
-    let valid = candidate
-        .strip_prefix(EXECUTION_ID_PREFIX)
-        .is_some_and(|raw| {
-            uuid::Uuid::parse_str(raw).is_ok_and(|value| {
-                raw == value.hyphenated().to_string()
-                    && value.get_version_num() == 7
-                    && value.get_variant() == uuid::Variant::RFC4122
-            })
-        });
-    valid
-        .then_some(())
-        .ok_or(ExecutionEvidenceValidationError::InvalidExecutionId)
+    ExecutionId::parse(candidate)
+        .map(|_| ())
+        .map_err(|_| ExecutionEvidenceValidationError::InvalidExecutionId)
 }
 
 fn is_blake3_hash(candidate: &str) -> bool {
