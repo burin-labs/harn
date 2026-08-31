@@ -12,6 +12,7 @@ use super::{
 };
 use crate::llm::env_guard;
 
+mod anthropic_egress;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]
 mod gemini_generate_content;
 mod terminal_usage;
