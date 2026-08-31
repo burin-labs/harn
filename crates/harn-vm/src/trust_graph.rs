@@ -727,8 +727,7 @@ pub fn compute_trust_record_hash(record: &TrustRecord) -> Result<String, LogErro
     if let Some(object) = value.as_object_mut() {
         object.remove("entry_hash");
     }
-    let canonical = serde_json::to_string(&value)
-        .map_err(|error| LogError::Serde(format!("trust record canonicalize error: {error}")))?;
+    let canonical = crate::canonical_json::to_string(&value);
     let digest = Sha256::digest(canonical.as_bytes());
     Ok(format!("sha256:{}", hex::encode(digest)))
 }

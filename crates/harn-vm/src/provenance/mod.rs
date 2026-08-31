@@ -476,13 +476,12 @@ fn canonical_unsigned_receipt(receipt: &ProvenanceReceipt) -> Result<String, Log
     let mut unsigned = receipt.clone();
     unsigned.chain.receipt_hash.clear();
     unsigned.signatures.clear();
-    serde_json::to_string(&unsigned)
+    crate::canonical_json::of(&unsigned)
         .map_err(|error| LogError::Serde(format!("receipt canonicalize error: {error}")))
 }
 
-fn sha256_json(context: &str, value: &serde_json::Value) -> Result<String, LogError> {
-    let canonical = serde_json::to_string(value)
-        .map_err(|error| LogError::Serde(format!("{context} canonicalize error: {error}")))?;
+fn sha256_json(_context: &str, value: &serde_json::Value) -> Result<String, LogError> {
+    let canonical = crate::canonical_json::to_string(value);
     Ok(sha256_bytes_prefixed(&canonical))
 }
 
@@ -543,6 +542,25 @@ mod tests {
     use crate::event_log::{EventLog, MemoryEventLog, Topic};
     use crate::secrets::{SecretAuditContext, SecretScope};
     use std::sync::Mutex;
+
+    #[test]
+    fn event_record_hash_ignores_payload_key_order() {
+        let mut first = LogEvent::new(
+            "tool.call",
+            serde_json::from_str(r#"{"zeta":1,"alpha":2}"#).unwrap(),
+        );
+        let mut second = LogEvent::new(
+            "tool.call",
+            serde_json::from_str(r#"{"alpha":2,"zeta":1}"#).unwrap(),
+        );
+        first.occurred_at_ms = 42;
+        second.occurred_at_ms = 42;
+
+        assert_eq!(
+            compute_event_record_hash("run.test", 7, &first).unwrap(),
+            compute_event_record_hash("run.test", 7, &second).unwrap()
+        );
+    }
 
     #[derive(Default)]
     struct MemorySecretProvider {
