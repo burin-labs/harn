@@ -467,8 +467,9 @@ async fn vm_call_llm_api_with_body_inner(
         );
     }
     if stream_protocol == StreamProtocol::AnthropicSse {
-        crate::llm::providers::anthropic::reconcile_request_body(
+        crate::llm::providers::anthropic::reconcile_request_body_with_option_probe(
             &mut body,
+            provider,
             model,
             &opts.thinking,
             opts.provider_contract_probe,

@@ -4,8 +4,9 @@
 
 use super::anthropic::{
     claude_generation, claude_model_supports_tool_search, model_defaults_to_adaptive_thinking,
-    reconcile_request_body, strip_unsupported_bedrock_converse_sampling_params,
-    strip_unsupported_sampling_params, AnthropicProvider,
+    reconcile_request_body, reconcile_request_body_with_option_probe,
+    strip_unsupported_bedrock_converse_sampling_params, strip_unsupported_sampling_params,
+    AnthropicProvider,
 };
 use super::anthropic_test_support::base_payload;
 use crate::llm::api::{ReasoningEffort, ThinkingConfig};
@@ -96,7 +97,7 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
             "thinking": {"type": "disabled"},
             "output_config": {"effort": effort},
         });
-        reconcile_request_body(&mut body, model, &ThinkingConfig::Disabled, None);
+        reconcile_request_body(&mut body, "anthropic", model, &ThinkingConfig::Disabled);
         body
     };
 
@@ -123,6 +124,7 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
     });
     reconcile_request_body(
         &mut thinking_on,
+        "anthropic",
         "claude-opus-5",
         &ThinkingConfig::Effort {
             level: ReasoningEffort::XHigh,
@@ -285,6 +287,35 @@ fn option_probe_preserves_only_its_selected_sampling_field() {
     assert!(bedrock["inferenceConfig"].get("temperature").is_none());
     assert_eq!(bedrock["inferenceConfig"]["topP"], serde_json::json!(0.9));
     assert!(bedrock["inferenceConfig"].get("topK").is_none());
+}
+
+#[test]
+fn final_reconciliation_preserves_probe_option_and_removes_rejected_prefill() {
+    use crate::llm::capabilities::PortableOption;
+
+    let mut body = serde_json::json!({
+        "model": "claude-opus-5",
+        "messages": [
+            {"role": "user", "content": "Reply with ok"},
+            {"role": "assistant", "content": "persisted prefill"},
+        ],
+        "temperature": 0.2,
+        "top_p": 0.9,
+    });
+    reconcile_request_body_with_option_probe(
+        &mut body,
+        "anthropic",
+        "claude-opus-5",
+        &ThinkingConfig::Disabled,
+        Some(PortableOption::Temperature),
+    );
+
+    assert_eq!(body["temperature"], serde_json::json!(0.2));
+    assert!(body.get("top_p").is_none());
+    assert_eq!(
+        body["messages"],
+        serde_json::json!([{"role": "user", "content": "Reply with ok"}])
+    );
 }
 
 #[test]
