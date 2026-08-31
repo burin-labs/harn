@@ -71,7 +71,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: provider-contract-probe-${{ github.ref }}
@@ -81,13 +80,19 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   HARN_BUILD_REVISION: ${{ github.sha }}
+  PROVIDER_CONTRACT_PROBE_LIVE: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'true' || 'false' }}
   RUSTFLAGS: "-D warnings"
 
 jobs:
   probe:
     if: github.repository == 'burin-labs/harn'
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    outputs:
+      live: ${{ steps.campaign.outputs.live }}
+      exit_code: ${{ steps.campaign.outputs.exit_code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -105,34 +110,28 @@ jobs:
         id: campaign
         shell: bash
         env:
-          LIVE_INPUT: ${{ inputs.live && 'true' || 'false' }}
           MAX_COST_USD_INPUT: ${{ inputs.max_cost_usd || '5' }}
           MAX_PROBES_INPUT: ${{ inputs.max_probes || '500' }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
-          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
-          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENAI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GEMINI_API_KEY || '' }}
+          GOOGLE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GOOGLE_API_KEY || '' }}
+          OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
+          MISTRAL_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MISTRAL_API_KEY || '' }}
+          COHERE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.COHERE_API_KEY || '' }}
+          XAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.XAI_API_KEY || '' }}
+          TOGETHER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.TOGETHER_API_KEY || '' }}
+          GROQ_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.CEREBRAS_API_KEY || '' }}
+          DEEPSEEK_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.DEEPSEEK_API_KEY || '' }}
+          FIREWORKS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.FIREWORKS_API_KEY || '' }}
+          ZAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ZAI_API_KEY || '' }}
+          MOONSHOT_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MOONSHOT_API_KEY || '' }}
+          NVIDIA_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.NVIDIA_API_KEY || '' }}
         run: |
           set -euo pipefail
           output_dir=".harn-runs/provider-contract-probe"
-          live=false
-          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            live=true
-          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            live="$LIVE_INPUT"
-          fi
+          live="$PROVIDER_CONTRACT_PROBE_LIVE"
           max_cost="$MAX_COST_USD_INPUT"
           max_probes="$MAX_PROBES_INPUT"
           args=(
@@ -173,12 +172,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  notify-live-failure:
+    needs: probe
+    if: ${{ always() && needs.probe.result == 'failure' && needs.probe.outputs.live == 'true' }}
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
       - name: File or update an owned drift issue
-        if: failure() && steps.campaign.outputs.live == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          EXIT_CODE: ${{ steps.campaign.outputs.exit_code }}
+          EXIT_CODE: ${{ needs.probe.outputs.exit_code }}
         shell: bash
         run: |
           set -euo pipefail
