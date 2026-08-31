@@ -14,6 +14,7 @@ use crate::personas::{
     PersonaStatus, PersonaValueReceipt,
 };
 
+pub const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 pub const ACTION_GRAPH_NODE_KIND_RUN: &str = "run";
 pub const ACTION_GRAPH_NODE_KIND_TRIGGER: &str = "trigger";
 pub const ACTION_GRAPH_NODE_KIND_PREDICATE: &str = "predicate";
