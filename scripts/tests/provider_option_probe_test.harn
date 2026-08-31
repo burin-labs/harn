@@ -45,6 +45,19 @@ pipeline test_provider_option_probe_distinguishes_wire_rejection_from_no_measure
   )
   assert_eq(rejected.verdict, "rejected")
   assert_eq(rejected.measured, true)
+  const policy_block = provider_option_probe_classify(
+    Err(
+      {
+        origin: "provider",
+        kind: "terminal",
+        reason: "content_policy",
+        message: "request blocked by provider policy",
+      },
+    ),
+  )
+  assert_eq(policy_block.verdict, "inconclusive")
+  assert_eq(policy_block.measured, false)
+  assert_eq(policy_block.failure_class, "unrelated")
   const gated = provider_option_probe_classify(
     Err({origin: "local", kind: "terminal", reason: "invalid_request", message: "catalog gate"}),
   )

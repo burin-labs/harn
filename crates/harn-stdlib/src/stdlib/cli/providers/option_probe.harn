@@ -130,11 +130,11 @@ fn __failure_class(error: unknown) -> string {
   if kind == "transient" {
     return "transient"
   }
+  if reason == "invalid_request" {
+    return "rejected"
+  }
   if contains(["model_unavailable", "context_overflow", "invalid_response"], reason) {
     return "unrelated"
-  }
-  if kind == "terminal" {
-    return "rejected"
   }
   return "unrelated"
 }
