@@ -230,6 +230,16 @@ mod tests {
             Err(ExecutionEvidenceValidationError::InvalidSpanCost)
         );
 
+        evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!(0.25),
+        );
+        assert_eq!(validate_execution_evidence(&evidence), Ok(()));
+
+        evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!("not-a-cost"),
+        );
         evidence.trace_spans[0].cost_usd = Some(0.25);
         assert_eq!(validate_execution_evidence(&evidence), Ok(()));
     }
