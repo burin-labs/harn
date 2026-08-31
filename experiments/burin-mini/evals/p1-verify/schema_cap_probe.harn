@@ -1,0 +1,73 @@
+// harn#7324 probe: structured output validated against a schema the model was
+// never sent.
+//
+// Shape reproduced: a strict structured-output call whose schema carries a
+// `maxLength` on a string field. The OpenAiStrict compat profile strips
+// `maxLength` before serializing `response_format.json_schema`, so the model is
+// never told the cap. Before the fix the mid-stream watcher validated the
+// streamed reply against the ORIGINAL, unstripped schema and severed the
+// connection on the first delta past the cap (`schema_stream_aborted at
+// $.detail`, priced at 0 tokens because the usage frame never arrives).
+//
+// Falsifier: on a pre-fix binary this call must abort mid-stream. On a binary
+// where the watcher validates the schema that was actually SENT, the same call
+// must return a complete response whose detail is over the cap. A probe that
+// cannot abort on the old binary proves nothing, so the prompt demands a value
+// far past the cap and the terminal value reports the observed length.
+const DETAIL_CAP = 240
+
+fn probe_schema() -> dict {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["verdict", "detail"],
+    properties: {
+      verdict: {type: "string", enum: ["done", "not_done"]},
+      detail: {type: "string", minLength: 1, maxLength: DETAIL_CAP},
+    },
+  }
+}
+
+fn main(harness: Harness) -> dict {
+  const system =
+    "You report on completed engineering work. Answer only with JSON matching the requested schema."
+  const task =
+    "Set verdict to \"done\". In the detail field, write a single flowing paragraph of AT LEAST 600 characters that names all twelve test files a suite ran (auth.test.ts, session.test.ts, rate_limit.test.ts, token.test.ts, cookie.test.ts, csrf.test.ts, refresh.test.ts, logout.test.ts, mfa.test.ts, audit.test.ts, throttle.test.ts, replay.test.ts), states how many assertions each file carried, and ends with the total wall-clock runtime. Do not abbreviate. Do not stop early."
+  const outcome = try {
+    harness.llm.call(
+      task,
+      system,
+      {
+        provider: "llamacpp",
+        model: "qwen3.6-35b-a3b-ud-q4-k-xl",
+        max_tokens: 2000,
+        output: {schema: probe_schema(), strict: true, validation: "warn", stream_abort: true},
+      },
+    )
+  }
+  if is_err(outcome) {
+    return {
+      probe: "harn7324_schema_cap",
+      result: "aborted",
+      cap: DETAIL_CAP,
+      error: json_stringify(unwrap_err(outcome)),
+    }
+  }
+  const res = unwrap(outcome)
+  const text = res?.text ?? ""
+  const data = res?.data
+  const detail = if type_of(data) == "dict" {
+    to_string(data?.detail ?? "")
+  } else {
+    ""
+  }
+  return {
+    probe: "harn7324_schema_cap",
+    result: "completed",
+    cap: DETAIL_CAP,
+    detail_chars: len(detail),
+    text_chars: len(text),
+    over_cap: len(detail) > DETAIL_CAP,
+    text: text,
+  }
+}

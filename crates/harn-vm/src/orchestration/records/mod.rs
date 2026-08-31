@@ -31,7 +31,7 @@ pub use eval_pack::{
     EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
 };
 pub use execution_evidence::{
-    validate_execution_evidence, ExecutionEvidenceValidationError,
+    validate_execution_evidence, validate_execution_id, ExecutionEvidenceValidationError,
     EXECUTION_EVIDENCE_SCHEMA_VERSION,
 };
 pub use from_session::{

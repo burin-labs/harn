@@ -241,6 +241,61 @@ assert initialized["method"] == "notifications/initialized"
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn stdio_client_preserves_fields_outside_the_current_sdk_tool_model() {
+    let script = r#"
+import json, sys
+discover = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": discover["id"],
+    "error": {"code": -32601, "message": "Method not found"}
+}), flush=True)
+initialize = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": initialize["id"],
+    "result": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "versioned-fields", "version": "1.0.0"}
+    }
+}), flush=True)
+initialized = json.loads(sys.stdin.readline())
+assert initialized["method"] == "notifications/initialized"
+while True:
+    request = json.loads(sys.stdin.readline())
+    if request["method"] == "tools/list":
+        break
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "result": {
+        "tools": [{
+            "name": "long_task",
+            "inputSchema": {"type": "object"},
+            "execution": {"taskSupport": "optional"},
+            "x-future-display": {"density": "compact"}
+        }]
+    }
+}), flush=True)
+"#;
+    let handle = connect_stdio_test_script(script, "2025-11-25".to_string()).await;
+    let result = handle
+        .call("tools/list", serde_json::json!({}))
+        .await
+        .expect("tools/list should preserve the negotiated wire result");
+
+    assert_eq!(
+        result["tools"][0]["execution"]["taskSupport"],
+        serde_json::json!("optional")
+    );
+    assert_eq!(
+        result["tools"][0]["x-future-display"]["density"],
+        serde_json::json!("compact")
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn stable_http_sends_stateless_metadata_headers_and_schema_headers() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
