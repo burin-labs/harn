@@ -968,7 +968,7 @@ fn persisted_assistant_prefill_respects_catalog_capability() {
             "role": "assistant",
             "content": "",
             "provider_continuation": {
-                "anthropic": {"content_blocks": [signed_thinking.clone()]},
+                "anthropic": {"content_blocks": [signed_thinking]},
             },
         }),
     ];
