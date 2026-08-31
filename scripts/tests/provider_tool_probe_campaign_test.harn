@@ -64,6 +64,20 @@ fn verified_catalog() -> ProviderToolProbeCatalogReceipt {
   }
 }
 
+fn first_route(routes: list<ProviderToolProbeRoute>) -> ProviderToolProbeRoute {
+  for route in routes {
+    return route
+  }
+  throw "expected at least one provider route"
+}
+
+fn first_behavior(behaviors: list<ProviderToolProbeBehavior>) -> ProviderToolProbeBehavior {
+  for behavior in behaviors {
+    return behavior
+  }
+  throw "expected at least one provider behavior"
+}
+
 @test
 pipeline test_provider_tool_probe_campaign_selects_explicit_provider_config(
   harness: Harness,
@@ -1120,8 +1134,10 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
   harness: Harness,
   task: unknown,
 ) {
-  const route = provider_tool_probe_campaign_routes(["anthropic:claude-opus-4-7"])[0]
-  const behavior = provider_tool_probe_campaign_select_behaviors(["temperature"])[0]
+  const route = first_route(
+    provider_tool_probe_campaign_routes(["anthropic:claude-opus-4-7"]),
+  )
+  const behavior = first_behavior(provider_tool_probe_campaign_select_behaviors(["temperature"]))
   const command = ["harn", "provider", "option-probe"]
   const accepted_report = {
     schema_version: "harn.provider_option_probe.v1",
@@ -1162,6 +1178,12 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
     command,
     0,
   )
+  const missing_auth: ProviderToolProbeCell = accepted
+    + {
+      status: "skip",
+      reason: "missing provider environment key",
+      observed: {missing_env_keys: ["ANTHROPIC_API_KEY"]},
+    }
   const only_positive = provider_tool_probe_campaign_report(
     [route],
     [behavior],
@@ -1186,12 +1208,26 @@ pipeline test_provider_tool_probe_campaign_requires_measured_true_and_false_cont
     verified_runtime(),
     verified_catalog(),
   )
+  const both_with_missing_auth = provider_tool_probe_campaign_report(
+    [route],
+    [behavior],
+    [accepted, rejected, missing_auth],
+    true,
+    false,
+    ".out",
+    1,
+    {env: {}, env_source: {checked: true}},
+    verified_runtime(),
+    verified_catalog(),
+  )
   assert_eq(only_positive.claim_controls.status, "incomplete")
   assert_eq(only_positive.claim_controls.measured_supported_count, 1)
   assert_eq(only_positive.claim_controls.measured_unsupported_count, 0)
   assert_eq(both.claim_controls.status, "complete")
   assert_eq(both.claim_controls.measured_supported_count, 1)
   assert_eq(both.claim_controls.measured_unsupported_count, 1)
+  assert_eq(both_with_missing_auth.claim_controls.status, "incomplete")
+  assert_eq(both_with_missing_auth.claim_controls.unmeasured_count, 1)
 }
 
 @test

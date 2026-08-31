@@ -235,7 +235,7 @@ pub fn __claim_controls(live: bool, cells: list<ProviderToolProbeCell>) -> dict 
       measured_supported = measured_supported + 1
     } else if observed == false {
       measured_unsupported = measured_unsupported + 1
-    } else if live && cell.status != "skip" {
+    } else if live {
       unmeasured = unmeasured + 1
     }
   }
