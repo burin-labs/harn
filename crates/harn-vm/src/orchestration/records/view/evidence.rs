@@ -64,14 +64,13 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
     match crate::orchestration::validate_execution_evidence(evidence) {
         Ok(()) => (),
         Err(ValidationError::MissingExecutionId) => {
-            if evidence.flight_recording.take().is_some() {
-                push_gap_once(
-                    evidence,
-                    "execution_identity",
-                    "projection_invalid",
-                    "The persisted run contained unowned flight recording metadata.",
-                );
-            }
+            evidence.flight_recording = None;
+            push_gap_once(
+                evidence,
+                "execution_identity",
+                "projection_invalid",
+                "The persisted run contained evidence without a Harn execution identity.",
+            );
         }
         Err(ValidationError::UnsupportedSchema | ValidationError::InvalidExecutionId) => {
             evidence.execution_id = None;
@@ -202,6 +201,30 @@ mod tests {
 
         assert_eq!(projected.execution_id, None);
         assert_eq!(projected.flight_recording, None);
+        assert!(!projected.trace_spans[0]
+            .metadata
+            .contains_key(crate::tracing::meta::EXECUTION_ID));
+        assert!(projected.gaps.iter().any(|gap| {
+            gap.component == "execution_identity" && gap.code == "projection_invalid"
+        }));
+    }
+
+    #[test]
+    fn public_projection_marks_unexplained_missing_execution_identity() {
+        let mut run = RunRecord::default();
+        run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                metadata: std::collections::BTreeMap::from([(
+                    crate::tracing::meta::EXECUTION_ID.to_string(),
+                    serde_json::json!("host-run-id"),
+                )]),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+
+        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+
         assert!(!projected.trace_spans[0]
             .metadata
             .contains_key(crate::tracing::meta::EXECUTION_ID));
