@@ -222,6 +222,7 @@ fn __session_compaction_fields(
     throw "transcript_auto_compact receipt omitted its source measurement"
   }
   return {
+    receipt: receipt,
     requested_strategy: requested_strategy,
     engine_strategy: receipt.engine_strategy,
     resolved_threshold_tokens: receipt.resolved_threshold_tokens,

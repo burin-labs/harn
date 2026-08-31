@@ -117,9 +117,9 @@ impl CompactionReceipt {
 
     /// Normalize a host-script compaction payload — the dict `.harn` code hands
     /// to `agent_record_compaction` / `__host_agent_record_compaction` — into a
-    /// receipt at the builtin boundary, minting a fresh `receipt_id`. This is the
-    /// one place the host-driven shape is validated, so the `.harn` auto-compact
-    /// path yields the same unified receipt as the Rust lifecycle paths.
+    /// receipt at the builtin boundary. Current callers forward the engine-owned
+    /// receipt, whose identity and measured outcome stay authoritative. Legacy
+    /// flat payloads still normalize here and receive a new identity.
     pub fn from_host_payload(session_id: &str, payload: &serde_json::Value) -> Self {
         let str_field = |key: &str| {
             payload
@@ -133,6 +133,27 @@ impl CompactionReceipt {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as usize
         };
+        if let Some(mut receipt) = Self::from_event_metadata(Some(payload))
+            .filter(|receipt| !receipt.receipt_id.is_empty())
+        {
+            receipt.session_id = Some(session_id.to_string());
+            if let Some(mode) = str_field("mode") {
+                receipt.mode = mode;
+            }
+            if let Some(reason) = str_field("reason") {
+                receipt.reason = reason;
+            }
+            if let Some(strategy) = str_field("strategy") {
+                receipt.strategy = strategy;
+            }
+            if let Some(requested_strategy) = str_field("requested_strategy") {
+                receipt.requested_strategy = Some(requested_strategy);
+            }
+            if let Some(threshold_source) = str_field("threshold_source") {
+                receipt.threshold_source = Some(threshold_source);
+            }
+            return receipt;
+        }
         let strategy = str_field("strategy")
             .or_else(|| str_field("engine_strategy"))
             .unwrap_or_default();
@@ -281,6 +302,61 @@ mod tests {
                 .expect("source measurement is retained")
                 .carried_source_bytes,
             Some(0),
+        );
+    }
+
+    #[test]
+    fn host_payload_preserves_forwarded_engine_receipt_identity_and_outcome() {
+        let engine_receipt = CompactionReceipt {
+            receipt_id: "compaction-engine-owned".to_string(),
+            mode: "manual".to_string(),
+            reason: "manual".to_string(),
+            strategy: "llm".to_string(),
+            engine_strategy: "llm".to_string(),
+            requested_strategy: Some("llm".to_string()),
+            resolved_threshold_tokens: Some(7),
+            threshold_source: Some("token_threshold".to_string()),
+            hard_limit_tokens: Some(99),
+            source_measurement: Some(CompactionSourceMeasurement {
+                summary_bytes: Some(123),
+                ..CompactionSourceMeasurement::default()
+            }),
+            ..CompactionReceipt::default()
+        };
+        let receipt = CompactionReceipt::from_host_payload(
+            "session-live",
+            &serde_json::json!({
+                "receipt": engine_receipt.to_json(),
+                "mode": "auto",
+                "reason": "threshold",
+                "strategy": "policy-label",
+                "requested_strategy": "custom",
+                "threshold_source": "pre_compact_modify",
+                "engine_strategy": "stale-flat-value",
+                "resolved_threshold_tokens": 999,
+                "hard_limit_tokens": 1000,
+                "source_measurement": {"summary_bytes": 1}
+            }),
+        );
+
+        assert_eq!(receipt.receipt_id, "compaction-engine-owned");
+        assert_eq!(receipt.session_id.as_deref(), Some("session-live"));
+        assert_eq!(receipt.mode, "auto");
+        assert_eq!(receipt.reason, "threshold");
+        assert_eq!(receipt.strategy, "policy-label");
+        assert_eq!(receipt.requested_strategy.as_deref(), Some("custom"));
+        assert_eq!(receipt.engine_strategy, "llm");
+        assert_eq!(receipt.resolved_threshold_tokens, Some(7));
+        assert_eq!(
+            receipt.threshold_source.as_deref(),
+            Some("pre_compact_modify")
+        );
+        assert_eq!(receipt.hard_limit_tokens, Some(99));
+        assert_eq!(
+            receipt
+                .source_measurement
+                .and_then(|value| value.summary_bytes),
+            Some(123),
         );
     }
 }
