@@ -1090,8 +1090,8 @@ mod tests {
     }
 
     #[cfg(feature = "cloud-aws")]
-    #[tokio::test(flavor = "current_thread")]
-    async fn default_credential_chain_resolves_environment_without_network() {
+    #[test]
+    fn default_credential_chain_resolves_environment_without_network() {
         let _guard = crate::llm::env_guard();
         assert!(
             implicit_discovery_allowed(),
@@ -1119,8 +1119,12 @@ mod tests {
         let _container_token_file = ScopedEnvVar::remove("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE");
         let _metadata_disabled = ScopedEnvVar::set("AWS_EC2_METADATA_DISABLED", "true");
 
-        let credentials: AwsCredentials = resolve_aws_credentials("us-east-1")
-            .await
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("current-thread Tokio runtime");
+        let credentials: AwsCredentials = runtime
+            .block_on(resolve_aws_credentials("us-east-1"))
             .expect("environment credentials should resolve without another provider");
 
         assert_eq!(credentials.access_key_id, "fake-access-key");

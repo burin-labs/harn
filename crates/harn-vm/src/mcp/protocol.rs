@@ -86,49 +86,6 @@ pub(crate) fn parse_jsonrpc_message(raw: &[u8]) -> Result<serde_json::Value, ser
     Ok(value)
 }
 
-#[cfg(test)]
-mod input_order_tests {
-    use super::*;
-
-    #[test]
-    fn raw_elicitation_order_becomes_explicit_before_generic_json_sorting() {
-        let raw = br#"{"jsonrpc":"2.0","id":1,"result":{"resultType":"input_required","inputRequests":{"form":{"method":"elicitation/create","params":{"mode":"form","message":"Choose","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"},"alpha":{"type":"integer"}}}}}}}}"#;
-        let parsed = parse_jsonrpc_message(raw).expect("valid JSON-RPC response");
-        assert_eq!(
-            parsed["result"]["inputRequests"]["form"]["params"][REQUESTED_SCHEMA_PROPERTY_ORDER],
-            serde_json::json!(["zeta", "alpha"])
-        );
-
-        let reverse = br#"{"jsonrpc":"2.0","id":1,"result":{"status":"input_required","inputRequests":{"form":{"method":"elicitation/create","params":{"mode":"form","message":"Choose","requestedSchema":{"type":"object","properties":{"alpha":{"type":"integer"},"zeta":{"type":"string"}}}}}}}}"#;
-        let parsed = parse_jsonrpc_message(reverse).expect("valid reverse-order response");
-        assert_eq!(
-            parsed["result"]["inputRequests"]["form"]["params"][REQUESTED_SCHEMA_PROPERTY_ORDER],
-            serde_json::json!(["alpha", "zeta"])
-        );
-    }
-
-    #[test]
-    fn ordinary_result_named_input_requests_is_not_augmented() {
-        let raw = br#"{"jsonrpc":"2.0","id":1,"result":{"inputRequests":{"form":{"method":"elicitation/create","params":{"mode":"form","message":"Data","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"}}}}}}}}"#;
-        let parsed = parse_jsonrpc_message(raw).expect("valid custom result");
-        assert!(parsed["result"]["inputRequests"]["form"]["params"]
-            .get(REQUESTED_SCHEMA_PROPERTY_ORDER)
-            .is_none());
-    }
-
-    #[test]
-    fn direct_sdk_elicitation_projection_carries_typed_order() {
-        let raw = r#"{"mode":"form","message":"Choose","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"},"alpha":{"type":"integer"}}}}"#;
-        let params: rmcp::model::ElicitRequestParams =
-            serde_json::from_str(raw).expect("valid typed elicitation params");
-        let projected = project_elicitation_params(&params).expect("params project to JSON");
-        assert_eq!(
-            projected[REQUESTED_SCHEMA_PROPERTY_ORDER],
-            serde_json::json!(["zeta", "alpha"])
-        );
-    }
-}
-
 pub(crate) fn parse_jsonrpc_result(msg: serde_json::Value) -> Result<serde_json::Value, VmError> {
     if let Some(error) = msg.get("error") {
         return Err(jsonrpc_error_to_vm_error(error));
@@ -371,5 +328,48 @@ pub(crate) fn extract_content_text(result: &serde_json::Value) -> String {
         }
     } else {
         json_to_vm_value(result).display()
+    }
+}
+
+#[cfg(test)]
+mod input_order_tests {
+    use super::*;
+
+    #[test]
+    fn raw_elicitation_order_becomes_explicit_before_generic_json_sorting() {
+        let raw = br#"{"jsonrpc":"2.0","id":1,"result":{"resultType":"input_required","inputRequests":{"form":{"method":"elicitation/create","params":{"mode":"form","message":"Choose","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"},"alpha":{"type":"integer"}}}}}}}}"#;
+        let parsed = parse_jsonrpc_message(raw).expect("valid JSON-RPC response");
+        assert_eq!(
+            parsed["result"]["inputRequests"]["form"]["params"][REQUESTED_SCHEMA_PROPERTY_ORDER],
+            serde_json::json!(["zeta", "alpha"])
+        );
+
+        let reverse = br#"{"jsonrpc":"2.0","id":1,"result":{"status":"input_required","inputRequests":{"form":{"method":"elicitation/create","params":{"mode":"form","message":"Choose","requestedSchema":{"type":"object","properties":{"alpha":{"type":"integer"},"zeta":{"type":"string"}}}}}}}}"#;
+        let parsed = parse_jsonrpc_message(reverse).expect("valid reverse-order response");
+        assert_eq!(
+            parsed["result"]["inputRequests"]["form"]["params"][REQUESTED_SCHEMA_PROPERTY_ORDER],
+            serde_json::json!(["alpha", "zeta"])
+        );
+    }
+
+    #[test]
+    fn ordinary_result_named_input_requests_is_not_augmented() {
+        let raw = br#"{"jsonrpc":"2.0","id":1,"result":{"inputRequests":{"form":{"method":"elicitation/create","params":{"mode":"form","message":"Data","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"}}}}}}}}"#;
+        let parsed = parse_jsonrpc_message(raw).expect("valid custom result");
+        assert!(parsed["result"]["inputRequests"]["form"]["params"]
+            .get(REQUESTED_SCHEMA_PROPERTY_ORDER)
+            .is_none());
+    }
+
+    #[test]
+    fn direct_sdk_elicitation_projection_carries_typed_order() {
+        let raw = r#"{"mode":"form","message":"Choose","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"},"alpha":{"type":"integer"}}}}"#;
+        let params: rmcp::model::ElicitRequestParams =
+            serde_json::from_str(raw).expect("valid typed elicitation params");
+        let projected = project_elicitation_params(&params).expect("params project to JSON");
+        assert_eq!(
+            projected[REQUESTED_SCHEMA_PROPERTY_ORDER],
+            serde_json::json!(["zeta", "alpha"])
+        );
     }
 }
