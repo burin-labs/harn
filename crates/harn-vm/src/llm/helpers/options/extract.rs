@@ -52,6 +52,7 @@ pub(crate) fn extract_llm_options(
     let mut options = options;
     apply_model_role_defaults(&mut options);
     apply_active_step_defaults(&mut options);
+    project_agent_tools(&mut options)?;
 
     // A `models:`/`ladder:` ladder owns provider/model selection, so reject a
     // standalone `model:`/`provider:` pin up front — before provider inference
