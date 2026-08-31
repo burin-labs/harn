@@ -288,7 +288,7 @@ mod tests {
                     ("api_key".to_string(), serde_json::json!(SECRET)),
                     (
                         crate::tracing::meta::COST_USD.to_string(),
-                        serde_json::json!(99.0),
+                        serde_json::json!("stale-cost"),
                     ),
                 ]),
                 links: vec![crate::tracing::SpanLink {
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(run.evidence.trace_spans[0].metadata["api_key"], SECRET);
         assert_eq!(
             run.evidence.trace_spans[0].metadata[crate::tracing::meta::COST_USD],
-            serde_json::json!(99.0)
+            serde_json::json!("stale-cost")
         );
         crate::orchestration::validate_execution_evidence(&projected).unwrap();
     }
