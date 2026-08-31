@@ -1,7 +1,7 @@
 use super::{
     build_assistant_response_message, build_assistant_tool_message, collect_tool_schemas, json,
     normalize_tool_args, sample_tool_registry, validate_tool_args, vm_bool, vm_dict, vm_list,
-    vm_str, VmValue,
+    vm_str, vm_tools_to_native, VmValue,
 };
 use std::collections::BTreeMap;
 
@@ -23,6 +23,39 @@ fn validate_tool_args_enforces_required_parameters() {
     )
     .is_ok());
     assert!(validate_tool_args("unknown", &json!({}), &schemas).is_ok());
+}
+
+#[test]
+fn agent_schema_collection_excludes_tools_without_the_agent_audience() {
+    let governance = |audiences: Vec<VmValue>| vm_dict(&[("audiences", vm_list(audiences))]);
+    let tools = vm_dict(&[(
+        "tools",
+        vm_list(vec![
+            vm_dict(&[
+                ("name", vm_str("agent_visible")),
+                ("parameters", vm_dict(&[])),
+                ("governance", governance(vec![vm_str("agent")])),
+            ]),
+            vm_dict(&[
+                ("name", vm_str("operator_only")),
+                ("parameters", vm_dict(&[])),
+                ("governance", governance(vec![vm_str("cli")])),
+            ]),
+        ]),
+    )]);
+
+    let names = collect_tool_schemas(Some(&tools), None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["agent_visible"]);
+
+    let native = vm_tools_to_native(&tools, "openai", "gpt-5.4").unwrap();
+    let names = native
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["agent_visible"]);
 }
 
 fn normalization_registry() -> VmValue {

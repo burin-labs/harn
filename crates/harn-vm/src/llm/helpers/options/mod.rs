@@ -14,6 +14,7 @@ mod defaults;
 mod directive_placement;
 mod extract;
 mod generation;
+mod governance;
 mod json;
 mod output;
 mod reminders;
@@ -72,6 +73,7 @@ pub(super) use super::{
 // Public surface consumed by `super` (llm::helpers::mod).
 pub(crate) use extract::extract_llm_options;
 pub(crate) use generation::validate_options;
+pub(crate) use governance::project_agent_tools;
 pub(crate) use json::{expects_structured_output, extract_json};
 pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,
