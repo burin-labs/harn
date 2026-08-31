@@ -211,9 +211,8 @@ pub(crate) use provider::{
     ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
     ProviderCommand, ProviderDispatchAuditArgs, ProviderDispatchAuditVariantArg,
     ProviderDispatchExplainArgs, ProviderEffortProbeArgs, ProviderLimitsArgs,
-    ProviderOptionProbeArgs, ProviderPortableOptionArg, ProviderProbeArgs,
-    ProviderToolCalibrateArgs, ProviderToolProbeArgs, ProviderToolProbeAuditArgs,
-    ProviderToolProbeCaseArg, ProviderToolScorecardArgs,
+    ProviderOptionProbeArgs, ProviderProbeArgs, ProviderToolCalibrateArgs, ProviderToolProbeArgs,
+    ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg, ProviderToolScorecardArgs,
 };
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersExportArgs, ProvidersGenerateArgs, ProvidersMatrixArgs,
