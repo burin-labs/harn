@@ -25,6 +25,7 @@ mod standalone;
 mod stdlib;
 mod symbol_reachability;
 mod type_dependencies;
+mod typecheck;
 
 use declarations::{
     callable_decl_name, collect_callable_declarations, collect_module_info,

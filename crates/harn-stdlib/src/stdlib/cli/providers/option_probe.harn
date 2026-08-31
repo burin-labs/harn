@@ -30,11 +30,19 @@ const __OPTIONS = [
 ]
 
 fn __probe_verdict(value: string) -> ProviderOptionProbeVerdict {
-  if !contains(["accepted", "rejected", "inconclusive", "gated_locally"], value) {
-    throw "invalid provider option probe verdict: ${value}"
+  if value == "accepted" {
+    return "accepted"
   }
-  const verdict: ProviderOptionProbeVerdict = value
-  return verdict
+  if value == "rejected" {
+    return "rejected"
+  }
+  if value == "inconclusive" {
+    return "inconclusive"
+  }
+  if value == "gated_locally" {
+    return "gated_locally"
+  }
+  throw "invalid provider option probe verdict: ${value}"
 }
 
 fn __attempt(
