@@ -84,16 +84,17 @@ pub use types::{
     ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ, ACTION_GRAPH_NODE_KIND_PREDICATE,
     ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_RUN, ACTION_GRAPH_NODE_KIND_STAGE,
     ACTION_GRAPH_NODE_KIND_TRIGGER, ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE,
-    ACTION_GRAPH_NODE_KIND_WORKER, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
+    ACTION_GRAPH_NODE_KIND_WORKER, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE, ACTION_GRAPH_TOPIC,
 };
 pub use view::{
     build_empty_session_view, build_run_view, build_run_view_with_event_log,
     build_run_view_with_options, build_run_view_with_path, build_session_view_from_run_records,
-    build_session_view_from_run_views, ProjectionInfo, RunView, RunViewApproval, RunViewArtifact,
-    RunViewAuth, RunViewCheckpoint, RunViewChild, RunViewError, RunViewFailure, RunViewMetadata,
-    RunViewOptions, RunViewPendingState, RunViewProvider, RunViewRun, RunViewStage, RunViewUsage,
-    SessionView, SessionViewHistoryItem, SessionViewMetadata, SessionViewOptions,
-    SessionViewSession, TranscriptSummary, ViewProducer, RUN_VIEW_SCHEMA, RUN_VIEW_SCHEMA_VERSION,
+    build_session_view_from_run_views, project_execution_evidence, ArtifactPathVisibility,
+    ProjectionInfo, RunView, RunViewApproval, RunViewArtifact, RunViewAuth, RunViewCheckpoint,
+    RunViewChild, RunViewError, RunViewFailure, RunViewMetadata, RunViewOptions,
+    RunViewPendingState, RunViewProvider, RunViewRun, RunViewStage, RunViewUsage, SessionView,
+    SessionViewHistoryItem, SessionViewMetadata, SessionViewOptions, SessionViewSession,
+    TranscriptSummary, ViewProducer, RUN_VIEW_SCHEMA, RUN_VIEW_SCHEMA_VERSION,
     SESSION_VIEW_QUERY_METHOD, SESSION_VIEW_SCHEMA, SESSION_VIEW_SCHEMA_VERSION,
 };
 
