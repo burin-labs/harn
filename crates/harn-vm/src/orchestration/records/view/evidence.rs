@@ -25,12 +25,13 @@ pub enum ArtifactPathVisibility {
 pub fn project_execution_evidence(
     evidence: &ExecutionEvidenceRecord,
     artifact_paths: ArtifactPathVisibility,
-) -> ExecutionEvidenceRecord {
-    project_execution_evidence_with_policy(
+) -> Result<ExecutionEvidenceRecord, ExecutionEvidenceValidationError> {
+    crate::orchestration::validate_execution_evidence(evidence)?;
+    Ok(project_execution_evidence_with_policy(
         evidence,
         &crate::redact::current_policy(),
         artifact_paths,
-    )
+    ))
 }
 
 pub(super) fn project_evidence(
@@ -270,13 +271,25 @@ mod tests {
         let projected = crate::orchestration::project_execution_evidence(
             &run.evidence,
             crate::orchestration::ArtifactPathVisibility::Hidden,
-        );
+        )
+        .unwrap();
         let rendered = serde_json::to_string(&projected).unwrap();
 
         assert!(!rendered.contains(SECRET), "projected evidence: {rendered}");
         assert_eq!(projected.trace_spans[0].events.len(), 1);
         assert_eq!(run.evidence.trace_spans[0].metadata["api_key"], SECRET);
         crate::orchestration::validate_execution_evidence(&projected).unwrap();
+    }
+
+    #[test]
+    fn standalone_projection_rejects_invalid_evidence() {
+        let mut run = run_with_local_recording();
+        run.evidence.execution_id = Some("host-run-id".to_string());
+
+        assert_eq!(
+            project_execution_evidence(&run.evidence, ArtifactPathVisibility::Hidden),
+            Err(ExecutionEvidenceValidationError::InvalidExecutionId)
+        );
     }
 
     #[test]
