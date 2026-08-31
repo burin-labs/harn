@@ -46,6 +46,23 @@ impl Drop for CurrentHostBridgeGuard {
     }
 }
 
+struct SessionLifecycleGuard(String);
+
+impl Drop for SessionLifecycleGuard {
+    fn drop(&mut self) {
+        crate::agent_sessions::close(&self.0);
+    }
+}
+
+struct SamplingMockGuard;
+
+impl Drop for SamplingMockGuard {
+    fn drop(&mut self) {
+        crate::llm::clear_cli_llm_mock_mode();
+        crate::stdlib::host::reset_host_state();
+    }
+}
+
 // Keep loopback HTTP server lifetimes isolated under the parallel Rust test
 // harness so one test cannot consume another test's local networking resources.
 async fn http_mcp_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
@@ -359,9 +376,10 @@ async fn stable_input_required_result_dispatches_and_retries() {
             let handle = stable_http_handle(&base_url).await;
             let session_id =
                 crate::agent_sessions::open_or_create(Some("mcp-input-required".to_string()));
+            let _session_lifecycle = SessionLifecycleGuard(session_id.clone());
             let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
             let captured_events = install_capturing_agent_sink(&session_id);
-            install_sampling_mock().await;
+            let _sampling_mock = install_sampling_mock().await;
             let result = call_mcp_tool(
                 &handle,
                 "needs_input",
@@ -445,9 +463,6 @@ async fn stable_input_required_result_dispatches_and_retries() {
                 requested_schema["properties"]["alpha"]["type"],
                 serde_json::json!("integer")
             );
-            drop(events);
-            crate::agent_events::clear_session_sinks(&session_id);
-            clear_sampling_mock().await;
         })
         .await;
 }
@@ -559,7 +574,7 @@ pub(super) async fn connect_stdio_test_script(
         .expect("stdio test MCP server should connect")
 }
 
-async fn install_sampling_mock() {
+async fn arm_sampling_mock() {
     crate::llm::install_cli_llm_mocks(vec![crate::llm::parse_llm_mock_value(
         &serde_json::json!({"text": "sampled", "provider": "mock", "model": "mock"}),
     )
@@ -578,9 +593,9 @@ host_mock("mcp", "sample", {
     .await;
 }
 
-async fn clear_sampling_mock() {
-    crate::llm::clear_cli_llm_mock_mode();
-    execute_test_harn("host_mock_clear()").await;
+async fn install_sampling_mock() -> SamplingMockGuard {
+    arm_sampling_mock().await;
+    SamplingMockGuard
 }
 
 async fn stable_http_handle(base_url: &str) -> VmMcpClientHandle {
