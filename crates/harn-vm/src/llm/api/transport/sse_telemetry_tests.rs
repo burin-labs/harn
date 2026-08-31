@@ -18,6 +18,7 @@ use super::liveness::StreamDeadlinePolicy;
 use super::sse::{consume_sse_lines, consume_sse_lines_with_policy};
 use crate::llm::api::DialectContract;
 use crate::llm::api::LlmResult;
+use crate::llm::api::ProviderResponseEnvelope;
 use crate::llm::capabilities::WireDialect;
 use crate::llm::usage::ProviderUsageReceipt;
 use crate::value::VmValue;
@@ -52,6 +53,15 @@ fn usage_chunk(fingerprint: Option<&str>) -> serde_json::Value {
         frame["system_fingerprint"] = serde_json::json!(fingerprint);
     }
     frame
+}
+
+fn empty_terminal_content_chunk() -> serde_json::Value {
+    serde_json::json!({
+        "choices": [{"finish_reason": "stop", "index": 0, "delta": {"content": ""}}],
+        "id": "chatcmpl-stream",
+        "model": "served-model",
+        "object": "chat.completion.chunk"
+    })
 }
 
 /// The trailing frame shape captured from llama-server b10603-c060ca974.
@@ -105,6 +115,33 @@ async fn drive_openai(body: &str) -> LlmResult {
     .expect("sse parse should succeed")
 }
 
+/// Drive the production SSE parser to the typed empty-generation boundary.
+async fn drive_empty_openai(
+    body: &str,
+    provider_request_id: Option<&str>,
+) -> crate::value::VmError {
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    consume_sse_lines_with_policy(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "openai",
+        "gpt-5.4-preview",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+        StreamDeadlinePolicy::for_test(
+            Duration::from_hours(1),
+            Duration::from_hours(1),
+            Duration::from_hours(1),
+        ),
+        provider_request_id,
+        tokio::time::Instant::now(),
+    )
+    .await
+    .expect_err("token-bearing empty stream must be rejected")
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn streamed_system_fingerprint_reaches_telemetry() {
     let body = sse_body(&[
@@ -121,21 +158,8 @@ async fn streamed_system_fingerprint_reaches_telemetry() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn empty_openai_stream_keeps_provider_usage_receipt() {
-    let body = sse_body(&[usage_chunk(None)]);
-    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-
-    let error = consume_sse_lines(
-        tokio::io::BufReader::new(body.as_bytes()),
-        "openai",
-        "gpt-5.4-preview",
-        DialectContract::new(WireDialect::OpenAiCompat, None),
-        delta_tx,
-        None,
-        None,
-        false,
-    )
-    .await
-    .expect_err("token-bearing empty stream must be rejected");
+    let body = sse_body(&[empty_terminal_content_chunk(), usage_chunk(None)]);
+    let error = drive_empty_openai(&body, None).await;
 
     let receipt = ProviderUsageReceipt::from_error(&error)
         .expect("stream parser error must retain provider usage");
@@ -149,6 +173,63 @@ async fn empty_openai_stream_keeps_provider_usage_receipt() {
     assert_eq!(
         fields.get("output_tokens").and_then(VmValue::as_int),
         Some(6)
+    );
+    let response = ProviderResponseEnvelope::from_error(&error)
+        .expect("empty stream must retain its typed provider response");
+    assert_eq!(response.response_id(), Some("chatcmpl-stream"));
+    assert_eq!(response.stop_reason(), Some("stop"));
+    assert_eq!(response.content_block_count(), 1);
+    assert_eq!(response.content_block_types(), &["text".to_string()]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn empty_stream_does_not_promote_http_request_id_to_response_id() {
+    let mut terminal = empty_terminal_content_chunk();
+    terminal
+        .as_object_mut()
+        .expect("fixture frame")
+        .remove("id");
+    let mut usage = usage_chunk(None);
+    usage.as_object_mut().expect("fixture frame").remove("id");
+    let body = sse_body(&[terminal, usage]);
+    let error = drive_empty_openai(&body, Some("http-request-only")).await;
+
+    let response = ProviderResponseEnvelope::from_error(&error)
+        .expect("empty stream must retain its typed provider response");
+    assert_eq!(response.response_id(), None);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn openai_stream_distinguishes_empty_reasoning_from_absence() {
+    let absent = serde_json::json!({
+        "choices": [{"finish_reason": "stop", "index": 0, "delta": {}}],
+        "id": "chatcmpl-absent-reasoning",
+        "model": "served-model",
+        "object": "chat.completion.chunk"
+    });
+    let present = serde_json::json!({
+        "choices": [{
+            "finish_reason": "stop",
+            "index": 0,
+            "delta": {"reasoning_content": ""}
+        }],
+        "id": "chatcmpl-empty-reasoning",
+        "model": "served-model",
+        "object": "chat.completion.chunk"
+    });
+    let absent_body = sse_body(&[absent, usage_chunk(None)]);
+    let present_body = sse_body(&[present, usage_chunk(None)]);
+
+    let absent_error = drive_empty_openai(&absent_body, None).await;
+    let present_error = drive_empty_openai(&present_body, None).await;
+    let absent_envelope = ProviderResponseEnvelope::from_error(&absent_error)
+        .expect("absent reasoning must still carry an envelope");
+    let present_envelope = ProviderResponseEnvelope::from_error(&present_error)
+        .expect("empty reasoning must still carry an envelope");
+    assert!(absent_envelope.content_block_types().is_empty());
+    assert_eq!(
+        present_envelope.content_block_types(),
+        &["reasoning".to_string()]
     );
 }
 

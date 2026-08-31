@@ -21,7 +21,9 @@ mod item_kinds;
 pub(crate) use cache_mapping::{extract_cache_read_tokens, extract_cache_write_tokens};
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
-    is_billed_noncommittal_completion, is_length_stop_reason, CompletionContractSignals,
+    is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
+    openai_reasoning_field_present, openai_responses_content_block_types,
+    provider_content_block_types, CompletionContractSignals, ProviderResponseEnvelope,
 };
 use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
 
@@ -32,6 +34,10 @@ mod gateway_tests;
 #[cfg(test)]
 #[path = "response_signed_reasoning_tests.rs"]
 mod signed_reasoning_tests;
+
+#[cfg(test)]
+#[path = "response/empty_generation_envelope_tests.rs"]
+mod empty_generation_envelope_tests;
 
 fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
     match value {
@@ -620,25 +626,30 @@ pub(crate) fn parse_openai_responses_response(
         telemetry.cache_accounting_declared,
         true,
     );
+    // `status: "incomplete"` says only that generation stopped early. Prefer
+    // its nested reason and retain status as the completed-response fallback.
+    let stop_reason = json
+        .get("incomplete_details")
+        .and_then(|value| value.get("reason"))
+        .and_then(|value| value.as_str())
+        .or_else(|| json["status"].as_str())
+        .map(str::to_string);
     let has_blocks = !blocks.is_empty();
     if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
         return Err(empty_generation_error(
             provider,
             model,
-            provider_usage,
+            ProviderResponseEnvelope::new(
+                request_id,
+                stop_reason.as_deref(),
+                openai_responses_content_block_types(output),
+                provider_usage,
+            ),
             format!(
                 "openai Responses model {model} delivered no content, reasoning, or tool calls"
             ),
         ));
     }
-    let stop_reason = json["status"]
-        .as_str()
-        .or_else(|| {
-            json.get("incomplete_details")
-                .and_then(|value| value.get("reason"))
-                .and_then(|value| value.as_str())
-        })
-        .map(str::to_string);
 
     Ok(LlmResult {
         attempts: Default::default(),
@@ -820,7 +831,12 @@ pub(crate) fn parse_llm_response(
             return Err(empty_generation_error(
                 provider,
                 model,
-                provider_usage,
+                ProviderResponseEnvelope::new(
+                    request_id,
+                    stop_reason.as_deref(),
+                    provider_content_block_types(Some(content.as_slice())),
+                    provider_usage,
+                ),
                 format!(
                     "anthropic-style model {model} delivered no content, reasoning, or tool calls"
                 ),
@@ -1069,7 +1085,12 @@ pub(crate) fn parse_llm_response(
             return Err(empty_generation_error(
                 provider,
                 model,
-                provider_usage,
+                ProviderResponseEnvelope::new(
+                    request_id,
+                    stop_reason.as_deref(),
+                    openai_message_content_block_types(message),
+                    provider_usage,
+                ),
                 format!(
                     "openai-compatible model {model} delivered no content, reasoning, or tool calls"
                 ),
@@ -1656,34 +1677,6 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_empty_completion_keeps_provider_usage_receipt() {
-        let response = serde_json::json!({
-            "id": "msg-empty",
-            "content": [],
-            "usage": {"input_tokens": 11, "output_tokens": 7}
-        });
-
-        let error = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
-            .expect_err("empty Anthropic completion must be rejected");
-
-        assert_provider_usage_receipt(&error, 11, 7);
-    }
-
-    #[test]
-    fn openai_responses_empty_completion_keeps_provider_usage_receipt() {
-        let response = serde_json::json!({
-            "id": "resp-empty",
-            "output": [],
-            "usage": {"input_tokens": 19, "output_tokens": 3}
-        });
-
-        let error = parse_openai_responses_response(&response, "openai", "gpt-5.4-preview")
-            .expect_err("empty Responses API completion must be rejected");
-
-        assert_provider_usage_receipt(&error, 19, 3);
-    }
-
-    #[test]
     fn openai_parser_rejects_missing_choices_array() {
         let response = serde_json::json!({
             "id": "chatcmpl-bad",
@@ -1696,30 +1689,6 @@ mod tests {
         assert!(error
             .to_string()
             .contains("missing non-empty choices array"));
-    }
-
-    #[test]
-    fn openai_parser_rejects_empty_message_without_content() {
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {"content": ""},
-                "finish_reason": "stop"
-            }],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 0}
-        });
-
-        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false, false)
-            .expect_err("empty provider message must be rejected");
-
-        let VmError::Thrown(VmValue::Dict(fields)) = &error else {
-            panic!("empty generation must be structured: {error:?}");
-        };
-        assert!(fields
-            .get("code")
-            .is_some_and(|value| value.display() == "empty_generation"));
-        assert!(matches!(fields.get("output_tokens"), Some(VmValue::Int(0))));
-        assert_provider_usage_receipt(&error, 1, 0);
-        assert!(error.to_string().contains("delivered no content"));
     }
 
     #[test]

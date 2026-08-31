@@ -18,7 +18,7 @@ use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs}
 use super::response::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
     extract_cache_write_tokens, is_billed_noncommittal_completion,
-    parse_openai_tool_argument_json_values, CompletionContractSignals,
+    parse_openai_tool_argument_json_values, CompletionContractSignals, ProviderResponseEnvelope,
 };
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
@@ -29,6 +29,7 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
+mod response_envelope;
 mod sse;
 
 pub(crate) use liveness::premature_eof;

@@ -1,0 +1,144 @@
+import { agent_loop_control_invoke } from "std/agent/control"
+// Run: harn test tests/agent/call_budget_projection_test.harn
+//
+// Regression coverage for #7619. The loop must project call-budget exhaustion
+// BEFORE it enters the terminal region, so verification, recovery, and terminal
+// reporting still have calls to spend when they run — instead of the loop
+// discovering exhaustion once useful work can no longer be completed.
+//
+// Deterministic: mock LLM script and hand-built loop state. No sleeps, no API
+// calls.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_tool_call, with_llm_script } from "std/testing"
+
+const BUDGET = {
+  mode: "adaptive",
+  initial: 8,
+  max: 50,
+  extend_by: 4,
+  progress_window: 4,
+  expose_decisions: false,
+  wall_clock_ms: nil,
+  total_cost_usd: nil,
+  consecutive_failures: nil,
+}
+
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect the target.",
+    {
+      handler: { _args -> "target contents" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn events_of(events: any, kind: string) {
+  return events.filter({ event -> event.type == kind })
+}
+
+/**
+ * The default loop-control policy decides only at a MEASURED boundary. An
+ * unavailable measurement must not be read as "remaining == 0".
+ */
+pipeline test_unavailable_remaining_is_not_the_budget_boundary(harness: Harness, task: unknown) {
+  const at_boundary = {
+    iteration: 10,
+    budget: {remaining: 0},
+    turn: {tool_call_count: 1},
+    session: {required_tools_satisfied: true},
+    completion: {vetoed: true},
+    progress: {changed: false},
+  }
+  assert_eq(agent_loop_control_invoke({}, BUDGET, at_boundary).action, "extend")
+  const unmeasured = at_boundary + {budget: {remaining: nil}}
+  assert_eq(
+    agent_loop_control_invoke({}, BUDGET, unmeasured).action,
+    "none",
+    "an unavailable remaining-call measurement is not a budget boundary",
+  )
+}
+
+/**
+ * The live path: a run that reaches the reserve boundary projects it before the
+ * terminal region, signals the agent exactly once, and still produces a
+ * terminal receipt.
+ */
+pipeline test_reserve_boundary_is_projected_before_the_terminal_region(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("inspect", {}, "i1"),
+      llm_tool_call("inspect", {}, "i2"),
+      llm_tool_call("inspect", {}, "i3"),
+      llm_tool_call("inspect", {}, "i4"),
+      llm_tool_call("inspect", {}, "i5"),
+    ],
+    { ->
+      const session = "call-budget-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: toolset(),
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        turn_end_condition: nil,
+        final_wrapup: false,
+        iteration_budget: {mode: "fixed", initial: 4, max: 4, extend_by: 0, expose_decisions: true},
+        call_budget_reserve_signal: true,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect until told to stop.", nil, opts) },
+      )
+      const result = captured.result
+      assert_eq(result.status, "budget_exhausted")
+      const projections = events_of(captured.events, "typed_checkpoint").filter(
+        { event -> event.checkpoint?.schema == "harn.agent_loop_call_budget_projection.v1" },
+      )
+        .map({ event -> event.checkpoint })
+      assert(len(projections) > 0, "the loop must project its remaining calls each turn")
+      for projection in projections {
+        assert_eq(projection.measured, true)
+        assert(projection.remaining != nil, "a projected turn carries a measurement")
+        assert_eq(
+          projection.reserve.total,
+          projection.reserve.verification
+            + projection.reserve.recovery
+            + projection.reserve.terminal_report,
+        )
+      }
+      // Bounded early signal: raised once, not every turn under the boundary.
+      const shortfalls = projections.filter({ p -> p.reserve_shortfall })
+      assert_eq(len(shortfalls), 1, "the reserve warning is bounded to one per run")
+      const shortfall = shortfalls[0]
+      assert(
+        shortfall.remaining <= shortfall.reserve.total,
+        "the warning fires only when the remaining budget cannot cover the reserve",
+      )
+      assert(
+        shortfall.iteration < result.llm.iterations,
+        "the signal must precede the terminal region, not report it afterwards",
+      )
+      // The terminal receipt still lands.
+      const exhausted = events_of(captured.events, "budget_exhausted")
+      assert_eq(len(exhausted), 1)
+      assert(
+        result.stop_reason != nil && result.stop_reason != "unattributed",
+        "the terminal receipt must name why the loop stopped",
+      )
+    },
+  )
+}

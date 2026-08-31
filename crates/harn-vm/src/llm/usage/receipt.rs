@@ -148,7 +148,14 @@ impl ProviderUsageReceipt {
         let crate::value::VmError::Thrown(VmValue::Dict(error_fields)) = error else {
             return None;
         };
-        let VmValue::Dict(fields) = error_fields.get("provider_usage")? else {
+        Self::from_vm_value(error_fields.get("provider_usage")?)
+    }
+
+    /// Decode the canonical parser-owned receipt wherever another typed
+    /// envelope embeds it. Keeping this decoder here prevents response
+    /// diagnostics from maintaining a second interpretation of usage.
+    pub(crate) fn from_vm_value(value: &VmValue) -> Option<Self> {
+        let VmValue::Dict(fields) = value else {
             return None;
         };
         let input_tokens = optional_non_negative_int(fields, "input_tokens").ok()?;

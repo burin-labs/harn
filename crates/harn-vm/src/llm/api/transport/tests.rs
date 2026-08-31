@@ -3,6 +3,7 @@ use super::sse::reqwest_send_error;
 use super::{append_ollama_tool_calls, non_stream_send_error, telemetry_source};
 use crate::llm::api::response::parse_tool_arguments;
 use crate::llm::api::DialectContract;
+use crate::llm::api::ProviderResponseEnvelope;
 use crate::llm::capabilities::WireDialect;
 use crate::llm::usage::ProviderUsageReceipt;
 use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
@@ -137,7 +138,7 @@ fn ollama_stream_chunks_surface_tool_calls() {
 
 #[tokio::test]
 async fn ollama_ndjson_empty_content_eval_count_is_marked_for_retry() {
-    let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":10,\"eval_count\":4}\n";
+    let body = b"{\"id\":\"generation-empty\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":10,\"eval_count\":4}\n";
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let mut warmup_gate = false;
     let err = consume_ollama_ndjson_lines(
@@ -178,6 +179,12 @@ async fn ollama_ndjson_empty_content_eval_count_is_marked_for_retry() {
         fields.get("output_tokens").and_then(VmValue::as_int),
         Some(4)
     );
+    let response = ProviderResponseEnvelope::from_error(&err)
+        .expect("empty NDJSON response must retain its typed provider response");
+    assert_eq!(response.response_id(), Some("generation-empty"));
+    assert_eq!(response.stop_reason(), None, "missing remains explicit nil");
+    assert_eq!(response.content_block_count(), 1);
+    assert_eq!(response.content_block_types(), &["text".to_string()]);
 }
 
 #[tokio::test]
