@@ -132,6 +132,22 @@ fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
                 "The persisted run contained invalid Harn execution evidence.",
             );
         }
+        Err(ValidationError::InvalidSpanCost) => {
+            for span in &mut evidence.trace_spans {
+                if span
+                    .cost_usd
+                    .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+                {
+                    span.cost_usd = None;
+                }
+            }
+            push_gap_once(
+                evidence,
+                "trace_spans",
+                "projection_invalid",
+                "The persisted run contained an invalid span cost.",
+            );
+        }
         Err(
             ValidationError::UnsupportedFlightRecordingSchema
             | ValidationError::FlightRecordingIdentityMismatch
@@ -290,6 +306,29 @@ mod tests {
             project_execution_evidence(&run.evidence, ArtifactPathVisibility::Hidden),
             Err(ExecutionEvidenceValidationError::InvalidExecutionId)
         );
+    }
+
+    #[test]
+    fn public_view_drops_invalid_span_cost_and_records_gap() {
+        let mut run = run_with_local_recording();
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                cost_usd: Some(f64::NAN),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+
+        assert_eq!(
+            project_execution_evidence(&run.evidence, ArtifactPathVisibility::Hidden),
+            Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+        );
+
+        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+        assert_eq!(projected.trace_spans[0].cost_usd, None);
+        assert!(projected
+            .gaps
+            .iter()
+            .any(|gap| gap.component == "trace_spans" && gap.code == "projection_invalid"));
     }
 
     #[test]

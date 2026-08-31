@@ -13,6 +13,8 @@ pub enum ExecutionEvidenceValidationError {
     MissingExecutionId,
     #[error("execution evidence has an invalid Harn execution identity")]
     InvalidExecutionId,
+    #[error("execution evidence span cost must be finite and non-negative")]
+    InvalidSpanCost,
     #[error("flight recording must use schema version {FLIGHT_RECORDING_SCHEMA_VERSION}")]
     UnsupportedFlightRecordingSchema,
     #[error("flight recording identity does not match its execution evidence")]
@@ -35,6 +37,14 @@ pub fn validate_execution_evidence(
         return Err(ExecutionEvidenceValidationError::MissingExecutionId);
     };
     validate_execution_id(execution_id)?;
+    if evidence
+        .trace_spans
+        .iter()
+        .filter_map(|span| span.cost_usd)
+        .any(|cost| !cost.is_finite() || cost < 0.0)
+    {
+        return Err(ExecutionEvidenceValidationError::InvalidSpanCost);
+    }
     let Some(recording) = evidence.flight_recording.as_ref() else {
         return Ok(());
     };
@@ -168,6 +178,21 @@ mod tests {
             let mut evidence = evidence();
             evidence.flight_recording = Some(artifact);
             assert_eq!(validate_execution_evidence(&evidence), Err(expected));
+        }
+    }
+
+    #[test]
+    fn rejects_non_finite_or_negative_span_costs() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.01] {
+            let mut evidence = evidence();
+            evidence.trace_spans.push(super::super::RunTraceSpanRecord {
+                cost_usd: Some(invalid),
+                ..super::super::RunTraceSpanRecord::default()
+            });
+            assert_eq!(
+                validate_execution_evidence(&evidence),
+                Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+            );
         }
     }
 }
