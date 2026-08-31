@@ -723,8 +723,19 @@ fn assemble(
         total_cost: known_cost_usd,
         ..fold.usage
     };
-    let (execution_id, execution_identity_gaps) = match fold.execution_id.clone() {
-        Some(execution_id) => (Some(execution_id), Vec::new()),
+    let (execution_id, execution_identity_gaps) = match fold.execution_id.as_deref() {
+        Some(execution_id) => match crate::ExecutionId::parse(execution_id) {
+            Ok(execution_id) => (Some(execution_id.to_string()), Vec::new()),
+            Err(_) => (
+                None,
+                vec![super::types::RunEvidenceGapRecord {
+                    component: "execution_identity".to_string(),
+                    code: "session_projection_invalid".to_string(),
+                    message: "the session event stream carries an invalid VM execution identity"
+                        .to_string(),
+                }],
+            ),
+        },
         None => (
             None,
             vec![super::types::RunEvidenceGapRecord {
@@ -1173,6 +1184,10 @@ fn push_distinct(values: &mut Vec<String>, value: String) {
         values.push(value);
     }
 }
+
+#[cfg(test)]
+#[path = "from_session/execution_identity_tests.rs"]
+mod execution_identity_tests;
 
 #[cfg(test)]
 mod tests;
