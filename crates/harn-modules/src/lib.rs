@@ -25,6 +25,7 @@ mod standalone;
 mod stdlib;
 mod symbol_reachability;
 mod type_dependencies;
+mod typecheck;
 
 use declarations::{
     callable_decl_name, collect_callable_declarations, collect_module_info,
@@ -897,9 +898,7 @@ impl ModuleGraph {
         Some(decls)
     }
 
-    /// Collect callable declarations made visible to `file` by its imports.
-    /// Only signatures are consumed by the type checker; imported bodies
-    /// remain owned by their defining modules.
+    /// Collect imported callable signatures; bodies stay in their defining modules.
     pub fn imported_callable_declarations_for_file(&self, file: &Path) -> Option<Vec<SNode>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;

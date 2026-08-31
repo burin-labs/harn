@@ -546,17 +546,32 @@ fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
     if opts.max_tokens > 0 {
         config.insert("max_output_tokens".to_string(), json!(opts.max_tokens));
     }
-    if caps.temperature_supported {
+    if caps.temperature_supported
+        || !crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            opts.provider_contract_probe,
+            crate::llm::capabilities::PortableOption::Temperature,
+        )
+    {
         if let Some(temperature) = opts.temperature {
             config.insert("temperature".to_string(), json!(temperature));
         }
     }
-    if caps.top_p_supported {
+    if caps.top_p_supported
+        || !crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            opts.provider_contract_probe,
+            crate::llm::capabilities::PortableOption::TopP,
+        )
+    {
         if let Some(top_p) = opts.top_p {
             config.insert("top_p".to_string(), json!(top_p));
         }
     }
-    if caps.top_k_supported {
+    if caps.top_k_supported
+        || !crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            opts.provider_contract_probe,
+            crate::llm::capabilities::PortableOption::TopK,
+        )
+    {
         if let Some(top_k) = opts.top_k {
             config.insert("top_k".to_string(), json!(top_k));
         }
