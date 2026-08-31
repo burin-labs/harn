@@ -37,16 +37,15 @@ async fn dispatch(args: ProviderToolCalibrateArgs) -> i32 {
 
     let mut reports = Vec::new();
     for (provider, requested_model) in routes {
-        let model = match crate::commands::providers::resolve_tool_probe_wire_model(
-            &provider,
-            &requested_model,
-        ) {
-            Ok(model) => model,
-            Err(error) => {
-                eprintln!("{error}");
-                return 1;
-            }
-        };
+        let model =
+            match crate::commands::providers::resolve_probe_wire_model(&provider, &requested_model)
+            {
+                Ok(model) => model,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return 1;
+                }
+            };
         for format in &formats {
             for probe_case in requested_cases
                 .iter()

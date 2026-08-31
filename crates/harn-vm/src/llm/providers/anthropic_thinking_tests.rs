@@ -4,7 +4,8 @@
 
 use super::anthropic::{
     claude_generation, claude_model_supports_tool_search, model_defaults_to_adaptive_thinking,
-    reconcile_request_body, strip_unsupported_sampling_params, AnthropicProvider,
+    reconcile_request_body, strip_unsupported_bedrock_converse_sampling_params,
+    strip_unsupported_sampling_params, AnthropicProvider,
 };
 use super::anthropic_test_support::base_payload;
 use crate::llm::api::{ReasoningEffort, ThinkingConfig};
@@ -95,7 +96,13 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
             "thinking": {"type": "disabled"},
             "output_config": {"effort": effort},
         });
-        reconcile_request_body(&mut body, "anthropic", model, &ThinkingConfig::Disabled);
+        reconcile_request_body(
+            &mut body,
+            "anthropic",
+            model,
+            &ThinkingConfig::Disabled,
+            None,
+        );
         body
     };
 
@@ -127,6 +134,7 @@ fn opus_5_clamps_effort_when_thinking_is_disabled() {
         &ThinkingConfig::Effort {
             level: ReasoningEffort::XHigh,
         },
+        None,
     );
     assert_eq!(
         thinking_on["output_config"]["effort"],
@@ -237,12 +245,82 @@ fn sampling_params_stripped_by_shared_helper_for_rejecting_models() {
         "top_k": 20,
     });
 
-    strip_unsupported_sampling_params(&mut body, "claude-opus-4-7", &ThinkingConfig::Disabled);
+    strip_unsupported_sampling_params(
+        &mut body,
+        "claude-opus-4-7",
+        &ThinkingConfig::Disabled,
+        None,
+    );
 
     assert!(body.get("temperature").is_none());
     assert!(body.get("top_p").is_none());
     assert!(body.get("top_k").is_none());
     assert_eq!(body["model"], serde_json::json!("claude-opus-4-7"));
+}
+
+#[test]
+fn option_probe_preserves_only_its_selected_sampling_field() {
+    use crate::llm::capabilities::PortableOption;
+
+    let mut direct = serde_json::json!({
+        "model": "claude-opus-4-7",
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "top_k": 20,
+    });
+    strip_unsupported_sampling_params(
+        &mut direct,
+        "claude-opus-4-7",
+        &ThinkingConfig::Disabled,
+        Some(PortableOption::TopP),
+    );
+
+    assert!(direct.get("temperature").is_none());
+    assert_eq!(direct["top_p"], serde_json::json!(0.9));
+    assert!(direct.get("top_k").is_none());
+
+    let mut bedrock = serde_json::json!({
+        "inferenceConfig": {"temperature": 0.2, "topP": 0.9, "topK": 20},
+    });
+    strip_unsupported_bedrock_converse_sampling_params(
+        &mut bedrock,
+        "anthropic.claude-opus-4-7-v1:0",
+        &ThinkingConfig::Disabled,
+        Some(PortableOption::TopP),
+    );
+
+    assert!(bedrock["inferenceConfig"].get("temperature").is_none());
+    assert_eq!(bedrock["inferenceConfig"]["topP"], serde_json::json!(0.9));
+    assert!(bedrock["inferenceConfig"].get("topK").is_none());
+}
+
+#[test]
+fn final_reconciliation_preserves_probe_option_and_removes_rejected_prefill() {
+    use crate::llm::capabilities::PortableOption;
+
+    let mut body = serde_json::json!({
+        "model": "claude-opus-5",
+        "messages": [
+            {"role": "user", "content": "Reply with ok"},
+            {"role": "assistant", "content": "persisted prefill"},
+        ],
+        "temperature": 0.2,
+        "top_p": 0.9,
+    });
+    reconcile_request_body(
+        &mut body,
+        "anthropic",
+        "claude-opus-5",
+        &ThinkingConfig::Disabled,
+        Some(PortableOption::Temperature),
+    );
+
+    assert_eq!(body["temperature"], serde_json::json!(0.2));
+    assert!(body.get("top_p").is_none());
+    assert_eq!(
+        body["messages"],
+        serde_json::json!([{"role": "user", "content": "Reply with ok"}])
+    );
 }
 
 #[test]
@@ -254,7 +332,12 @@ fn sampling_params_stripped_by_shared_helper_when_thinking_active() {
         "top_k": 20,
     });
 
-    strip_unsupported_sampling_params(&mut body, "claude-sonnet-4-6", &ThinkingConfig::Adaptive);
+    strip_unsupported_sampling_params(
+        &mut body,
+        "claude-sonnet-4-6",
+        &ThinkingConfig::Adaptive,
+        None,
+    );
 
     assert!(body.get("temperature").is_none());
     assert!(body.get("top_p").is_none());
@@ -270,7 +353,12 @@ fn sampling_params_preserved_by_shared_helper_for_supported_disabled_thinking() 
         "top_k": 20,
     });
 
-    strip_unsupported_sampling_params(&mut body, "claude-sonnet-4-6", &ThinkingConfig::Disabled);
+    strip_unsupported_sampling_params(
+        &mut body,
+        "claude-sonnet-4-6",
+        &ThinkingConfig::Disabled,
+        None,
+    );
 
     assert_eq!(body["temperature"], serde_json::json!(0.2));
     assert_eq!(body["top_p"], serde_json::json!(0.9));
@@ -286,7 +374,12 @@ fn sampling_params_stripped_when_body_thinking_override_is_active() {
         "thinking": {"type": "enabled", "budget_tokens": 1024},
     });
 
-    strip_unsupported_sampling_params(&mut body, "claude-sonnet-4-6", &ThinkingConfig::Disabled);
+    strip_unsupported_sampling_params(
+        &mut body,
+        "claude-sonnet-4-6",
+        &ThinkingConfig::Disabled,
+        None,
+    );
 
     assert!(body.get("temperature").is_none());
     assert!(body.get("top_p").is_none());
@@ -305,7 +398,12 @@ fn sampling_params_stripped_when_body_output_config_effort_override_is_active() 
         "output_config": {"effort": "high"},
     });
 
-    strip_unsupported_sampling_params(&mut body, "claude-sonnet-4-6", &ThinkingConfig::Disabled);
+    strip_unsupported_sampling_params(
+        &mut body,
+        "claude-sonnet-4-6",
+        &ThinkingConfig::Disabled,
+        None,
+    );
 
     assert!(body.get("temperature").is_none());
     assert!(body.get("top_p").is_none());
