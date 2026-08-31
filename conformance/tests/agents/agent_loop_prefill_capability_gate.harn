@@ -1,64 +1,186 @@
-// A caller-supplied `prefill` must not reach a model that declares
-// `supports_assistant_prefill = false`.
-//
-// A prefill is a trailing assistant message. A provider that forbids one
-// rejects the whole request as a terminal `invalid_request`, so an unsupported
-// prefill costs the run rather than degrading the turn. The monologue
-// call-opener already consults the capability before it actuates; a prefill
-// passed in the loop options did not, and both converge on the same arming
-// site.
-//
-// The pair is the test. The negative arm alone would also pass if the loop had
-// simply stopped prefilling altogether, so the control arm pins that a model
-// which DOES declare support still gets its prefill on the wire.
+// Assistant prefill is a route capability, not an agent-loop assumption.
+// These controls drive the real multi-turn loop and its custom-caller seam so
+// a provider rejection cannot hide behind a shallow option-normalization test.
+import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { assert_eq, llm_text, with_llm_script } from "std/testing"
+import { default_llm_caller } from "std/llm/caller"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
-fn options(session: string, model: string) {
+type AgentLoopCapabilities = {agent: HarnessAgent, llm: HarnessLlm, runtime: HarnessRuntime}
+
+fn lookup_tools() {
+  return tool_define(
+    tool_registry(),
+    "lookup",
+    "Read evidence.",
+    {
+      handler: { args -> "evidence for " + to_string(args.path) },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn actuation_receipts(events: list) -> list {
+  return events.filter({ event -> event.type == "typed_checkpoint" }).filter(
+    { event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" },
+  )
+    .to_list()
+}
+
+fn options(
+  capabilities: AgentLoopCapabilities,
+  session: string,
+  model: string,
+  route_observation: any,
+  extra: dict? = nil,
+) {
+  const base_caller = default_llm_caller(capabilities.agent, capabilities.llm)
+  const observed_caller = { call ->
+    const prior = capabilities.runtime.shared_snapshot(route_observation)
+    capabilities.runtime.shared_set(
+      route_observation,
+      prior.value + [call?.opts?.equivalent_failover != nil],
+    )
+    return base_caller(call)
+  }
   return {
-    provider: "mock",
+    provider: "anthropic",
     model: model,
-    tools: tool_registry(),
-    tool_format: "text",
+    tools: lookup_tools(),
+    tool_format: "native",
     loop_until_done: true,
-    done_sentinel: "##DONE##",
+    done_sentinel: nil,
     turn_end_condition: nil,
     final_wrapup: false,
     max_iterations: 4,
-    max_nudges: 4,
+    max_nudges: 0,
     session_id: session,
-    prefill: "I will start by",
+    llm_caller: observed_caller,
+    llm_caller_transport: {forwards_assistant_prefill: true},
   }
+    + (extra ?? {})
 }
 
-fn first_call_prefill(harness: Harness, session: string, model: string) {
+fn run_after_tool_prefill(harness: Harness, model: string, arm_prefill: bool, extra: dict? = nil) {
   return with_llm_script(
     harness.llm,
-    [llm_text("done ##DONE##")],
+    [llm_tool_call("lookup", {path: "app.txt"}, "lookup-1"), llm_text("Inspection complete.")],
     { ->
-      const _ = agent_loop(harness, "Inspect app.txt.", nil, options(session, model))
-      const calls = harness.llm.mock_calls()
-      return calls[0].prefill
+      const session = "prefill-gate-" + model + "-" + harness.random.uuid()
+      const route_observation = harness.runtime.shared_cell(
+        {scope: "task_group", key: session + "-equivalent-failover", initial: []},
+      )
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Inspect app.txt.",
+          nil,
+          options(
+            {agent: harness.agent, llm: harness.llm, runtime: harness.runtime},
+            session,
+            model,
+            route_observation,
+            if arm_prefill {
+              {
+                post_turn_callback: { info ->
+                  if "lookup" in info.successful_tool_names {
+                    return {prefill: "I will continue by"}
+                  }
+                  return nil
+                },
+              }
+            } else {
+              {}
+            }
+              + (extra ?? {}),
+          ),
+        ) },
+      )
+      return {
+        result: captured.result,
+        events: captured.events,
+        calls: harness.llm.mock_calls(),
+        equivalent_failover_observations: harness.runtime.shared_get(route_observation),
+      }
     },
   )
 }
 
 pipeline default(harness: Harness) {
-  // FALSIFIER: `claude-sonnet-5` declares supports_assistant_prefill = false.
-  // Before the gate this put "I will start by" on the wire as a trailing
-  // assistant message and the provider refused the request outright.
-  assert_eq(
-    first_call_prefill(harness, "prefill-gate-unsupported", "claude-sonnet-5"),
-    nil,
-    "a model that forbids assistant prefill must receive no prefill",
+  // FALSIFIER: after a native tool_use/tool_result turn, Sonnet 5 must not
+  // receive the callback's trailing assistant prefill.
+  const unsupported = run_after_tool_prefill(harness, "claude-sonnet-5", true)
+  require unsupported.result.status == "done",
+    "the unsupported-provider loop must reach natural completion"
+  require len(unsupported.calls) == 2,
+    "the unsupported-provider fixture must exercise both model turns"
+  require unsupported.calls[1].prefill == nil,
+    "a model that forbids assistant prefill must receive no prefill"
+  const unsupported_messages = unsupported.calls[1].messages
+  require unsupported_messages[len(unsupported_messages) - 1].role == "tool_result",
+    "the unsupported native-tool follow-up must end at the tool-result boundary"
+  require json_stringify(unsupported.calls[1].messages).contains("evidence for app.txt"),
+    "the guarded request must be the native-tool follow-up, not the first turn"
+  // CONTROL: the same multi-turn request retains its opener on a route whose
+  // catalog row explicitly supports assistant prefill.
+  const supported = run_after_tool_prefill(harness, "haiku", true, {provider: nil})
+  require supported.result.status == "done",
+    "the supported-provider loop must reach natural completion"
+  require supported.calls[1].prefill == "I will continue by",
+    "a provider-omitted model alias must resolve before capability admission"
+  require !supported.equivalent_failover_observations[1],
+    "an admitted prefill must pin its request to the checked route"
+  const active_failover = run_after_tool_prefill(
+    harness,
+    "haiku",
+    true,
+    {equivalent_failover: true},
   )
-  // CONTROL: `claude-opus-3-5` declares supports_assistant_prefill = true, so
-  // the existing behavior must survive. Without this arm the assertion above
-  // would also pass if the loop had stopped prefilling entirely.
-  assert_eq(
-    first_call_prefill(harness, "prefill-gate-supported", "claude-opus-3-5"),
-    "I will start by",
-    "a model that allows assistant prefill must still receive it",
+  require active_failover.calls[1].prefill == nil,
+    "an active multi-route owner must suppress route-specific prefill"
+  require active_failover.equivalent_failover_observations[1],
+    "a suppressed prefill must preserve the caller's active failover policy"
+  const disabled_failover = run_after_tool_prefill(
+    harness,
+    "haiku",
+    true,
+    {equivalent_failover: {enabled: false}},
   )
+  require disabled_failover.calls[1].prefill == "I will continue by",
+    "a disabled failover policy must retain single-route prefill"
+  const false_failover = run_after_tool_prefill(
+    harness,
+    "haiku",
+    true,
+    {equivalent_failover: false},
+  )
+  require false_failover.calls[1].prefill == "I will continue by",
+    "a false failover policy must retain single-route prefill"
+  const undeclared_caller = run_after_tool_prefill(
+    harness,
+    "haiku",
+    true,
+    {llm_caller_transport: {forwards_assistant_prefill: false}},
+  )
+  require undeclared_caller.calls[1].prefill == nil, "an opaque custom caller must fail closed"
+  // INVERSE: a healthy loop with no recovery decision must never manufacture
+  // a prefill, even when the selected route could accept one.
+  const no_stall = run_after_tool_prefill(
+    harness,
+    "haiku",
+    false,
+    {stall_diagnostics: {enabled: true, monologue_actuation: {enabled: true, read_only_turns: 2}}},
+  )
+  require no_stall.result.status == "done", "the no-stall control must reach natural completion"
+  require no_stall.calls.all({ call -> call.prefill == nil }),
+    "a no-stall loop must not inject an assistant prefill"
+  require len(actuation_receipts(no_stall.events)) == 0,
+    "a below-threshold successful turn must not emit an actuation decision"
+  require no_stall.equivalent_failover_observations[1],
+    "an ordinary no-prefill request must retain default equivalent failover"
   harness.stdio.println("prefill capability gate ok")
 }

@@ -37,7 +37,9 @@ fn truncated_turn() {
 
 fn options(session: any, extra: dict? = nil) {
   return {
-    provider: "mock",
+    // `with_llm_script` owns transport; keep the logical route Anthropic so
+    // the same catalog capability gate as production is exercised.
+    provider: "anthropic",
     model: "claude-opus-3-5",
     tools: lookup_tools(),
     tool_format: "native",
