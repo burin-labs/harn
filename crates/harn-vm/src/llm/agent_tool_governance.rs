@@ -189,7 +189,7 @@ mod tests {
             let id = request["id"]
                 .as_u64()
                 .ok_or_else(|| "missing request id".to_string())?;
-            let sender = response_pending
+            let sender: tokio::sync::oneshot::Sender<serde_json::Value> = response_pending
                 .try_lock()
                 .map_err(|_| "pending lock busy".to_string())?
                 .remove(&id)
