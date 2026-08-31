@@ -5444,9 +5444,10 @@ for entry in drain_audit() {
   `improvement`. Small models often leave them blank, and validation
   will fail every time. Use the system prompt to demand non-empty
   strings instead.
-- On `harness.llm.call`, `provider: "auto"` with `model: "local:foo"` strips
-  the `local:` prefix and routes to Ollama. Without `"auto"`, an
-  explicit provider such as `"local"` still wins.
+- On `harness.llm.call`, `model: "local:foo"` is an Ollama-qualified selector.
+  It strips the `local:` prefix and routes to Ollama. A separately supplied
+  provider must agree; use `{provider: "local", model: "foo"}` for the generic
+  local OpenAI-compatible adapter.
 - `schema_retries` retries schema-validation failures with a
   corrective nudge. Transient provider errors are fail-fast — compose
   `with_retry` from `std/llm/handlers` for retry policy. The two

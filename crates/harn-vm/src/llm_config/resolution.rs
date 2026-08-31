@@ -55,13 +55,16 @@ impl ModelResolution {
         let config = effective_config();
         let route = resolve_model_request_with_config(
             &config,
-            &format!("{provider}:{model}"),
+            model,
             Some(provider),
+            ProviderResolutionScope::ActiveCall,
         )?;
         if let Some((requested_provider, _)) = self.requested_model.split_once(':') {
-            if let Some(requested_provider) =
-                known_provider(&config, provider_selector_target(requested_provider))
-            {
+            if let Some(requested_provider) = known_provider(
+                &config,
+                provider_selector_target(requested_provider),
+                ProviderResolutionScope::Catalog,
+            ) {
                 if requested_provider != route.resolved_provider {
                     return Err(ModelResolutionError::ProviderConflict {
                         selector_provider: requested_provider.to_string(),
@@ -267,7 +270,35 @@ fn provider_selector_target(provider: &str) -> &str {
     }
 }
 
-fn known_provider<'a>(config: &ProvidersConfig, provider: &'a str) -> Option<&'a str> {
+fn explicit_provider_target(provider: &str) -> &str {
+    match provider {
+        // `local` is both a real generic OpenAI-compatible adapter and a
+        // selector shorthand for Ollama. Only selector syntax takes the
+        // shorthand; an explicit provider names the adapter itself.
+        "hf" => "huggingface",
+        other => other,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProviderResolutionScope {
+    Catalog,
+    ActiveCall,
+}
+
+impl ProviderResolutionScope {
+    fn permits_fixture_adapter(self) -> bool {
+        matches!(self, Self::ActiveCall)
+            && (crate::llm::mock::cli_llm_mock_replay_active()
+                || crate::llm::mock::builtin_llm_mock_active())
+    }
+}
+
+fn known_provider<'a>(
+    config: &ProvidersConfig,
+    provider: &'a str,
+    scope: ProviderResolutionScope,
+) -> Option<&'a str> {
     let provider = if config.providers.contains_key(provider)
         || matches!(provider, "mock" | "fake")
         || crate::llm::provider::is_provider_registered(provider)
@@ -278,15 +309,29 @@ fn known_provider<'a>(config: &ProvidersConfig, provider: &'a str) -> Option<&'a
     };
     (matches!(provider, "mock" | "fake")
         || config.providers.contains_key(provider)
-        || crate::llm::provider::is_provider_registered(provider))
+        || crate::llm::provider::is_provider_registered(provider)
+        // A scoped fixture is itself the transport adapter. Its scripted
+        // provider/model identity is intentionally open-world so tests can
+        // prove routing and receipts without registering a fake production
+        // endpoint. Catalog introspection and real calls still fail closed.
+        || scope.permits_fixture_adapter())
     .then_some(provider)
 }
 
-fn provider_has_builtin_model_namespace(provider: &str) -> bool {
+const MODEL_PROXY_FEATURE: &str = "model_proxy";
+
+fn provider_has_builtin_model_namespace(config: &ProvidersConfig, provider: &str) -> bool {
     static PROVIDERS: OnceLock<BTreeSet<String>> = OnceLock::new();
-    PROVIDERS
+    let is_builtin = PROVIDERS
         .get_or_init(|| default_config().providers.into_keys().collect())
-        .contains(provider)
+        .contains(provider);
+    let is_proxy = config.providers.get(provider).is_some_and(|definition| {
+        definition
+            .features
+            .iter()
+            .any(|feature| feature == MODEL_PROXY_FEATURE)
+    });
+    is_builtin && !is_proxy
 }
 
 fn provider_suggestions(config: &ProvidersConfig, requested: &str) -> Vec<String> {
@@ -323,13 +368,32 @@ pub fn resolve_model_request(
     requested_provider: Option<&str>,
 ) -> Result<ModelResolution, ModelResolutionError> {
     let config = effective_config();
-    resolve_model_request_with_config(&config, requested_model, requested_provider)
+    resolve_model_request_with_config(
+        &config,
+        requested_model,
+        requested_provider,
+        ProviderResolutionScope::Catalog,
+    )
+}
+
+pub(crate) fn resolve_model_request_for_active_call(
+    requested_model: &str,
+    requested_provider: Option<&str>,
+) -> Result<ModelResolution, ModelResolutionError> {
+    let config = effective_config();
+    resolve_model_request_with_config(
+        &config,
+        requested_model,
+        requested_provider,
+        ProviderResolutionScope::ActiveCall,
+    )
 }
 
 fn resolve_model_request_with_config(
     config: &ProvidersConfig,
     requested_model: &str,
     requested_provider: Option<&str>,
+    scope: ProviderResolutionScope,
 ) -> Result<ModelResolution, ModelResolutionError> {
     let requested_model = requested_model.trim();
     if requested_model.is_empty() {
@@ -342,7 +406,7 @@ fn resolve_model_request_with_config(
         .map(str::trim)
         .filter(|provider| !provider.is_empty() && !provider.eq_ignore_ascii_case("auto"))
         .map(|provider| {
-            known_provider(config, provider_selector_target(provider)).ok_or_else(|| {
+            known_provider(config, explicit_provider_target(provider), scope).ok_or_else(|| {
                 ModelResolutionError::UnknownProvider {
                     provider: provider.to_string(),
                     catalog_version: catalog_version(),
@@ -356,14 +420,22 @@ fn resolve_model_request_with_config(
         .split_once(':')
         .filter(|(_, model)| !model.trim().is_empty());
     let qualified = qualified_parts.and_then(|(provider, model)| {
-        known_provider(config, provider_selector_target(provider))
-            .map(|known| (known, model.trim()))
+        // Selector prefixes are syntax, so only registered or configured
+        // names may claim them. Fixture adapters remain open-world through
+        // the separate explicit `provider` field; otherwise a provider-native
+        // model id such as `qwen3.2:latest` becomes an accidental qualifier.
+        known_provider(
+            config,
+            provider_selector_target(provider),
+            ProviderResolutionScope::Catalog,
+        )
+        .map(|known| (known, model.trim()))
     });
     if let Some((provider, model)) = qualified_parts.filter(|_| qualified.is_none()) {
         let suggestions = provider_suggestions(config, provider);
-        if !suggestions.is_empty()
-            || config.aliases.contains_key(model)
+        if config.aliases.contains_key(model)
             || config.models.contains_key(model)
+            || (explicit_provider.is_none() && !suggestions.is_empty())
         {
             return Err(ModelResolutionError::UnknownProvider {
                 provider: provider.to_string(),
@@ -400,8 +472,14 @@ fn resolve_model_request_with_config(
                 catalog_version: catalog_version(),
             });
         }
-        alias_chain.push(current);
         alias_provider = Some(alias.provider.as_str());
+        // Some catalog rows use a same-name alias to attach a provider to a
+        // provider-native model id. That is a terminal annotation, not a
+        // recursive rename and therefore not an alias cycle.
+        if alias.id == current {
+            break;
+        }
+        alias_chain.push(current);
         current = alias.id.clone();
     }
 
@@ -432,7 +510,7 @@ fn resolve_model_request_with_config(
     // whose canonical identity is catalogued under its upstream provider.
     let enforces_catalog_ownership = provider_constraint
         .or(alias_provider)
-        .is_some_and(provider_has_builtin_model_namespace);
+        .is_some_and(|provider| provider_has_builtin_model_namespace(config, provider));
     if let Some((expected, Some(actual))) =
         provider_expectation.filter(|_| enforces_catalog_ownership)
     {

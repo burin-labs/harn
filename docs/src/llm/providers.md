@@ -1308,11 +1308,13 @@ different provider, if a separate `provider` option disagrees, or if a later
 routing step changes the provider. It does not fall through to the default or
 local provider.
 
-Catalog ownership applies to Harn's built-in provider namespaces. A custom
-adapter or proxy may deliberately serve an upstream model identity, while its
-selected adapter remains a hard transport constraint. This keeps gateways and
-test adapters composable without allowing `ollama:gpt-5.6-sol` or another
-contradictory built-in selector to escape to the wrong provider.
+Catalog ownership applies to Harn's built-in provider namespaces unless the
+provider registry declares the `model_proxy` feature. A custom adapter, the
+generic local OpenAI-compatible adapter, or a catalogued router may deliberately
+serve an upstream model identity, while its selected adapter remains a hard
+transport constraint. This keeps gateways and test adapters composable without
+allowing `ollama:gpt-5.6-sol` or another contradictory namespace-owned selector
+to escape to the wrong provider.
 
 An explicit provider can name a private or newly released model that is not in
 Harn's catalog, or proxy a catalogued upstream model:
