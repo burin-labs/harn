@@ -239,6 +239,7 @@ fn strip_anthropic_sampling_params(body: &mut serde_json::Value, request: &LlmRe
         body,
         &request.model,
         &request.thinking,
+        request.provider_contract_probe,
     );
 }
 
@@ -1190,6 +1191,7 @@ aws_secret_access_key = dev-secret
             frequency_penalty: None,
             presence_penalty: None,
             parallel_tool_calls: None,
+            provider_contract_probe: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             output_schema: None,

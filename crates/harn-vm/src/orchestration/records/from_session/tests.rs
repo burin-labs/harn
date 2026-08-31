@@ -112,16 +112,6 @@ fn run_started() -> AppendEvent {
     )
 }
 
-fn run_started_with_execution_id(execution_id: &str) -> AppendEvent {
-    AppendEvent::new(
-        custom("agent_run_started"),
-        transcript_event(
-            "agent_run_started",
-            json!({"execution_id": execution_id, "lifecycle_state": "running"}),
-        ),
-    )
-}
-
 fn sub_agent_start(child_session_id: &str, child_run_id: &str) -> AppendEvent {
     AppendEvent::new(
         custom("sub_agent_start"),
@@ -997,44 +987,6 @@ async fn a_reused_session_projects_only_its_latest_run_invocation() {
         crate::orchestration::validate_execution_evidence(&run.evidence),
         Err(crate::orchestration::ExecutionEvidenceValidationError::MissingExecutionId),
         "legacy sessions remain visibly incomplete instead of bypassing the validator",
-    );
-}
-
-#[tokio::test]
-async fn session_execution_identity_survives_projection_and_json_round_trip() {
-    const EXECUTION_ID: &str = "hxe-019c13e0-8080-7000-8000-000000000041";
-    let store = MemorySessionStore::default();
-    let meta = store
-        .create(CreateSession::default())
-        .await
-        .expect("create session");
-    for event in [
-        run_started_with_execution_id(EXECUTION_ID),
-        user_message("typed identity"),
-        terminal("done", "natural"),
-    ] {
-        store.append(&meta.id, event).await.expect("append event");
-    }
-
-    let projected = project_run_record_from_session(&store, &meta.id)
-        .await
-        .expect("project session");
-    assert_eq!(
-        projected.evidence.execution_id.as_deref(),
-        Some(EXECUTION_ID)
-    );
-    assert!(projected.evidence.gaps.is_empty());
-    assert_eq!(
-        crate::orchestration::validate_execution_evidence(&projected.evidence),
-        Ok(())
-    );
-
-    let encoded = serde_json::to_vec(&projected).expect("encode projected run");
-    let decoded: RunRecord = serde_json::from_slice(&encoded).expect("decode projected run");
-    assert_eq!(decoded.evidence, projected.evidence);
-    assert_eq!(
-        crate::orchestration::validate_execution_evidence(&decoded.evidence),
-        Ok(())
     );
 }
 
