@@ -1438,8 +1438,9 @@ the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
 Provider auto-resolution precedence:
 
 1. An explicit `provider` option other than `"auto"` constrains the route. It
-   must agree with a provider-qualified `model` and with any matching catalog
-   row or known model family.
+   must agree with a provider-qualified `model`. A built-in catalog provider
+   must also own any matching catalog row or known model family. Custom
+   adapters may proxy an upstream model identity.
 2. `model_role` fills missing provider/model/routing options from
    `[model_roles.<role>]` or role env overrides.
 3. `provider: "auto"` with a `model` infers from the model selector.
@@ -1452,9 +1453,9 @@ Provider auto-resolution precedence:
 Resolution produces one typed receipt before provider dispatch:
 `requested_model`, `alias_chain`, `resolved_provider`, `resolved_model`, and
 `model_catalog_version`. Provider-qualified selectors are hard constraints,
-including across routing-policy transforms. The runtime compares the receipt
-with the transport route before every provider request and fails without
-egress on disagreement.
+including custom proxy selectors and routing-policy transforms. The runtime
+compares the receipt with the transport route before every provider request
+and fails without egress on disagreement.
 
 ### OpenAI Responses mode
 

@@ -1,7 +1,10 @@
 //! Selector resolution: turn an alias or provider/model selector into the
 //! complete `ResolvedModel` identity (provider, normalized id, tool format,
 //! tier, family, lineage).
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::OnceLock,
+};
 
 use serde::Serialize;
 
@@ -279,6 +282,13 @@ fn known_provider<'a>(config: &ProvidersConfig, provider: &'a str) -> Option<&'a
     .then_some(provider)
 }
 
+fn provider_has_builtin_model_namespace(provider: &str) -> bool {
+    static PROVIDERS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    PROVIDERS
+        .get_or_init(|| default_config().providers.into_keys().collect())
+        .contains(provider)
+}
+
 fn provider_suggestions(config: &ProvidersConfig, requested: &str) -> Vec<String> {
     nearest_names(
         requested,
@@ -332,10 +342,12 @@ fn resolve_model_request_with_config(
         .map(str::trim)
         .filter(|provider| !provider.is_empty() && !provider.eq_ignore_ascii_case("auto"))
         .map(|provider| {
-            known_provider(config, provider).ok_or_else(|| ModelResolutionError::UnknownProvider {
-                provider: provider.to_string(),
-                catalog_version: catalog_version(),
-                suggestions: provider_suggestions(config, provider),
+            known_provider(config, provider_selector_target(provider)).ok_or_else(|| {
+                ModelResolutionError::UnknownProvider {
+                    provider: provider.to_string(),
+                    catalog_version: catalog_version(),
+                    suggestions: provider_suggestions(config, provider),
+                }
             })
         })
         .transpose()?;
@@ -414,7 +426,16 @@ fn resolve_model_request_with_config(
         .or_else(|| {
             alias_provider.map(|expected| (expected, catalog_provider.or(inferred_provider)))
         });
-    if let Some((expected, Some(actual))) = provider_expectation {
+    // Catalog-owned providers promise a concrete model namespace, so crossing
+    // those namespaces is an error. Runtime-registered adapters remain
+    // open-world: test providers and customer proxies commonly serve a model
+    // whose canonical identity is catalogued under its upstream provider.
+    let enforces_catalog_ownership = provider_constraint
+        .or(alias_provider)
+        .is_some_and(provider_has_builtin_model_namespace);
+    if let Some((expected, Some(actual))) =
+        provider_expectation.filter(|_| enforces_catalog_ownership)
+    {
         if provider_selector_target(actual) != expected {
             return Err(ModelResolutionError::ProviderModelMismatch {
                 provider: expected.to_string(),

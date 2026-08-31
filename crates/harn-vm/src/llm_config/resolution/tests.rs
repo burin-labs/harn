@@ -92,6 +92,46 @@ fn explicit_provider_keeps_private_model_ids_extensible() {
 }
 
 #[test]
+fn runtime_adapter_can_proxy_a_catalogued_model() {
+    let resolution = resolve_model_request("claude-sonnet-4-6", Some("mock"))
+        .expect("a runtime adapter may proxy an upstream model identity");
+    assert_eq!(resolution.resolved_provider, "mock");
+    assert_eq!(resolution.resolved_model, "claude-sonnet-4-6");
+}
+
+#[test]
+fn configured_proxy_can_serve_an_upstream_model_identity() {
+    let mut config = (*effective_config()).clone();
+    let proxy = config
+        .providers
+        .get("openai")
+        .expect("the embedded OpenAI provider exists")
+        .clone();
+    config.providers.insert("my-proxy".to_string(), proxy);
+    config.aliases.insert(
+        "proxied-sonnet".to_string(),
+        AliasDef {
+            id: "claude-sonnet-4-6".to_string(),
+            provider: "my-proxy".to_string(),
+            tool_format: None,
+        },
+    );
+
+    let resolution = resolve_model_request_with_config(&config, "proxied-sonnet", None)
+        .expect("a configured proxy may serve an upstream model identity");
+    assert_eq!(resolution.resolved_provider, "my-proxy");
+    assert_eq!(resolution.resolved_model, "claude-sonnet-4-6");
+}
+
+#[test]
+fn local_provider_alias_canonicalizes_before_catalog_validation() {
+    let resolution = resolve_model_request("qwen3.2:latest", Some("local"))
+        .expect("the local provider selector is the Ollama transport alias");
+    assert_eq!(resolution.resolved_provider, "ollama");
+    assert_eq!(resolution.resolved_model, "qwen3.2:latest");
+}
+
+#[test]
 fn alias_resolution_records_the_chain() {
     let resolution =
         resolve_model_request("gpt-5.6", None).expect("the current family alias resolves");
