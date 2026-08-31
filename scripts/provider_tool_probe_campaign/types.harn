@@ -16,11 +16,15 @@ pub type ProviderToolProbeRoute = {
   metadata: dict,
 }
 
+pub type ProviderToolProbeRunner = "planned_agent_loop" \
+  | "provider_tool_probe" \
+  | "provider_option_probe"
+
 pub type ProviderToolProbeBehavior = {
   id: string,
   category: string,
   description: string,
-  runner: string,
+  runner: ProviderToolProbeRunner,
   probe_case?: string,
   probe_option?: ProviderPortableProbeOption,
   modes: list<string>,
@@ -82,13 +86,24 @@ pub type ProviderToolProbeCell = {
   category: string,
   mode: string,
   tool_format: string,
-  runner: string,
+  runner: ProviderToolProbeRunner,
   status: string,
   reason: string,
   command?: list<string>,
   artifact_path?: string,
   observed: dict,
   catalog: dict,
+}
+
+pub type ProviderOptionClaimControlStatus = "not_selected" | "dry_run" | "complete" | "incomplete"
+
+pub type ProviderOptionClaimControls = {
+  status: ProviderOptionClaimControlStatus,
+  selected_count: int,
+  measured_supported_count: int,
+  measured_unsupported_count: int,
+  unmeasured_count: int,
+  requires_both_directions: bool,
 }
 
 pub type ProviderToolProbeCampaignReport = {
@@ -103,7 +118,7 @@ pub type ProviderToolProbeCampaignReport = {
   summary: dict,
   runner_summary: dict,
   executable_gap: dict,
-  claim_controls: dict,
+  claim_controls: ProviderOptionClaimControls,
   auth_readiness: dict,
   spend: dict,
   campaign_slice: dict,

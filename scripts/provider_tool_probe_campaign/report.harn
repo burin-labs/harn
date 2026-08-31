@@ -220,7 +220,10 @@ pub fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
   }
 }
 
-pub fn __claim_controls(live: bool, cells: list<ProviderToolProbeCell>) -> dict {
+pub fn __claim_controls(
+  live: bool,
+  cells: list<ProviderToolProbeCell>,
+) -> ProviderOptionClaimControls {
   let selected = 0
   let measured_supported = 0
   let measured_unsupported = 0
