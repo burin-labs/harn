@@ -21,10 +21,7 @@ pub(crate) fn render(args: &ProviderToolProbeArgs) -> i32 {
         }
     }
 }
-pub(crate) fn resolve_tool_probe_wire_model(
-    provider: &str,
-    selector: &str,
-) -> Result<String, String> {
+pub(crate) fn resolve_probe_wire_model(provider: &str, selector: &str) -> Result<String, String> {
     let resolved = harn_vm::llm_config::resolve_model_info(selector);
     if (resolved.alias.is_some()
         || harn_vm::llm_config::model_catalog_entry(&resolved.id).is_some())
@@ -40,12 +37,12 @@ pub(crate) fn resolve_tool_probe_wire_model(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_tool_probe_wire_model;
+    use super::resolve_probe_wire_model;
 
     #[test]
     fn resolves_alias_to_provider_wire_model() {
         assert_eq!(
-            resolve_tool_probe_wire_model("vercel_ai_gateway", "vercel-gpt-5.4-nano")
+            resolve_probe_wire_model("vercel_ai_gateway", "vercel-gpt-5.4-nano")
                 .expect("alias resolves"),
             "openai/gpt-5.4-nano"
         );
@@ -53,7 +50,7 @@ mod tests {
 
     #[test]
     fn rejects_alias_for_a_different_provider() {
-        let error = resolve_tool_probe_wire_model("openai", "vercel-gpt-5.4-nano")
+        let error = resolve_probe_wire_model("openai", "vercel-gpt-5.4-nano")
             .expect_err("provider mismatch");
         assert!(error.contains("vercel_ai_gateway"));
     }

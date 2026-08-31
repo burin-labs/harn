@@ -158,6 +158,7 @@ async fn vm_call_completion_openai_style(
             &opts.provider,
             &opts.model,
             &opts.thinking,
+            opts.provider_contract_probe,
         );
     }
 

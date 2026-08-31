@@ -1,0 +1,200 @@
+name: Provider contract probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/provider-contract-probe.yml"
+      - "crates/harn-cli/src/cli/provider.rs"
+      - "crates/harn-cli/src/cli/mod.rs"
+      - "crates/harn-cli/src/entrypoint.rs"
+      - "crates/harn-cli/src/commands/mod.rs"
+      - "crates/harn-cli/src/commands/provider.rs"
+      - "crates/harn-cli/src/commands/provider_option_probe.rs"
+      - "crates/harn-cli/src/commands/providers.rs"
+      - "crates/harn-cli/src/commands/providers/tool_probe_request.rs"
+      - "crates/harn-stdlib/src/lib.rs"
+      - "crates/harn-vm/src/llm/capability_sources/**"
+      - "crates/harn-vm/src/llm/catalog_sources/**"
+      - "crates/harn-vm/src/llm/capabilities/**"
+      - "crates/harn-vm/src/llm/agent_observe.rs"
+      - "crates/harn-vm/src/llm/api/**"
+      - "crates/harn-vm/src/llm/helpers/options/**"
+      - "crates/harn-vm/src/llm/provider_contract_probe.rs"
+      - "crates/harn-vm/src/llm/providers/**"
+      - "crates/harn-stdlib/src/stdlib/cli/providers/**"
+      - "scripts/provider_tool_probe_campaign.harn"
+      - "scripts/provider_tool_probe_campaign/**"
+      - "scripts/tests/provider_option_probe_test.harn"
+      - "scripts/tests/provider_tool_probe_campaign_test.harn"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/provider-contract-probe.yml"
+      - "crates/harn-cli/src/cli/provider.rs"
+      - "crates/harn-cli/src/cli/mod.rs"
+      - "crates/harn-cli/src/entrypoint.rs"
+      - "crates/harn-cli/src/commands/mod.rs"
+      - "crates/harn-cli/src/commands/provider.rs"
+      - "crates/harn-cli/src/commands/provider_option_probe.rs"
+      - "crates/harn-cli/src/commands/providers.rs"
+      - "crates/harn-cli/src/commands/providers/tool_probe_request.rs"
+      - "crates/harn-stdlib/src/lib.rs"
+      - "crates/harn-vm/src/llm/capability_sources/**"
+      - "crates/harn-vm/src/llm/catalog_sources/**"
+      - "crates/harn-vm/src/llm/capabilities/**"
+      - "crates/harn-vm/src/llm/agent_observe.rs"
+      - "crates/harn-vm/src/llm/api/**"
+      - "crates/harn-vm/src/llm/helpers/options/**"
+      - "crates/harn-vm/src/llm/provider_contract_probe.rs"
+      - "crates/harn-vm/src/llm/providers/**"
+      - "crates/harn-stdlib/src/stdlib/cli/providers/**"
+      - "scripts/provider_tool_probe_campaign.harn"
+      - "scripts/provider_tool_probe_campaign/**"
+      - "scripts/tests/provider_option_probe_test.harn"
+      - "scripts/tests/provider_tool_probe_campaign_test.harn"
+  schedule:
+    - cron: "17 11 * * 1"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: Make budget-capped provider requests
+        type: boolean
+        default: false
+      max_cost_usd:
+        description: Hard live campaign spend cap in USD
+        type: string
+        default: "5"
+      max_probes:
+        description: Maximum executable endpoint/option cells
+        type: string
+        default: "500"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-contract-probe-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  HARN_BUILD_REVISION: ${{ github.sha }}
+  PROVIDER_CONTRACT_PROBE_LIVE: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live)) && 'true' || 'false' }}
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  probe:
+    if: github.repository == 'burin-labs/harn'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      live: ${{ steps.campaign.outputs.live }}
+      exit_code: ${{ steps.campaign.outputs.exit_code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: workspace
+          cache-bin: false
+
+      - name: Build the exact-source Harn CLI
+        run: make build-harn
+
+      - name: Plan or execute endpoint option contracts
+        id: campaign
+        shell: bash
+        env:
+          MAX_COST_USD_INPUT: ${{ inputs.max_cost_usd || '5' }}
+          MAX_PROBES_INPUT: ${{ inputs.max_probes || '500' }}
+          ANTHROPIC_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENAI_API_KEY || '' }}
+          GEMINI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GEMINI_API_KEY || '' }}
+          GOOGLE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GOOGLE_API_KEY || '' }}
+          OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
+          MISTRAL_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MISTRAL_API_KEY || '' }}
+          COHERE_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.COHERE_API_KEY || '' }}
+          XAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.XAI_API_KEY || '' }}
+          TOGETHER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.TOGETHER_API_KEY || '' }}
+          GROQ_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.GROQ_API_KEY || '' }}
+          CEREBRAS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.CEREBRAS_API_KEY || '' }}
+          DEEPSEEK_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.DEEPSEEK_API_KEY || '' }}
+          FIREWORKS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.FIREWORKS_API_KEY || '' }}
+          ZAI_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.ZAI_API_KEY || '' }}
+          MOONSHOT_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.MOONSHOT_API_KEY || '' }}
+          NVIDIA_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.NVIDIA_API_KEY || '' }}
+        run: |
+          set -euo pipefail
+          output_dir=".harn-runs/provider-contract-probe"
+          live="$PROVIDER_CONTRACT_PROBE_LIVE"
+          max_cost="$MAX_COST_USD_INPUT"
+          max_probes="$MAX_PROBES_INPUT"
+          args=(
+            --catalog-routes
+            --exclude-local
+            --behavior provider_option_probe
+            --max-probes "$max_probes"
+            --max-cost-usd "$max_cost"
+            --harn-bin ./target/debug/harn
+            --require-runtime-revision "$(git rev-parse HEAD)"
+            --output-dir "$output_dir"
+          )
+          if [[ "$live" == "true" ]]; then
+            args+=(--live)
+          fi
+          set +e
+          ./target/debug/harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- "${args[@]}"
+          status=$?
+          set -e
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          report="$output_dir/report.json"
+          if [[ ! -s "$report" ]]; then
+            echo "::error::provider contract campaign produced no report"
+            exit 2
+          fi
+          jq -r '
+            "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) unmeasured=\(.claim_controls.unmeasured_count)"
+          ' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload exact receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: provider-contract-probe-${{ github.run_id }}
+          path: .harn-runs/provider-contract-probe/
+          if-no-files-found: error
+          retention-days: 30
+
+  notify-live-failure:
+    needs: probe
+    if: ${{ always() && needs.probe.result == 'failure' && needs.probe.outputs.live == 'true' }}
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: File or update an owned drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXIT_CODE: ${{ needs.probe.outputs.exit_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Provider contract probe needs catalog review"
+          run_url="https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+          body="The weekly endpoint capability probe exited $EXIT_CODE. The run summary reports explicit pass, fail, error, skipped, pending, supported-control, unsupported-control, and unmeasured counts. Review the attached typed receipts before changing the catalog: $run_url"
+          existing="$(gh issue list --repo "$GH_REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GH_REPO" --body "$body"
+          else
+            gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee ksinder
+          fi

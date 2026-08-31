@@ -136,6 +136,33 @@ fn anthropic_fable_effort_cannot_be_disabled() {
 }
 
 #[test]
+fn anthropic_47_and_newer_sampling_is_denied_by_the_catalog() {
+    reset();
+    for model in [
+        "claude-fable-5",
+        "anthropic/claude-fable-5",
+        "claude-mythos-5-preview",
+        "anthropic/claude-mythos-5-preview",
+        "claude-opus-4-7",
+        "anthropic/claude-opus-4-7",
+        "claude-opus-5",
+        "anthropic/claude-opus-5",
+        "claude-sonnet-5",
+        "anthropic/claude-sonnet-5",
+    ] {
+        let caps = lookup("anthropic", model);
+        assert!(!caps.temperature_supported, "{model}: temperature");
+        assert!(!caps.top_p_supported, "{model}: top_p");
+        assert!(!caps.top_k_supported, "{model}: top_k");
+    }
+
+    let pre_47 = lookup("anthropic", "claude-sonnet-4-6");
+    assert!(pre_47.temperature_supported);
+    assert!(pre_47.top_p_supported);
+    assert!(pre_47.top_k_supported);
+}
+
+#[test]
 fn anthropic_opus_46_uses_budgeted_thinking() {
     reset();
     let caps = lookup("anthropic", "claude-opus-4-6");
