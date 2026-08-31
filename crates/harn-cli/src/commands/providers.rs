@@ -18,7 +18,7 @@ pub(crate) use build::run_generate;
 pub(crate) use overlay_audit::run_overlay_audit;
 pub(crate) use tool_probe_audit::run as run_audit;
 pub(crate) use tool_probe_request::{
-    render as render_tool_probe_request, resolve_tool_probe_wire_model,
+    render as render_tool_probe_request, resolve_probe_wire_model,
 };
 
 /// Route one `harn provider catalog <sub>` invocation to its command.
