@@ -854,6 +854,67 @@ fn output_format_json_schema_uses_native_format_with_thinking_and_tools() {
 }
 
 #[test]
+fn native_tool_followup_prefill_respects_catalog_capability() {
+    let tool_history = vec![
+        serde_json::json!({"role": "user", "content": "inspect app.txt"}),
+        serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "toolu_lookup_1",
+                "name": "read_file",
+                "arguments": {"path": "app.txt"},
+            }],
+        }),
+        serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": "toolu_lookup_1",
+            "name": "read_file",
+            "content": "evidence",
+        }),
+    ];
+
+    let mut unsupported = base_payload();
+    unsupported.model = "claude-sonnet-5".to_string();
+    unsupported.messages = tool_history.clone();
+    unsupported.prefill = Some("I will continue by".to_string());
+    let unsupported_body = AnthropicProvider::build_request_body(&unsupported);
+    let unsupported_messages = unsupported_body["messages"]
+        .as_array()
+        .expect("messages array");
+    assert_eq!(
+        unsupported_messages
+            .last()
+            .and_then(|message| message["role"].as_str()),
+        Some("user"),
+        "a route that rejects assistant prefill must end the native-tool follow-up on its user tool_result"
+    );
+    assert!(
+        unsupported_messages
+            .iter()
+            .all(|message| message["content"] != "I will continue by"),
+        "unsupported assistant prefill reached the Anthropic request body"
+    );
+
+    let mut supported = base_payload();
+    supported.model = "claude-opus-3-5".to_string();
+    supported.messages = tool_history;
+    supported.prefill = Some("I will continue by".to_string());
+    let supported_body = AnthropicProvider::build_request_body(&supported);
+    let supported_messages = supported_body["messages"]
+        .as_array()
+        .expect("messages array");
+    assert_eq!(
+        supported_messages.last(),
+        Some(&serde_json::json!({
+            "role": "assistant",
+            "content": "I will continue by",
+        })),
+        "a route that supports assistant prefill must retain the opener"
+    );
+}
+
+#[test]
 fn forced_json_overrides_caller_tools_and_tool_choice() {
     // Caller supplies their own native tool AND tool_choice, then also asks
     // for structured output. Structured output wins (the documented

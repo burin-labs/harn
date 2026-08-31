@@ -269,7 +269,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         } else {
           pending_prefill.prefill
         }
-        const base_llm_opts = if monologue_actuation.applied {
+        const prefill_eligibility = agent_prefill_eligibility(
+          harness.llm,
+          one_shot_prefill,
+          direct_llm_opts,
+        )
+        // A prefill is a request-level continuation and therefore pins this
+        // one request to the route whose capability was checked. Ordinary
+        // requests retain equivalent-route failover.
+        const base_llm_opts = if prefill_eligibility.allowed {
           direct_llm_opts
         } else {
           __agent_loop_enable_equivalent_failover(
@@ -279,7 +287,10 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             opts,
           )
         }
-        const llm_opts = if one_shot_prefill != "" {
+        // Caller-supplied and recovery-generated prefills converge here. The
+        // typed eligibility decision above is shared with monologue actuation,
+        // so no path can bypass caller, routing, or catalog capability checks.
+        const llm_opts = if prefill_eligibility.allowed {
           llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)
         } else {
           base_llm_opts
