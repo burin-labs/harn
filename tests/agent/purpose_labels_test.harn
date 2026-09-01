@@ -112,7 +112,8 @@ pipeline test_purpose_label_delivery_defaults_to_system(harness: Harness, task: 
   const config = agent_purpose_label_config(true)
   assert(config.delivery == "system")
   assert(agent_purpose_label_prompt_fragment(config) != "")
-  // Exactly one seam carries the instruction, so the rungs stay comparable.
+  // Only one seam carries the instruction wording, so `system` and `nudge`
+  // stay comparable. `prefill` is the exception and adds an opener on top.
   assert(agent_purpose_label_turn_nudge(config) == "")
   assert(agent_purpose_label_prefill(config) == "")
 }
@@ -126,7 +127,11 @@ pipeline test_purpose_label_nudge_delivery_moves_the_instruction(harness: Harnes
 
 pipeline test_purpose_label_prefill_delivery_arms_the_opening_tag(harness: Harness, task: unknown) {
   const config = agent_purpose_label_config({delivery: "prefill"})
-  assert(agent_purpose_label_prompt_fragment(config) == "")
+  // Prefill positions the declaration and the instruction says what belongs
+  // in it. Measured with the opener alone, the model continued its ordinary
+  // narration past the tag on 5 of 8 turns — every one a fired event carrying
+  // prose, which is worse than a miss because it reads as compliance.
+  assert(contains(agent_purpose_label_prompt_fragment(config), "<purpose>"))
   assert(agent_purpose_label_turn_nudge(config) == "")
   assert(agent_purpose_label_prefill(config) == "<purpose>")
 }

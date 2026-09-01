@@ -135,12 +135,19 @@ pub fn agent_purpose_label_prefill(config: PurposeLabelConfig) -> string {
  * here so the declaration grammar and the sentence that teaches it cannot
  * drift apart.
  *
+ * `prefill` carries it too. A prefilled `<purpose>` opener is a seam, not a
+ * teaching: measured without the instruction, the model fired on 5 of 8 turns
+ * but simply continued its ordinary narration past the tag ("I'll help you
+ * understand what the stdlib module does and check..."), so the rung looked
+ * compliant while producing no heading. Prefill positions the declaration;
+ * only the instruction says what belongs there.
+ *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
 pub fn agent_purpose_label_prompt_fragment(config: PurposeLabelConfig) -> string {
-  if !config.enabled || config.delivery != "system" {
+  if !config.enabled || !contains(["system", "prefill"], config.delivery) {
     return ""
   }
   return __purpose_label_instruction(config)
