@@ -316,6 +316,8 @@ sources = [
   "spec/openapi.yaml",
   "crates/harn-cli/src/commands/",
   "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
+  "crates/harn-vm/src/mcp_tasks.rs",
+  "crates/harn-vm/src/tool_annotations.rs",
   "crates/harn-vm/src/tool_registry.rs",
   "crates/harn-vm/src/tool_registry/",
 ]

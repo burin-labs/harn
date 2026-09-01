@@ -524,12 +524,54 @@ fn validate_schema_document(
     Ok(())
 }
 
+const OFFLINE_SCHEMA_ROOT_URI: &str = "https://harn.invalid/tool-schema";
+const OFFLINE_EXTERNAL_SCHEMA_URI: &str = "https://harn.invalid/external-schema";
+
 fn validate_refs(
     value: &JsonValue,
     components: Option<&BTreeMap<String, JsonValue>>,
     field: &str,
 ) -> Result<(), String> {
-    validate_ref_nodes(value, value, components, field)
+    let component_uris = components
+        .into_iter()
+        .flat_map(|schemas| schemas.keys())
+        .enumerate()
+        .map(|(index, name)| {
+            (
+                name.clone(),
+                format!("https://harn.invalid/tool-components/{index}"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let validation_schema = refs_for_offline_validation(value.clone(), &component_uris)?;
+    let mut resources = components
+        .into_iter()
+        .flat_map(|schemas| schemas.iter())
+        .map(|(name, schema)| {
+            let uri = component_uris
+                .get(name)
+                .expect("every component has a synthetic validation URI")
+                .clone();
+            refs_for_offline_validation(schema.clone(), &component_uris).map(|schema| (uri, schema))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    resources.push((
+        OFFLINE_EXTERNAL_SCHEMA_URI.to_string(),
+        JsonValue::Bool(true),
+    ));
+
+    let registry = jsonschema::Registry::new()
+        .draft(jsonschema::Draft::Draft202012)
+        .extend(resources)
+        .and_then(|builder| builder.prepare())
+        .map_err(|error| format!("{field} contains invalid schema resources: {error}"))?;
+    jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft202012)
+        .with_registry(&registry)
+        .with_base_uri(OFFLINE_SCHEMA_ROOT_URI)
+        .build(&validation_schema)
+        .map(|_| ())
+        .map_err(|error| format!("{field} contains an unresolved schema reference: {error}"))
 }
 
 fn validate_defs_do_not_shadow_components(
@@ -554,59 +596,49 @@ fn validate_defs_do_not_shadow_components(
     Ok(())
 }
 
-fn validate_ref_nodes(
-    root: &JsonValue,
-    value: &JsonValue,
-    components: Option<&BTreeMap<String, JsonValue>>,
-    field: &str,
-) -> Result<(), String> {
-    match value {
+fn refs_for_offline_validation(
+    mut value: JsonValue,
+    component_uris: &BTreeMap<String, String>,
+) -> Result<JsonValue, String> {
+    match &mut value {
         JsonValue::Array(values) => {
             for value in values {
-                validate_ref_nodes(root, value, components, field)?;
+                *value = refs_for_offline_validation(std::mem::take(value), component_uris)?;
             }
         }
         JsonValue::Object(object) => {
-            if let Some(reference) = object.get("$ref").and_then(JsonValue::as_str) {
+            if let Some(JsonValue::String(reference)) = object.get_mut("$ref") {
                 if let Some(path) = reference.strip_prefix("#/components/schemas/") {
                     let (encoded_name, nested_path) = path
                         .split_once('/')
                         .map_or((path, None), |(name, path)| (name, Some(path)));
                     let name = decode_json_pointer_segment(encoded_name).ok_or_else(|| {
-                        format!("{field} contains invalid schema reference {reference:?}")
+                        format!("invalid schema component reference {reference:?}")
                     })?;
-                    let component = components.and_then(|schemas| schemas.get(&name));
-                    if name.is_empty() || component.is_none() {
-                        return Err(format!(
-                            "{field} contains dangling schema reference {reference:?}"
-                        ));
-                    }
-                    if nested_path.is_some_and(|path| {
-                        component
-                            .and_then(|schema| schema.pointer(&format!("/{path}")))
-                            .is_none()
-                    }) {
-                        return Err(format!(
-                            "{field} contains dangling schema reference {reference:?}"
-                        ));
-                    }
-                } else if reference == "#" {
-                    // A recursive root reference is a valid local schema ref.
-                } else if let Some(pointer) = reference.strip_prefix('#') {
-                    if root.pointer(pointer).is_none() {
-                        return Err(format!(
-                            "{field} contains dangling schema reference {reference:?}"
-                        ));
-                    }
+                    let uri = component_uris.get(&name).ok_or_else(|| {
+                        format!("dangling schema component reference {reference:?}")
+                    })?;
+                    *reference = match nested_path {
+                        Some(path) => format!("{uri}#/{path}"),
+                        None => uri.clone(),
+                    };
+                } else if !reference.starts_with('#') {
+                    *reference = OFFLINE_EXTERNAL_SCHEMA_URI.to_string();
                 }
             }
-            for value in object.values() {
-                validate_ref_nodes(root, value, components, field)?;
+            // Dynamic references can depend on a caller's runtime dynamic scope.
+            // Their syntax is covered by meta-validation; this offline pass must
+            // not reject a portable catalog merely because that scope is absent.
+            if let Some(JsonValue::String(reference)) = object.get_mut("$dynamicRef") {
+                *reference = OFFLINE_EXTERNAL_SCHEMA_URI.to_string();
+            }
+            for value in object.values_mut() {
+                *value = refs_for_offline_validation(std::mem::take(value), component_uris)?;
             }
         }
         _ => {}
     }
-    Ok(())
+    Ok(value)
 }
 
 fn decode_json_pointer_segment(value: &str) -> Option<String> {
@@ -1181,6 +1213,40 @@ mod tests {
         let external: ToolCatalog =
             serde_json::from_value(external).expect("portable catalogs retain open JSON Schema");
         assert!(external.mcp_tool(&external.tools[0]).is_err());
+    }
+
+    #[test]
+    fn semantic_validation_uses_draft_resource_and_anchor_resolution() {
+        let mut anchored = valid_catalog_json();
+        anchored["tools"][0]["outputSchema"] = json!({
+            "$defs": {"result": {"$anchor": "node", "type": "string"}},
+            "$ref": "#node"
+        });
+        serde_json::from_value::<ToolCatalog>(anchored)
+            .expect("a local anchor is a valid Draft 2020-12 reference target");
+
+        let mut nested_resource = valid_catalog_json();
+        nested_resource["tools"][0]["outputSchema"] = json!({
+            "$id": "https://example.test/root",
+            "allOf": [{
+                "$id": "nested",
+                "$defs": {"result": {"type": "string"}},
+                "$ref": "#/$defs/result"
+            }]
+        });
+        serde_json::from_value::<ToolCatalog>(nested_resource)
+            .expect("a local pointer resolves from its containing schema resource");
+
+        let mut instance_data = valid_catalog_json();
+        instance_data["tools"][0]["outputSchema"] = json!({
+            "const": {"$ref": "#not-a-schema-reference"}
+        });
+        serde_json::from_value::<ToolCatalog>(instance_data)
+            .expect("reference-shaped instance data is not a schema reference");
+
+        let mut dangling_anchor = valid_catalog_json();
+        dangling_anchor["tools"][0]["outputSchema"] = json!({"$ref": "#missing"});
+        assert!(serde_json::from_value::<ToolCatalog>(dangling_anchor).is_err());
     }
 
     #[test]
