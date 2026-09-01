@@ -132,7 +132,7 @@ impl Compiler {
                     chunk: Arc::new(fn_compiler.chunk),
                     is_generator: false,
                     is_stream: false,
-                    has_rest_param: false,
+                    has_rest_param: params.last().is_some_and(|param| param.rest),
                     has_runtime_type_checks,
                 };
                 let fn_idx = self.chunk.functions.len();

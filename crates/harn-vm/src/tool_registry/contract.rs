@@ -11,6 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value as JsonValue};
 use ts_rs::{Config, TS};
 
+mod prepared;
 mod schema;
 
 use schema::{
@@ -20,6 +21,9 @@ use schema::{
 
 pub use crate::mcp_tasks::McpTaskSupport as ToolTaskSupport;
 use crate::tool_annotations::{SideEffectLevel, ToolKind};
+pub use prepared::{
+    PreparedToolCatalog, PreparedToolCatalogError, ToolContractPhase, ToolContractViolation,
+};
 
 pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/1.0";
 pub const TOOL_CATALOG_SCHEMA_ARTIFACT: &str = "schemas/harn-tools-v1.schema.json";
@@ -342,7 +346,6 @@ impl ToolCatalog {
         }
 
         let mut names = std::collections::BTreeSet::new();
-        let mut commands = std::collections::BTreeSet::new();
         for (index, tool) in self.tools.iter().enumerate() {
             let context = format!("tools[{index}]");
             require_non_empty(&tool.name, &format!("{context}.name"))?;
@@ -364,12 +367,6 @@ impl ToolCatalog {
                         "{context}.cli.command[{part_index}] must match ^[A-Za-z0-9_][A-Za-z0-9_-]*$"
                     ));
                 }
-            }
-            if !commands.insert(tool.cli.command.as_slice()) {
-                return Err(format!(
-                    "duplicate CLI command path {:?}",
-                    tool.cli.command.join(" ")
-                ));
             }
             require_unique(
                 &tool.governance.audiences,
@@ -438,6 +435,7 @@ impl ToolCatalog {
                 )?;
             }
         }
+        validate_cli_command_tree(&self.tools)?;
         Ok(())
     }
 
@@ -480,6 +478,37 @@ impl ToolCatalog {
         )?;
         Ok(tool_output_to_mcp_structured_content(Some(&schema), result))
     }
+}
+
+fn validate_cli_command_tree(tools: &[ToolCatalogEntry]) -> Result<(), String> {
+    let mut commands = BTreeMap::<&[String], &str>::new();
+    for tool in tools
+        .iter()
+        .filter(|tool| tool.governance.allows(ToolAudience::Cli))
+    {
+        for (path, owner) in &commands {
+            if *path == tool.cli.command {
+                return Err(format!(
+                    "duplicate CLI command path {:?}: tools {owner:?} and {:?} claim it",
+                    tool.cli.command.join(" "),
+                    tool.name
+                ));
+            }
+            if path.starts_with(&tool.cli.command) || tool.cli.command.starts_with(path) {
+                return Err(format!(
+                    "CLI command path conflict: tools {owner:?} and {:?} make '{}' both a tool and a parent command",
+                    tool.name,
+                    if path.len() < tool.cli.command.len() {
+                        path.join(" ")
+                    } else {
+                        tool.cli.command.join(" ")
+                    }
+                ));
+            }
+        }
+        commands.insert(&tool.cli.command, &tool.name);
+    }
+    Ok(())
 }
 
 pub fn is_valid_cli_command_component(value: &str) -> bool {

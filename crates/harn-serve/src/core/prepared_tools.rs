@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use harn_vm::tool_registry::ToolCatalog;
+use harn_vm::tool_registry::{PreparedToolCatalog, ToolCatalog};
 
 use super::DispatchCore;
 use crate::{DispatchError, ExportCatalog};
@@ -10,8 +10,7 @@ use crate::{DispatchError, ExportCatalog};
 #[derive(Debug)]
 pub(super) struct PreparedTools {
     exports: ExportCatalog,
-    contract: ToolCatalog,
-    mcp: Vec<serde_json::Value>,
+    contract: PreparedToolCatalog,
 }
 
 impl PreparedTools {
@@ -20,15 +19,9 @@ impl PreparedTools {
     }
 
     fn from_catalog(exports: ExportCatalog) -> Result<Self, DispatchError> {
-        let contract = exports.tool_catalog()?;
-        let mcp = contract
-            .mcp_tools()
+        let contract = PreparedToolCatalog::prepare(exports.tool_catalog()?)
             .map_err(|error| DispatchError::Validation(error.to_string()))?;
-        Ok(Self {
-            exports,
-            contract,
-            mcp,
-        })
+        Ok(Self { exports, contract })
     }
 
     pub(super) fn exports(&self) -> &ExportCatalog {
@@ -42,11 +35,15 @@ impl DispatchCore {
     }
 
     pub fn tool_catalog(&self) -> &ToolCatalog {
-        &self.tools.contract
+        self.tools.contract.catalog()
     }
 
     pub(crate) fn mcp_tools(&self) -> &[serde_json::Value] {
-        &self.tools.mcp
+        self.tools.contract.mcp_tools()
+    }
+
+    pub(crate) fn prepared_tool_catalog(&self) -> &PreparedToolCatalog {
+        &self.tools.contract
     }
 }
 

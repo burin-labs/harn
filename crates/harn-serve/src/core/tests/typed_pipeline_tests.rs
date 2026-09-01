@@ -45,9 +45,9 @@ pub pipeline deploy(replicas: int) -> bool {
 
     assert_eq!(
         error,
-        DispatchError::Execution(
-            "Runtime error: TypeError: function 'deploy' parameter 'replicas' expected int, got string (many)"
-                .to_string()
+        DispatchError::Validation(
+            "tool \"deploy\" input violates its declared schema: \"many\" is not of type \"integer\""
+                .to_string(),
         )
     );
 }

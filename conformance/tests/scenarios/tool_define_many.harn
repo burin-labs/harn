@@ -27,7 +27,15 @@ pipeline test(harness: Harness, task: unknown) {
   assert(tool_find(registry, "read_file").outputSchema.type == "string", "nested config works")
   const fresh: ToolRegistry = tool_registry_from(
     [{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}],
+    nil,
+    {schemas: {Receipt: {type: "object", required: ["ok"]}}},
   )
   assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
+  const selected: ToolRegistry = tool_select(fresh, ["one"])
+  const components = tool_schema(selected).components ?? {schemas: {}}
+  assert(
+    components.schemas.Receipt.required == ["ok"],
+    "registry transforms preserve shared components",
+  )
   harness.stdio.log("tool_define_many tests passed")
 }

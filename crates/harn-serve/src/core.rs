@@ -418,6 +418,10 @@ impl DispatchCore {
                 self.catalog().script_path.display()
             ))
         })?;
+        let canonical_input = canonical_arguments_json(&request.arguments, function)?;
+        self.prepared_tool_catalog()
+            .validate_input(&request.function, &canonical_input)
+            .map_err(|error| DispatchError::Validation(error.to_string()))?;
 
         // Rate-limit + backpressure gate. Every dispatch attempt passes this
         // gate before replay lookup. The in-flight counter decrements when the
@@ -427,6 +431,13 @@ impl DispatchCore {
         let replay_key = request.replay_key.clone().map(ReplayKey);
         if let Some(key) = replay_key.as_ref() {
             if let Some(cached) = self.config.replay_cache.get(key).await? {
+                self.prepared_tool_catalog()
+                    .validate_output(&request.function, &cached.value)
+                    .map_err(|error| {
+                        DispatchError::Execution(format!(
+                            "replay cache contains a value outside the current tool contract: {error}"
+                        ))
+                    })?;
                 return Ok(CallResponse {
                     function: request.function.clone(),
                     value: cached.value,
@@ -475,6 +486,9 @@ impl DispatchCore {
                 ExportedCallableKind::Function => self.invoke_function(&request, function).await?,
                 ExportedCallableKind::Pipeline => self.invoke_pipeline(&request, function).await?,
             };
+            self.prepared_tool_catalog()
+                .validate_output(&request.function, &value.0)
+                .map_err(|error| DispatchError::Execution(error.to_string()))?;
             Ok::<_, DispatchError>(value)
         }
         .instrument(span)
@@ -773,6 +787,18 @@ fn build_vm_args(
             let mut saw_gap = false;
             for param in params {
                 let value = values.get(&param.name);
+                if param.rest {
+                    if let Some(value) = value {
+                        let rest = value.as_array().ok_or_else(|| {
+                            DispatchError::Validation(format!(
+                                "rest argument '{}' for '{}' must be an array",
+                                param.name, function.name
+                            ))
+                        })?;
+                        args.extend(rest.iter().map(json_to_vm_value));
+                    }
+                    continue;
+                }
                 match value {
                     Some(value) => {
                         if saw_gap {
@@ -799,6 +825,47 @@ fn build_vm_args(
     };
 
     Ok(rest)
+}
+
+/// Normalize every adapter's argument form into the object advertised by the
+/// canonical tool input schema. Compatibility lifting happens before
+/// validation so the handler and validator receive the same logical call.
+fn canonical_arguments_json(
+    arguments: &CallArguments,
+    function: &crate::ExportedFunction,
+) -> Result<serde_json::Value, DispatchError> {
+    let params = function.params.as_slice();
+    let values = match arguments {
+        CallArguments::Named(values) => {
+            lift_flat_single_object_arg(params, values).unwrap_or_else(|| values.clone())
+        }
+        CallArguments::Positional(values) => {
+            let rest_index = params.iter().position(|param| param.rest);
+            if values.len() > params.len() && rest_index.is_none() {
+                return Err(DispatchError::Validation(format!(
+                    "too many positional arguments for '{}': expected at most {}, got {}",
+                    function.name,
+                    params.len(),
+                    values.len()
+                )));
+            }
+            let mut arguments = BTreeMap::new();
+            for (index, param) in params.iter().enumerate() {
+                if param.rest {
+                    arguments.insert(
+                        param.name.clone(),
+                        serde_json::Value::Array(values.get(index..).unwrap_or_default().to_vec()),
+                    );
+                    break;
+                }
+                if let Some(value) = values.get(index) {
+                    arguments.insert(param.name.clone(), value.clone());
+                }
+            }
+            arguments
+        }
+    };
+    Ok(serde_json::Value::Object(values.into_iter().collect()))
 }
 
 /// Tolerate MCP/JSON-RPC clients that emit a single-object-parameter tool's
@@ -925,6 +992,21 @@ mod tests {
         }
     }
 
+    struct InvalidContractVmConfigurator {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl VmConfigurator for InvalidContractVmConfigurator {
+        fn configure(&self, vm: &mut Vm) -> Result<(), DispatchError> {
+            let calls = self.calls.clone();
+            vm.register_builtin("test_invalid_contract_value", move |_args, _output| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(VmValue::String("not-an-integer".into()))
+            });
+            Ok(())
+        }
+    }
+
     fn replay_test_fixture() -> (
         tempfile::TempDir,
         DispatchCore,
@@ -1023,6 +1105,118 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("alice"));
         assert!(!response.cached);
+    }
+
+    #[tokio::test]
+    async fn dispatch_validates_input_before_handler_and_output_before_success() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn inspect(count: int) -> int {
+  return test_invalid_contract_value()
+}
+",
+        )
+        .expect("write script");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.vm_configurator = Arc::new(InvalidContractVmConfigurator {
+            calls: calls.clone(),
+        });
+        let core = DispatchCore::new(config).expect("core");
+
+        let mut invalid_input = replay_test_request(None);
+        invalid_input.function = "inspect".to_string();
+        invalid_input.arguments = CallArguments::Named(BTreeMap::from([(
+            "count".to_string(),
+            serde_json::json!("not-an-integer"),
+        )]));
+        let input_error = core
+            .dispatch(invalid_input)
+            .await
+            .expect_err("invalid input must fail");
+        assert!(matches!(input_error, DispatchError::Validation(_)));
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "handler must not run");
+
+        let mut invalid_output = replay_test_request(None);
+        invalid_output.function = "inspect".to_string();
+        invalid_output.arguments = CallArguments::Named(BTreeMap::from([(
+            "count".to_string(),
+            serde_json::json!(1),
+        )]));
+        let output_error = core
+            .dispatch(invalid_output)
+            .await
+            .expect_err("invalid output must fail");
+        assert!(matches!(output_error, DispatchError::Execution(_)));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "valid input reaches handler"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_projects_variadic_parameters_as_arrays_for_every_argument_form() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn collect(prefix: string, ...values: int) -> dict {
+  return {prefix: prefix, values: values}
+}
+",
+        )
+        .expect("write script");
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        assert!(
+            core.catalog().function("collect").unwrap().params[1].rest,
+            "export discovery preserves the variadic marker"
+        );
+        let mut vm = core
+            .generation
+            .instantiate(Arc::new(AtomicBool::new(false)));
+        let exports = vm
+            .load_prepared_module_exports_from_source(&script, core.generation.source())
+            .await
+            .expect("load compiled exports");
+        assert!(
+            exports["collect"].func.has_rest_param,
+            "compiled export preserves the variadic marker"
+        );
+        assert_eq!(
+            core.tool_catalog().tools[0].input_schema["properties"]["values"],
+            serde_json::json!({"type": "array", "items": {"type": "integer"}})
+        );
+
+        let mut named = replay_test_request(None);
+        named.function = "collect".to_string();
+        named.arguments = CallArguments::Named(BTreeMap::from([
+            ("prefix".to_string(), serde_json::json!("named")),
+            ("values".to_string(), serde_json::json!([1, 2])),
+        ]));
+        assert_eq!(
+            core.dispatch(named).await.expect("named dispatch").value,
+            serde_json::json!({"prefix": "named", "values": [1, 2]})
+        );
+
+        let mut positional = replay_test_request(None);
+        positional.function = "collect".to_string();
+        positional.arguments = CallArguments::Positional(vec![
+            serde_json::json!("positional"),
+            serde_json::json!(3),
+            serde_json::json!(4),
+        ]);
+        assert_eq!(
+            core.dispatch(positional)
+                .await
+                .expect("positional dispatch")
+                .value,
+            serde_json::json!({"prefix": "positional", "values": [3, 4]})
+        );
     }
 
     /// harn#5039: a single-object-param tool (the `pub fn tool(params: {..})`

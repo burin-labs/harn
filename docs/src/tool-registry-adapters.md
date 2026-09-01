@@ -12,10 +12,27 @@ deployment time.
 ## Registry declaration
 
 ```harn
-import { ToolRegistry, tool_registry_from } from "std/tools"
+import { ToolRegistry, tool_define_many } from "std/tools"
 
 fn widget_tools() -> ToolRegistry {
-  return tool_registry_from([
+  let registry = tool_registry(
+    {
+      name: "widgets",
+      version: "1.0.0",
+      description: "Widget integration",
+    },
+    {
+      schemas: {
+        Widget: {
+          type: "object",
+          properties: {id: {type: "integer"}, label: {type: "string"}},
+          required: ["id", "label"],
+          additionalProperties: false,
+        },
+      },
+    },
+  )
+  return tool_define_many(registry, [
     {
       name: "lookup_widget",
       description: "Fetch one widget by numeric id.",
@@ -23,12 +40,7 @@ fn widget_tools() -> ToolRegistry {
         widget_id: {schema: {type: "integer"}, required: true},
         verbose: {schema: {type: "boolean"}, required: false},
       },
-      returns: {
-        type: "object",
-        properties: {id: {type: "integer"}, label: {type: "string"}},
-        required: ["id", "label"],
-        additionalProperties: false,
-      },
+      returns: {"$ref": "#/components/schemas/Widget"},
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -47,11 +59,7 @@ fn widget_tools() -> ToolRegistry {
       },
       handler: {args -> {id: args.widget_id, label: "example"}},
     },
-  ], {
-    name: "widgets",
-    version: "1.0.0",
-    description: "Widget integration",
-  })
+  ])
 }
 
 fn main(harness: Harness) {
@@ -134,9 +142,11 @@ bundling. Server preparation fails instead of publishing a misleading schema.
 Resource-aware bundling can add those cases later without weakening the
 portable catalog.
 
-Plain `tools/call` responses and completed MCP tasks use the same
-`CallToolResult` projection. Their `content`, `structuredContent`, and
-`isError` fields therefore follow one result-shaping path.
+Harn compiles each standalone input and output validator once when it prepares
+the registry. Plain `tools/call`, completed MCP tasks, generated CLI calls, and
+export-backed adapters all validate against that prepared catalog. Invalid
+arguments never reach the handler. Invalid or non-JSON results become tool
+failures and are never stored or reported as successful task results.
 
 The `exports` surface derives its MCP tools from public Harn functions through
 the same canonical catalog entries as `harn tool schema --surface exports`.
@@ -270,6 +280,10 @@ Registry construction and adapter loading reject:
 - CLI flag collisions after underscore-to-hyphen normalization
 - unresolved parameter `$ref` values at CLI construction
 - non-JSON handler results at the CLI output boundary
+- call arguments and handler results that violate the prepared catalog on CLI,
+  MCP, task, and export-backed dispatch paths
 
-This validation runs before handler execution. A missing registry publication
-also fails even if an earlier in-process run published one.
+Input validation runs before handler execution. Output validation runs before
+success receipts, replay/cache writes, task completion, or transport shaping.
+A missing registry publication also fails even if an earlier in-process run
+published one.

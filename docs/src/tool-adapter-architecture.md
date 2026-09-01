@@ -90,6 +90,12 @@ property, then applies the same wrapper to `structuredContent`. Inline calls
 and task completions share one `CallToolResult` projection, so asynchronous
 execution cannot create a second result contract.
 
+At load time Harn turns the portable catalog into one immutable prepared
+catalog. It compiles Draft 2020-12 input and output validators, stable name
+lookup, and MCP discovery documents once. CLI, MCP, tasks, replay, and exported
+function dispatch all use that object. They do not compile schemas or recover
+component context per request.
+
 ## Language bridges
 
 `harn-tools/1.0` is the stable boundary for documentation, compatibility

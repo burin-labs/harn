@@ -82,7 +82,6 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
     let entries = registry_entries(registry)?;
     let mut tools = Vec::with_capacity(entries.len());
     let mut names = BTreeSet::new();
-    let mut command_owners = BTreeMap::<Vec<String>, String>::new();
     for entry in entries {
         let catalog = catalog_entry(entry)?;
         if !names.insert(catalog.name.clone()) {
@@ -91,22 +90,13 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
                 catalog.name
             )));
         }
-        if let Some(previous) =
-            command_owners.insert(catalog.cli.command.clone(), catalog.name.clone())
-        {
-            return Err(VmError::Runtime(format!(
-                "tool registry CLI command '{}' is ambiguous: tools {previous:?} and {:?} claim it",
-                catalog.cli.command.join(" "),
-                catalog.name,
-            )));
-        }
         tools.push(catalog);
     }
     let catalog = ToolCatalog {
         schema_version: ToolCatalogSchemaVersion::V1,
         info: registry_info(registry)?,
         tools,
-        components: None,
+        components: registry_components(registry)?,
     };
     catalog
         .validate()
@@ -127,26 +117,8 @@ pub fn tool_registry_catalog_for_audience(
 }
 
 /// Serialize the catalog adapter projection with optional shared schemas.
-pub fn tool_registry_schema(
-    registry: &VmValue,
-    components: Option<&VmValue>,
-) -> Result<JsonValue, VmError> {
-    let mut catalog = tool_registry_catalog_for_audience(registry, ToolAudience::Catalog)?;
-    if let Some(components) = components.and_then(VmValue::as_dict) {
-        let components = result_to_json(&VmValue::dict(components.clone())).map_err(|error| {
-            VmError::Runtime(format!(
-                "tool_schema: components are not portable JSON: {error}"
-            ))
-        })?;
-        catalog.components = Some(ToolCatalogComponents {
-            schemas: components
-                .as_object()
-                .expect("dict converts to object")
-                .iter()
-                .map(|(name, schema)| (name.clone(), schema.clone()))
-                .collect(),
-        });
-    }
+pub fn tool_registry_schema(registry: &VmValue) -> Result<JsonValue, VmError> {
+    let catalog = tool_registry_catalog_for_audience(registry, ToolAudience::Catalog)?;
     catalog
         .validate()
         .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
@@ -277,6 +249,37 @@ fn registry_info(registry: &crate::value::DictMap) -> Result<Option<ToolRegistry
         name,
         version,
         description,
+    }))
+}
+
+fn registry_components(
+    registry: &crate::value::DictMap,
+) -> Result<Option<ToolCatalogComponents>, VmError> {
+    let Some(value) = registry.get("components") else {
+        return Ok(None);
+    };
+    let VmValue::Dict(components) = value else {
+        return Err(VmError::Runtime(
+            "tool registry components must be an object with a schemas field".into(),
+        ));
+    };
+    let Some(VmValue::Dict(schemas)) = components.get("schemas") else {
+        return Err(VmError::Runtime(
+            "tool registry components.schemas must be an object of named JSON Schemas".into(),
+        ));
+    };
+    let schemas = result_to_json(&VmValue::Dict(schemas.clone())).map_err(|error| {
+        VmError::Runtime(format!(
+            "tool registry components.schemas are not portable JSON: {error}"
+        ))
+    })?;
+    Ok(Some(ToolCatalogComponents {
+        schemas: schemas
+            .as_object()
+            .expect("dict converts to object")
+            .iter()
+            .map(|(name, schema)| (name.clone(), schema.clone()))
+            .collect(),
     }))
 }
 
@@ -1037,6 +1040,31 @@ mod tests {
     }
 
     #[test]
+    fn registry_components_are_the_catalog_components_source_of_truth() {
+        let mut registry = match registry(vec![entry("inspect", None)]) {
+            VmValue::Dict(registry) => (*registry).clone(),
+            _ => unreachable!(),
+        };
+        let mut schemas = DictMap::new();
+        schemas.insert(
+            "Receipt".into(),
+            crate::schema::json_to_vm_value(&serde_json::json!({
+                "type": "object",
+                "required": ["ok"]
+            })),
+        );
+        let mut components = DictMap::new();
+        components.insert("schemas".into(), VmValue::dict(schemas));
+        registry.insert("components".into(), VmValue::dict(components));
+
+        let catalog = tool_registry_catalog(&VmValue::dict(registry)).expect("project catalog");
+        assert_eq!(
+            catalog.components.unwrap().schemas["Receipt"]["required"],
+            serde_json::json!(["ok"])
+        );
+    }
+
+    #[test]
     fn filters_each_projection_and_serializes_normalized_governance() {
         let registry = registry(vec![governed_entry(
             "operator_inspect",
@@ -1142,7 +1170,52 @@ mod tests {
             entry("second", Some(command())),
         ]))
         .unwrap_err();
-        assert!(error.to_string().contains("ambiguous"));
+        assert!(error.to_string().contains("duplicate CLI command path"));
+    }
+
+    #[test]
+    fn cli_path_conflicts_are_scoped_to_the_cli_audience() {
+        let command = |parts: &[&str]| {
+            let mut cli = DictMap::new();
+            cli.insert(
+                "command".into(),
+                VmValue::List(
+                    parts
+                        .iter()
+                        .map(|part| string(part))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+            );
+            VmValue::dict(cli)
+        };
+        let mut mcp_parent = match governed_entry("mcp_parent", &["mcp"]) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        mcp_parent.insert("cli".into(), command(&["widgets"]));
+        let mut cli_leaf = match governed_entry("cli_leaf", &["cli"]) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        cli_leaf.insert("cli".into(), command(&["widgets", "get"]));
+        tool_registry_catalog(&registry(vec![
+            VmValue::dict(mcp_parent),
+            VmValue::dict(cli_leaf.clone()),
+        ]))
+        .expect("non-CLI tools do not occupy the CLI command tree");
+
+        let mut cli_parent = match governed_entry("cli_parent", &["cli"]) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        cli_parent.insert("cli".into(), command(&["widgets"]));
+        let error = tool_registry_catalog(&registry(vec![
+            VmValue::dict(cli_parent),
+            VmValue::dict(cli_leaf),
+        ]))
+        .expect_err("a CLI leaf cannot also be a parent command");
+        assert!(error.to_string().contains("both a tool and a parent"));
     }
 
     #[test]

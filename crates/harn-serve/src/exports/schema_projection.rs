@@ -45,16 +45,23 @@ pub(super) fn exported_params(
 ) -> Vec<ExportedParam> {
     params
         .iter()
-        .map(|param| ExportedParam {
-            name: param.name.clone(),
-            type_expr: param.type_expr.clone(),
-            input_schema: param
+        .map(|param| {
+            let item_schema = param
                 .type_expr
                 .as_ref()
                 .and_then(|type_expr| resolver.json_schema_for_input_type_expr(type_expr))
-                .unwrap_or_else(|| serde_json::json!({})),
-            has_default: param.default_value.is_some(),
-            rest: param.rest,
+                .unwrap_or_else(|| serde_json::json!({}));
+            ExportedParam {
+                name: param.name.clone(),
+                type_expr: param.type_expr.clone(),
+                input_schema: if param.rest {
+                    serde_json::json!({"type": "array", "items": item_schema})
+                } else {
+                    item_schema
+                },
+                has_default: param.default_value.is_some(),
+                rest: param.rest,
+            }
         })
         .collect()
 }

@@ -49,27 +49,24 @@ async fn run_loaded_registry(
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
+    let catalog = harn_vm::tool_registry::tool_registry_catalog_for_audience(
+        &loaded.registry,
+        harn_vm::tool_registry::ToolAudience::Cli,
+    )
+    .map_err(|error| error.to_string())?;
+    let prepared = harn_vm::tool_registry::PreparedToolCatalog::prepare(catalog)
+        .map_err(|error| error.to_string())?;
     let tools = harn_vm::tool_registry::executable_tools_for_audience(
         &loaded.registry,
         harn_vm::tool_registry::ToolAudience::Cli,
     )
     .map_err(|error| error.to_string())?;
-    let registry_info = harn_vm::tool_registry::tool_registry_catalog(&loaded.registry)
-        .map_err(|error| error.to_string())?
-        .info;
-    let catalog = tools
-        .iter()
-        .map(|tool| tool.catalog.clone())
-        .collect::<Vec<_>>();
-    let invocation = match parse_registry_invocation(
-        &args.file,
-        &args.arguments,
-        registry_info.as_ref(),
-        &catalog,
-    )? {
-        Some(invocation) => invocation,
-        None => return Ok(()),
-    };
+    let registry_info = prepared.catalog().info.as_ref();
+    let invocation =
+        match parse_registry_invocation(&args.file, &args.arguments, registry_info, &prepared)? {
+            Some(invocation) => invocation,
+            None => return Ok(()),
+        };
     let tool = tools
         .iter()
         .find(|tool| tool.catalog.name == invocation.tool_name)
@@ -90,25 +87,9 @@ async fn run_loaded_registry(
             tool.catalog.name
         )
     })?;
-    if let Some(output_schema) = tool.catalog.output_schema.as_ref() {
-        let validator = jsonschema::draft202012::new(output_schema).map_err(|error| {
-            format!(
-                "tool {:?} has an invalid output schema: {error}",
-                tool.catalog.name
-            )
-        })?;
-        let violations = validator
-            .iter_errors(&json)
-            .map(|error| error.to_string())
-            .collect::<Vec<_>>();
-        if !violations.is_empty() {
-            return Err(format!(
-                "tool {:?} returned a value that does not match its output schema:\n  - {}",
-                tool.catalog.name,
-                violations.join("\n  - ")
-            ));
-        }
-    }
+    prepared
+        .validate_output(&tool.catalog.name, &json)
+        .map_err(|error| error.to_string())?;
     match invocation.output.as_str() {
         "json" => println!(
             "{}",
@@ -202,8 +183,9 @@ fn parse_registry_invocation(
     file: &str,
     arguments: &[String],
     info: Option<&harn_vm::tool_registry::ToolRegistryInfo>,
-    tools: &[harn_vm::tool_registry::ToolCatalogEntry],
+    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Option<RegistryInvocation>, String> {
+    let tools = &prepared.catalog().tools;
     let root = command_tree(tools)?;
     let binary_name = info
         .map(|info| info.name.clone())
@@ -258,19 +240,9 @@ fn parse_registry_invocation(
             object.insert(name.clone(), coerce_argument(name, value, schema)?);
         }
     }
-    let validator = jsonschema::draft202012::new(&tool.input_schema)
-        .map_err(|error| format!("tool {:?} has an invalid input schema: {error}", tool.name))?;
-    let violations = validator
-        .iter_errors(&input)
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>();
-    if !violations.is_empty() {
-        return Err(format!(
-            "arguments for tool {:?} do not match its schema:\n  - {}",
-            tool.name,
-            violations.join("\n  - ")
-        ));
-    }
+    prepared
+        .validate_input(&tool.name, &input)
+        .map_err(|error| error.to_string())?;
     Ok(Some(RegistryInvocation {
         tool_name: tool.name.clone(),
         arguments: input,
@@ -548,6 +520,18 @@ mod tests {
         }
     }
 
+    fn prepared_catalog(
+        tools: Vec<harn_vm::tool_registry::ToolCatalogEntry>,
+    ) -> harn_vm::tool_registry::PreparedToolCatalog {
+        harn_vm::tool_registry::PreparedToolCatalog::prepare(harn_vm::tool_registry::ToolCatalog {
+            schema_version: harn_vm::tool_registry::ToolCatalogSchemaVersion::V1,
+            info: None,
+            tools,
+            components: None,
+        })
+        .expect("prepare test catalog")
+    }
+
     #[test]
     fn generated_cli_coerces_flags_and_validates_the_canonical_schema() {
         let tool = catalog_tool(
@@ -563,6 +547,7 @@ mod tests {
                 "additionalProperties": false
             }),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let invocation = parse_registry_invocation(
             "server.harn",
             &[
@@ -576,7 +561,7 @@ mod tests {
                 "pretty".into(),
             ],
             None,
-            &[tool],
+            &prepared,
         )
         .unwrap()
         .unwrap();
@@ -595,11 +580,12 @@ mod tests {
             &["widgets", "get"],
             serde_json::json!({"type": "object", "properties": {}}),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let invocation = parse_registry_invocation(
             "server.harn",
             &["widgets".into(), "get".into(), "--json".into()],
             None,
-            &[tool],
+            &prepared,
         )
         .unwrap()
         .unwrap();
@@ -618,6 +604,7 @@ mod tests {
                 "required": ["json"]
             }),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let invocation = parse_registry_invocation(
             "server.harn",
             &[
@@ -627,7 +614,7 @@ mod tests {
                 "raw-payload".into(),
             ],
             None,
-            &[tool],
+            &prepared,
         )
         .unwrap()
         .unwrap();
@@ -647,11 +634,12 @@ mod tests {
                 "required": ["widget_id"]
             }),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let error = parse_registry_invocation(
             "server.harn",
             &["widgets".into(), "get".into()],
             None,
-            &[tool],
+            &prepared,
         )
         .unwrap_err();
         assert!(error.contains("widget_id"));

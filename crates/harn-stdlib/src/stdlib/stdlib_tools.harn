@@ -7,7 +7,15 @@
  */
 pub type ToolRegistryInfo = {name: string, version?: string, description?: string}
 
-pub type ToolRegistry = {_type: "tool_registry", tools: list, info?: ToolRegistryInfo}
+/** Reusable named JSON Schemas shared by every adapter projection. */
+pub type ToolComponents = {schemas: dict}
+
+pub type ToolRegistry = {
+  _type: "tool_registry",
+  tools: list,
+  info?: ToolRegistryInfo,
+  components?: ToolComponents,
+}
 
 /** Deterministic command path projected by `harn tool run`. */
 pub type ToolCliSpec = {command: list<string>, hidden?: bool}
@@ -62,7 +70,7 @@ pub type ToolCatalog = {
   schema_version: "harn-tools/1.0",
   info?: ToolRegistryInfo,
   tools: list<ToolCatalogEntry>,
-  components?: dict,
+  components?: ToolComponents,
 }
 
 type ToolDefinitionConfig = {
@@ -205,6 +213,7 @@ pub fn tool_define_many(registry: ToolRegistry, specs: list<ToolDefinitionSpec>)
 pub fn tool_registry_from(
   specs: list<ToolDefinitionSpec>,
   info: ToolRegistryInfo? = nil,
+  components: ToolComponents? = nil,
 ) -> ToolRegistry {
-  return tool_define_many(tool_registry(info), specs)
+  return tool_define_many(tool_registry(info, components), specs)
 }

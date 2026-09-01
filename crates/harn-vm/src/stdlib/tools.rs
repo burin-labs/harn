@@ -223,7 +223,7 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_registry(info?: {name: string, version?: string, description?: string}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}}",
+    sig = "tool_registry(info?: {name: string, version?: string, description?: string}?, components?: {schemas: dict}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}, components?: {schemas: dict}}",
     category = "tools"
 )]
 fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -235,6 +235,9 @@ fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     );
     if let Some(info) = args.first().filter(|value| !matches!(value, VmValue::Nil)) {
         registry.insert(crate::value::intern_key("info"), info.clone());
+    }
+    if let Some(components) = args.get(1).filter(|value| !matches!(value, VmValue::Nil)) {
+        registry.insert(crate::value::intern_key("components"), components.clone());
     }
     let registry = VmValue::dict(registry);
     crate::tool_registry::tool_registry_catalog(&registry).map_err(|error| {
@@ -493,7 +496,7 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> ToolCatalog",
+    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure) -> ToolCatalog",
     category = "tools"
 )]
 fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -502,7 +505,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "tool_schema: requires a tool registry",
         )))
     })?;
-    let schema = crate::tool_registry::tool_registry_schema(registry, args.get(1))?;
+    let schema = crate::tool_registry::tool_registry_schema(registry)?;
     Ok(crate::schema::json_to_vm_value(&schema))
 }
 
