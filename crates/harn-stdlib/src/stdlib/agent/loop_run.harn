@@ -4,6 +4,7 @@ import {
   command_ledger_new,
   command_wait_normalize,
 } from "std/agent/command_ledger"
+import "std/agent/loop_call_budget"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
 import "std/agent/loop_finalize"
@@ -80,6 +81,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       0
     }
     let terminal_callback_continues = 0
+    let call_budget = __agent_loop_call_budget_new(opts, terminal_verify_reserve_remaining)
     // Session-scoped ownership of long-running handles keeps polling out of the
     // model loop. Normalize thresholds and wording once here (harn#4456);
     // linked hosts predating `command_wait` receive the defaults.
@@ -129,8 +131,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stop_reason = "suspended"
           break
         }
+        const turn_budget = call_budget + {iteration: iteration, max: current_max}
+        call_budget = __agent_loop_project_call_budget(harness, session, turn_budget)
         if agent_budget_pre_call_blocked(harness.agent, session, opts) {
           final_status = "budget_exhausted"
+          // Unset, this gate is indistinguishable from an unexplained break:
+          // `loop_finalize.harn` stamps `kind: "unattributed"` for this path.
+          stop_reason = "pre_call_budget_block"
           break
         }
         const iteration_index = iteration
