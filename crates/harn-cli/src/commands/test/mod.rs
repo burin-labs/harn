@@ -401,6 +401,7 @@ async fn run_user_test_targets(
         paths,
     );
     let selected_paths;
+    let mut allow_empty = args.allow_empty;
     let paths = if let Some(base) = args.affected_from.as_deref() {
         let resolved = affected::resolve(paths, base);
         if args.plan {
@@ -419,6 +420,11 @@ async fn run_user_test_targets(
                     paths.len()
                 );
                 selected_paths = resolved.files;
+                // Impact analysis is allowed to prove that none of the
+                // requested test files are affected. That is an intentional
+                // zero-file plan, not a mistargeted suite; #6486 also requires
+                // it to produce successful zero-case machine reports.
+                allow_empty |= selected_paths.is_empty();
                 &selected_paths
             }
             affected::AffectedTestMode::Full => {
@@ -439,6 +445,7 @@ async fn run_user_test_targets(
         max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
         fail_fast: args.fail_fast,
+        allow_empty,
         jobs: args.jobs,
         shard: resolve_test_shard(args.shard_index, args.shard_total),
         timing_baseline: args.timing_baseline.as_deref().map(|path| {
@@ -631,6 +638,10 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub max_execute_ms: Option<u64>,
     pub parallel: bool,
     pub fail_fast: bool,
+    /// Whether a one-shot invocation may report success after executing zero
+    /// tests. Watch mode consumes the same execution shape but has no terminal
+    /// verdict; it remains active so a newly-created test can be observed.
+    pub allow_empty: bool,
     pub jobs: Option<usize>,
     pub shard: Option<test_runner::TestShard>,
     pub timing_baseline: Option<test_runner::TimingBaseline>,
@@ -853,6 +864,8 @@ pub(crate) async fn run_user_tests(
         harn_vm::coverage::begin_session();
     }
 
+    let allow_empty = args.allow_empty;
+    let filter = args.filter;
     let summary = run_user_test_paths_once(&paths, args).await;
 
     if let Some(reports) = report_config.reports() {
@@ -875,6 +888,19 @@ pub(crate) async fn run_user_tests(
     if summary.failed > 0 {
         process::exit(crate::exit::PROGRAM_FAILURE);
     }
+    if summary.total == 0 && !allow_empty {
+        eprintln!("{}", empty_user_test_message(path_strs, filter));
+        process::exit(crate::exit::PROGRAM_FAILURE);
+    }
+}
+
+fn empty_user_test_message(path_strs: &[String], filter: Option<&str>) -> String {
+    format!(
+        "error: 0 user tests ran for {} requested target(s): {} (filter: {}). A run that executed nothing is reported as a program failure because an empty selection is otherwise indistinguishable from every test passing. Pass --allow-empty if an empty selection is expected here.",
+        path_strs.len(),
+        path_strs.join(", "),
+        filter.unwrap_or("<none>"),
+    )
 }
 
 /// Materialize the suite's locked dependencies once, before any case runs.
