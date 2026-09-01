@@ -1,6 +1,7 @@
 // std/agent/completion_evidence — typed, bounded terminal evidence contracts.
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
 import { CompletionVerificationState } from "std/agent/judge_internals"
+import { CompletionObligations } from "std/agent/obligations"
 import { AgentTranscriptToolLifecycleStatus } from "std/agent/transcript"
 
 const COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT = 4500
@@ -104,6 +105,11 @@ pub type CompletionEvidenceSnapshot = {
   pending_tool_batch_effect_count: int,
   // Absent until a deterministic gate actually ran and reported.
   verification?: CompletionVerificationState?,
+  // The completion target as amended by accepted mid-run user steering,
+  // derived once at the judge payload seam. Every exit authority shown this
+  // snapshot — the LLM judge, a `verify_completion` closure, the completion
+  // gate — reads this instead of re-deriving the goal from raw history.
+  obligations?: CompletionObligations?,
 }
 
 fn completion_evidence_clip(value: string) -> string {
@@ -186,21 +192,26 @@ pub fn completion_evidence_id(
   packet: CompletionEvidencePacket,
   pending_tool_batch_effect_count: int,
   verification: CompletionVerificationState? = nil,
+  obligations_digest: string = "",
 ) -> string {
-  return "sha256:"
-    + sha256(
-      json_stringify(
-        {
-          task: task,
-          trigger: stop_reason,
-          candidate_text: text,
-          actions: packet.actions,
-          fallback_observations: packet.fallback_observations,
-          requirement_evidence: packet.requirement_evidence,
-          lifecycle_issues: packet.lifecycle_issues,
-          pending_tool_batch_effect_count: pending_tool_batch_effect_count,
-          verification: verification,
-        },
-      ),
-    )
+  const base = {
+    task: task,
+    trigger: stop_reason,
+    candidate_text: text,
+    actions: packet.actions,
+    fallback_observations: packet.fallback_observations,
+    requirement_evidence: packet.requirement_evidence,
+    lifecycle_issues: packet.lifecycle_issues,
+    pending_tool_batch_effect_count: pending_tool_batch_effect_count,
+    verification: verification,
+  }
+  // Two decisions that differ only in accepted steering were decided under
+  // different obligations and must not share an evidence identity. An unsteered
+  // run contributes no key at all, so its identity is unchanged by this seam.
+  const identity = if obligations_digest == "" {
+    base
+  } else {
+    base + {obligations_digest: obligations_digest}
+  }
+  return "sha256:" + sha256(json_stringify(identity))
 }
