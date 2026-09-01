@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -22,9 +22,13 @@ use crate::limits::{LimitContext, LimitDecision, LimitGuard, LimitRegistry};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
 use crate::{BudgetSpec, DispatchError, ExportedCallableKind};
 
+mod arguments;
 mod config;
 mod prepared_generation;
 mod prepared_tools;
+#[cfg(test)]
+use arguments::lift_flat_single_object_arg;
+use arguments::{build_vm_args, canonical_arguments_json};
 pub use config::DispatchCoreConfig;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
@@ -765,182 +769,6 @@ impl DispatchCore {
     }
 }
 
-fn build_vm_args(
-    arguments: &CallArguments,
-    function: &crate::ExportedFunction,
-) -> Result<Vec<VmValue>, DispatchError> {
-    // ExportCatalog already removes the contiguous host-injected authority
-    // prefix. The remaining parameters are exactly the caller-owned JSON API.
-    let params = function.params.as_slice();
-
-    let rest = match arguments {
-        CallArguments::Positional(values) => {
-            values.iter().map(json_to_vm_value).collect::<Vec<_>>()
-        }
-        CallArguments::Named(values) => {
-            // Tolerate clients that emit a single-object-param tool's arguments
-            // FLAT at the top level instead of nested under the parameter name
-            // (harn#5039). See `lift_flat_single_object_arg`.
-            let lifted = lift_flat_single_object_arg(params, values);
-            let values: &BTreeMap<String, serde_json::Value> = lifted.as_ref().unwrap_or(values);
-            let mut args = Vec::new();
-            let mut saw_gap = false;
-            for param in params {
-                let value = values.get(&param.name);
-                if param.rest {
-                    if let Some(value) = value {
-                        let rest = value.as_array().ok_or_else(|| {
-                            DispatchError::Validation(format!(
-                                "rest argument '{}' for '{}' must be an array",
-                                param.name, function.name
-                            ))
-                        })?;
-                        args.extend(rest.iter().map(json_to_vm_value));
-                    }
-                    continue;
-                }
-                match value {
-                    Some(value) => {
-                        if saw_gap {
-                            return Err(DispatchError::Validation(format!(
-                                "named arguments for '{}' skipped '{}' before later arguments",
-                                function.name, param.name
-                            )));
-                        }
-                        args.push(json_to_vm_value(value));
-                    }
-                    None if param.has_default => {
-                        saw_gap = true;
-                    }
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
-            }
-            trim_trailing_defaults(args)
-        }
-    };
-
-    Ok(rest)
-}
-
-/// Normalize every adapter's argument form into the object advertised by the
-/// canonical tool input schema. Compatibility lifting happens before
-/// validation so the handler and validator receive the same logical call.
-fn canonical_arguments_json(
-    arguments: &CallArguments,
-    function: &crate::ExportedFunction,
-) -> Result<serde_json::Value, DispatchError> {
-    let params = function.params.as_slice();
-    let values = match arguments {
-        CallArguments::Named(values) => {
-            lift_flat_single_object_arg(params, values).unwrap_or_else(|| values.clone())
-        }
-        CallArguments::Positional(values) => {
-            let rest_index = params.iter().position(|param| param.rest);
-            if values.len() > params.len() && rest_index.is_none() {
-                return Err(DispatchError::Validation(format!(
-                    "too many positional arguments for '{}': expected at most {}, got {}",
-                    function.name,
-                    params.len(),
-                    values.len()
-                )));
-            }
-            let mut arguments = BTreeMap::new();
-            for (index, param) in params.iter().enumerate() {
-                if param.rest {
-                    arguments.insert(
-                        param.name.clone(),
-                        serde_json::Value::Array(values.get(index..).unwrap_or_default().to_vec()),
-                    );
-                    break;
-                }
-                if let Some(value) = values.get(index) {
-                    arguments.insert(param.name.clone(), value.clone());
-                }
-            }
-            arguments
-        }
-    };
-    Ok(serde_json::Value::Object(values.into_iter().collect()))
-}
-
-/// Tolerate MCP/JSON-RPC clients that emit a single-object-parameter tool's
-/// arguments FLAT at the top level instead of nested under the parameter name
-/// (harn#5039).
-///
-/// Harn projects `pub fn tool(params: { field: T, .. })` into an MCP
-/// `inputSchema` that nests every field under `params`. Some model clients
-/// (notably local/open-weight models) ignore that wrapper and emit the inner
-/// fields at the top level — e.g. `{ "events_dir": ".." }` instead of
-/// `{ "params": { "events_dir": ".." } }`. Bound by name, those flat keys match
-/// no parameter and are dropped, so the tool silently runs on its default and
-/// reports the field as "required".
-///
-/// When the function declares exactly one object-typed parameter and the
-/// incoming named map both (a) omits that parameter's own name and (b) is
-/// non-empty, wrap the whole map as that parameter's value. This is:
-/// - **idempotent** — a correctly-nested `{ "params": { .. } }` call already
-///   contains the parameter name, so it is passed through untouched;
-/// - **strictly additive** — it only rewrites calls whose keys would otherwise
-///   all be dropped (the parameter falling back to its default), never a call
-///   that already binds the parameter;
-/// - **shape-guarded** — it fires only for object-typed parameters, so a scalar
-///   single-parameter tool still reports a clear "missing required argument"
-///   instead of a spurious type error.
-///
-/// Returns the rewritten map when the lift applies, else `None` (bind the
-/// original arguments unchanged).
-fn lift_flat_single_object_arg(
-    params: &[crate::ExportedParam],
-    values: &BTreeMap<String, serde_json::Value>,
-) -> Option<BTreeMap<String, serde_json::Value>> {
-    let [only] = params else {
-        return None;
-    };
-    if only.rest || !only.accepts_json_object() {
-        return None;
-    }
-    if values.is_empty() || values.contains_key(&only.name) {
-        return None;
-    }
-    let wrapped = serde_json::Value::Object(values.clone().into_iter().collect());
-    Some(BTreeMap::from([(only.name.clone(), wrapped)]))
-}
-
-fn trim_trailing_defaults(mut args: Vec<VmValue>) -> Vec<VmValue> {
-    let mut tail = VecDeque::from(args);
-    while matches!(tail.back(), Some(VmValue::Nil)) {
-        tail.pop_back();
-    }
-    args = tail.into_iter().collect();
-    args
-}
-
-fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
-    match value {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(value) => VmValue::Bool(*value),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map(VmValue::Int)
-            .or_else(|| value.as_f64().map(VmValue::Float))
-            .unwrap_or(VmValue::Nil),
-        serde_json::Value::String(value) => VmValue::String(arcstr::ArcStr::from(value.as_str())),
-        serde_json::Value::Array(items) => VmValue::List(Arc::new(
-            items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
-        )),
-        serde_json::Value::Object(map) => VmValue::dict(
-            map.iter()
-                .map(|(key, value)| (key.clone(), json_to_vm_value(value)))
-                .collect::<harn_vm::value::DictMap>(),
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -987,21 +815,6 @@ mod tests {
                 Ok(VmValue::Int(
                     count.try_into().expect("test call count fits in i64"),
                 ))
-            });
-            Ok(())
-        }
-    }
-
-    struct InvalidContractVmConfigurator {
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl VmConfigurator for InvalidContractVmConfigurator {
-        fn configure(&self, vm: &mut Vm) -> Result<(), DispatchError> {
-            let calls = self.calls.clone();
-            vm.register_builtin("test_invalid_contract_value", move |_args, _output| {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Ok(VmValue::String("not-an-integer".into()))
             });
             Ok(())
         }
@@ -1105,118 +918,6 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("alice"));
         assert!(!response.cached);
-    }
-
-    #[tokio::test]
-    async fn dispatch_validates_input_before_handler_and_output_before_success() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r"
-pub fn inspect(count: int) -> int {
-  return test_invalid_contract_value()
-}
-",
-        )
-        .expect("write script");
-        let calls = Arc::new(AtomicUsize::new(0));
-        let mut config = DispatchCoreConfig::for_script(&script);
-        config.vm_configurator = Arc::new(InvalidContractVmConfigurator {
-            calls: calls.clone(),
-        });
-        let core = DispatchCore::new(config).expect("core");
-
-        let mut invalid_input = replay_test_request(None);
-        invalid_input.function = "inspect".to_string();
-        invalid_input.arguments = CallArguments::Named(BTreeMap::from([(
-            "count".to_string(),
-            serde_json::json!("not-an-integer"),
-        )]));
-        let input_error = core
-            .dispatch(invalid_input)
-            .await
-            .expect_err("invalid input must fail");
-        assert!(matches!(input_error, DispatchError::Validation(_)));
-        assert_eq!(calls.load(Ordering::SeqCst), 0, "handler must not run");
-
-        let mut invalid_output = replay_test_request(None);
-        invalid_output.function = "inspect".to_string();
-        invalid_output.arguments = CallArguments::Named(BTreeMap::from([(
-            "count".to_string(),
-            serde_json::json!(1),
-        )]));
-        let output_error = core
-            .dispatch(invalid_output)
-            .await
-            .expect_err("invalid output must fail");
-        assert!(matches!(output_error, DispatchError::Execution(_)));
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "valid input reaches handler"
-        );
-    }
-
-    #[tokio::test]
-    async fn dispatch_projects_variadic_parameters_as_arrays_for_every_argument_form() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r"
-pub fn collect(prefix: string, ...values: int) -> dict {
-  return {prefix: prefix, values: values}
-}
-",
-        )
-        .expect("write script");
-        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-        assert!(
-            core.catalog().function("collect").unwrap().params[1].rest,
-            "export discovery preserves the variadic marker"
-        );
-        let mut vm = core
-            .generation
-            .instantiate(Arc::new(AtomicBool::new(false)));
-        let exports = vm
-            .load_prepared_module_exports_from_source(&script, core.generation.source())
-            .await
-            .expect("load compiled exports");
-        assert!(
-            exports["collect"].func.has_rest_param,
-            "compiled export preserves the variadic marker"
-        );
-        assert_eq!(
-            core.tool_catalog().tools[0].input_schema["properties"]["values"],
-            serde_json::json!({"type": "array", "items": {"type": "integer"}})
-        );
-
-        let mut named = replay_test_request(None);
-        named.function = "collect".to_string();
-        named.arguments = CallArguments::Named(BTreeMap::from([
-            ("prefix".to_string(), serde_json::json!("named")),
-            ("values".to_string(), serde_json::json!([1, 2])),
-        ]));
-        assert_eq!(
-            core.dispatch(named).await.expect("named dispatch").value,
-            serde_json::json!({"prefix": "named", "values": [1, 2]})
-        );
-
-        let mut positional = replay_test_request(None);
-        positional.function = "collect".to_string();
-        positional.arguments = CallArguments::Positional(vec![
-            serde_json::json!("positional"),
-            serde_json::json!(3),
-            serde_json::json!(4),
-        ]);
-        assert_eq!(
-            core.dispatch(positional)
-                .await
-                .expect("positional dispatch")
-                .value,
-            serde_json::json!({"prefix": "positional", "values": [3, 4]})
-        );
     }
 
     /// harn#5039: a single-object-param tool (the `pub fn tool(params: {..})`
@@ -1852,6 +1553,8 @@ pub fn whoami(harness: Harness) -> string {
     mod dispatch_error_tests;
     #[path = "prepared_generation_tests.rs"]
     mod prepared_generation_tests;
+    #[path = "prepared_tools_tests.rs"]
+    mod prepared_tools_tests;
     #[path = "trusted_host_dispatch_tests.rs"]
     mod trusted_host_dispatch_tests;
     #[path = "typed_pipeline_tests.rs"]
