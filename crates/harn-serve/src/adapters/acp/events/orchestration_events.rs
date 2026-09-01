@@ -6,6 +6,26 @@ use harn_vm::agent_events::AgentEvent;
 
 pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
     match event {
+        AgentEvent::PurposeLabel {
+            session_id,
+            label,
+            source,
+            iteration,
+            tool_call_ids,
+            tool_call_count,
+        } => {
+            sink.emit_agent_event_ext(
+                "purpose_label",
+                session_id,
+                serde_json::json!({
+                    "label": label,
+                    "source": source,
+                    "iteration": iteration,
+                    "toolCallIds": tool_call_ids,
+                    "toolCallCount": tool_call_count,
+                }),
+            );
+        }
         AgentEvent::ProgressReported {
             session_id,
             message,
