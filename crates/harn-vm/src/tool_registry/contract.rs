@@ -23,7 +23,8 @@ use schema::{
 pub use crate::mcp_tasks::McpTaskSupport as ToolTaskSupport;
 use crate::tool_annotations::{SideEffectLevel, ToolKind};
 pub use cli::{
-    ToolCliArgumentSpec, ToolCliCommandSpec, ToolCliSpec, ToolCliTreeSpec, ToolCliValueHint,
+    ToolCliArgumentSpec, ToolCliBooleanStyle, ToolCliCommandSpec, ToolCliSpec, ToolCliTreeSpec,
+    ToolCliValueHint,
 };
 pub use prepared::{
     PreparedCliArgument, PreparedCliCommand, PreparedCliTree, PreparedToolCatalog,
@@ -996,6 +997,7 @@ pub fn tool_catalog_typescript() -> String {
     declaration!(ToolIconTheme);
     declaration!(ToolRegistryInfo);
     declaration!(ToolCliValueHint);
+    declaration!(ToolCliBooleanStyle);
     declaration!(ToolCliArgumentSpec);
     declaration!(ToolCliCommandSpec);
     declaration!(ToolCliTreeSpec);

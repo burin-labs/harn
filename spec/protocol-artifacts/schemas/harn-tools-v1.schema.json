@@ -226,6 +226,20 @@
           "type": "array",
           "uniqueItems": true
         },
+        "boolean_style": {
+          "$ref": "#/$defs/ToolCliBooleanStyle",
+          "default": "value",
+          "description": "Boolean token behavior. Presence styles never synthesize a value when\nthe option is absent."
+        },
+        "completions": {
+          "default": [],
+          "description": "Ordered advisory completion candidates. These do not constrain input.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "display_order": {
           "format": "uint32",
           "minimum": 0,
@@ -249,6 +263,11 @@
             "string",
             "null"
           ]
+        },
+        "hidden": {
+          "default": false,
+          "description": "Hide the argument from generated help while retaining explicit use.",
+          "type": "boolean"
         },
         "long": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$",
@@ -297,6 +316,26 @@
         }
       },
       "type": "object"
+    },
+    "ToolCliBooleanStyle": {
+      "description": "How one boolean property maps from command-line tokens.",
+      "oneOf": [
+        {
+          "const": "value",
+          "description": "Read an explicit `true` or `false` value.",
+          "type": "string"
+        },
+        {
+          "const": "set_true",
+          "description": "Insert `true` when the option is present and omit the property otherwise.",
+          "type": "string"
+        },
+        {
+          "const": "set_false",
+          "description": "Insert `false` when the option is present and omit the property otherwise.",
+          "type": "string"
+        }
+      ]
     },
     "ToolCliCommandSpec": {
       "additionalProperties": false,
@@ -357,6 +396,16 @@
       "additionalProperties": false,
       "description": "Deterministic command-line presentation for one tool.",
       "properties": {
+        "aliases": {
+          "default": [],
+          "description": "Alternate spellings for the final command component.",
+          "items": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "arguments": {
           "additionalProperties": {
             "$ref": "#/$defs/ToolCliArgumentSpec"
@@ -407,8 +456,10 @@
         "path",
         "url",
         "email",
+        "username",
         "hostname",
-        "command"
+        "command",
+        "other"
       ],
       "type": "string"
     },

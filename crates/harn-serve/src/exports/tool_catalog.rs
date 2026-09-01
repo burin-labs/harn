@@ -40,6 +40,7 @@ impl ExportCatalog {
                 governance: ToolGovernance::default(),
                 cli: ToolCliSpec {
                     command: vec![function.name.clone()],
+                    aliases: Vec::new(),
                     hidden: false,
                     arguments: BTreeMap::new(),
                 },

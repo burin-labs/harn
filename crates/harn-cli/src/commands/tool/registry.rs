@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::Path;
 
 use clap::{Arg, ArgAction, ArgMatches, Command, ValueHint};
+use harn_vm::tool_registry::ToolCliBooleanStyle;
 
 use crate::cli::{
     ToolCompletionShell, ToolCompletionsArgs, ToolRunArgs, ToolSchemaArgs, ToolSchemaSurface,
@@ -280,7 +281,15 @@ fn parse_registry_invocation(
         let schema = properties.get(name).ok_or_else(|| {
             format!("prepared CLI argument {name:?} is absent from the input schema")
         })?;
-        if argument.repeatable() {
+        if argument.boolean_style() != ToolCliBooleanStyle::Value {
+            if leaf.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
+                let value = leaf
+                    .get_one::<bool>(name)
+                    .copied()
+                    .ok_or_else(|| format!("generated boolean option {name:?} has no value"))?;
+                object.insert(name.to_string(), serde_json::Value::Bool(value));
+            }
+        } else if argument.repeatable() {
             if let Some(values) = leaf.get_many::<String>(name) {
                 let item_schema = schema
                     .get("items")
@@ -429,15 +438,21 @@ fn add_prepared_leaf_arguments(
             schema
         };
         command_arg_schema_guard(tool_name, projection.property(), value_schema)?;
-        let mut argument = Arg::new(projection.property().to_string())
-            .action(if projection.repeatable() {
-                ArgAction::Append
-            } else {
-                ArgAction::Set
-            })
-            .value_name(projection.value_name().to_string());
+        let mut argument =
+            Arg::new(projection.property().to_string()).action(match projection.boolean_style() {
+                ToolCliBooleanStyle::Value if projection.repeatable() => ArgAction::Append,
+                ToolCliBooleanStyle::Value => ArgAction::Set,
+                ToolCliBooleanStyle::SetTrue => ArgAction::SetTrue,
+                ToolCliBooleanStyle::SetFalse => ArgAction::SetFalse,
+            });
+        if projection.boolean_style() == ToolCliBooleanStyle::Value {
+            argument = argument.value_name(projection.value_name().to_string());
+        }
         if let Some(position) = projection.position() {
             argument = argument.index((position + 1) as usize);
+            if projection.repeatable() {
+                argument = argument.num_args(1..);
+            }
         } else if let Some(long) = projection.long() {
             argument = argument.long(long.to_string());
         }
@@ -456,11 +471,27 @@ fn add_prepared_leaf_arguments(
         if let Some(group) = projection.help_group() {
             argument = argument.help_heading(group.to_string());
         }
+        argument = argument.hide(projection.hidden());
         if let Some(hint) = projection.value_hint() {
             argument = argument.value_hint(clap_value_hint(hint));
         }
+        if matches!(schema_type(value_schema), Some("integer" | "number")) {
+            argument = argument.allow_negative_numbers(true);
+        }
+        let has_advisory_candidates = !projection.completions().is_empty();
+        let mut candidates = projection.completions().to_vec();
         if let Some(values) = static_string_enum(value_schema) {
-            argument = argument.value_parser(values);
+            for value in values {
+                if !candidates.contains(&value) {
+                    candidates.push(value);
+                }
+            }
+        }
+        if !candidates.is_empty() {
+            argument = argument.value_parser(AdvisoryValueParser::new(candidates));
+            if has_advisory_candidates {
+                argument = argument.hide_possible_values(true);
+            }
         }
         command = command.arg(argument);
     }
@@ -474,8 +505,10 @@ fn clap_value_hint(hint: harn_vm::tool_registry::ToolCliValueHint) -> ValueHint 
         harn_vm::tool_registry::ToolCliValueHint::Path => ValueHint::AnyPath,
         harn_vm::tool_registry::ToolCliValueHint::Url => ValueHint::Url,
         harn_vm::tool_registry::ToolCliValueHint::Email => ValueHint::EmailAddress,
+        harn_vm::tool_registry::ToolCliValueHint::Username => ValueHint::Username,
         harn_vm::tool_registry::ToolCliValueHint::Hostname => ValueHint::Hostname,
         harn_vm::tool_registry::ToolCliValueHint::Command => ValueHint::CommandName,
+        harn_vm::tool_registry::ToolCliValueHint::Other => ValueHint::Other,
     }
 }
 
@@ -486,6 +519,48 @@ fn static_string_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
         .iter()
         .map(|value| value.as_str().map(ToOwned::to_owned))
         .collect()
+}
+
+/// Advertise ordered candidates to help/completion generators without turning
+/// them into an allowlist. The prepared JSON Schema remains the validator.
+#[derive(Clone, Debug)]
+struct AdvisoryValueParser {
+    candidates: Vec<clap::builder::PossibleValue>,
+}
+
+impl AdvisoryValueParser {
+    fn new(candidates: Vec<String>) -> Self {
+        Self {
+            candidates: candidates
+                .into_iter()
+                .map(clap::builder::PossibleValue::new)
+                .collect(),
+        }
+    }
+}
+
+impl clap::builder::TypedValueParser for AdvisoryValueParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        command: &Command,
+        argument: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        clap::builder::TypedValueParser::parse_ref(
+            &clap::builder::StringValueParser::new(),
+            command,
+            argument,
+            value,
+        )
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(self.candidates.iter().cloned()))
+    }
 }
 
 fn selected_prepared_leaf<'a>(
@@ -617,6 +692,7 @@ mod tests {
             governance: harn_vm::tool_registry::ToolGovernance::default(),
             cli: harn_vm::tool_registry::ToolCliSpec {
                 command: command.iter().map(|part| (*part).to_string()).collect(),
+                aliases: Vec::new(),
                 hidden: false,
                 arguments: BTreeMap::new(),
             },
@@ -754,6 +830,72 @@ mod tests {
     }
 
     #[test]
+    fn generated_cli_preserves_boolean_omission_and_accepts_negative_numbers() {
+        use harn_vm::tool_registry::{ToolCliArgumentSpec, ToolCliBooleanStyle};
+
+        let mut tool = catalog_tool(
+            "configure_widget",
+            &["widgets", "configure"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "enabled": {"type": "boolean", "default": false},
+                    "cached": {"type": "boolean", "default": true},
+                    "offset": {"type": "integer"}
+                },
+                "additionalProperties": false
+            }),
+        );
+        tool.cli.arguments = BTreeMap::from([
+            (
+                "enabled".to_string(),
+                ToolCliArgumentSpec {
+                    long: Some("enable".to_string()),
+                    boolean_style: ToolCliBooleanStyle::SetTrue,
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+            (
+                "cached".to_string(),
+                ToolCliArgumentSpec {
+                    long: Some("no-cache".to_string()),
+                    boolean_style: ToolCliBooleanStyle::SetFalse,
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+        ]);
+        let prepared = prepared_catalog(vec![tool]);
+
+        let omitted = parse_registry_invocation(
+            "server.harn",
+            &["widgets".into(), "configure".into()],
+            &prepared,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(omitted.arguments, serde_json::json!({}));
+
+        let explicit = parse_registry_invocation(
+            "server.harn",
+            &[
+                "widgets".into(),
+                "configure".into(),
+                "--enable".into(),
+                "--no-cache".into(),
+                "--offset".into(),
+                "-4".into(),
+            ],
+            &prepared,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            explicit.arguments,
+            serde_json::json!({"enabled": true, "cached": false, "offset": -4})
+        );
+    }
+
+    #[test]
     fn generated_cli_uses_prepared_parent_and_argument_projections() {
         use harn_vm::tool_registry::{
             ToolCliArgumentSpec, ToolCliCommandSpec, ToolCliTreeSpec, ToolCliValueHint,
@@ -767,7 +909,8 @@ mod tests {
                 "properties": {
                     "widget_id": {"type": "integer", "description": "Widget identifier"},
                     "tags": {"type": "array", "items": {"type": "string"}},
-                    "mode": {"type": "string", "enum": ["safe", "fast"]}
+                    "mode": {"type": "string", "enum": ["safe", "fast"]},
+                    "internal": {"type": "string"}
                 },
                 "required": ["widget_id"],
                 "additionalProperties": false
@@ -793,10 +936,19 @@ mod tests {
                     repeatable: true,
                     display_order: Some(2),
                     help_group: Some("Selection".to_string()),
+                    completions: vec!["blue".to_string(), "green".to_string()],
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+            (
+                "internal".to_string(),
+                ToolCliArgumentSpec {
+                    hidden: true,
                     ..ToolCliArgumentSpec::default()
                 },
             ),
         ]);
+        tool.cli.aliases = vec!["add".to_string()];
         let mut catalog = test_catalog(vec![tool]);
         catalog.info = Some(harn_vm::tool_registry::ToolRegistryInfo {
             name: "widgetctl".to_string(),
@@ -842,12 +994,42 @@ mod tests {
             })
         );
 
+        let advisory_only = parse_registry_invocation(
+            "server.harn",
+            &[
+                "widgets".into(),
+                "add".into(),
+                "42".into(),
+                "--tag".into(),
+                "red".into(),
+            ],
+            &prepared,
+        )
+        .expect("advisory candidates do not restrict values")
+        .expect("invocation");
+        assert_eq!(advisory_only.arguments["tags"], serde_json::json!(["red"]));
+
         let help = prepared_clap_command("widgetctl".to_string(), &prepared)
             .expect("project command")
             .render_long_help()
             .to_string();
         assert!(help.contains("Manage widgets"), "{help}");
         assert!(help.contains("[alias: w]"), "{help}");
+
+        let mut leaf_help_command =
+            prepared_clap_command("widgetctl".to_string(), &prepared).expect("command tree");
+        let leaf_help = leaf_help_command
+            .find_subcommand_mut("widgets")
+            .unwrap()
+            .find_subcommand_mut("create")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(leaf_help.contains("WIDGET"), "{leaf_help}");
+        assert!(leaf_help.contains("Selection"), "{leaf_help}");
+        assert!(leaf_help.contains("--tag"), "{leaf_help}");
+        assert!(!leaf_help.contains("blue"), "{leaf_help}");
+        assert!(!leaf_help.contains("--internal"), "{leaf_help}");
 
         for shell in [
             clap_complete::Shell::Bash,
@@ -862,8 +1044,53 @@ mod tests {
             let script = String::from_utf8(output).expect("completion script is UTF-8");
             assert!(script.contains("widgets"), "{shell:?}: {script}");
             assert!(script.contains("create"), "{shell:?}: {script}");
+            assert!(script.contains("add"), "{shell:?}: {script}");
             assert!(script.contains("tag"), "{shell:?}: {script}");
+            if shell != clap_complete::Shell::PowerShell {
+                assert!(script.contains("blue"), "{shell:?}: {script}");
+                assert!(script.contains("green"), "{shell:?}: {script}");
+                assert!(
+                    script.find("blue") < script.find("green"),
+                    "{shell:?}: {script}"
+                );
+                assert!(
+                    script.find("safe") < script.find("fast"),
+                    "{shell:?}: {script}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn generated_cli_honors_option_termination_for_negative_positionals() {
+        use harn_vm::tool_registry::ToolCliArgumentSpec;
+
+        let mut tool = catalog_tool(
+            "shift_widget",
+            &["widgets", "shift"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {"offset": {"type": "integer"}},
+                "required": ["offset"],
+                "additionalProperties": false
+            }),
+        );
+        tool.cli.arguments.insert(
+            "offset".to_string(),
+            ToolCliArgumentSpec {
+                position: Some(0),
+                ..ToolCliArgumentSpec::default()
+            },
+        );
+        let prepared = prepared_catalog(vec![tool]);
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &["widgets".into(), "shift".into(), "--".into(), "-3".into()],
+            &prepared,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(invocation.arguments, serde_json::json!({"offset": -3}));
     }
 
     #[test]

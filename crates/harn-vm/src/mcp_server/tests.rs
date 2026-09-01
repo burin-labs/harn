@@ -56,6 +56,7 @@ fn tool_def(
             governance: crate::tool_registry::ToolGovernance::default(),
             cli: crate::tool_registry::ToolCliSpec {
                 command: vec![name.to_string()],
+                aliases: Vec::new(),
                 hidden: false,
                 arguments: std::collections::BTreeMap::new(),
             },

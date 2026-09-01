@@ -18,9 +18,24 @@ export type ToolIconTheme = "light" | "dark";
 
 export type ToolRegistryInfo = { name: string, version?: string | null, description?: string | null, };
 
-export type ToolCliValueHint = "file" | "directory" | "path" | "url" | "email" | "hostname" | "command";
+export type ToolCliValueHint = "file" | "directory" | "path" | "url" | "email" | "username" | "hostname" | "command" | "other";
 
-export type ToolCliArgumentSpec = { long?: string | null, short?: string | null, aliases: Array<string>, position?: number | null, value_name?: string | null, help?: string | null, value_hint?: ToolCliValueHint | null, repeatable: boolean, display_order?: number | null, help_group?: string | null, };
+export type ToolCliBooleanStyle = "value" | "set_true" | "set_false";
+
+export type ToolCliArgumentSpec = { long?: string | null, short?: string | null, aliases: Array<string>, position?: number | null, value_name?: string | null, help?: string | null, value_hint?: ToolCliValueHint | null,
+/**
+ * Boolean token behavior. Presence styles never synthesize a value when
+ * the option is absent.
+ */
+boolean_style: ToolCliBooleanStyle, repeatable: boolean,
+/**
+ * Hide the argument from generated help while retaining explicit use.
+ */
+hidden: boolean,
+/**
+ * Ordered advisory completion candidates. These do not constrain input.
+ */
+completions: Array<string>, display_order?: number | null, help_group?: string | null, };
 
 export type ToolCliCommandSpec = { command: Array<string>, title?: string | null, description?: string | null, aliases: Array<string>, hidden: boolean, display_order?: number | null, };
 
@@ -31,6 +46,10 @@ export type ToolCliSpec = {
  * Non-empty command path below `harn tool run <script>`.
  */
 command: Array<string>,
+/**
+ * Alternate spellings for the final command component.
+ */
+aliases: Array<string>,
 /**
  * Hide the command from help while retaining explicit invocation.
  */

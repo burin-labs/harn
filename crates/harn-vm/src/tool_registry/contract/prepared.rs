@@ -359,6 +359,7 @@ mod tests {
                 governance: ToolGovernance::default(),
                 cli: ToolCliSpec {
                     command: vec!["widgets".to_string(), "create".to_string()],
+                    aliases: Vec::new(),
                     hidden: false,
                     arguments: BTreeMap::new(),
                 },

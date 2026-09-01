@@ -10,7 +10,17 @@ pub type ToolRegistryInfo = {name: string, version?: string, description?: strin
 /** Reusable named JSON Schemas shared by every adapter projection. */
 pub type ToolComponents = {schemas: dict}
 
-pub type ToolCliValueHint = "file" | "directory" | "path" | "url" | "email" | "hostname" | "command"
+pub type ToolCliValueHint = "file" \
+  | "directory" \
+  | "path" \
+  | "url" \
+  | "email" \
+  | "username" \
+  | "hostname" \
+  | "command" \
+  | "other"
+
+pub type ToolCliBooleanStyle = "value" | "set_true" | "set_false"
 
 pub type ToolCliArgumentSpec = {
   long?: string,
@@ -20,7 +30,10 @@ pub type ToolCliArgumentSpec = {
   value_name?: string,
   help?: string,
   value_hint?: ToolCliValueHint,
+  boolean_style?: ToolCliBooleanStyle,
   repeatable?: bool,
+  hidden?: bool,
+  completions?: list<string>,
   display_order?: int,
   help_group?: string,
 }
@@ -53,6 +66,7 @@ pub type ToolRegistry = {
 /** Deterministic command path projected by `harn tool run`. */
 pub type ToolCliSpec = {
   command: list<string>,
+  aliases?: list<string>,
   hidden?: bool,
   arguments?: dict<string, ToolCliArgumentSpec>,
 }

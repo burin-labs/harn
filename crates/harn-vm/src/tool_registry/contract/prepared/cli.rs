@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value as JsonValue;
 
 use super::PreparedToolCatalogError;
 use crate::tool_registry::{
     is_valid_cli_command_component, ToolAudience, ToolCatalog, ToolCliArgumentSpec,
-    ToolCliCommandSpec, ToolCliValueHint,
+    ToolCliBooleanStyle, ToolCliCommandSpec, ToolCliValueHint,
 };
 
 const RESERVED_LONG_NAMES: [&str; 4] = ["harn-input", "harn-output", "help", "version"];
@@ -23,7 +23,10 @@ pub struct PreparedCliArgument {
     value_name: String,
     help: Option<String>,
     value_hint: Option<ToolCliValueHint>,
+    boolean_style: ToolCliBooleanStyle,
     repeatable: bool,
+    hidden: bool,
+    completions: Vec<String>,
     display_order: Option<u32>,
     help_group: Option<String>,
 }
@@ -61,8 +64,20 @@ impl PreparedCliArgument {
         self.value_hint
     }
 
+    pub fn boolean_style(&self) -> ToolCliBooleanStyle {
+        self.boolean_style
+    }
+
     pub fn repeatable(&self) -> bool {
         self.repeatable
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.hidden
+    }
+
+    pub fn completions(&self) -> &[String] {
+        &self.completions
     }
 
     pub fn display_order(&self) -> Option<u32> {
@@ -165,6 +180,7 @@ impl PreparedCliTree {
                     .or_insert_with(|| MutableCommand::new(path.to_vec()));
             }
             node.tool_name = Some(tool.name.clone());
+            node.aliases = tool.cli.aliases.clone();
             node.hidden |= tool.cli.hidden;
             node.description = tool.description.clone();
             node.title = tool.title.clone();
@@ -340,6 +356,15 @@ fn prepare_arguments(
         .and_then(JsonValue::as_object)
         .cloned()
         .unwrap_or_default();
+    let required = tool
+        .input_schema
+        .get("required")
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(JsonValue::as_str)
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>();
     for property in tool.cli.arguments.keys() {
         if !properties.contains_key(property) {
             return Err(error(format!(
@@ -408,6 +433,30 @@ fn prepare_arguments(
             )));
         }
     }
+    let last_position = positions.last_key_value().map(|(position, _)| *position);
+    let mut first_optional = None;
+    for (position, property) in &positions {
+        let argument = arguments
+            .iter()
+            .find(|argument| argument.property == *property)
+            .expect("position owner is a prepared argument");
+        if required.contains(property) {
+            if let Some(optional) = first_optional {
+                return Err(error(format!(
+                    "tool {:?} CLI positional property {property:?} at {position} is required after optional property {optional:?}",
+                    tool.name
+                )));
+            }
+        } else {
+            first_optional.get_or_insert(property);
+        }
+        if argument.repeatable && Some(*position) != last_position {
+            return Err(error(format!(
+                "tool {:?} repeatable CLI positional property {property:?} must be last",
+                tool.name
+            )));
+        }
+    }
     arguments.sort_by_key(|argument| {
         (
             argument.position.unwrap_or(u32::MAX),
@@ -444,7 +493,42 @@ fn prepare_argument(
     validate_optional_text(projection.value_name.as_deref(), "CLI argument value_name")?;
     validate_optional_text(projection.help.as_deref(), "CLI argument help")?;
     validate_optional_text(projection.help_group.as_deref(), "CLI argument help_group")?;
+    let mut completions = BTreeSet::new();
+    for completion in &projection.completions {
+        if completion.is_empty() || completion.chars().any(char::is_control) {
+            return Err(error(format!(
+                "tool {tool:?} property {property:?} CLI completion must be non-empty and contain no control characters"
+            )));
+        }
+        if !completions.insert(completion) {
+            return Err(error(format!(
+                "tool {tool:?} property {property:?} has duplicate CLI completion {completion:?}"
+            )));
+        }
+    }
     let is_array = schema.get("type").and_then(JsonValue::as_str) == Some("array");
+    let is_boolean = schema.get("type").and_then(JsonValue::as_str) == Some("boolean");
+    if projection.boolean_style != ToolCliBooleanStyle::Value && !is_boolean {
+        return Err(error(format!(
+            "tool {tool:?} property {property:?} can use a boolean presence style only when its schema type is boolean"
+        )));
+    }
+    if projection.boolean_style != ToolCliBooleanStyle::Value
+        && (projection.position.is_some() || projection.repeatable)
+    {
+        return Err(error(format!(
+            "tool {tool:?} property {property:?} boolean presence style must be a non-repeatable named option"
+        )));
+    }
+    if projection.boolean_style != ToolCliBooleanStyle::Value
+        && (projection.value_name.is_some()
+            || projection.value_hint.is_some()
+            || !projection.completions.is_empty())
+    {
+        return Err(error(format!(
+            "tool {tool:?} property {property:?} boolean presence style cannot declare value metadata"
+        )));
+    }
     if projection.repeatable && !is_array {
         return Err(error(format!(
             "tool {tool:?} property {property:?} can be repeatable only when its schema type is array"
@@ -497,7 +581,10 @@ fn prepare_argument(
         value_name,
         help,
         value_hint: projection.value_hint,
+        boolean_style: projection.boolean_style,
         repeatable: projection.repeatable,
+        hidden: projection.hidden,
+        completions: projection.completions,
         display_order: projection.display_order,
         help_group: projection.help_group,
     })
@@ -554,6 +641,7 @@ mod tests {
             governance: ToolGovernance::default(),
             cli: ToolCliSpec {
                 command: vec!["widgets".to_string(), "create".to_string()],
+                aliases: vec!["add".to_string()],
                 hidden: false,
                 arguments: BTreeMap::from([
                     (
@@ -612,6 +700,7 @@ mod tests {
         assert_eq!(parent.aliases(), &["w"]);
         let leaf = &parent.children()[0];
         assert_eq!(leaf.tool_name(), Some("create_widget"));
+        assert_eq!(leaf.aliases(), &["add"]);
         assert_eq!(leaf.arguments()[0].property(), "widget_id");
         assert_eq!(leaf.arguments()[0].position(), Some(0));
         assert_eq!(leaf.arguments()[1].long(), Some("tag"));
@@ -711,5 +800,69 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("only when its schema type is array"));
+
+        let mut invalid_boolean_style = tool();
+        invalid_boolean_style
+            .cli
+            .arguments
+            .get_mut("widget_id")
+            .unwrap()
+            .boolean_style = ToolCliBooleanStyle::SetTrue;
+        assert!(PreparedCliTree::prepare(&catalog(invalid_boolean_style))
+            .unwrap_err()
+            .to_string()
+            .contains("only when its schema type is boolean"));
+
+        let mut duplicate_completion = tool();
+        duplicate_completion
+            .cli
+            .arguments
+            .get_mut("tags")
+            .unwrap()
+            .completions = vec!["blue".to_string(), "blue".to_string()];
+        assert!(PreparedCliTree::prepare(&catalog(duplicate_completion))
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate CLI completion"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_and_non_terminal_repeatable_positionals() {
+        let mut ambiguous = tool();
+        ambiguous
+            .cli
+            .arguments
+            .get_mut("widget_id")
+            .unwrap()
+            .position = Some(1);
+        let ambiguous_tags = ambiguous.cli.arguments.get_mut("tags").unwrap();
+        ambiguous_tags.position = Some(0);
+        ambiguous_tags.long = None;
+        ambiguous_tags.short = None;
+        ambiguous_tags.aliases.clear();
+        ambiguous_tags.repeatable = false;
+        assert!(PreparedCliTree::prepare(&catalog(ambiguous))
+            .unwrap_err()
+            .to_string()
+            .contains("required after optional"));
+
+        let mut repeated_first = tool();
+        repeated_first
+            .cli
+            .arguments
+            .get_mut("widget_id")
+            .unwrap()
+            .position = Some(1);
+        let repeated_tags = repeated_first.cli.arguments.get_mut("tags").unwrap();
+        repeated_tags.position = Some(0);
+        repeated_tags.long = None;
+        repeated_tags.short = None;
+        repeated_tags.aliases.clear();
+        repeated_tags.repeatable = true;
+        repeated_first.input_schema["required"] = json!(["widget_id", "tags"]);
+        assert!(PreparedCliTree::prepare(&catalog(repeated_first))
+            .unwrap_err()
+            .to_string()
+            .contains("must be last"));
     }
 }

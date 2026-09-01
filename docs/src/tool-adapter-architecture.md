@@ -131,6 +131,5 @@ resources and prompts share the script loader. They are not part of the tool
 catalog because they have different invocation and content contracts.
 Streaming output, interactive CLI prompts, pagination UX, installable
 completion packaging, and generated native language packages are later
-projections. They
-should extend this registry or a sibling typed capability registry, not create
-another operation owner.
+projections. They should extend this registry or a sibling typed capability
+registry, not create another operation owner.

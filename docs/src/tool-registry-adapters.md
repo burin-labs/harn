@@ -36,6 +36,7 @@ fn widget_tools() -> ToolRegistry {
       },
       cli: {
         command: ["widgets", "get"],
+        aliases: ["show"],
         arguments: {
           widget_id: {
             position: 0,
@@ -108,6 +109,20 @@ presentation only; the input JSON Schema remains the validation owner.
 Harn coerces `string`, `integer`, `number`, and `boolean` values. Pass JSON for
 `object`, `array`, union, or untyped properties.
 
+Boolean inputs use the explicit `value` style by default, so
+`--verbose false` remains distinct from omission. Set `boolean_style` to
+`set_true` or `set_false` for a presence option such as `--verbose` or
+`--no-cache`. Presence options insert a value only when the token occurs; they
+never synthesize a property when omitted. The metadata must choose the spelling
+instead of deriving English negation rules.
+
+Numeric options accept hyphen-leading values such as `--offset -1`.
+`completions` supplies ordered suggestions without restricting input; string
+`enum` values contribute schema-owned suggestions and remain enforced by the
+prepared schema validator. A repeated positional must be last, and an optional
+positional cannot precede a required positional because neither shape has a
+portable token interpretation.
+
 Every leaf also accepts:
 
 - `--harn-input <JSON>` for a base argument object
@@ -125,7 +140,8 @@ additional properties fail at the CLI boundary.
 A tool with a `json` input keeps `--json` for that input. Use
 `--harn-output json` to select compact output in that case.
 
-`cli.command` must be a non-empty list of command names. A tool with no `cli`
+`cli.command` must be a non-empty list of command names. `cli.aliases` gives the
+leaf command alternate spellings under the same parent. A tool with no `cli`
 field defaults to `[namespace, name]` when `namespace` is present and `[name]`
 otherwise. Dots in an implicit namespace or tool name become nested commands,
 so `harn.code.search_examples` projects to `harn code search_examples`.
@@ -135,8 +151,11 @@ invocation. Duplicate paths and leaf/parent path conflicts are errors.
 Catalog-level `cli.commands` supplies metadata for parent commands. A parent
 can set `title`, `description`, aliases, visibility, and display order without
 duplicating a leaf tool schema. `harn tool completions` emits Bash, Zsh, Fish,
-or PowerShell completion from this same prepared tree. Static enum schemas and
-`value_hint` values contribute value completions.
+or PowerShell command and option completion from this same prepared tree. Bash,
+Zsh, and Fish also receive value-hint behavior plus static enum and advisory
+value candidates. The upstream PowerShell ahead-of-time generator currently
+omits argument-value candidates; parsing and schema validation remain identical
+on PowerShell.
 
 ## MCP projection
 
@@ -243,9 +262,12 @@ and other cross-entry invariants.
 - `ToolRegistryOptions`: `{info?, components?, cli?}`
 - `ToolCliTreeSpec`: `{commands: list<ToolCliCommandSpec>}`
 - `ToolCliCommandSpec`: parent path, copy, aliases, visibility, and order
-- `ToolCliSpec`: `{command, hidden?, arguments?}` for one leaf tool
-- `ToolCliArgumentSpec`: token mapping, help, order, repeatability, and value hint
-- `ToolCliValueHint`: `file`, `directory`, `path`, `url`, `email`, `hostname`, or `command`
+- `ToolCliSpec`: `{command, aliases?, hidden?, arguments?}` for one leaf tool
+- `ToolCliArgumentSpec`: token mapping, boolean style, help visibility/order,
+  repeatability, advisory completions, and value hint
+- `ToolCliBooleanStyle`: `value`, `set_true`, or `set_false`
+- `ToolCliValueHint`: `file`, `directory`, `path`, `url`, `email`, `username`,
+  `hostname`, `command`, or `other` (disable shell-default value completion)
 - `ToolAudience`: `"cli" | "mcp" | "catalog" | "dashboard" | "agent"`
 - `ToolGovernance`: `{audiences: list<ToolAudience>}`
 - `ToolSource`: `{kind: string, id?: string, binding?: dict}`
@@ -311,6 +333,9 @@ Registry construction and adapter loading reject:
 - sparse or duplicate positional indexes
 - CLI command, long-flag, alias, short-flag, and framework-reserved collisions
 - repeatable arguments whose schema is not one array with an item schema
+- non-terminal repeated positionals and required positionals after optional ones
+- boolean presence styles on non-boolean, positional, or repeatable arguments
+- empty or duplicate advisory completion candidates
 - argument metadata that names no input-schema property
 - unresolved parameter `$ref` values at CLI construction
 - non-JSON handler results at the CLI output boundary
