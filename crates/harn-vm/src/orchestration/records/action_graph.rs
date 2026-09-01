@@ -20,7 +20,7 @@ use super::types::{
     ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,
     ACTION_GRAPH_EDGE_KIND_TRANSITION, ACTION_GRAPH_EDGE_KIND_TRIGGER_DISPATCH,
     ACTION_GRAPH_NODE_KIND_PREDICATE, ACTION_GRAPH_NODE_KIND_RUN, ACTION_GRAPH_NODE_KIND_STAGE,
-    ACTION_GRAPH_NODE_KIND_TRIGGER, ACTION_GRAPH_NODE_KIND_WORKER,
+    ACTION_GRAPH_NODE_KIND_TRIGGER, ACTION_GRAPH_NODE_KIND_WORKER, ACTION_GRAPH_TOPIC,
 };
 use crate::event_log::{active_event_log, EventLog, LogEvent as EventLogRecord, Topic};
 use crate::triggers::TriggerEvent;
@@ -94,7 +94,7 @@ async fn append_action_graph_update_with_policy(
     let Some(log) = active_event_log() else {
         return Ok(());
     };
-    let topic = Topic::new("observability.action_graph")
+    let topic = Topic::new(ACTION_GRAPH_TOPIC)
         .expect("static observability.action_graph topic should always be valid");
     let mut record = EventLogRecord::new("action_graph_update", payload).with_headers(headers);
     record.redact_in_place(&policy);

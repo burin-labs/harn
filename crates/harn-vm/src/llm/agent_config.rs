@@ -462,7 +462,7 @@ fn agent_inject_host_event_builtin(
     sig = "prompt_explain(options: dict?) -> dict", category = "agent"
 )]
 fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let options = match args.first() {
+    let mut options = match args.first() {
         Some(VmValue::Dict(map)) => Some((**map).clone()),
         Some(VmValue::Nil) | None => None,
         _ => {
@@ -471,6 +471,7 @@ fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
             ))
         }
     };
+    super::helpers::project_agent_tools(&mut options)?;
     let assembled = super::helpers::assemble_system_prompt(None, options.as_ref(), &[])?;
     let mut result = assembled.provenance_json();
     result["system"] = match &assembled.system {

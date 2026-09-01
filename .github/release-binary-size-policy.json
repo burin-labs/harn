@@ -26,8 +26,8 @@
       "accepted_growth": [
         {
           "against_baseline_sha": "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc",
-          "bytes": 6937672,
-          "reason": "Bound the v0.10.125 cumulative runtime and CLI growth from the exact release build plus 512 KiB variance; section deltas are code-dominant, not an embedded asset. Remove after the released baseline refresh."
+          "bytes": 7695576,
+          "reason": "Bound the final v0.10.125 cumulative runtime, CLI, and public-evidence projection growth from the exact release build plus 512 KiB variance; current-versus-prior section deltas remain code-dominant, not an embedded asset. Remove after the released baseline refresh."
         }
       ]
     }

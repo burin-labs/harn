@@ -1,4 +1,5 @@
-import { agent_merge_llm_options } from "std/agent/options"
+import { agent_merge_llm_options, agent_route_capabilities } from "std/agent/options"
+import { llm_equivalent_failover_enabled, llm_has_explicit_routing_owner } from "std/llm/options"
 
 /**
  * A pending agent-loop prefill and the persistent options with that value
@@ -6,6 +7,18 @@ import { agent_merge_llm_options } from "std/agent/options"
  * later requests receive `options`.
  */
 pub type AgentOneShotPrefill = {options: dict, prefill: string}
+
+/** Stable reasons for admitting or suppressing one assistant prefill. */
+pub type AgentPrefillAdmissionReason = "supported" \
+  | "not_requested" \
+  | "external_llm_caller_unsupported" \
+  | "multi_route_prefill_unsupported" \
+  | "assistant_prefill_unsupported"
+
+/** The typed decision for attaching an assistant prefill to one request. */
+pub type AgentPrefillEligibility = {allowed: bool, reason: AgentPrefillAdmissionReason}
+
+type AgentPrefillRouteCapabilities = {supports_assistant_prefill: bool, ...rest}
 
 /**
  * Consume the effective agent-loop prefill once. Nested `llm_options` retains
@@ -37,4 +50,58 @@ pub fn agent_take_one_shot_prefill(options: any = nil) -> AgentOneShotPrefill {
     cleaned = cleaned + {llm_options: nested.removing("prefill")}
   }
   return {options: cleaned, prefill: value ?? ""}
+}
+
+/**
+ * Decide whether one request may carry an assistant prefill.
+ *
+ * A prefill is a trailing assistant message, and a provider that forbids one
+ * rejects the entire request rather than ignoring the field, so an unsupported
+ * prefill costs the run and not just the turn. The capability is already
+ * declared per model; this is the read.
+ *
+ * This is the single owner for all admission requirements: the candidate must
+ * contain visible text, a custom caller must declare that it forwards the
+ * field, one concrete route must own the request, and that route's catalog row
+ * must allow assistant prefill.
+ * Arbitrary callers and multi-route policies are opaque at this boundary, so
+ * both fail closed. Not prefilling is serviceable; sending an assistant turn
+ * to a route that rejects it loses the request.
+ *
+ * @effects: [llm]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_prefill_eligibility(
+  llm: HarnessLlm,
+  prefill: string,
+  options: any = nil,
+) -> AgentPrefillEligibility {
+  if trim(prefill) == "" {
+    return {allowed: false, reason: "not_requested"}
+  }
+  const resolved = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  if resolved?._llm_caller != nil
+    && !(resolved?._llm_caller_transport?.forwards_assistant_prefill
+      ?? false) {
+    return {allowed: false, reason: "external_llm_caller_unsupported"}
+  }
+  if llm_has_explicit_routing_owner(resolved) || llm_equivalent_failover_enabled(resolved) {
+    return {allowed: false, reason: "multi_route_prefill_unsupported"}
+  }
+  const raw_capabilities = agent_route_capabilities(llm, resolved)
+  if raw_capabilities == nil {
+    return {allowed: false, reason: "assistant_prefill_unsupported"}
+  }
+  const capabilities = try {
+    schema_expect(raw_capabilities, schema_of(AgentPrefillRouteCapabilities))
+  }
+  if is_err(capabilities) || !unwrap(capabilities).supports_assistant_prefill {
+    return {allowed: false, reason: "assistant_prefill_unsupported"}
+  }
+  return {allowed: true, reason: "supported"}
 }

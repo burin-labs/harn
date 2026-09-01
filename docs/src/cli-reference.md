@@ -1994,6 +1994,38 @@ claim, since a catalog ladder is a rule matching many models; each result names
 the routes it stands for. `--suggest-fragment` prints a corrected capability row
 for review — the probe never edits catalog TOML.
 
+## harn provider option-probe
+
+Send one portable generation option through one concrete provider/model
+endpoint and compare the provider verdict with the capability catalog. The
+accepted options are `temperature`, `top_p`, `top_k`, `seed`,
+`frequency_penalty`, `presence_penalty`, and `stop`.
+
+```bash
+harn provider option-probe anthropic \
+  --model claude-opus-4-7 \
+  --option temperature \
+  --plan --json
+
+harn provider option-probe anthropic \
+  --model claude-opus-4-7 \
+  --option temperature \
+  --fail-on-drift --json
+```
+
+`--plan` reports the endpoint, exact catalog field, claim, and one-request call
+count without contacting the provider. A live report records `match`, `drift`,
+or `unmeasured`. Provider acceptance and provider rejection are measurements;
+authentication failures, throttling, unavailable models, and local gates are
+not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.
+
+The command normally suspends catalog shaping for only the selected option, so
+a negative claim can be falsified at the wire. The typed authority is captured
+in the resolved call and carried through spawned transport work; it does not
+affect sibling calls or other options. `--gated` leaves normal shaping enabled
+for a confirm-only run. Acceptance proves the endpoint accepted a meaningful,
+non-default value, not that a provider necessarily honored the value.
+
 ## harn provider dispatch-explain
 
 Explain the resolved provider dispatch configuration for one provider/model

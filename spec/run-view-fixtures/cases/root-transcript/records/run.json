@@ -42,7 +42,7 @@
   },
   "evidence": {
     "schema_version": 1,
-    "execution_id": "run-root-transcript",
+    "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
     "trace_spans": [
       {
         "kind": "llm_call",
@@ -50,6 +50,7 @@
         "start_ms": 0,
         "duration_ms": 3000,
         "metadata": {
+          "harn.execution.id": "hxe-019c13e0-8080-7000-8000-000000000001",
           "provider": "fixture-provider",
           "model": "fixture-model",
           "input_tokens": 12,

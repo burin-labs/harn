@@ -1,6 +1,6 @@
-//! Request-shaping tests: what the provider payload looks like BEFORE any
-//! transport runs. No sockets, no stubs — these assert prefill handling,
-//! sampling-parameter stripping, and thinking-config rewrites per model.
+//! Request-shaping tests without sockets or stubs. Most assertions inspect the
+//! provider builder directly; prefill assertions also run the required final
+//! post-override reconciliation that every live Anthropic request uses.
 
 use super::options::base_opts;
 use super::test_support::ScopedEnvVar;
@@ -9,6 +9,18 @@ use super::{
 };
 use crate::llm::env_guard;
 use crate::value::VmValue;
+
+fn finalized_anthropic_body(payload: &LlmRequestPayload) -> serde_json::Value {
+    let mut body = crate::llm::providers::AnthropicProvider::build_request_body(payload);
+    crate::llm::providers::anthropic::reconcile_request_body(
+        &mut body,
+        &payload.provider,
+        &payload.model,
+        &payload.thinking,
+        None,
+    );
+    body
+}
 
 #[test]
 fn openai_compat_prefill_appends_assistant_and_sets_chat_template_kwargs() {
@@ -45,13 +57,11 @@ fn openai_compat_without_prefill_omits_continue_flags() {
 
 #[test]
 fn anthropic_prefill_appends_assistant_for_legacy_model() {
-    use crate::llm::providers::AnthropicProvider;
-
     let mut opts = base_opts("anthropic");
     opts.model = "claude-sonnet-4-20250514".to_string();
     opts.prefill = Some("<done>##DONE##</done>".to_string());
     let payload = LlmRequestPayload::from(&opts);
-    let body = AnthropicProvider::build_request_body(&payload);
+    let body = finalized_anthropic_body(&payload);
 
     let messages = body["messages"].as_array().expect("messages array");
     let last = messages.last().expect("at least one message");
@@ -61,13 +71,11 @@ fn anthropic_prefill_appends_assistant_for_legacy_model() {
 
 #[test]
 fn anthropic_prefill_skipped_for_opus_4_6() {
-    use crate::llm::providers::AnthropicProvider;
-
     let mut opts = base_opts("anthropic");
     opts.model = "claude-opus-4-6".to_string();
     opts.prefill = Some("<done>##DONE##</done>".to_string());
     let payload = LlmRequestPayload::from(&opts);
-    let body = AnthropicProvider::build_request_body(&payload);
+    let body = finalized_anthropic_body(&payload);
 
     let messages = body["messages"].as_array().expect("messages array");
     // User message only; prefill dropped silently.
@@ -77,13 +85,11 @@ fn anthropic_prefill_skipped_for_opus_4_6() {
 
 #[test]
 fn anthropic_prefill_skipped_for_opus_4_7() {
-    use crate::llm::providers::AnthropicProvider;
-
     let mut opts = base_opts("anthropic");
     opts.model = "claude-opus-4-7".to_string();
     opts.prefill = Some("<done>##DONE##</done>".to_string());
     let payload = LlmRequestPayload::from(&opts);
-    let body = AnthropicProvider::build_request_body(&payload);
+    let body = finalized_anthropic_body(&payload);
 
     let messages = body["messages"].as_array().expect("messages array");
     assert_eq!(messages.len(), 1);
@@ -300,8 +306,6 @@ fn anthropic_thinking_preserves_extended_for_opus_4_6() {
 
 #[test]
 fn anthropic_prefill_preserved_for_or_opus_dotted_older_generations() {
-    use crate::llm::providers::AnthropicProvider;
-
     // Dotted "claude-opus-4.5" style supports prefill when no incompatible
     // native schema contract is requested.
     let mut opts = base_opts("anthropic");
@@ -309,7 +313,7 @@ fn anthropic_prefill_preserved_for_or_opus_dotted_older_generations() {
     opts.prefill = Some("<done>##DONE##</done>".to_string());
     opts.output_format = OutputFormat::Text;
     let payload = LlmRequestPayload::from(&opts);
-    let body = AnthropicProvider::build_request_body(&payload);
+    let body = finalized_anthropic_body(&payload);
 
     let messages = body["messages"].as_array().expect("messages array");
     assert_eq!(messages.len(), 2);
@@ -318,13 +322,11 @@ fn anthropic_prefill_preserved_for_or_opus_dotted_older_generations() {
 
 #[test]
 fn anthropic_prefill_skipped_for_or_opus_4_7_dotted() {
-    use crate::llm::providers::AnthropicProvider;
-
     let mut opts = base_opts("anthropic");
     opts.model = "anthropic/claude-opus-4.7".to_string();
     opts.prefill = Some("<done>##DONE##</done>".to_string());
     let payload = LlmRequestPayload::from(&opts);
-    let body = AnthropicProvider::build_request_body(&payload);
+    let body = finalized_anthropic_body(&payload);
 
     let messages = body["messages"].as_array().expect("messages array");
     assert_eq!(messages.len(), 1);

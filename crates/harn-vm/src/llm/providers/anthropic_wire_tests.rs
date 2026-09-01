@@ -190,6 +190,7 @@ fn mid_conversation_system_section_reaches_exact_anthropic_wire_json() {
                 "content": [{"type": "text", "text": "second"}]
             }),
             serde_json::json!({"role": "assistant", "content": "A1"}),
+            serde_json::json!({"role": "user", "content": "U2"}),
         ],
         max_tokens: 64,
         ..LlmCallOptions::default()
@@ -214,6 +215,7 @@ fn mid_conversation_system_section_reaches_exact_anthropic_wire_json() {
                 ]
             },
             {"role": "assistant", "content": "A1"},
+            {"role": "user", "content": "U2"},
         ])
     );
 }
@@ -234,6 +236,7 @@ fn exact_server_tool_use_boundary_keeps_native_system_message() {
             serde_json::json!({"role": "assistant", "content": [server_tool_use]}),
             serde_json::json!({"role": "system", "content": "budget is now $0.25"}),
             serde_json::json!({"role": "assistant", "content": "continuing"}),
+            serde_json::json!({"role": "user", "content": "next step"}),
         ],
         max_tokens: 64,
         ..LlmCallOptions::default()
@@ -254,6 +257,7 @@ fn exact_server_tool_use_boundary_keeps_native_system_message() {
             }]},
             {"role": "system", "content": "budget is now $0.25"},
             {"role": "assistant", "content": "continuing"},
+            {"role": "user", "content": "next step"},
         ])
     );
 }
@@ -271,6 +275,7 @@ fn assert_mixed_tool_boundary_moves_system_after_client_result(blocks: Vec<serde
                 "type": "tool_result", "tool_use_id": "toolu_01", "content": "contents"
             }]}),
             serde_json::json!({"role": "assistant", "content": "continuing"}),
+            serde_json::json!({"role": "user", "content": "next step"}),
         ],
         max_tokens: 64,
         ..LlmCallOptions::default()
@@ -288,6 +293,7 @@ fn assert_mixed_tool_boundary_moves_system_after_client_result(blocks: Vec<serde
             }]},
             {"role": "system", "content": "budget is now $0.25"},
             {"role": "assistant", "content": "continuing"},
+            {"role": "user", "content": "next step"},
         ])
     );
 }
@@ -368,6 +374,7 @@ fn unsupported_fable_route_folds_system_message_on_exact_wire() {
             serde_json::json!({"role": "user", "content": "U1"}),
             serde_json::json!({"role": "system", "content": "operator constraint"}),
             serde_json::json!({"role": "assistant", "content": "A1"}),
+            serde_json::json!({"role": "user", "content": "U2"}),
         ],
         max_tokens: 64,
         ..LlmCallOptions::default()
@@ -384,6 +391,7 @@ fn unsupported_fable_route_folds_system_message_on_exact_wire() {
                 "content": "U1\n\n<system-reminder>\noperator constraint\n</system-reminder>"
             },
             {"role": "assistant", "content": "A1"},
+            {"role": "user", "content": "U2"},
         ])
     );
 }

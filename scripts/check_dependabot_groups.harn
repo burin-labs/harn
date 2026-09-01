@@ -1,10 +1,13 @@
 import "std/schema"
+import * as semver from "std/semver"
 
 type DependabotGroup = {
   patterns: list<string>,
   exclude_patterns: list<string>,
   update_types: list<string>,
 }
+
+type DependabotIgnore = {dependency_name: string}
 
 /**
  * What one package ecosystem's groups have to look like.
@@ -30,6 +33,15 @@ pub type EcosystemGroups = {
   ecosystem: string,
   directories: list<string>,
   groups: dict<string, DependabotGroup>,
+  ignores: list<DependabotIgnore>,
+}
+
+pub type VscodeApiContract = {
+  engine_range: string,
+  manifest_types: string,
+  lock_manifest_types: string,
+  lock_resolved_types: string,
+  dependabot_ignored: bool,
 }
 
 pub type GroupErrorKind = "missing_group" \
@@ -96,6 +108,15 @@ fn dependabot_schema() {
       directory: schema_field(schema_string(), false),
       directories: schema_field(schema_list(schema_string()), false),
       groups: schema_field(schema_dict(group), false),
+      ignore: schema_field(
+        schema_list(
+          schema_object(
+            {"dependency-name": schema_field(schema_string())},
+            {additional_properties: true},
+          ),
+        ),
+        false,
+      ),
     },
     {additional_properties: true},
   )
@@ -161,9 +182,51 @@ pub fn groups_from_text(text: string) -> list<EcosystemGroups> {
         }
       },
     )
-    entries = entries + [{ecosystem: ecosystem, directories: directories, groups: groups}]
+    const ignores = (update.get("ignore") ?? []).map(
+      { ignored -> {dependency_name: ignored.get("dependency-name")} },
+    )
+    entries = entries
+      + [{ecosystem: ecosystem, directories: directories, groups: groups, ignores: ignores}]
   }
   return entries
+}
+
+/** Whether one update entry deliberately excludes a dependency from automation. */
+pub fn dependabot_ignores(entry: EcosystemGroups, dependency: string) -> bool {
+  return entry.ignores.any({ ignored -> ignored.dependency_name == dependency })
+}
+
+/**
+ * Validate the VS Code extension's compile-time API ceiling.
+ *
+ * A caret engine range advertises support from its lower bound upward. The
+ * extension must therefore compile against that exact lower-bound API, and
+ * automation must not move the type package independently of the engine.
+ */
+pub fn vscode_api_contract_errors(contract: VscodeApiContract) -> list<string> {
+  let errors: list<string> = []
+  if !contract.engine_range.starts_with("^") {
+    errors = errors + ["engines.vscode must be a caret range"]
+  } else {
+    const minimum = contract.engine_range[1:]
+    if semver.parse_release(minimum) == nil {
+      errors = errors + ["engines.vscode has no valid release minimum"]
+    } else {
+      if contract.manifest_types != minimum {
+        errors = errors + ["package.json @types/vscode must equal the engine minimum"]
+      }
+      if contract.lock_manifest_types != minimum {
+        errors = errors + ["package-lock root @types/vscode must equal the engine minimum"]
+      }
+      if contract.lock_resolved_types != minimum {
+        errors = errors + ["resolved @types/vscode must equal the engine minimum"]
+      }
+    }
+  }
+  if !contract.dependabot_ignored {
+    errors = errors + ["Dependabot must ignore @types/vscode"]
+  }
+  return errors
 }
 
 /** GitHub Dependabot `patterns` use `*` as a zero-or-more wildcard. */

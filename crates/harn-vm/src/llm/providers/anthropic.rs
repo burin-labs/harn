@@ -276,13 +276,69 @@ fn warn_sampling_stripped(model: &str) {
 /// a caller override belong here rather than in `build_request_body`.
 pub(crate) fn reconcile_request_body(
     body: &mut serde_json::Value,
-    model: &str,
+    provider: &str,
+    fallback_model: &str,
     thinking: &ThinkingConfig,
+    provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
-    strip_unsupported_sampling_params(body, model, thinking);
+    // Provider overrides are merged before this seam and may replace `model`
+    // alongside messages. Every model-dependent guard must therefore read the
+    // value that will actually be sent. An invalid non-string override maps to
+    // the empty unknown model and fails closed instead of inheriting an older,
+    // more permissive catalog row.
+    let wire_model = body.get("model").map_or_else(
+        || fallback_model.to_owned(),
+        |value| value.as_str().unwrap_or_default().to_owned(),
+    );
+    remove_unsupported_assistant_prefill(body, provider, &wire_model);
+    strip_unsupported_sampling_params(body, &wire_model, thinking, provider_contract_probe);
     if crate::llm::catalog_may_shape_requested_reasoning() {
-        clamp_effort_for_disabled_thinking(body, model);
+        clamp_effort_for_disabled_thinking(body, &wire_model);
     }
+}
+
+fn remove_unsupported_assistant_prefill(body: &mut serde_json::Value, provider: &str, model: &str) {
+    let supports_prefill =
+        crate::llm::capabilities::lookup(provider, model).supports_assistant_prefill;
+    let uses_native_schema = body
+        .pointer("/output_config/format/type")
+        .and_then(serde_json::Value::as_str)
+        == Some("json_schema");
+    // Anthropic also rejects response prefill whenever thinking is on. Treat
+    // an authored but unknown thinking shape as enabled so a future wire mode
+    // cannot silently bypass this compatibility boundary.
+    let thinking_on = body.get("thinking").is_some_and(|thinking| {
+        thinking.get("type").and_then(serde_json::Value::as_str) != Some("disabled")
+    });
+    if supports_prefill && !uses_native_schema && !thinking_on {
+        return;
+    }
+    let Some(messages) = body
+        .get_mut("messages")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let original_len = messages.len();
+    // At the Messages API boundary, every trailing assistant turn is a
+    // response prefill regardless of how it entered durable history. Remove
+    // the complete trailing run, not just a caller's `prefill` option: loop
+    // continuation, replay, direct messages, and provider overrides can all
+    // produce the same wire shape. The durable transcript remains unchanged.
+    while messages.last().and_then(|message| message["role"].as_str()) == Some("assistant") {
+        messages.pop();
+    }
+    if messages.len() == original_len {
+        return;
+    }
+    let reason = if uses_native_schema {
+        "Anthropic native structured output is incompatible with prefill"
+    } else if thinking_on {
+        "Anthropic thinking is incompatible with prefill"
+    } else {
+        "this Anthropic model does not support prefill"
+    };
+    warn_anthropic_prefill_skipped(model, reason);
 }
 
 /// Remove Anthropic sampling parameters when the resolved Claude request
@@ -292,6 +348,7 @@ pub(crate) fn strip_unsupported_sampling_params(
     body: &mut serde_json::Value,
     model: &str,
     thinking: &ThinkingConfig,
+    provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
     let strip_sampling = model_rejects_sampling_params(model)
         || !thinking.is_disabled()
@@ -303,14 +360,24 @@ pub(crate) fn strip_unsupported_sampling_params(
     let Some(object) = body.as_object_mut() else {
         return;
     };
-    let had_sampling = object.contains_key("temperature")
-        || object.contains_key("top_p")
-        || object.contains_key("top_k");
+    let mut had_sampling = false;
+    for (field, option) in [
+        (
+            "temperature",
+            crate::llm::capabilities::PortableOption::Temperature,
+        ),
+        ("top_p", crate::llm::capabilities::PortableOption::TopP),
+        ("top_k", crate::llm::capabilities::PortableOption::TopK),
+    ] {
+        if crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            provider_contract_probe,
+            option,
+        ) {
+            had_sampling = object.remove(field).is_some() || had_sampling;
+        }
+    }
     if had_sampling {
         warn_sampling_stripped(model);
-        object.remove("temperature");
-        object.remove("top_p");
-        object.remove("top_k");
     }
 }
 
@@ -321,6 +388,7 @@ pub(crate) fn strip_unsupported_bedrock_converse_sampling_params(
     body: &mut serde_json::Value,
     model: &str,
     thinking: &ThinkingConfig,
+    provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 ) {
     if !is_claude_model_id(model) {
         return;
@@ -342,9 +410,19 @@ pub(crate) fn strip_unsupported_bedrock_converse_sampling_params(
         return;
     };
 
-    let had_temperature = inference.remove("temperature").is_some();
-    let had_top_p = inference.remove("topP").is_some();
-    let had_top_k = inference.remove("topK").is_some();
+    let had_temperature =
+        crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+            provider_contract_probe,
+            crate::llm::capabilities::PortableOption::Temperature,
+        ) && inference.remove("temperature").is_some();
+    let had_top_p = crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+        provider_contract_probe,
+        crate::llm::capabilities::PortableOption::TopP,
+    ) && inference.remove("topP").is_some();
+    let had_top_k = crate::llm::provider_contract_probe::catalog_may_shape_requested_portable_option(
+        provider_contract_probe,
+        crate::llm::capabilities::PortableOption::TopK,
+    ) && inference.remove("topK").is_some();
     let had_sampling = had_temperature || had_top_p || had_top_k;
     if had_sampling {
         warn_sampling_stripped(model);
@@ -453,7 +531,11 @@ impl LlmProviderChat for AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// Build the Anthropic-style request body.
+    /// Build the Anthropic-style pre-override request body.
+    ///
+    /// Every live sender must apply caller/provider overrides and then call
+    /// [`reconcile_request_body`] before serialization. That final seam owns
+    /// lossy capability admission against the actual wire model and shape.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let anthropic_max = if opts.max_tokens > 0 {
@@ -530,30 +612,14 @@ impl AnthropicProvider {
         let mut messages = enforce_tool_result_adjacency(messages);
         preserve_orphan_results_as_text(&mut messages);
         if let Some(ref prefill) = opts.prefill {
-            let uses_native_schema = matches!(
-                &opts.output_format,
-                crate::llm::api::OutputFormat::JsonSchema { .. }
-            ) && caps.structured_output.as_deref() == Some("native");
-            // Anthropic rejects message prefill both on models that removed
-            // the feature and on requests using native structured output.
-            // The capability catalog is the semantic owner of model support;
-            // the request shape adds the one per-call incompatibility.
-            if caps.supports_assistant_prefill && !uses_native_schema {
-                messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": prefill,
-                }));
-            } else if uses_native_schema {
-                warn_anthropic_prefill_skipped(
-                    &opts.model,
-                    "Anthropic native structured output is incompatible with prefill",
-                );
-            } else {
-                warn_anthropic_prefill_skipped(
-                    &opts.model,
-                    "this Anthropic model does not support prefill",
-                );
-            }
+            // Admission is intentionally deferred until after provider
+            // overrides. The final wire model and output shape, rather than
+            // this pre-override payload, own whether the request may end in an
+            // assistant turn.
+            messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": prefill,
+            }));
         }
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
@@ -573,7 +639,12 @@ impl AnthropicProvider {
         if let Some(top_k) = opts.top_k {
             body["top_k"] = serde_json::json!(top_k);
         }
-        strip_unsupported_sampling_params(&mut body, &opts.model, &opts.thinking);
+        strip_unsupported_sampling_params(
+            &mut body,
+            &opts.model,
+            &opts.thinking,
+            opts.provider_contract_probe,
+        );
         if let Some(ref stop) = opts.stop {
             body["stop_sequences"] = serde_json::json!(stop);
         }

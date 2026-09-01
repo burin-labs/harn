@@ -55,7 +55,7 @@ impl crate::vm::Vm {
         if items.is_empty() {
             return VmValue::Bool(false);
         }
-        let mut scope: Option<std::sync::Arc<str>> = None;
+        let mut scope: Option<crate::ExecutionId> = None;
         for item in items {
             let VmValue::VerdictReceipt(receipt) = item else {
                 return VmValue::Bool(false);
@@ -80,9 +80,9 @@ impl crate::vm::Vm {
     /// Mint the opaque `VerdictReceipt` VM-side from the host validator's plain
     /// dict. On any non-`"pass"` outcome the dict passes through unchanged (no
     /// receipt), so the `.harn` side maps outcome -> fail / indeterminate. The
-    /// run identity is the host-controlled ambient request id — a caller cannot
-    /// forge it — which, with the host-captured content hash, closes the cross-run
-    /// replay class on top of the execution-provenance floor the hostlib enforces.
+    /// run identity is the VM-owned execution scope — a caller cannot forge it —
+    /// which, with the host-captured content hash, closes the cross-run replay
+    /// class on top of the execution-provenance floor the hostlib enforces.
     fn mint_verdict_receipt(raw: &VmValue) -> VmValue {
         let Some(dict) = raw.as_dict() else {
             return raw.clone();
@@ -136,6 +136,15 @@ impl crate::vm::Vm {
         // through on the `"pass"` dict — NOT to a consumption-time request id. A
         // `"pass"` is only reached after the hostlib scope gate confirmed the
         // active scope equals this owner, so it is always present here.
+        let Ok(execution_scope) = crate::ExecutionId::parse(&execution_scope) else {
+            let mut unavailable = dict.clone();
+            unavailable.put_str("outcome", "unavailable");
+            unavailable.put_str(
+                "detail",
+                "host verdict response carried an invalid execution identity",
+            );
+            return VmValue::dict_map(unavailable);
+        };
         let receipt = VmVerdictReceipt {
             artifact_id: std::sync::Arc::from(artifact_id.as_str()),
             content_hash: std::sync::Arc::from(artifact_hash.as_str()),
@@ -144,7 +153,7 @@ impl crate::vm::Vm {
             command_hash: std::sync::Arc::from(command_hash.as_str()),
             passed,
             total,
-            execution_scope: std::sync::Arc::from(execution_scope.as_str()),
+            execution_scope,
             subject,
         };
         let mut out = dict.clone();
@@ -155,11 +164,11 @@ impl crate::vm::Vm {
 
 #[cfg(test)]
 mod verdict_same_run_tests {
-    use crate::observability::execution_scope::enter_execution_scope;
-    use crate::value::{VmValue, VmVerdictReceipt};
+    use crate::observability::execution_scope::{enter_execution_scope, ExecutionId};
+    use crate::value::{DictMap, VmDictExt, VmValue, VmVerdictReceipt};
     use std::sync::Arc;
 
-    fn receipt(scope: &str) -> VmValue {
+    fn receipt(scope: &ExecutionId) -> VmValue {
         VmValue::verdict_receipt(VmVerdictReceipt {
             artifact_id: Arc::from("art"),
             content_hash: Arc::from("sha256:abc"),
@@ -168,15 +177,16 @@ mod verdict_same_run_tests {
             command_hash: Arc::from("sha256:command"),
             passed: 1,
             total: 1,
-            execution_scope: Arc::from(scope),
+            execution_scope: scope.clone(),
             subject: None,
         })
     }
 
     #[test]
     fn same_scope_receipts_combine_inside_that_scope() {
-        let _scope = enter_execution_scope(Arc::from("run-A"));
-        let out = crate::vm::Vm::verdict_same_run(&[receipt("run-A"), receipt("run-A")]);
+        let owner = ExecutionId::mint();
+        let _scope = enter_execution_scope(owner.clone());
+        let out = crate::vm::Vm::verdict_same_run(&[receipt(&owner), receipt(&owner)]);
         assert!(matches!(out, VmValue::Bool(true)));
     }
 
@@ -185,8 +195,10 @@ mod verdict_same_run_tests {
         // The cross-run replay negative: a pass produced by run A cannot combine
         // with one from run B — verdict_all degrades such an aggregate to
         // indeterminate off this `false`.
-        let _scope = enter_execution_scope(Arc::from("run-A"));
-        let out = crate::vm::Vm::verdict_same_run(&[receipt("run-A"), receipt("run-B")]);
+        let owner = ExecutionId::mint();
+        let other = ExecutionId::mint();
+        let _scope = enter_execution_scope(owner.clone());
+        let out = crate::vm::Vm::verdict_same_run(&[receipt(&owner), receipt(&other)]);
         assert!(matches!(out, VmValue::Bool(false)));
     }
 
@@ -194,7 +206,8 @@ mod verdict_same_run_tests {
     fn same_scope_but_no_active_scope_is_rejected() {
         // Fail-closed: aggregation outside any owning run cannot combine, even
         // when the receipts agree — a replay into a later, scope-less context.
-        let out = crate::vm::Vm::verdict_same_run(&[receipt("run-A"), receipt("run-A")]);
+        let owner = ExecutionId::mint();
+        let out = crate::vm::Vm::verdict_same_run(&[receipt(&owner), receipt(&owner)]);
         assert!(matches!(out, VmValue::Bool(false)));
     }
 
@@ -202,15 +215,18 @@ mod verdict_same_run_tests {
     fn same_scope_but_different_active_scope_is_rejected() {
         // Replay into a DIFFERENT active run is rejected: the receipts' owner is
         // not the active owner.
-        let _scope = enter_execution_scope(Arc::from("run-B"));
-        let out = crate::vm::Vm::verdict_same_run(&[receipt("run-A"), receipt("run-A")]);
+        let owner = ExecutionId::mint();
+        let other = ExecutionId::mint();
+        let _scope = enter_execution_scope(other);
+        let out = crate::vm::Vm::verdict_same_run(&[receipt(&owner), receipt(&owner)]);
         assert!(matches!(out, VmValue::Bool(false)));
     }
 
     #[test]
     fn a_non_receipt_element_is_rejected() {
-        let _scope = enter_execution_scope(Arc::from("run-A"));
-        let out = crate::vm::Vm::verdict_same_run(&[receipt("run-A"), VmValue::Int(42)]);
+        let owner = ExecutionId::mint();
+        let _scope = enter_execution_scope(owner.clone());
+        let out = crate::vm::Vm::verdict_same_run(&[receipt(&owner), VmValue::Int(42)]);
         assert!(matches!(out, VmValue::Bool(false)));
     }
 
@@ -220,5 +236,31 @@ mod verdict_same_run_tests {
             crate::vm::Vm::verdict_same_run(&[]),
             VmValue::Bool(false)
         ));
+    }
+
+    #[test]
+    fn malformed_host_identity_cannot_become_an_opaque_receipt() {
+        let mut raw = DictMap::new();
+        for (field, value) in [
+            ("outcome", "pass"),
+            ("artifact_id", "artifact"),
+            ("artifact_hash", "sha256:artifact"),
+            ("plan_id", "sha256:plan"),
+            ("workspace_hash", "sha256:workspace"),
+            ("command_hash", "sha256:command"),
+            ("execution_scope", "external-run"),
+        ] {
+            raw.put_str(field, value);
+        }
+        raw.put("passed", VmValue::Int(1));
+        raw.put("total", VmValue::Int(1));
+
+        let result = crate::vm::Vm::mint_verdict_receipt(&VmValue::dict_map(raw));
+        let result = result.as_dict().expect("unavailable response dict");
+        assert_eq!(
+            result.get("outcome").map(VmValue::as_str_cow).as_deref(),
+            Some("unavailable")
+        );
+        assert!(!result.contains_key("receipt"));
     }
 }
