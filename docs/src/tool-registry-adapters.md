@@ -63,6 +63,12 @@ The publishing call makes the registry available to script-backed adapters. It
 does not make MCP the semantic owner. `harn serve mcp` and `harn tool run` load
 the same published registry and invoke the same closures in the same VM.
 
+The registry's `annotations` record also carries Harn runtime metadata. The
+portable catalog selects only `title` and the four MCP presentation hints;
+lifecycle, inline-result, and artifact-emission annotations remain runtime-only.
+Legacy `kind` and `side_effect_level` values normalize into the typed `policy`
+field rather than presentation metadata.
+
 ## CLI projection
 
 ```bash

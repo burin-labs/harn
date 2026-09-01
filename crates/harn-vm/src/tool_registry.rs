@@ -498,24 +498,11 @@ fn presentation_annotations(
             "tool {name:?} field 'annotations' must be an object"
         )));
     };
-    let allowed = BTreeSet::from([
-        "title",
-        "readOnlyHint",
-        "destructiveHint",
-        "idempotentHint",
-        "openWorldHint",
-        // Compatibility-only policy inputs. They project through `policy`,
-        // not the presentation annotations record.
-        "kind",
-        "side_effect_level",
-    ]);
-    for key in fields.keys() {
-        if !allowed.contains(key.as_str()) {
-            return Err(VmError::Runtime(format!(
-                "tool {name:?} field 'annotations' contains unknown key {key:?}"
-            )));
-        }
-    }
+    // Registry annotations are a broader Harn runtime record. Select only the
+    // portable presentation fields here; lifecycle, rendering, artifact, and
+    // other runtime annotations remain available to their owning subsystems
+    // without leaking into the transport-neutral DTO. `policy_spec` separately
+    // consumes the legacy `kind` and `side_effect_level` keys.
     let annotations = ToolPresentationAnnotations {
         title: optional_string(fields, "title", &format!("tool {name:?} annotations"))?,
         read_only_hint: optional_bool(
@@ -1202,6 +1189,42 @@ mod tests {
             })
         );
         assert!(catalog.tools[0].annotations.is_none());
+    }
+
+    #[test]
+    fn filters_runtime_annotations_from_portable_presentation_metadata() {
+        let mut tool = match entry("runtime_annotated", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut annotations = DictMap::new();
+        annotations.insert("readOnlyHint".into(), VmValue::Bool(true));
+        annotations.insert("agent_lifecycle".into(), VmValue::Bool(true));
+        annotations.insert("inline_result".into(), VmValue::Bool(true));
+        annotations.insert("emits_artifacts".into(), VmValue::Bool(true));
+        annotations.insert("kind".into(), string("execute"));
+        annotations.insert("side_effect_level".into(), string("process_exec"));
+        tool.insert("annotations".into(), VmValue::dict(annotations));
+
+        let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
+        assert_eq!(
+            catalog.tools[0].annotations,
+            Some(ToolPresentationAnnotations {
+                read_only_hint: Some(true),
+                ..ToolPresentationAnnotations::default()
+            })
+        );
+        assert_eq!(
+            catalog.tools[0].policy,
+            Some(ToolPolicy {
+                kind: ToolKind::Execute,
+                side_effect_level: SideEffectLevel::ProcessExec,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&catalog).unwrap()["tools"][0]["annotations"],
+            serde_json::json!({"readOnlyHint": true})
+        );
     }
 
     #[test]
