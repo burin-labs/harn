@@ -221,14 +221,15 @@ fn __session_compaction_fields(
   guard type_of(measurement) == "dict" else {
     throw "transcript_auto_compact receipt omitted its source measurement"
   }
-  const canonical_receipt = receipt + {
-    requested_strategy: requested_strategy,
-    threshold_source: if threshold_modified {
-      "pre_compact_modify"
-    } else {
-      receipt.threshold_source
-    },
-  }
+  const canonical_receipt = receipt
+    + {
+      requested_strategy: requested_strategy,
+      threshold_source: if threshold_modified {
+        "pre_compact_modify"
+      } else {
+        receipt.threshold_source
+      },
+    }
   return {
     receipt: canonical_receipt,
     requested_strategy: canonical_receipt.requested_strategy,
