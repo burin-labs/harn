@@ -221,17 +221,21 @@ fn __session_compaction_fields(
   guard type_of(measurement) == "dict" else {
     throw "transcript_auto_compact receipt omitted its source measurement"
   }
-  return {
-    receipt: receipt,
+  const canonical_receipt = receipt + {
     requested_strategy: requested_strategy,
-    engine_strategy: receipt.engine_strategy,
-    resolved_threshold_tokens: receipt.resolved_threshold_tokens,
     threshold_source: if threshold_modified {
       "pre_compact_modify"
     } else {
       receipt.threshold_source
     },
-    hard_limit_tokens: receipt.hard_limit_tokens,
+  }
+  return {
+    receipt: canonical_receipt,
+    requested_strategy: canonical_receipt.requested_strategy,
+    engine_strategy: canonical_receipt.engine_strategy,
+    resolved_threshold_tokens: canonical_receipt.resolved_threshold_tokens,
+    threshold_source: canonical_receipt.threshold_source,
+    hard_limit_tokens: canonical_receipt.hard_limit_tokens,
     source_measurement: measurement,
     // Flat compatibility projection for transcript readers that predate the
     // typed source_measurement record. The receipt remains the semantic owner.
