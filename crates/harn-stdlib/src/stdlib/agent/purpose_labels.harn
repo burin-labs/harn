@@ -1,0 +1,207 @@
+import { agent_emit_event } from "std/agent/state"
+
+/**
+ * Purpose labels: a plain-language heading the agent writes for the run of
+ * tool calls it is about to make, so a reader sees "Searching for GitHub
+ * issues" instead of eleven unexplained tool rows.
+ *
+ * The label is declared by the model in the same turn that proposes the
+ * calls, so it costs no extra model call. This module owns the declaration
+ * grammar, the normalization rules, and the typed event; it never decides
+ * whether a call runs. Extraction is pure string work on text the loop is
+ * already holding, and the emit is fire-and-forget, so a label can never
+ * gate, reorder, or delay dispatch.
+ */
+/** Caller-facing options for declared purpose labels. */
+pub type PurposeLabelOptions = {enabled?: bool, max_chars?: int}
+
+/** Normalized purpose-label policy. */
+pub type PurposeLabelConfig = {enabled: bool, max_chars: int}
+
+/** One turn's declaration, with the declaration removed from the prose. */
+pub type PurposeLabelExtraction = {label: string, text: string, declared: bool}
+
+/**
+ * The declaration grammar. A tag rather than a structured field because the
+ * native tool-call channel carries calls out of band: under native tool
+ * calling the assistant text is still prose, so a tag is the one spelling
+ * that survives every tool format.
+ */
+pub const PURPOSE_LABEL_PATTERN: string = "<purpose>(.*?)</purpose>"
+
+const PURPOSE_LABEL_FLAGS: string = "is"
+
+const PURPOSE_LABEL_DEFAULT_MAX_CHARS: int = 64
+
+/**
+ * Normalize the `purpose_labels` agent-loop option. Default off, and a bool
+ * is shorthand for `{enabled: bool}`.
+ *
+ * @effects: []
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_config(value: any = nil) -> PurposeLabelConfig {
+  const defaults: PurposeLabelConfig = {enabled: false, max_chars: PURPOSE_LABEL_DEFAULT_MAX_CHARS}
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) == "bool" {
+    return defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: purpose_labels must be a bool, dict, or nil; got " + type_of(value)
+  }
+  const enabled = value?.enabled
+  if enabled != nil && type_of(enabled) != "bool" {
+    throw "agent_loop: purpose_labels.enabled must be a bool; got " + type_of(enabled)
+  }
+  const max_chars = value?.max_chars
+  if max_chars != nil && (type_of(max_chars) != "int" || max_chars < 8) {
+    throw "agent_loop: purpose_labels.max_chars must be an int >= 8; got " + type_of(max_chars)
+  }
+  return {enabled: enabled ?? true, max_chars: max_chars ?? defaults.max_chars}
+}
+
+/**
+ * The instruction appended to the system prompt when labels are on. Kept
+ * here so the declaration grammar and the sentence that teaches it cannot
+ * drift apart.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_prompt_fragment(config: PurposeLabelConfig) -> string {
+  if !config.enabled {
+    return ""
+  }
+  // Phrased as a requirement with the tag first. An earlier wording that led
+  // with prose and hedged ("write it only when the purpose changes") was
+  // reliably ignored: the model narrated its intent in plain prose and never
+  // reached for the tag.
+  return "PURPOSE HEADINGS. Every message in which you call tools MUST begin "
+    + "with a purpose heading on its own first line, in exactly this form:\n"
+    + "<purpose>Searching for GitHub issues</purpose>\n"
+    + "Write it before anything else in the message, every time you call a "
+    + "tool. Say the purpose of the batch in plain language a reader who does "
+    + "not know this codebase would understand, under "
+    + to_string(config.max_chars)
+    + " characters, and name the goal rather than the tools. When the purpose "
+    + "is unchanged from your last one, repeat it verbatim. It is a heading "
+    + "for the reader and never changes what you do."
+}
+
+/**
+ * Clamp one declared label to a renderable single line.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_normalize(raw: any, max_chars: int) -> string {
+  if type_of(raw) != "string" {
+    return ""
+  }
+  const collapsed = trim(regex_replace("\\s+", " ", raw))
+  if collapsed == "" {
+    return ""
+  }
+  if collapsed.count <= max_chars {
+    return collapsed
+  }
+  // Clip on a word boundary so the heading stays readable, falling back to a
+  // hard cut when the first word is already longer than the budget.
+  let kept = ""
+  for word in split(collapsed, " ") {
+    const candidate = if kept == "" {
+      word
+    } else {
+      kept + " " + word
+    }
+    if candidate.count > max_chars {
+      break
+    }
+    kept = candidate
+  }
+  if kept == "" {
+    kept = collapsed[0:max_chars]
+  }
+  return trim(kept) + "..."
+}
+
+/**
+ * Pull the declaration out of one turn's raw text and return the prose with
+ * every declaration removed. A turn with no declaration is the normal case
+ * and returns `declared: false` with the text untouched.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_extract(
+  config: PurposeLabelConfig,
+  raw_text: any,
+) -> PurposeLabelExtraction {
+  const text = if type_of(raw_text) == "string" {
+    raw_text
+  } else {
+    ""
+  }
+  if !config.enabled || text == "" {
+    return {label: "", text: text, declared: false}
+  }
+  // `regex_captures` returns a LIST of capture records and an EMPTY list on no
+  // match — never nil. A nil check here would make extraction silently inert.
+  const captures = regex_captures(PURPOSE_LABEL_PATTERN, text, PURPOSE_LABEL_FLAGS)
+  if type_of(captures) != "list" || captures.count == 0 {
+    return {label: "", text: text, declared: false}
+  }
+  const groups = captures[0]?.groups ?? []
+  const first = if type_of(groups) == "list" && groups.count > 0 {
+    groups[0]
+  } else {
+    ""
+  }
+  const label = agent_purpose_label_normalize(first, config.max_chars)
+  // Strip every declaration, not just the captured one: a turn that wrote two
+  // must not leave markup in the rendered prose.
+  const stripped = trim(regex_replace(PURPOSE_LABEL_PATTERN, "", text, PURPOSE_LABEL_FLAGS))
+  return {label: label, text: stripped, declared: label != ""}
+}
+
+/**
+ * Emit one purpose label. Best-effort by construction: a label is
+ * presentation metadata, so a failure to publish one must never surface as a
+ * turn failure.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_emit(
+  agent: HarnessAgent,
+  session_id: any,
+  label: string,
+  iteration: any = nil,
+  tool_call_count: any = nil,
+) {
+  if trim(label) == "" {
+    return nil
+  }
+  let _ = try {
+    agent_emit_event(
+      agent,
+      session_id,
+      "purpose_label",
+      {
+        label: label,
+        source: "declared",
+        iteration: iteration,
+        tool_call_ids: [],
+        tool_call_count: tool_call_count,
+      },
+    )
+  }
+  return nil
+}
