@@ -20,8 +20,13 @@ pipeline test_remaining_calls_separates_measured_zero_from_unavailable(
 }
 
 /**
- * One owner names the calls held back for verification, recovery, and terminal
- * reporting.
+ * One owner names the calls a run intends to keep for verification, recovery,
+ * and terminal reporting.
+ *
+ * This asserts the arithmetic only. It does NOT assert that any call is
+ * withheld, because none is — see `agent_loop_call_reserve`. A test proving a
+ * reserved call actually happens at exhaustion belongs with the governing
+ * change, not here.
  */
 pipeline test_call_reserve_has_one_owner(harness: Harness, task: unknown) {
   const reserve = agent_loop_call_reserve({})
