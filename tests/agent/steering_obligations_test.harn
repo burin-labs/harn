@@ -105,6 +105,22 @@ pipeline test_rendered_block_carries_supersession_authority(harness: Harness, ta
     contains(block, "reverting or not doing it is compliance, not a gap"),
     "withdrawn work must not read to the judge as a missing artifact",
   )
+  // The founder's session was vetoed TWICE. The second veto was not a missing
+  // artifact but a missing check — "No focused verification passed after the
+  // latest code changes" — demanded for code the steer had forbidden. A
+  // supersession clause that only covers artifacts leaves that veto standing.
+  assert(
+    contains(block, "Verification is owed only for work that still stands"),
+    "a steer that withdrew work also withdrew the obligation to verify it",
+  )
+  assert(
+    contains(block, "Checks on work that survives the steering are still required"),
+    "the judge keeps its authority over verification of work that still stands",
+  )
+  assert(
+    contains(block, "that condition IS the completion test"),
+    "a steer stating its own completion condition sets the completion test",
+  )
 }
 
 pipeline test_steering_changes_the_terminal_evidence_identity(harness: Harness, task: unknown) {

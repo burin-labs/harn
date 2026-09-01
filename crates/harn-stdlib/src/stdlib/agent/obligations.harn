@@ -192,8 +192,12 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
     + " redirects, or cancels work makes the narrowed outcome the completion target: the withdrawn"
     + " work is no longer owed, and reverting or not doing it is compliance, not a gap. If the"
     + " latest steering asked the agent to report a finding and stop, a report that answers it is"
-    + " a complete run. Judge against the goal as amended here, never against the original goal"
-    + " alone."
+    + " a complete run. When a steer states its own completion condition, that condition IS the"
+    + " completion test — apply it as written. Verification is owed only for work that still"
+    + " stands: a steer that withdrew or forbade work also withdrew the obligation to verify it,"
+    + " so do not continue for missing checks on work the user cancelled. Checks on work that"
+    + " survives the steering are still required. Judge against the goal as amended here, never"
+    + " against the original goal alone."
 }
 
 /**
