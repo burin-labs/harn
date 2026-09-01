@@ -7,6 +7,24 @@ use super::{
 use crate::adapters::acp::events::agent_event_ext_params;
 use harn_vm::agent_events::AgentEvent;
 
+/// Append the `purpose_label` fixture, which exists so the advertised-kind
+/// contract below stays complete.
+///
+/// It is appended rather than written into the literal because the literal is
+/// spliced at a fixed index: an entry added there shifts the splice point and
+/// rotates six unrelated fixtures out of position.
+pub(super) fn with_purpose_label(mut events: Vec<AgentEvent>) -> Vec<AgentEvent> {
+    events.push(AgentEvent::PurposeLabel {
+        session_id: "session-1".to_string(),
+        label: "Searching for GitHub issues".to_string(),
+        source: harn_vm::agent_events::PurposeLabelSource::Declared,
+        iteration: Some(0),
+        tool_call_ids: Vec::new(),
+        tool_call_count: Some(3),
+    });
+    events
+}
+
 #[test]
 fn agent_event_envelope_rejects_payloads_with_reserved_keys() {
     for key in ["kind", "sessionId"] {

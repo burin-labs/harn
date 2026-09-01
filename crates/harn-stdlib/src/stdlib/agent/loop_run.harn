@@ -14,6 +14,7 @@ import {
   agent_loop_post_turn_transition,
 } from "std/agent/loop_post_turn"
 import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
+import "std/agent/loop_purpose_labels"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
@@ -140,7 +141,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           .read_only_streak
         stall_state = stall_state
           + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
-        const pending_prefill = agent_take_one_shot_prefill(opts)
+        const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
         opts = pending_prefill.options
         const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
         agent_emit_event(
@@ -187,6 +188,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           command_hold_cap_tokens = nil
         }
         const turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
+        turn_opts = turn_opts + {purpose_labels: opts?.purpose_labels}
         agent_stage(
           harness.agent,
           session.session_id,
@@ -392,6 +394,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           turn_opts?.tools,
           turn_opts,
         )
+        __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls)
         const parse_feedback = __agent_loop_record_parse_feedback(
           harness,
           session.session_id,
