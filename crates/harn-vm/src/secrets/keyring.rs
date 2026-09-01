@@ -169,6 +169,17 @@ impl NativeKeyring {
         Ok(users)
     }
 
+    /// Whether an entry exists for `user`, without reading its secret.
+    ///
+    /// [`Self::list`] searches item *attributes*; it never asks the platform
+    /// for item data. On macOS that is the whole difference: reading data
+    /// raises a Keychain access dialog for any binary not on the item's ACL,
+    /// while enumerating attributes raises none. A caller that only needs to
+    /// know whether a credential exists pays nothing here.
+    pub fn contains(&self, user: &str) -> Result<bool, NativeKeyringError> {
+        Ok(self.list()?.iter().any(|entry| entry == user))
+    }
+
     pub fn healthcheck(&self) -> Result<String, NativeKeyringError> {
         let user = format!("__harn_probe__:{}", uuid::Uuid::now_v7().simple());
         self.healthcheck_with_user(&user)
@@ -328,6 +339,18 @@ impl SecretProvider for KeyringSecretProvider {
         self.delete(&request.id).await
     }
 
+    /// Presence from the attribute-only search rather than an item read, so
+    /// asking "does this credential exist" costs no Keychain access dialog.
+    ///
+    /// No `audit.secret_access` event is emitted: nothing read a secret. The
+    /// event records value access, and firing it here would report reads that
+    /// did not happen.
+    async fn contains(&self, id: &SecretId) -> Result<bool, SecretError> {
+        self.keyring
+            .contains(&account_name(id))
+            .map_err(|error| backend_error("read", error))
+    }
+
     async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
         Err(SecretError::Unsupported {
             provider: "keyring".to_string(),
@@ -419,6 +442,104 @@ mod tests {
 
         assert!(detail.contains("passed write, read, and delete checks"));
         assert_eq!(keyring.get("__harn_probe__:test").unwrap(), None);
+    }
+
+    /// Presence must not read the secret.
+    ///
+    /// The falsifier is the point: the stored credential is rigged so that any
+    /// *data* access fails. `contains` still answers, because it searches item
+    /// attributes. Implement it as `get(...).is_ok()` and this test fails —
+    /// which is exactly the regression that made one `connect status` raise a
+    /// Keychain access dialog per stored secret (#7749).
+    #[tokio::test]
+    async fn presence_is_answered_without_reading_the_secret() {
+        let store = keyring_core::mock::Store::new().unwrap();
+        let credential_store: Arc<CredentialStore> = store;
+        let keyring =
+            NativeKeyring::with_store("harn.presence-test", Arc::clone(&credential_store));
+        keyring.set_string("alpha/token", "super-secret").unwrap();
+
+        // Rig the stored item so reading its data fails. On a real macOS
+        // keychain this is the ACL dialog; here it is a hard error, which is
+        // the observable stand-in.
+        credential_store
+            .build("harn.presence-test", "alpha/token", None)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<keyring_core::mock::Cred>()
+            .unwrap()
+            .set_error(KeyringError::Invalid(
+                "reading this item's data is not allowed".to_string(),
+                "value read attempted".to_string(),
+            ));
+
+        let provider = KeyringSecretProvider::with_store("harn.presence-test", credential_store);
+        let present = SecretId::new("alpha", "token");
+
+        assert!(
+            provider.contains(&present).await.unwrap(),
+            "presence must come from the attribute search, not a value read"
+        );
+        // Guard against passing for the wrong reason: the value read really is
+        // broken, so a `get`-based implementation could not have returned true.
+        assert!(provider.get(&present).await.is_err());
+        assert!(!provider
+            .contains(&SecretId::new("alpha", "absent"))
+            .await
+            .unwrap());
+    }
+
+    /// The control for the case above: the trait's default `contains` really
+    /// is value-based.
+    ///
+    /// Together the two are the falsifier, without anyone having to edit the
+    /// override and re-run. This one shows a provider that implements only
+    /// `get` propagates a read failure out of `contains`; the keyring case
+    /// shows the keyring provider answers `true` for an item whose `get`
+    /// fails. No value-reading implementation can do both.
+    #[tokio::test]
+    async fn the_default_presence_implementation_reads_the_value() {
+        struct UnreadableProvider {
+            namespace: String,
+        }
+
+        #[async_trait]
+        impl SecretProvider for UnreadableProvider {
+            async fn get(&self, _id: &SecretId) -> Result<SecretBytes, SecretError> {
+                Err(SecretError::Backend {
+                    provider: self.namespace.clone(),
+                    message: "value read attempted".to_string(),
+                })
+            }
+
+            async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
+                unimplemented!("presence control never writes")
+            }
+
+            async fn rotate(&self, _id: &SecretId) -> Result<RotationHandle, SecretError> {
+                unimplemented!("presence control never rotates")
+            }
+
+            async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
+                unimplemented!("presence control never lists")
+            }
+
+            fn namespace(&self) -> &str {
+                &self.namespace
+            }
+
+            fn supports_versions(&self) -> bool {
+                false
+            }
+        }
+
+        let error = UnreadableProvider {
+            namespace: "fixture".to_string(),
+        }
+        .contains(&SecretId::new("alpha", "token"))
+        .await
+        .expect_err("the default presence check reads the value, so a read failure surfaces");
+        assert!(error.to_string().contains("value read attempted"));
     }
 
     #[test]
