@@ -118,6 +118,13 @@ pub type LlmCallOptions = {
   capabilities?: any,
   prefill?: string,
   previous_response_id?: string,
+  // Requested provider retention/training posture. "default" sends nothing
+  // and lets the provider's own server-side default apply; "strictest_
+  // available" applies every per-request control the resolved provider
+  // declares. The per-request receipt on telemetry.data_controls says which
+  // of applied / no_control_available / provider_unresearched actually
+  // happened, because all three look identical on the wire.
+  data_controls?: "default" | "strictest_available",
   // Generation.
   max_tokens?: int,
   temperature?: float,
@@ -236,6 +243,40 @@ pub fn llm_has_explicit_routing_owner(options: any = nil) -> bool {
     }
   }
   return false
+}
+
+/**
+ * Whether the request's equivalent-route failover policy is active.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn llm_equivalent_failover_enabled(options: any = nil) -> bool {
+  const base = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  const value = base?.equivalent_failover
+  if value == nil {
+    return false
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  if type_of(value) == "dict" {
+    const enabled = value?.enabled
+    if enabled == nil {
+      return true
+    }
+    if type_of(enabled) == "bool" {
+      return enabled
+    }
+  }
+  // Invalid non-nil shapes are rejected by the runtime parser. Suppress
+  // prefill here so malformed routing data cannot become a permissive read.
+  return true
 }
 
 /**

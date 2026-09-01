@@ -302,6 +302,10 @@ pub(crate) struct ServeMcpArgs {
     /// compatibility heuristic.
     #[arg(long, value_enum, default_value_t = McpServeSurface::Auto)]
     pub surface: McpServeSurface,
+    /// Reload a script-published registry after source changes without
+    /// disconnecting the stdio client.
+    #[arg(long)]
+    pub watch: bool,
     /// Socket address to bind when serving over HTTP.
     #[arg(
         long,

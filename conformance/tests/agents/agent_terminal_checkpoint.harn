@@ -74,6 +74,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println("natural=" + natural_checkpoint.terminal.kind)
   harness.stdio.println("natural_owner=" + natural_checkpoint.terminal.owner)
   harness.stdio.println("natural_reason=" + natural_checkpoint.terminal.reason)
+  harness.stdio.println("natural_lifecycle=" + natural_checkpoint.terminal.lifecycle_state)
+  harness.stdio.println("natural_run_status=" + natural_checkpoint.terminal.run_record_status)
   harness.stdio.println("natural_status=" + natural_checkpoint.final_status)
   const sentinel = run_sentinel_case(harness, "terminal-sentinel-" + harness.random.uuid())
   const sentinel_checkpoint = terminal_checkpoint(sentinel.events)
@@ -89,6 +91,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("policy=" + policy_checkpoint.terminal.kind)
   harness.stdio.println("policy_owner=" + policy_checkpoint.terminal.owner)
   harness.stdio.println("policy_reason=" + policy_checkpoint.terminal.reason)
+  harness.stdio.println("policy_run_status=" + policy_checkpoint.terminal.run_record_status)
   with_llm_script(
     harness.llm,
     [llm_text("I will keep thinking about the next step.")],
@@ -114,6 +117,7 @@ pipeline default(harness: Harness) {
       const checkpoint = terminal_checkpoint(captured.events)
       harness.stdio.println("no_progress=" + checkpoint.terminal.kind)
       harness.stdio.println("no_progress_reason=" + checkpoint.terminal.reason)
+      harness.stdio.println("no_progress_run_status=" + checkpoint.terminal.run_record_status)
     },
   )
   with_llm_script(
@@ -149,6 +153,7 @@ pipeline default(harness: Harness) {
       const checkpoint = terminal_checkpoint(captured.events)
       harness.stdio.println("thrash=" + checkpoint.terminal.kind)
       harness.stdio.println("thrash_reason=" + checkpoint.terminal.reason)
+      harness.stdio.println("thrash_run_status=" + checkpoint.terminal.run_record_status)
     },
   )
 }

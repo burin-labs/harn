@@ -209,6 +209,7 @@ path = "/models"
 
 [providers.openrouter]
 display_name = "OpenRouter"
+features = ["model_proxy"]
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://openrouter.ai/api/v1"
@@ -892,6 +893,7 @@ cost_per_1k_out = 0.005
 latency_p50_ms = 2100
 
 [providers.local]
+features = ["model_proxy"]
 base_url = "http://localhost:8000"
 base_url_env = "LOCAL_LLM_BASE_URL"
 auth_style = "none"

@@ -14,9 +14,12 @@ use super::{
     RunTraceSpanRecord,
 };
 
+mod evidence;
 mod usage;
 mod visible_transcript;
 
+use evidence::project_evidence;
+pub use evidence::{project_execution_evidence, ArtifactPathVisibility};
 pub use usage::RunViewUsage;
 use visible_transcript::public_assistant_transcript_text;
 
@@ -284,6 +287,7 @@ pub struct RunViewOptions {
     pub run_path: Option<String>,
     pub last_event_id: Option<EventId>,
     pub prefix_hash: Option<String>,
+    pub artifact_paths: ArtifactPathVisibility,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -331,6 +335,7 @@ pub fn build_run_view_with_path(run: &RunRecord, run_path: Option<impl Into<Stri
         run,
         RunViewOptions {
             run_path: run_path.map(Into::into),
+            artifact_paths: ArtifactPathVisibility::Local,
             ..RunViewOptions::default()
         },
     )
@@ -343,6 +348,7 @@ pub async fn build_run_view_with_event_log(
 ) -> Result<RunView, RunViewError> {
     let mut options = RunViewOptions {
         run_path: run_path.map(Into::into),
+        artifact_paths: ArtifactPathVisibility::Local,
         ..RunViewOptions::default()
     };
     if let Some(log) = log {
@@ -404,7 +410,7 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
             finished_at: run.finished_at.clone(),
             duration_ms: run_duration_ms(run),
         },
-        evidence: project_evidence(run, &policy),
+        evidence: project_evidence(run, &policy, options.artifact_paths),
         projection: ProjectionInfo {
             projection_id: String::new(),
             projection_hash: None,
@@ -455,25 +461,6 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
     };
     finalize_run_projection(&mut view);
     view
-}
-
-fn project_evidence(run: &RunRecord, policy: &RedactionPolicy) -> super::ExecutionEvidenceRecord {
-    let mut evidence = run.evidence.clone();
-    for span in &mut evidence.trace_spans {
-        span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
-        let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
-        policy.redact_json_in_place(&mut metadata);
-        if let Value::Object(metadata) = metadata {
-            span.metadata = metadata.into_iter().collect();
-        }
-    }
-    if let Some(recording) = &mut evidence.flight_recording {
-        recording.path = redact_bounded(&recording.path, policy, PREVIEW_LIMIT);
-    }
-    for gap in &mut evidence.gaps {
-        gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
-    }
-    evidence
 }
 
 pub fn build_session_view_from_run_views(
@@ -1326,8 +1313,10 @@ mod tests {
 
     #[test]
     fn build_run_view_projects_stable_public_fields() {
+        const EXECUTION_ID: &str = "hxe-019c13e0-8080-7000-8000-000000000001";
         let mut run = sample_run();
-        run.evidence.execution_id = Some("hxe-view".to_string());
+        run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence.execution_id = Some(EXECUTION_ID.to_string());
         let view = build_run_view_with_path(&run, Some("runs/run_1.json"));
         assert_eq!(view.schema, RUN_VIEW_SCHEMA);
         assert_eq!(view.schema_version, RUN_VIEW_SCHEMA_VERSION);
@@ -1335,7 +1324,7 @@ mod tests {
         assert_eq!(view.run.session_id.as_deref(), Some("session_1"));
         assert_eq!(view.run.run_path.as_deref(), Some("runs/run_1.json"));
         assert_eq!(view.run.duration_ms, Some(2000));
-        assert_eq!(view.evidence.execution_id.as_deref(), Some("hxe-view"));
+        assert_eq!(view.evidence.execution_id.as_deref(), Some(EXECUTION_ID));
         assert_eq!(
             view.evidence.trace_spans[0].metadata["api_key"],
             json!(crate::redact::REDACTED_PLACEHOLDER)

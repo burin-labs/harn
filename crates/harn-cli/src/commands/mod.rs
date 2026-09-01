@@ -78,6 +78,7 @@ pub(crate) mod provider;
 pub(crate) mod provider_capabilities;
 pub(crate) mod provider_effort_probe;
 pub(crate) mod provider_limits;
+pub(crate) mod provider_option_probe;
 pub(crate) mod provider_report;
 pub(crate) mod provider_support;
 pub(crate) mod provider_tool_calibrate;

@@ -837,6 +837,7 @@ impl Walk<'_> {
             tools: self.catalog.schemas,
             provenance: TrainingProvenance {
                 run_id: run.id.clone(),
+                execution_id: run.evidence.execution_id.clone(),
                 session_id,
                 // Only an unambiguous single-stage run can name its stage; a
                 // multi-stage run's sidecar does not attribute provider calls

@@ -335,6 +335,17 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
 }
 
 pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider: &str) -> String {
+    let selector = vm_resolve_model_selector(options, provider);
+    crate::llm_config::resolve_model(&selector).0
+}
+
+/// Return the selector that won model precedence before alias normalization.
+/// Resolution receipts use this form so environment and session aliases do
+/// not disappear before the one typed model-selection decision is recorded.
+pub(crate) fn vm_resolve_model_selector(
+    options: &Option<crate::value::DictMap>,
+    provider: &str,
+) -> String {
     use crate::llm_config;
 
     if let Some(raw) = options
@@ -342,8 +353,7 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
     {
-        let (resolved, _) = llm_config::resolve_model(&raw);
-        return resolved;
+        return raw;
     }
     if let Some(tier) = options
         .as_ref()
@@ -355,26 +365,25 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
         }
     }
     if let Some(pinned) = current_session_pinned_model() {
-        let (resolved, resolved_provider) = llm_config::resolve_model(&pinned);
+        let (_, resolved_provider) = llm_config::resolve_model(&pinned);
         let inferred_provider =
             resolved_provider.unwrap_or_else(|| infer_provider_from_model_selector(&pinned, false));
         if inferred_provider == provider {
-            return resolved;
+            return pinned;
         }
     }
     if let Some(raw) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
-        let (resolved, resolved_provider) = llm_config::resolve_model(&raw);
+        let (_, resolved_provider) = llm_config::resolve_model(&raw);
         let env_provider = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER");
         if resolved_provider.as_deref() == Some(provider)
             || (resolved_provider.is_none() && env_provider.as_deref() == Some(provider))
         {
-            return resolved;
+            return raw;
         }
     }
     if provider == "local" {
         if let Some(raw) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
-            let (resolved, _) = llm_config::resolve_model(&raw);
-            return resolved;
+            return raw;
         }
     }
     llm_config::default_model_for_provider(provider)

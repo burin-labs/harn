@@ -1,3 +1,4 @@
+import { get_typed_value } from "std/schema"
 import "./catalog"
 import "./plan"
 import "./support"
@@ -123,6 +124,85 @@ pub fn __probe_cell(
         tool_calling: report?.tool_calling ?? {},
         telemetry: provider_tool_probe_campaign_probe_telemetry(report),
         schema_version: report?.schema_version,
+      },
+    },
+  )
+    + {artifact_path: artifact_path, command: command}
+}
+
+pub fn provider_tool_probe_campaign_option_probe_telemetry(
+  report: ProviderOptionProbeReport,
+) -> dict {
+  const attempt = report.probe.attempt
+  const cost = attempt.cost_usd
+  return {
+    request_attempt_count: report.probe.request_count,
+    retry_count: 0,
+    retry_accounting: "provider option-probe makes exactly one physical request and does not retry",
+    observed_usage_count: if attempt.input_tokens != nil || attempt.output_tokens != nil {
+      1
+    } else {
+      0
+    },
+    observed_cost_count: if cost == nil {
+      0
+    } else {
+      1
+    },
+    unpriced_case_count: if report.probe.request_count > 0 && cost == nil {
+      1
+    } else {
+      0
+    },
+    input_tokens: attempt.input_tokens ?? 0,
+    output_tokens: attempt.output_tokens ?? 0,
+    actual_usd: cost ?? 0.0,
+  }
+}
+
+pub fn provider_tool_probe_campaign_option_probe_cell(
+  llm: HarnessLlm,
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  report: ProviderOptionProbeReport,
+  artifact_path: string,
+  command: list<string>,
+  exit_code: int,
+) -> ProviderToolProbeCell {
+  const diff_status = report.diff.status
+  const receipt_exit_matches = (diff_status == "match" && exit_code == 0)
+    || (diff_status == "drift" && exit_code == 1)
+    || (diff_status == "unmeasured" && exit_code == 2)
+  const status = if !receipt_exit_matches {
+    "error"
+  } else if diff_status == "match" {
+    "pass"
+  } else if diff_status == "drift" {
+    "fail"
+  } else {
+    "error"
+  }
+  const reason = if !receipt_exit_matches {
+    "option-probe exit code disagreed with its typed diff receipt"
+  } else if diff_status == "match" {
+    "provider observation matched the endpoint catalog claim"
+  } else if diff_status == "drift" {
+    "provider observation contradicted the endpoint catalog claim"
+  } else {
+    "the request did not produce provider evidence"
+  }
+  return __base_cell(
+    {
+      llm: llm,
+      route: route,
+      behavior: behavior,
+      mode: "non-streaming",
+      format: "none",
+      status: status,
+      reason: reason,
+      observed: {
+        option_probe: report,
+        telemetry: provider_tool_probe_campaign_option_probe_telemetry(report),
       },
     },
   )
@@ -318,6 +398,99 @@ pub fn __run_tool_probe(
   return cells
 }
 
+pub fn __run_option_probe(
+  llm: HarnessLlm,
+  fs: HarnessFs,
+  process: HarnessProcess,
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  harn_bin: string,
+  env: dict,
+  output_dir: string,
+  trial: int = 1,
+) -> list<ProviderToolProbeCell> {
+  const missing = __missing_env_keys(route, env)
+  if len(missing) > 0 {
+    return __skipped_cells_for_missing_env(llm, route, behavior, "non-streaming", missing)
+  }
+  const command = __option_probe_command(harn_bin, route, behavior.probe_option ?? "temperature")
+  const artifact_path = provider_tool_probe_campaign_artifact_path(
+    route,
+    behavior,
+    "non-streaming",
+    "none",
+    output_dir,
+    trial,
+  )
+  const child = process.run({program: harn_bin, args: command[1:len(command)], env: env})
+  const stdout = child.stdout ?? ""
+  if trim(stdout) != "" {
+    fs.write_text(artifact_path, stdout)
+  }
+  const parsed = try {
+    json_parse(stdout)
+  } catch (_) {
+    nil
+  }
+  const typed = if parsed == nil {
+    nil
+  } else {
+    const decoded = try {
+      get_typed_value(parsed, schema_of(ProviderOptionProbeReport))
+    }
+    if is_ok(decoded) {
+      unwrap(decoded)
+    } else {
+      nil
+    }
+  }
+  if typed == nil {
+    return [
+      __base_cell(
+        {
+          llm: llm,
+          route: route,
+          behavior: behavior,
+          mode: "non-streaming",
+          format: "none",
+          status: "error",
+          reason: if trim(stdout) == "" {
+            trim(child.stderr ?? "provider option-probe failed before producing JSON")
+          } else {
+            "provider option-probe output did not match its typed receipt contract"
+          },
+          observed: {
+            exit_code: child.exit_code,
+            stderr: trim(child.stderr ?? ""),
+            telemetry: {
+              actual_usd: 0.0,
+              observed_cost_count: 0,
+              unpriced_case_count: 1,
+              request_attempt_count: 1,
+              retry_count: 0,
+              retry_accounting:
+                "the child produced no typed receipt; the campaign conservatively counts one unpriced attempt",
+            },
+          },
+        },
+      )
+        + {command: command},
+    ]
+  }
+  const report: ProviderOptionProbeReport = typed
+  return [
+    provider_tool_probe_campaign_option_probe_cell(
+      llm,
+      route,
+      behavior,
+      report,
+      artifact_path,
+      command,
+      child.exit_code,
+    ),
+  ]
+}
+
 pub fn provider_tool_probe_campaign_artifact_path(
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
@@ -326,10 +499,17 @@ pub fn provider_tool_probe_campaign_artifact_path(
   output_dir: string,
   trial: int = 1,
 ) -> string {
-  const probe_case = __slug(to_string(behavior.probe_case ?? "single_tool_call"))
+  const probe_case = __slug(
+    to_string(behavior.probe_case ?? behavior.probe_option ?? "single_tool_call"),
+  )
+  const prefix = if behavior.runner == "provider_option_probe" {
+    "option-probe-"
+  } else {
+    "tool-probe-"
+  }
   return path_join(
     output_dir,
-    "tool-probe-" + route.id + "-" + __slug(behavior.id) + "-" + probe_case + "-" + __slug(mode)
+    prefix + route.id + "-" + __slug(behavior.id) + "-" + probe_case + "-" + __slug(mode)
       + "-"
       + __slug(format)
       + "-trial-"
@@ -346,7 +526,10 @@ pub fn provider_tool_probe_campaign_scorecard_inputs(
 ) -> dict {
   let reports: list<dict> = []
   for cell in cells {
-    const path = trim(to_string(cell?.artifact_path ?? ""))
+    if cell.runner != "provider_tool_probe" {
+      continue
+    }
+    const path = trim(to_string(cell.artifact_path ?? ""))
     if path == "" || !fs.exists(path) {
       continue
     }

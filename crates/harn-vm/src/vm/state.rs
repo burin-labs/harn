@@ -315,7 +315,7 @@ pub struct Vm {
     /// Structured spans owned by this VM tree.
     pub(crate) tracing_runtime: Arc<crate::tracing::TracingRuntime>,
     /// Durable identity shared by every VM in this execution tree.
-    pub(crate) execution_id: Arc<str>,
+    pub(crate) execution_id: crate::ExecutionId,
     /// Root VMs mint and close executions; child VMs only contribute evidence.
     pub(crate) owns_execution: bool,
     /// Exact source path recorder shared by this VM tree when explicitly enabled.
@@ -504,6 +504,7 @@ pub struct VmBaseline {
     source_dir: Option<std::path::PathBuf>,
     source_file: Option<String>,
     source_text: Option<String>,
+    source_cache: Arc<BTreeMap<std::path::PathBuf, Arc<str>>>,
     project_root: Option<std::path::PathBuf>,
     globals: Arc<crate::value::DictMap>,
     root_harness: Option<VmValue>,
@@ -529,6 +530,7 @@ impl VmBaseline {
             source_dir: vm.source_dir.clone(),
             source_file: vm.source_file.clone(),
             source_text: vm.source_text.clone(),
+            source_cache: Arc::clone(&vm.source_cache),
             project_root: vm.project_root.clone(),
             globals: Arc::clone(&vm.globals),
             root_harness: vm.root_harness.clone(),
@@ -543,10 +545,6 @@ impl VmBaseline {
 
     pub fn instantiate(&self) -> Vm {
         crate::initialize_runtime_assets();
-        let mut source_cache = BTreeMap::new();
-        if let (Some(file), Some(text)) = (&self.source_file, &self.source_text) {
-            source_cache.insert(std::path::PathBuf::from(file), Arc::from(text.as_str()));
-        }
         if let Some(dir) = &self.source_dir {
             crate::stdlib::set_thread_source_dir(dir);
         }
@@ -609,7 +607,7 @@ impl VmBaseline {
             module_provenance: self.module_provenance,
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
-            source_cache: Arc::new(source_cache),
+            source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
             linked_program_repository: self.linked_program_repository.clone(),
             source_file: self.source_file.clone(),
@@ -958,6 +956,16 @@ impl Vm {
         self.prepared_module_cache = cache;
         self.prepared_module_validation =
             crate::prepared_module::PreparedModuleValidation::default();
+    }
+
+    /// Install one immutable prepared module generation into this VM.
+    ///
+    /// The generation contains exact source bytes plus hydrated bytecode. A
+    /// baseline taken after this call can instantiate fresh runtime state for
+    /// each request without consulting the source tree again.
+    pub fn set_prepared_module_generation(&mut self, cache: crate::PreparedModuleCache) {
+        self.source_cache = cache.source_snapshot();
+        self.set_prepared_module_cache(cache);
     }
 
     /// Hand this VM the link table for the import graph it is about to run.

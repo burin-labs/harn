@@ -163,6 +163,10 @@ pub(crate) struct RecentDispatchRecord {
     pub occurred_at_ms: i64,
     pub trigger_id: Option<String>,
     pub event_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_path: Option<String>,
     pub attempt: Option<u32>,
     pub replay_of_event_id: Option<String>,
     pub handler_kind: Option<String>,
@@ -194,9 +198,12 @@ pub(crate) async fn collect_orchestrator_inspect_data(
     let envelopes = read_topic(&ctx.event_log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
     let legacy_inbox = read_topic(&ctx.event_log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
     let outbox = read_topic(&ctx.event_log, TRIGGER_OUTBOX_TOPIC).await?;
+    let action_graph =
+        read_topic(&ctx.event_log, harn_vm::orchestration::ACTION_GRAPH_TOPIC).await?;
     let lifecycle = read_topic(&ctx.event_log, TRIGGERS_LIFECYCLE_TOPIC).await?;
 
-    let recent_dispatches = recent_dispatch_records(&outbox, 20);
+    let run_paths = run_paths_by_trace_id(&action_graph);
+    let recent_dispatches = recent_dispatch_records(&outbox, &run_paths, 20);
     let terminal = terminal_dispatches(&outbox);
     let skipped = skipped_dispatches(&outbox);
 
@@ -319,6 +326,7 @@ pub(crate) async fn collect_orchestrator_inspect_data(
 
 pub(crate) fn recent_dispatch_records(
     dispatches: &[(u64, harn_vm::event_log::LogEvent)],
+    run_paths: &BTreeMap<String, String>,
     limit: usize,
 ) -> Vec<RecentDispatchRecord> {
     let mut recent: Vec<_> = dispatches
@@ -332,12 +340,19 @@ pub(crate) fn recent_dispatch_records(
             }
 
             let payload = event.payload.as_object();
+            let trace_id = event.headers.get("trace_id").cloned();
+            let run_path = trace_id
+                .as_ref()
+                .and_then(|trace_id| run_paths.get(trace_id))
+                .cloned();
             Some(RecentDispatchRecord {
                 status: event.kind.trim_start_matches("dispatch_").to_string(),
                 kind: event.kind.clone(),
                 occurred_at_ms: event.occurred_at_ms,
                 trigger_id: event.headers.get("trigger_id").cloned(),
                 event_id: event.headers.get("event_id").cloned(),
+                trace_id,
+                run_path,
                 attempt: event
                     .headers
                     .get("attempt")
@@ -378,6 +393,20 @@ pub(crate) fn recent_dispatch_records(
         recent.drain(0..recent.len() - limit);
     }
     recent
+}
+
+fn run_paths_by_trace_id(
+    action_graph: &[(u64, harn_vm::event_log::LogEvent)],
+) -> BTreeMap<String, String> {
+    action_graph
+        .iter()
+        .filter_map(|(_, event)| {
+            Some((
+                event.headers.get("trace_id")?.clone(),
+                event.payload.get("persisted_path")?.as_str()?.to_string(),
+            ))
+        })
+        .collect()
 }
 
 async fn build_flow_control_inspect(
@@ -940,6 +969,7 @@ pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {
 
         let inbox_topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
         let outbox_topic = Topic::new(TRIGGER_OUTBOX_TOPIC).unwrap();
+        let action_graph_topic = Topic::new(harn_vm::orchestration::ACTION_GRAPH_TOPIC).unwrap();
         let lifecycle_topic = Topic::new(TRIGGERS_LIFECYCLE_TOPIC).unwrap();
 
         let event_one = trigger_event("evt-1", "acme");
@@ -997,7 +1027,22 @@ pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {
                     (String::from("event_id"), String::from("evt-2")),
                     (String::from("trigger_id"), String::from("cron-flow")),
                     (String::from("binding_key"), String::from("cron-flow@v1")),
+                    (String::from("trace_id"), String::from("trace-2")),
                 ])),
+            )
+            .await
+            .unwrap();
+        ctx.event_log
+            .append(
+                &action_graph_topic,
+                LogEvent::new(
+                    "action_graph_update",
+                    serde_json::json!({"persisted_path": ".harn-runs/run.json"}),
+                )
+                .with_headers(BTreeMap::from([(
+                    String::from("trace_id"),
+                    String::from("trace-2"),
+                )])),
             )
             .await
             .unwrap();
@@ -1053,5 +1098,12 @@ pub fn on_ok(harness: Harness, event: TriggerEvent) -> dict {
                 .map(|budget| budget.used_usd),
             Some(0.42)
         );
+        let dispatch = inspect
+            .recent_dispatches
+            .iter()
+            .find(|dispatch| dispatch.event_id.as_deref() == Some("evt-2"))
+            .expect("recent dispatch");
+        assert_eq!(dispatch.trace_id.as_deref(), Some("trace-2"));
+        assert_eq!(dispatch.run_path.as_deref(), Some(".harn-runs/run.json"));
     }
 }

@@ -288,6 +288,32 @@ impl StdioJsonRpcClient {
         }
     }
 
+    /// Wait for one stderr line containing `needle`. This is the structural
+    /// readiness path for server events that intentionally do not produce a
+    /// protocol frame, such as a rejected hot reload.
+    pub fn wait_for_stderr(&mut self, needle: &str) -> String {
+        let deadline = Instant::now() + self.timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                self.diagnose(&format!(
+                    "timed out waiting for stderr line containing {needle:?}"
+                ));
+            }
+            match self.stderr_rx.recv_timeout(remaining) {
+                Ok(line) if line.contains(needle) => return line,
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Timeout) => self.diagnose(&format!(
+                    "timed out after {:?} waiting for stderr line containing {needle:?}",
+                    self.timeout
+                )),
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.diagnose("server closed stderr before the expected line arrived")
+                }
+            }
+        }
+    }
+
     /// Drop stdin (signalling EOF) and wait, bounded, for a successful exit.
     /// A server that does not exit promptly on EOF is diagnosed with its
     /// stderr rather than left to consume the nextest slow-test cap.

@@ -30,9 +30,9 @@ use harn_vm::VmValue;
 /// runner can tear a sibling test's env read, leak a secret var across tests,
 /// or, rarely, segfault. Every env-mutating test below acquires this guard and
 /// holds it for its full duration.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
+pub(super) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-fn lock_env() -> MutexGuard<'static, ()> {
+pub(super) fn lock_env() -> MutexGuard<'static, ()> {
     ENV_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

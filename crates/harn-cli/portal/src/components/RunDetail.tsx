@@ -250,7 +250,7 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
             </div>
             {flight ? (
               <div className="policy-list">
-                <div className="mono meta">{flight.path}</div>
+                {flight.path ? <div className="mono meta">{flight.path}</div> : null}
                 <div className="meta">
                   {formatNumber(flight.dropped_events)} dropped • values {flight.value_policy}
                 </div>

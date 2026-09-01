@@ -264,7 +264,9 @@ pub use persistent_state::{
     register_persistent_state_builtins_at_root, scope_persistent_state_root, PersistentStateRoot,
     ScopedPersistentStateRoot,
 };
-pub use prepared_module::{PreparedModuleCache, PreparedModuleCacheStats};
+pub use prepared_module::{
+    PreparedModuleCache, PreparedModuleCacheStats, PreparedModuleGenerationStats,
+};
 
 pub use actor_chain::{
     ActorChain, ActorChainEntry, ActorChainError, Principal, ScopeAttenuationMode,
@@ -354,11 +356,13 @@ pub use mcp_server::{
     take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
     take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
     McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServer, McpServerMetadata,
+    McpServerReload,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
 pub use observability::execution_scope::{
-    current_execution_scope, enter_execution_scope, mint_execution_scope, ExecutionScopeGuard,
+    current_execution_scope, enter_execution_scope, mint_execution_scope, ExecutionId,
+    ExecutionScopeGuard, InvalidExecutionId,
 };
 pub use observability::request_id::{current_request_id, enter_request_id, RequestIdScopeGuard};
 pub use orchestration::{

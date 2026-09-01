@@ -138,6 +138,10 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
             .clone()
             .map(healthcheck_def_from_catalog),
         cache_usage_accounting: provider.cache_usage_accounting,
+        data_controls: provider
+            .data_controls
+            .as_ref()
+            .map(CatalogProviderDataControls::to_definition),
         stream_usage_accounting: provider.stream_usage_accounting,
         features: provider.features.clone(),
         rpm: provider.rpm,

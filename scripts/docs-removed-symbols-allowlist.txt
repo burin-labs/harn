@@ -94,7 +94,6 @@ docs/src/builtins.md                               eval_suite_run
 docs/src/builtins.md                               friction_clear
 docs/src/builtins.md                               friction_events
 docs/src/builtins.md                               friction_record
-docs/src/builtins.md                               load_run_tree
 docs/src/builtins.md                               path_workspace_canonicalize_existing
 docs/src/builtins.md                               path_workspace_info
 docs/src/builtins.md                               persona_eval_ladder_run
@@ -103,8 +102,6 @@ docs/src/builtins.md                               prompt_explain
 docs/src/builtins.md                               receive
 docs/src/builtins.md                               register_tool_hook
 docs/src/builtins.md                               rng_seed
-docs/src/builtins.md                               run_record_load
-docs/src/builtins.md                               run_record_save
 docs/src/builtins.md                               send
 docs/src/builtins.md                               supervisor_events
 docs/src/builtins.md                               supervisor_metrics
