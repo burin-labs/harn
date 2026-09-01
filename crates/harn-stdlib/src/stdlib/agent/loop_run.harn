@@ -20,7 +20,12 @@ import "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
-import { agent_purpose_label_emit } from "std/agent/purpose_labels"
+import {
+  agent_purpose_label_config,
+  agent_purpose_label_emit,
+  agent_purpose_label_prefill,
+  agent_purpose_label_turn_nudge,
+} from "std/agent/purpose_labels"
 
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
@@ -139,8 +144,32 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           .read_only_streak
         stall_state = stall_state
           + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
-        const pending_prefill = agent_take_one_shot_prefill(opts)
-        opts = pending_prefill.options
+        const purpose_config = agent_purpose_label_config(opts?.purpose_labels)
+        const taken_prefill = agent_take_one_shot_prefill(opts)
+        opts = taken_prefill.options
+        // Under `prefill` delivery the assistant turn starts at the opening
+        // tag every turn, so the model continues a heading instead of choosing
+        // to write one. A caller's own one-shot prefill still wins: it was
+        // armed for this turn on purpose.
+        const purpose_prefill = agent_purpose_label_prefill(purpose_config)
+        const pending_prefill = if taken_prefill.prefill == "" && purpose_prefill != "" {
+          taken_prefill + {prefill: purpose_prefill}
+        } else {
+          taken_prefill
+        }
+        // Under `nudge` delivery the instruction rides every turn, next to the
+        // work, instead of once in a system prompt the model reads past.
+        const purpose_nudge = agent_purpose_label_turn_nudge(purpose_config)
+        if purpose_nudge != "" {
+          let _ = try {
+            __inject_feedback_with_tool_repair(
+              harness.agent,
+              session.session_id,
+              "purpose_label_instruction",
+              purpose_nudge,
+            )
+          }
+        }
         const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
         agent_emit_event(
           harness.agent,

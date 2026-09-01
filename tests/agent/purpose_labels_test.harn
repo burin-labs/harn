@@ -8,7 +8,9 @@ import {
   agent_purpose_label_config,
   agent_purpose_label_extract,
   agent_purpose_label_normalize,
+  agent_purpose_label_prefill,
   agent_purpose_label_prompt_fragment,
+  agent_purpose_label_turn_nudge,
 } from "std/agent/purpose_labels"
 
 pipeline test_purpose_labels_default_off(harness: Harness, task: unknown) {
@@ -26,9 +28,27 @@ pipeline test_purpose_labels_bool_shorthand(harness: Harness, task: unknown) {
 }
 
 pipeline test_purpose_labels_reject_bad_option(harness: Harness, task: unknown) {
-  assert(is_err(try { agent_purpose_label_config("yes") }))
-  assert(is_err(try { agent_purpose_label_config({enabled: "yes"}) }))
-  assert(is_err(try { agent_purpose_label_config({max_chars: 4}) }))
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config("yes")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config({enabled: "yes"})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config({max_chars: 4})
+      },
+    ),
+  )
 }
 
 pipeline test_purpose_label_normalize_collapses_and_clamps(harness: Harness, task: unknown) {
@@ -36,7 +56,9 @@ pipeline test_purpose_label_normalize_collapses_and_clamps(harness: Harness, tas
   assert(agent_purpose_label_normalize(nil, 64) == "")
   assert(agent_purpose_label_normalize("   ", 64) == "")
   // Clipping keeps whole words and marks the truncation.
-  assert(agent_purpose_label_normalize("Searching for open GitHub issues", 16) == "Searching for...")
+  assert(
+    agent_purpose_label_normalize("Searching for open GitHub issues", 16) == "Searching for...",
+  )
 }
 
 pipeline test_purpose_label_extract_pulls_declaration(harness: Harness, task: unknown) {
@@ -84,4 +106,65 @@ pipeline test_purpose_label_prompt_fragment_teaches_the_grammar(harness: Harness
   assert(contains(fragment, "<purpose>"))
   assert(contains(fragment, "</purpose>"))
   assert(contains(fragment, "64"))
+}
+
+pipeline test_purpose_label_delivery_defaults_to_system(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config(true)
+  assert(config.delivery == "system")
+  assert(agent_purpose_label_prompt_fragment(config) != "")
+  // Exactly one seam carries the instruction, so the rungs stay comparable.
+  assert(agent_purpose_label_turn_nudge(config) == "")
+  assert(agent_purpose_label_prefill(config) == "")
+}
+
+pipeline test_purpose_label_nudge_delivery_moves_the_instruction(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config({delivery: "nudge"})
+  assert(agent_purpose_label_prompt_fragment(config) == "")
+  assert(contains(agent_purpose_label_turn_nudge(config), "<purpose>"))
+  assert(agent_purpose_label_prefill(config) == "")
+}
+
+pipeline test_purpose_label_prefill_delivery_arms_the_opening_tag(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config({delivery: "prefill"})
+  assert(agent_purpose_label_prompt_fragment(config) == "")
+  assert(agent_purpose_label_turn_nudge(config) == "")
+  assert(agent_purpose_label_prefill(config) == "<purpose>")
+}
+
+pipeline test_purpose_label_reject_unknown_delivery(harness: Harness, task: unknown) {
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config({delivery: "sidecar"})
+      },
+    ),
+  )
+}
+
+/**
+ * A prefilled turn comes back without its opening tag. Reading that as "no
+ * declaration" would make the whole prefill rung measure zero while looking
+ * like model non-compliance.
+ */
+pipeline test_purpose_label_extract_recovers_a_prefilled_heading(harness: Harness, task: unknown) {
+  const result = agent_purpose_label_extract(
+    agent_purpose_label_config({delivery: "prefill"}),
+    "Listing the agent stdlib</purpose>\nHere are the entries.",
+  )
+  assert(result.declared == true)
+  assert(result.label == "Listing the agent stdlib")
+  assert(result.text == "Here are the entries.")
+}
+
+/**
+ * The orphan pattern is anchored, so a stray closing tag mid-prose cannot
+ * promote arbitrary text into a heading.
+ */
+pipeline test_purpose_label_orphan_recovery_is_anchored(harness: Harness, task: unknown) {
+  const result = agent_purpose_label_extract(
+    agent_purpose_label_config(true),
+    "I read the file. Then</purpose> I stopped.",
+  )
+  assert(result.declared == false)
+  assert(result.label == "")
 }

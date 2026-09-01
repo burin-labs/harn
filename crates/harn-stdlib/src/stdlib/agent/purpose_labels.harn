@@ -12,11 +12,27 @@ import { agent_emit_event } from "std/agent/state"
  * already holding, and the emit is fire-and-forget, so a label can never
  * gate, reorder, or delay dispatch.
  */
+/**
+ * Where the declaration instruction is delivered. A per-turn declaration is a
+ * per-turn instruction, and the seam it is delivered at decides whether the
+ * model acts on it at all.
+ *
+ * - `system`: once, in the system prompt. Cheapest, and empirically the
+ *   weakest — a strong model reads it and narrates in prose anyway.
+ * - `nudge`: injected into every turn, so it sits next to the work.
+ * - `prefill`: the assistant turn is started at `<purpose>`, so the model is
+ *   continuing a heading rather than choosing to write one.
+ */
+pub type PurposeLabelDelivery = "system" | "nudge" | "prefill"
+
 /** Caller-facing options for declared purpose labels. */
-pub type PurposeLabelOptions = {enabled?: bool, max_chars?: int}
+pub type PurposeLabelOptions = {enabled?: bool, max_chars?: int, delivery?: PurposeLabelDelivery}
 
 /** Normalized purpose-label policy. */
-pub type PurposeLabelConfig = {enabled: bool, max_chars: int}
+pub type PurposeLabelConfig = {enabled: bool, max_chars: int, delivery: PurposeLabelDelivery}
+
+/** The literal an assistant turn is started at under `prefill` delivery. */
+pub const PURPOSE_LABEL_PREFILL: string = "<purpose>"
 
 /** One turn's declaration, with the declaration removed from the prose. */
 pub type PurposeLabelExtraction = {label: string, text: string, declared: bool}
@@ -28,6 +44,13 @@ pub type PurposeLabelExtraction = {label: string, text: string, declared: bool}
  * that survives every tool format.
  */
 pub const PURPOSE_LABEL_PATTERN: string = "<purpose>(.*?)</purpose>"
+
+/**
+ * The same declaration with its opening tag already spent. Anchored to the
+ * start so it can only claim a heading the harness itself opened, never a
+ * stray `</purpose>` later in prose.
+ */
+pub const PURPOSE_LABEL_ORPHAN_PATTERN: string = "^\\s*([^<]*?)</purpose>"
 
 const PURPOSE_LABEL_FLAGS: string = "is"
 
@@ -42,7 +65,11 @@ const PURPOSE_LABEL_DEFAULT_MAX_CHARS: int = 64
  * @api_stability: experimental
  */
 pub fn agent_purpose_label_config(value: any = nil) -> PurposeLabelConfig {
-  const defaults: PurposeLabelConfig = {enabled: false, max_chars: PURPOSE_LABEL_DEFAULT_MAX_CHARS}
+  const defaults: PurposeLabelConfig = {
+    enabled: false,
+    max_chars: PURPOSE_LABEL_DEFAULT_MAX_CHARS,
+    delivery: "system",
+  }
   if value == nil {
     return defaults
   }
@@ -60,7 +87,47 @@ pub fn agent_purpose_label_config(value: any = nil) -> PurposeLabelConfig {
   if max_chars != nil && (type_of(max_chars) != "int" || max_chars < 8) {
     throw "agent_loop: purpose_labels.max_chars must be an int >= 8; got " + type_of(max_chars)
   }
-  return {enabled: enabled ?? true, max_chars: max_chars ?? defaults.max_chars}
+  const delivery = value?.delivery
+  if delivery != nil && !contains(["system", "nudge", "prefill"], delivery) {
+    throw "agent_loop: purpose_labels.delivery must be system, nudge, or prefill; got "
+      + to_string(delivery)
+  }
+  return {
+    enabled: enabled ?? true,
+    max_chars: max_chars ?? defaults.max_chars,
+    delivery: delivery ?? defaults.delivery,
+  }
+}
+
+/**
+ * The instruction as a per-turn nudge, or "" when this delivery does not use
+ * one. Same sentence as the system fragment; only the seam differs, so the two
+ * rungs stay comparable.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_turn_nudge(config: PurposeLabelConfig) -> string {
+  if !config.enabled || config.delivery != "nudge" {
+    return ""
+  }
+  return __purpose_label_instruction(config)
+}
+
+/**
+ * The literal to start the assistant turn at, or "" when this delivery does
+ * not prefill.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_purpose_label_prefill(config: PurposeLabelConfig) -> string {
+  if !config.enabled || config.delivery != "prefill" {
+    return ""
+  }
+  return PURPOSE_LABEL_PREFILL
 }
 
 /**
@@ -73,13 +140,24 @@ pub fn agent_purpose_label_config(value: any = nil) -> PurposeLabelConfig {
  * @api_stability: experimental
  */
 pub fn agent_purpose_label_prompt_fragment(config: PurposeLabelConfig) -> string {
-  if !config.enabled {
+  if !config.enabled || config.delivery != "system" {
     return ""
   }
-  // Phrased as a requirement with the tag first. An earlier wording that led
-  // with prose and hedged ("write it only when the purpose changes") was
-  // reliably ignored: the model narrated its intent in plain prose and never
-  // reached for the tag.
+  return __purpose_label_instruction(config)
+}
+
+/**
+ * The one wording, shared by every delivery so the seams stay comparable.
+ *
+ * Phrased as a requirement with the tag first. An earlier wording that led
+ * with prose and hedged ("write it only when the purpose changes") was
+ * reliably ignored: the model narrated its intent in plain prose and never
+ * reached for the tag.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __purpose_label_instruction(config: PurposeLabelConfig) -> string {
   return "PURPOSE HEADINGS. Every message in which you call tools MUST begin "
     + "with a purpose heading on its own first line, in exactly this form:\n"
     + "<purpose>Searching for GitHub issues</purpose>\n"
@@ -153,7 +231,18 @@ pub fn agent_purpose_label_extract(
   }
   // `regex_captures` returns a LIST of capture records and an EMPTY list on no
   // match — never nil. A nil check here would make extraction silently inert.
-  const captures = regex_captures(PURPOSE_LABEL_PATTERN, text, PURPOSE_LABEL_FLAGS)
+  let captures = regex_captures(PURPOSE_LABEL_PATTERN, text, PURPOSE_LABEL_FLAGS)
+  let pattern = PURPOSE_LABEL_PATTERN
+  if type_of(captures) == "list" && captures.count == 0 && config.delivery == "prefill" {
+    // The harness wrote the opening tag itself, so the provider returns only
+    // the continuation: a heading and a closing tag with no opener. Reading
+    // that as "no declaration" would make the whole prefill rung measure zero
+    // while looking like model non-compliance. Gated on the delivery that
+    // actually prefills, because the anchored pattern would otherwise promote
+    // any leading prose before a stray `</purpose>` into a heading.
+    pattern = PURPOSE_LABEL_ORPHAN_PATTERN
+    captures = regex_captures(pattern, text, PURPOSE_LABEL_FLAGS)
+  }
   if type_of(captures) != "list" || captures.count == 0 {
     return {label: "", text: text, declared: false}
   }
@@ -166,7 +255,7 @@ pub fn agent_purpose_label_extract(
   const label = agent_purpose_label_normalize(first, config.max_chars)
   // Strip every declaration, not just the captured one: a turn that wrote two
   // must not leave markup in the rendered prose.
-  const stripped = trim(regex_replace(PURPOSE_LABEL_PATTERN, "", text, PURPOSE_LABEL_FLAGS))
+  const stripped = trim(regex_replace(pattern, "", text, PURPOSE_LABEL_FLAGS))
   return {label: label, text: stripped, declared: label != ""}
 }
 
