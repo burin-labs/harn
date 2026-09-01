@@ -2,26 +2,26 @@
 //! Harn spans to a configured collector once the env var is set.
 //!
 //! The test stands up a single-shot raw HTTP listener, points
-//! `HARN_OTEL_ENDPOINT` at it, exercises [`emit_span_start`] /
-//! [`emit_span_end`], and then drops the sink to force the batch
-//! processor to flush. The captured request body is asserted to be a
-//! `POST /v1/traces` containing the emitted span name, providing
-//! confidence that the wiring between `install_otel_sink_from_env`
-//! and the `opentelemetry-otlp` exporter is intact.
+//! `HARN_OTEL_ENDPOINT` at it, enters a real execution scope, emits nested
+//! spans through [`SpanCollector`], and then shuts down the sink to force the
+//! batch processor to flush. The captured request body must be a
+//! `POST /v1/traces` containing the span tree and the typed execution id. This
+//! proves the canonical VM span path reaches the `opentelemetry-otlp` exporter.
 //!
 //! The former file-level `#![cfg(feature = "otel")]` gate now lives on the
 //! `mod otel_sink_export;` declaration in the `harn_vm` test root.
 
-use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
 use harn_vm::events::{
-    add_event_sink, clear_event_sinks, emit_span_end, emit_span_start, install_otel_sink_from_env,
-    reset_event_sinks, shutdown_otel_sink, CollectorSink,
+    add_event_sink, clear_event_sinks, install_otel_sink_from_env, reset_event_sinks,
+    shutdown_otel_sink, CollectorSink,
 };
+use harn_vm::tracing::{SpanCollector, SpanKind};
+use harn_vm::{enter_execution_scope, mint_execution_scope};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::timeout;
 
@@ -127,16 +127,14 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
         install_otel_sink_from_env().expect("otel sink install failed against the loopback stub");
     assert!(installed, "expected sink to install when endpoint is set");
 
-    let mut start_meta = BTreeMap::new();
-    start_meta.insert("turn".to_string(), serde_json::json!(7));
-    start_meta.insert(
-        "harn.execution.id".to_string(),
-        serde_json::json!("hxe-otel-smoke"),
-    );
-    emit_span_start(42, None, "burin.turn", "agent_loop", start_meta);
-    emit_span_start(43, Some(42), "burin.tool", "tool_call", BTreeMap::new());
-    emit_span_end(43, BTreeMap::new());
-    emit_span_end(42, BTreeMap::new());
+    let execution_id = mint_execution_scope();
+    let expected_execution_id = execution_id.to_string();
+    let _execution_scope = enter_execution_scope(execution_id);
+    let mut spans = SpanCollector::new();
+    let turn = spans.start(SpanKind::Pipeline, "burin.turn".into());
+    let tool = spans.start(SpanKind::ToolCall, "burin.tool".into());
+    spans.end(tool);
+    spans.end(turn);
 
     // Sanity: our CollectorSink also received the event. This proves
     // additional sinks coexist with the OtelSink (regression cover
@@ -178,7 +176,7 @@ async fn install_otel_sink_emits_spans_to_configured_endpoint() {
         "expected the service.name resource attribute in payload, got:\n{combined}",
     );
     assert!(
-        combined.contains("harn.execution.id") && combined.contains("hxe-otel-smoke"),
+        combined.contains("harn.execution.id") && combined.contains(&expected_execution_id),
         "expected the shared Harn execution id in the OTLP payload, got:\n{combined}",
     );
     let spans = snapshot

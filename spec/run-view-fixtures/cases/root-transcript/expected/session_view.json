@@ -29,8 +29,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:34f4104e9a4c3a6ab112332fd4a62f4a8c466592402a1f3ddcd33ce9574c688f",
-    "projection_id": "session_view:session_root_transcript:34f4104e9a4c"
+    "projection_hash": "sha256:8d6ed71513b015859c4edaddb6e780415da0fc750c50391877034aa94b569adb",
+    "projection_id": "session_view:session_root_transcript:8d6ed71513b0"
   },
   "runs": [
     {
@@ -59,7 +59,7 @@
         }
       ],
       "evidence": {
-        "execution_id": "run-root-transcript",
+        "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
         "flight_recording": null,
         "gaps": [],
         "schema_version": 1,
@@ -70,6 +70,7 @@
             "links": [],
             "metadata": {
               "cost_usd": 0.02,
+              "harn.execution.id": "hxe-019c13e0-8080-7000-8000-000000000001",
               "input_tokens": 12,
               "model": "fixture-model",
               "output_tokens": 8,
@@ -109,8 +110,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:a1b0c526ba2e87938931f3fc3d8e0bbc9fd93501a7ac64d1bd7766cfebd77860",
-        "projection_id": "run_view:run_root_transcript:a1b0c526ba2e"
+        "projection_hash": "sha256:df17de921d222f94024e0389f3f0b806ae66cf696de4af9838db139eb77ac629",
+        "projection_id": "run_view:run_root_transcript:df17de921d22"
       },
       "providers": [
         {

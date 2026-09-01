@@ -1437,14 +1437,25 @@ the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
 
 Provider auto-resolution precedence:
 
-1. Explicit `provider` option other than `"auto"` wins.
+1. An explicit `provider` option other than `"auto"` constrains the route. It
+   must agree with a provider-qualified `model`. A built-in catalog provider
+   must also own any matching catalog row or known model family. Custom
+   adapters may proxy an upstream model identity.
 2. `model_role` fills missing provider/model/routing options from
    `[model_roles.<role>]` or role env overrides.
 3. `provider: "auto"` with a `model` infers from the model selector.
 4. If `provider` is omitted, `HARN_LLM_PROVIDER` wins when set; otherwise a `model` infers the provider.
 5. Unknown model IDs fall back to `HARN_DEFAULT_PROVIDER`, then the
    configured default provider (`anthropic` in the built-in catalog),
-   and emit a warning.
+   and emit a warning. A near-miss of a known alias fails instead, naming the
+   compiled catalog version and suggested names.
+
+Resolution produces one typed receipt before provider dispatch:
+`requested_model`, `alias_chain`, `resolved_provider`, `resolved_model`, and
+`model_catalog_version`. Provider-qualified selectors are hard constraints,
+including custom proxy selectors and routing-policy transforms. The runtime
+compares the receipt with the transport route before every provider request
+and fails without egress on disagreement.
 
 ### OpenAI Responses mode
 
@@ -5441,9 +5452,10 @@ for entry in drain_audit() {
   `improvement`. Small models often leave them blank, and validation
   will fail every time. Use the system prompt to demand non-empty
   strings instead.
-- On `harness.llm.call`, `provider: "auto"` with `model: "local:foo"` strips
-  the `local:` prefix and routes to Ollama. Without `"auto"`, an
-  explicit provider such as `"local"` still wins.
+- On `harness.llm.call`, `model: "local:foo"` is an Ollama-qualified selector.
+  It strips the `local:` prefix and routes to Ollama. A separately supplied
+  provider must agree; use `{provider: "local", model: "foo"}` for the generic
+  local OpenAI-compatible adapter.
 - `schema_retries` retries schema-validation failures with a
   corrective nudge. Transient provider errors are fail-fast — compose
   `with_retry` from `std/llm/handlers` for retry policy. The two

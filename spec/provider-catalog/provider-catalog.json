@@ -893,7 +893,9 @@
       "protocols": [
         "openai_chat_completions"
       ],
-      "features": [],
+      "features": [
+        "model_proxy"
+      ],
       "caveats": [],
       "local_runtime": {
         "kind": "external",
@@ -1298,7 +1300,9 @@
       "protocols": [
         "openai_chat_completions"
       ],
-      "features": [],
+      "features": [
+        "model_proxy"
+      ],
       "caveats": [],
       "latency_p50_ms": 2200
     },

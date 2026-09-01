@@ -3,6 +3,7 @@ pub import {
   ci_linux_lane_policy_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  sccache_action_cache_size_errors,
 } from "./ci_cache_policy/linux_checks.harn"
 pub import {
   actions_cache_capacity_errors,

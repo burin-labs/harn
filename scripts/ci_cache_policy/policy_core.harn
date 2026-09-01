@@ -118,6 +118,12 @@ pub const SETUP_HARN_ACTION_PATH = ".github/actions/setup-harn/action.yml"
 // workflow may use it only on the single allowlisted compile producer.
 pub const PERSISTENT_SCCACHE_ACTION = "./.github/actions/sccache"
 
+pub const SCCACHE_ACTION_PATH = ".github/actions/sccache/action.yml"
+
+pub const SCCACHE_CACHE_SIZE_INPUT_EXPRESSION = "$" + "{{ inputs.cache-size }}"
+
+pub const SCCACHE_CONFIGURE_ENV_COMMAND = "\"$GITHUB_ACTION_PATH/configure-env.sh\""
+
 // Single pinned entry point for installing sccache. Everything else must route
 // through it: sccache allows one server per user and a client whose version
 // differs from the running server SHUTS IT DOWN, so an unpinned install on a

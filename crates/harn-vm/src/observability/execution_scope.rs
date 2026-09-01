@@ -19,19 +19,120 @@
 //! never falls back to a default owner.
 
 use std::cell::RefCell;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 
 /// Stable prefix for VM-owned execution identities.
 pub const EXECUTION_ID_PREFIX: &str = "hxe-";
 
+/// Harn-owned identity for one top-level execution tree.
+///
+/// Construction is deliberately closed: values are either minted here or
+/// parsed through the canonical UUIDv7 validator. Wire formats may carry a
+/// string, but runtime authority never carries an unchecked one.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExecutionId(Arc<str>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("invalid Harn execution identity")]
+pub struct InvalidExecutionId;
+
+impl ExecutionId {
+    /// Mint a fresh UUIDv7 identity. UUIDv7 preserves useful creation-time
+    /// ordering while remaining unique across processes and hosts.
+    pub fn mint() -> Self {
+        Self(Arc::from(format!(
+            "{EXECUTION_ID_PREFIX}{}",
+            uuid::Uuid::now_v7()
+        )))
+    }
+
+    /// Parse an identity at a trust boundary, accepting only the canonical
+    /// lowercase, hyphenated UUIDv7 representation owned by Harn.
+    pub fn parse(candidate: &str) -> Result<Self, InvalidExecutionId> {
+        let raw = candidate
+            .strip_prefix(EXECUTION_ID_PREFIX)
+            .ok_or(InvalidExecutionId)?;
+        let value = uuid::Uuid::parse_str(raw).map_err(|_| InvalidExecutionId)?;
+        if raw != value.hyphenated().to_string()
+            || value.get_version_num() != 7
+            || value.get_variant() != uuid::Variant::RFC4122
+        {
+            return Err(InvalidExecutionId);
+        }
+        Ok(Self(Arc::from(candidate)))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ExecutionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("ExecutionId")
+            .field(&self.as_str())
+            .finish()
+    }
+}
+
+impl fmt::Display for ExecutionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl AsRef<str> for ExecutionId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::ops::Deref for ExecutionId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl FromStr for ExecutionId {
+    type Err = InvalidExecutionId;
+
+    fn from_str(candidate: &str) -> Result<Self, Self::Err> {
+        Self::parse(candidate)
+    }
+}
+
+impl serde::Serialize for ExecutionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExecutionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let candidate = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::parse(&candidate).map_err(serde::de::Error::custom)
+    }
+}
+
 thread_local! {
-    static ACTIVE_EXECUTION_SCOPE_STACK: RefCell<Vec<Arc<str>>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_EXECUTION_SCOPE_STACK: RefCell<Vec<ExecutionId>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Mint a fresh, durable execution id. UUIDv7 keeps identifiers unique across
 /// processes and hosts while preserving useful creation-time ordering.
-pub fn mint_execution_scope() -> Arc<str> {
-    Arc::from(format!("{EXECUTION_ID_PREFIX}{}", uuid::Uuid::now_v7()))
+pub fn mint_execution_scope() -> ExecutionId {
+    ExecutionId::mint()
 }
 
 /// RAII guard returned by [`enter_execution_scope`]. Popping the stack on drop
@@ -52,14 +153,14 @@ impl Drop for ExecutionScopeGuard {
 
 /// Push `scope` onto the ambient stack for the lifetime of the returned guard.
 /// The innermost entry wins for [`current_execution_scope`].
-pub fn enter_execution_scope(scope: Arc<str>) -> ExecutionScopeGuard {
+pub fn enter_execution_scope(scope: ExecutionId) -> ExecutionScopeGuard {
     ACTIVE_EXECUTION_SCOPE_STACK.with(|stack| stack.borrow_mut().push(scope));
     ExecutionScopeGuard { _private: () }
 }
 
 /// Currently-active execution scope, or `None` when no owning program run is
 /// active on this task. Verdict issuance treats `None` as fail-closed.
-pub fn current_execution_scope() -> Option<Arc<str>> {
+pub fn current_execution_scope() -> Option<ExecutionId> {
     ACTIVE_EXECUTION_SCOPE_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
@@ -67,7 +168,7 @@ pub fn current_execution_scope() -> Option<Arc<str>> {
 /// orchestration ambient-scope machinery to carry the owner across
 /// `spawn_local` fan-out boundaries (which plain thread-locals do not cross),
 /// mirroring how the current-session stack is propagated.
-pub(crate) fn swap_execution_scope_stack(replacement: Vec<Arc<str>>) -> Vec<Arc<str>> {
+pub(crate) fn swap_execution_scope_stack(replacement: Vec<ExecutionId>) -> Vec<ExecutionId> {
     ACTIVE_EXECUTION_SCOPE_STACK
         .with(|stack| std::mem::replace(&mut *stack.borrow_mut(), replacement))
 }
@@ -102,5 +203,33 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn parse_and_serde_reject_noncanonical_or_non_v7_ids() {
+        let minted = ExecutionId::mint();
+        assert_eq!(ExecutionId::parse(minted.as_str()), Ok(minted));
+
+        let valid = "hxe-019c13e0-8080-7000-8000-000000000001";
+        assert_eq!(ExecutionId::parse(valid).unwrap().as_str(), valid);
+        assert_eq!(
+            serde_json::to_string(&ExecutionId::parse(valid).unwrap()).unwrap(),
+            format!("\"{valid}\"")
+        );
+        assert_eq!(
+            serde_json::from_str::<ExecutionId>(&format!("\"{valid}\""))
+                .unwrap()
+                .as_str(),
+            valid
+        );
+
+        for invalid in [
+            "cloud-run-id",
+            "hxe-019C13E0-8080-7000-8000-000000000001",
+            "hxe-019c13e0-8080-4000-8000-000000000001",
+        ] {
+            assert_eq!(ExecutionId::parse(invalid), Err(InvalidExecutionId));
+            assert!(serde_json::from_str::<ExecutionId>(&format!("\"{invalid}\"")).is_err());
+        }
     }
 }

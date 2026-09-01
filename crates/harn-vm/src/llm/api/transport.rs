@@ -467,7 +467,13 @@ async fn vm_call_llm_api_with_body_inner(
         );
     }
     if stream_protocol == StreamProtocol::AnthropicSse {
-        crate::llm::providers::anthropic::reconcile_request_body(&mut body, model, &opts.thinking);
+        crate::llm::providers::anthropic::reconcile_request_body(
+            &mut body,
+            provider,
+            model,
+            &opts.thinking,
+            opts.provider_contract_probe,
+        );
     }
     if provider == "openrouter"
         && (body.get("response_format").is_some() || body.get("top_k").is_some())
