@@ -19,7 +19,7 @@ mod usage;
 mod visible_transcript;
 
 use evidence::project_evidence;
-pub use evidence::ArtifactPathVisibility;
+pub use evidence::{project_execution_evidence, ArtifactPathVisibility};
 pub use usage::RunViewUsage;
 use visible_transcript::public_assistant_transcript_text;
 
