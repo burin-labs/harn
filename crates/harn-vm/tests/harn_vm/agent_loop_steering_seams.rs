@@ -715,3 +715,156 @@ fn steer_control_run_without_inject_is_eval_safe() {
         "control run has no steer message to order; lines: {lines:?}"
     );
 }
+
+/// Harn pipeline for the completion-judge obligation seam.
+///
+/// The founder dogfood repro (2026-09-01): the original task asked for an
+/// implementation, a test, and a changelog; the user then steered mid-run —
+/// "if no typed code exists, say so and stop"; the agent complied and reverted;
+/// the completion judge, reading only the frozen session task, vetoed the stop
+/// and ordered the withdrawn work redone.
+///
+/// This drives the real path end to end — a bridge steer, the real
+/// `finish_step` drain, the typed `injectedMode` marker the drain stamps, the
+/// obligations derived at the judge payload seam — and reports what the judge's
+/// ACTUAL system prompt contained. The paired control pushes no steer.
+fn steer_obligations_pipeline(session_id: &str, push_steer_mid_turn: bool) -> String {
+    let push_line = if push_steer_mid_turn {
+        r#"          agent_session_push_user_message(
+            harness.agent,
+            session,
+            {content: STEER, mode: "steer"},
+          )"#
+    } else {
+        ""
+    };
+    format!(
+        r###"
+import {{ agent_session_push_user_message }} from "std/agent/state"
+import {{ llm_text, with_llm_script }} from "std/testing"
+
+const STEER = "Do not match the detail string with ==. If no typed code exists, say so and stop."
+
+pipeline main(harness: Harness, task: unknown) {{
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I will compare the detail string with == and add the test."),
+      llm_text("Reverted the implementation, test, and changelog. No typed code exists, so I am reporting that and stopping as asked. ##DONE##"),
+      {{text: "{{\"verdict\":\"done\",\"detail\":\"The run answered the steered question.\"}}"}},
+    ],
+    {{ ->
+      const session = "{session_id}"
+      const seen = harness.runtime.shared_cell(
+        {{scope: "task_group", key: "obl-closure-{session_id}", initial: 0}},
+      )
+      const result = agent_loop(
+        harness,
+        "Implement one bounded improvement, add a focused test, and add a changelog fragment.",
+        nil,
+        {{
+          provider: "mock",
+          session_id: session,
+          root: "__HARN_TEST_SESSION_STORE_ROOT__",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 4,
+          verify_completion_judge: {{provider: "mock", max_invocations: 2}},
+          verify_completion: {{ info ->
+            const steers = info?.obligations?.steers ?? []
+            harness.runtime.shared_set(seen, len(steers))
+            return nil
+          }},
+          post_turn_callback: {{ info ->
+            if info.iteration == 0 {{
+{push_line}
+            }}
+            return nil
+          }},
+        }},
+      )
+      harness.stdio.log(result.status)
+
+      // Only the judge's own call carries the stable completion prefix.
+      const judged = harness.llm.mock_calls()
+        .filter({{ call -> contains(to_string(call?.system ?? ""), "Stable completion goal") }})
+        .to_list()
+      harness.stdio.log(len(judged))
+      if len(judged) == 0 {{
+        // Absence must not read as success: say so instead of reporting a
+        // prompt verdict nobody measured.
+        harness.stdio.log("no_judge_call")
+      }} else {{
+        const prefix = to_string(judged[0].system)
+        if contains(prefix, "Accepted user steering")
+          && contains(prefix, "say so and stop")
+          && contains(prefix, "supersedes any conflicting earlier requirement") {{
+          harness.stdio.log("steer_in_judge_prompt")
+        }} else {{
+          if contains(prefix, "Accepted user steering") {{
+            harness.stdio.log("steering_block_incomplete")
+          }} else {{
+            harness.stdio.log("no_steering_block")
+          }}
+        }}
+      }}
+      harness.stdio.log(harness.runtime.shared_snapshot(seen).value)
+    }},
+  )
+}}
+"###
+    )
+}
+
+/// RED ON MAIN: the judge prompt carries only the frozen session task, so the
+/// steer is invisible to the authority that decides whether the run may stop.
+#[test]
+fn accepted_steer_updates_the_completion_judge_obligations() {
+    let raw = run_with_bridge(&steer_obligations_pipeline(
+        &fresh_session_id("steer-obligations"),
+        true,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "1",
+        "expected exactly one completion-judge call; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "steer_in_judge_prompt",
+        "the judge's own system prompt must carry the accepted steer AND its \
+         supersession framing; lines: {lines:?}"
+    );
+    // The deterministic exit authority reads the SAME derived obligations.
+    assert_eq!(
+        lines[3], "1",
+        "the verify_completion closure must see the derived steer; lines: {lines:?}"
+    );
+}
+
+/// NEGATIVE CONTROL: with no steer the judge prompt renders no steering block
+/// at all, so an unsteered run's prefix is byte-identical to what it was before
+/// this seam existed and the judge's authority is untouched.
+#[test]
+fn unsteered_run_renders_no_steering_block() {
+    let raw = run_with_bridge(&steer_obligations_pipeline(
+        &fresh_session_id("steer-obligations-control"),
+        false,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "1",
+        "control must make the same single judge call; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "no_steering_block",
+        "an unsteered run must render no steering block; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "0",
+        "control must derive zero steers; lines: {lines:?}"
+    );
+}

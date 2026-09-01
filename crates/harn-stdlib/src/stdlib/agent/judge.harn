@@ -42,6 +42,11 @@ import {
   __judge_emit_started,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
+import {
+  completion_obligations_digest,
+  completion_obligations_from_messages,
+  completion_obligations_prompt,
+} from "std/agent/obligations"
 import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
@@ -628,18 +633,22 @@ fn __judge_payload(
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
+  const obligations = completion_obligations_from_messages(messages, session?.task ?? "")
   const evidence_id = completion_evidence_id(
     session?.task ?? "",
     stop_reason,
     text,
     evidence_packet,
     pending_tool_batch_effect_count,
+    nil,
+    completion_obligations_digest(obligations),
   )
   return {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
     session_id: session.session_id,
     task: session?.task ?? "",
+    obligations: obligations,
     stop_reason: stop_reason,
     text: text,
     visible_text: text,
@@ -683,6 +692,7 @@ fn __judge_payload_with_verification(
         evidence_packet,
         payload.pending_tool_batch_effect_count,
         verification,
+        completion_obligations_digest(payload?.obligations),
       ),
       judge_evidence: evidence_serialized,
       judge_evidence_packet: evidence_packet,
@@ -805,11 +815,15 @@ fn __judge_stable_prefix(
   const requirement_block = completion_requirement_contract_prompt(
     completion_requirement_contract(judge_cfg?.requirement_contract),
   )
+  // The steering block sits AFTER the goal, rubric, and requirement rows so its
+  // supersession clause reads over all of them. It renders empty for an
+  // unsteered run, which keeps that run's prefix byte-identical (and cacheable).
   return system
     + "\n\nStable completion goal:\n"
     + payload.task
     + rubric_block
     + requirement_block
+    + completion_obligations_prompt(payload?.obligations)
     + "\n\nRequired verdict schema:\n"
     + json_stringify(schema)
 }
