@@ -25,12 +25,29 @@
   ],
   "evidence": {
     "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
-    "flight_recording": null,
-    "gaps": [],
+    "flight_recording": {
+      "byte_length": 4096,
+      "content_hash": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dropped_events": 3,
+      "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
+      "format": "harn.flight.v1+json",
+      "path": null,
+      "retained_events": 64,
+      "schema_version": 1,
+      "value_policy": "omitted"
+    },
+    "gaps": [
+      {
+        "code": "export_failed",
+        "component": "otel_export",
+        "message": "The durable record remains complete while telemetry is unavailable."
+      }
+    ],
     "schema_version": 1,
     "trace_spans": [
       {
-        "duration_ms": 3000,
+        "cost_usd": 0.02,
+        "duration_ms": 2750,
         "kind": "llm_call",
         "links": [],
         "metadata": {
@@ -42,10 +59,24 @@
           "provider": "fixture-provider"
         },
         "name": "fixture completion",
+        "parent_span_id": 1,
+        "span_id": 2,
+        "start_ms": 250,
+        "trace_id": "trace_fixture_root",
+        "ttft_ms": 375
+      },
+      {
+        "duration_ms": 3000,
+        "kind": "pipeline",
+        "links": [],
+        "metadata": {
+          "harn.execution.id": "hxe-019c13e0-8080-7000-8000-000000000001"
+        },
+        "name": "main",
         "parent_span_id": null,
-        "span_id": 0,
+        "span_id": 1,
         "start_ms": 0,
-        "trace_id": ""
+        "trace_id": "trace_fixture_root"
       }
     ]
   },
@@ -75,8 +106,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:df17de921d222f94024e0389f3f0b806ae66cf696de4af9838db139eb77ac629",
-    "projection_id": "run_view:run_root_transcript:df17de921d22"
+    "projection_hash": "sha256:e7728b4e8e5439f9681f12f9b71915864de0091a04bc626eaa7e11ad32894e62",
+    "projection_id": "run_view:run_root_transcript:e7728b4e8e54"
   },
   "providers": [
     {
