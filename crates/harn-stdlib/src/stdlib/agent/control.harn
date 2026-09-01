@@ -49,14 +49,69 @@ type AgentLoopState = {
   progress: dict,
 }
 
+/**
+ * Remaining model calls before the current cap, or `nil` when there is nothing
+ * to measure against.
+ *
+ * `nil` and `0` are different facts. `0` is a measured zero: the loop knows its
+ * cap and knows it is spent. `nil` is an unavailable measurement: no cap was
+ * threaded through, so the loop knows nothing. Collapsing the second into the
+ * first makes an unmeasured loop look exhausted, and every consumer that
+ * branches on "remaining == 0" then fires on a run that was never measured.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_loop_remaining_calls(current_limit: int?, iteration: int?) -> int? {
+  if current_limit == nil || iteration == nil {
+    return nil
+  }
+  if iteration >= current_limit {
+    return 0
+  }
+  return current_limit - iteration
+}
+
+/**
+ * The calls a run INTENDS to preserve for verification, recovery, and terminal
+ * reporting once the model's working budget is spent.
+ *
+ * NOT A WITHHOLDING MECHANISM TODAY. This is arithmetic: it computes a number
+ * that is measured and warned about, and nothing draws from it. The three
+ * spenders each enforce their own independent policy — verification decrements
+ * `terminal_verify_reserve_remaining` from `stall_config`, recovery is bounded
+ * by `__agent_loop_max_consecutive_recoveries`, and terminal reporting is gated
+ * by `final_wrapup`. Changing this total therefore moves the projection and its
+ * warning without reserving a single call. Making one shared policy actually
+ * drive those spenders is tracked separately; until then, read every value here
+ * as intent, not as a guarantee.
+ *
+ * What it does own is the arithmetic. `total` is computed here rather than
+ * passed in, so no caller can maintain a second number that drifts from its
+ * parts, and the recovery input comes from the bound's owner rather than a
+ * literal.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_loop_call_reserve(reserve_inputs: dict?) -> dict {
+  const verification = to_int(reserve_inputs?.verification ?? 1) ?? 1
+  const recovery = to_int(reserve_inputs?.recovery ?? 1) ?? 1
+  const terminal_report = to_int(reserve_inputs?.terminal_report ?? 1) ?? 1
+  return {
+    verification: verification,
+    recovery: recovery,
+    terminal_report: terminal_report,
+    total: verification + recovery + terminal_report,
+  }
+}
+
 fn __agent_loop_state(args: dict) -> AgentLoopState {
   const current_limit = args.current_limit
   const iteration = args.iteration
-  const remaining = if iteration >= current_limit {
-    0
-  } else {
-    current_limit - iteration
-  }
+  const remaining = agent_loop_remaining_calls(current_limit, iteration)
   const missing = args.missing_required_tools
   return {
     iteration: iteration,
@@ -235,8 +290,15 @@ fn __agent_loop_extension_rules(state: AgentLoopState, budget: AgentLoopBudget) 
 }
 
 fn __agent_default_loop_control(state: AgentLoopState, budget: AgentLoopBudget) {
+  const remaining = state.budget?.remaining
+  // An UNAVAILABLE measurement is not a boundary. Reading `nil` as zero would
+  // make a loop that never threaded a cap start extending as though it were
+  // exhausted, on evidence it never had.
+  if remaining == nil {
+    return nil
+  }
   // Only decide at the budget boundary; below it, keep looping untouched.
-  if state.budget.remaining > 0 {
+  if remaining > 0 {
     return nil
   }
   for rule in __agent_loop_extension_rules(state, budget) {

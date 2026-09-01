@@ -269,6 +269,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/best_of_n" => "stdlib/agent/best_of_n.harn",
     "agent/loop" => "stdlib/agent/loop.harn",
     "agent/loop_support" => "stdlib/agent/loop_support.harn",
+    "agent/loop_call_budget" => "stdlib/agent/loop_call_budget.harn",
     "agent/loop_call_resolution" => "stdlib/agent/loop_call_resolution.harn",
     "agent/loop_await" => "stdlib/agent/loop_await.harn",
     "agent/loop_denial_cutoff" => "stdlib/agent/loop_denial_cutoff.harn",

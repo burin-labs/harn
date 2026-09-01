@@ -9,6 +9,159 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.125
+
+### Breaking
+
+- Run-record construction is now an observability capability operation. Call
+  `harness.obs.run_record(payload)` instead of the former global
+  `run_record(payload)`. This makes the constructor's read of the active execution
+  identity explicit in Harn's effect contract.
+- Model selection now resolves the requested name and provider as one typed
+  decision. Built-in provider selectors cannot cross catalog namespaces, custom
+  adapters can deliberately proxy upstream model identities, alias near-misses
+  fail with catalog-versioned suggestions, provider-call receipts record the
+  complete requested-to-resolved route, and
+  `std/llm/catalog.execution_contract` returns the stricter
+  `harn.llm.execution-contract/v2` shape.
+
+  `local:<model>` is now an Ollama-qualified selector and conflicts with a
+  separate non-Ollama provider. Use `{provider: "local", model: "<model>"}` for
+  the generic local OpenAI-compatible adapter.
+
+### Added
+
+- `harn serve mcp --surface script --watch` now reloads a validated `ToolRegistry`
+  without disconnecting stdio clients, keeps the previous runtime after invalid
+  edits, and emits the standard tool, resource, and prompt list-change
+  notifications. Generated tool commands also accept `--json` as an explicit
+  compact-output flag.
+- The provider registry now carries a typed `data_controls` fact per provider:
+  what retention or training control the provider exposes per request, where it
+  rides on the wire, what happens when Harn sets nothing, and the documentation
+  behind each claim. Callers request a posture in provider-neutral terms with
+  `data_controls: "strictest_available"` on `llm_call`, and every request returns
+  a receipt under `telemetry.data_controls` distinguishing `applied`,
+  `no_control_available`, `provider_unresearched`, and `not_requested` — so a
+  host can tell "we asked and this provider offers nothing" from "we never
+  asked". The declarations are projected into the provider catalog, so
+  `harn provider catalog show --json` can generate an accurate per-provider table
+  instead of prose. The shipped default posture is unchanged (`default`); an
+  embedder flips `[data_controls_policy] default_posture` in config rather than
+  having the runtime choose a privacy-relevant default by omission.
+- Reference page for the remote session control vocabulary: which ACP method
+  carries start, status, stop, steer, queue, interrupt, and resume, the typed
+  receipt each one produces, and the directive authority ladder that decides
+  whether a steer survives a completion judge.
+- `AgentResult.terminal` now includes Harn's canonical `lifecycle_state` and
+  `run_record_status` projections so persistence and protocol adapters do not
+  have to reclassify terminal kinds.
+- Composition reports, crystallization traces, and capsule bundle source
+  references now preserve the Harn execution ID that produced them. Legacy
+  inputs remain explicitly unidentified instead of inheriting the reader's
+  execution.
+- Expose Harn's typed execution-evidence projection so hosts can persist the same
+  validated, redacted record used by public run views. Invalid span costs now fail
+  closed instead of degrading during JSON persistence.
+- Replay reports now carry the source run's canonical execution ID. Standalone traces and legacy runs
+  leave it absent instead of substituting a replay or session identifier.
+- **ToolRegistry adapter governance.** Tools can declare a closed
+  `governance.audiences` list for CLI, MCP, catalog, dashboard, and agent/model
+  projections.
+  Model prompt, schema, progressive-search, and direct-invocation paths now
+  share the same fail-closed audience projection, while omitted governance
+  preserves existing all-adapter behavior.
+- `harn runs export-training` now carries the source run's canonical execution ID in training
+  provenance. Legacy runs leave the field absent instead of inventing an identity.
+
+### Changed
+
+- **Runtime content fingerprints now have one strict Harn contract (#7658).**
+  CLI and campaign consumers validate the complete linked-feature receipt
+  before reading it.
+- Public run projections now omit host-local flight-recording paths by default.
+  Local CLI, portal, and embedding adapters can still opt in when they can open
+  the recording.
+- Harn now carries execution identities as a validated runtime type from VM
+  creation through flight recording, verdict issuance, and evidence snapshots.
+  Persisted run records retain the same JSON shape, while malformed host-provided
+  identities can no longer become trusted evidence receipts. Trace-span identity
+  is immutable runtime ownership rather than caller-editable metadata, so reused
+  VMs cannot mix evidence from separate executions. Public run views also replace
+  invalid persisted identities or flight metadata with explicit evidence gaps.
+
+### Fixed
+
+- Empty model-generation failures now retain the response identifier, stop reason,
+  content-block shape, and measured usage in the provider response record.
+- **A host post-turn verdict can now claim the sentinel terminal (#7606).** The
+  post-turn callback is consulted before any natural terminal is decided, and a
+  natural terminal honours an explicit `needs_verify` from that verdict instead
+  of always demanding a verification pass. Previously a turn that ended on the
+  completion sentinel returned before the callback was invoked, so a host that
+  had already proved the work could not say so and paid for a redundant
+  completion-judge call on its happy path.
+- Environment-configured and script-configured egress policy now compose under one
+  typed contract instead of the second configuration throwing `policy already
+  configured from environment`. An exported `HARN_EGRESS_*` setting no longer fails
+  unrelated connector and conformance suites before their own behavior runs.
+  Composition is tighten-only — allow and deny rules union, a `deny` default or a
+  private-address block declared by any contribution wins, and loopback access
+  survives only while every declaring contribution grants it — and the
+  `egress_policy` receipt now reports `sources` plus per-axis `axis_sources`
+  provenance so a script author can see which contribution decided each axis.
+- Persisted execution evidence now retains ordered span events and redacts every
+  nested span, link, event, and gap text field before public run-view projection.
+  Orchestrator inspection also exposes typed trace and run locators for those
+  public views.
+- Transcript compaction no longer reports success while discarding the context it
+  archived. The summarizers now read the block-array `content` shape real agent
+  transcripts carry, instead of only the string shape, so a tool-result window is
+  no longer summarized to a bare header. The compaction boundary also measures the
+  source window and the summary as typed fields — source message count, source
+  bytes, summary bytes, and how many of those summary bytes came from the source
+  rather than generated scaffold — and refuses a compaction that carried nothing
+  forward, restoring the source window untouched.
+- Loop recovery is now bounded and explainable, and a forced stop is terminal. A
+  thrash hard stop that the loop forces after its recovery bound has fired can no
+  longer be converted back into `continue` by a terminal callback. Repeated
+  recovery requires materially changed evidence — two hard stops carrying the same
+  signature are the same evidence seen twice — under a finite consecutive-recovery
+  ceiling, and the recovery receipt now reports the consecutive-recovery count, the
+  evidence revision the decision considered, and which bound refused it.
+- Fixed linked-runtime fingerprints so enabled VM features affect content identity,
+  and version JSON now reports schema 2 for its required fingerprint field.
+- Local Cargo gates now refuse to run when a `rustc` earlier on `PATH` shadows the
+  version pinned in `rust-toolchain.toml`, naming both versions and the PATH
+  correction, so a local result stays comparable to CI. Set
+  `HARN_ALLOW_TOOLCHAIN_MISMATCH=1` to run anyway.
+- Session-projected execution evidence now carries the run's typed execution identity and validates after
+  persistence round trips.
+- Prevent forged exact-response references, prompt-frame termination, and duplicate concurrent response-summary calls.
+- Prepare an MCP export script's complete module generation once, then run
+  explicitly read-only, idempotent calls concurrently in isolated VM state.
+- Preserve protocol-versioned and additive MCP response fields when using the stdio client.
+- New run records constructed inside a running Harn program now inherit that VM
+  execution's canonical evidence identity instead of reporting a false
+  legacy-identity gap.
+- Prevented caller-supplied, persisted-history, and agent-recovery prefills from reaching model routes and request modes
+  that reject trailing assistant messages.
+- Correct Claude 4.7-and-newer sampling capability claims. Add typed, endpoint-specific provider option probes with
+  budgeted campaign automation, explicit unmeasured outcomes, and positive/negative direction controls.
+  Publishable CLI bytecode now type-checks against the same resolved import graph as `harn check`.
+- Fix sandboxed process execution so Cargo verifier commands cannot start a shared compiler-cache daemon inside the sandbox.
+- Sandboxed host commands now disable inherited Cargo compiler wrappers before
+  running builds or tests, matching Harn's VM-native process path.
+- Execution evidence now fails closed at every remaining construction boundary.
+  Run-record inputs can't claim another execution, workflows can't mint an
+  orphan identity, and malformed session identities become explicit evidence
+  gaps. Host-invoked closures now enter the same VM-owned execution scope as
+  ordinary top-level programs.
+- Release finalization now uses the immutable candidate range to distinguish
+  candidate-owned changelog fragments from later fragments that belong to the
+  next release. A busy main branch no longer strands an already-tagged release,
+  while unresolved or candidate-owned fragments still fail closed.
+
 ## v0.10.124
 
 ### Changed
