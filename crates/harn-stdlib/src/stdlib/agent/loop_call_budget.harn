@@ -1,5 +1,6 @@
 import { agent_loop_call_reserve, agent_loop_remaining_calls } from "std/agent/control"
 import { __inject_feedback_with_tool_repair } from "std/agent/loop_tool_calls"
+import { __agent_loop_max_consecutive_recoveries } from "std/agent/loop_turn_scope"
 import { agent_emit_event } from "std/agent/state"
 
 /**
@@ -29,7 +30,10 @@ pub fn __agent_loop_call_budget_new(opts: any, verification: int?) -> dict {
     reserve: agent_loop_call_reserve(
       {
         verification: verification,
-        recovery: 1,
+        // The recovery allowance has ONE owner (#7682). A literal here would be
+        // a second constant that silently drifts from the bound the recovery
+        // ladder actually enforces.
+        recovery: __agent_loop_max_consecutive_recoveries(),
         terminal_report: if opts?.final_wrapup ?? true {
           1
         } else {
