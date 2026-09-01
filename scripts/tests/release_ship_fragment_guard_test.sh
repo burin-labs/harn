@@ -134,6 +134,7 @@ run_finalize_tag_fixture() {
   git -C "$fixture" config user.name "Release guard fixture"
   git -C "$fixture" config user.email "release-guard@example.invalid"
   git -C "$fixture" config commit.gpgSign false
+  git -C "$fixture" config tag.gpgSign false
   printf '[workspace.package]\nversion = "0.10.999"\n' > "$fixture/Cargo.toml"
   printf -- '- must be folded before release\n' > "$fixture/changelog.d/7605.fixed.md"
   git -C "$fixture" add Cargo.toml changelog.d/7605.fixed.md
@@ -194,6 +195,7 @@ git -C "$scoped" init -q -b main
 git -C "$scoped" config user.name "Release guard fixture"
 git -C "$scoped" config user.email "release-guard@example.invalid"
 git -C "$scoped" config commit.gpgSign false
+git -C "$scoped" config tag.gpgSign false
 printf '[workspace.package]\nversion = "0.10.999"\n' > "$scoped/Cargo.toml"
 printf '# Changelog\n\n## v0.10.999\n\n- Candidate note.\n' > "$scoped/CHANGELOG.md"
 git -C "$scoped" add Cargo.toml CHANGELOG.md
