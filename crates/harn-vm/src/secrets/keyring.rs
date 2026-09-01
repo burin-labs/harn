@@ -499,13 +499,15 @@ mod tests {
     /// fails. No value-reading implementation can do both.
     #[tokio::test]
     async fn the_default_presence_implementation_reads_the_value() {
-        struct UnreadableProvider;
+        struct UnreadableProvider {
+            namespace: String,
+        }
 
         #[async_trait]
         impl SecretProvider for UnreadableProvider {
             async fn get(&self, _id: &SecretId) -> Result<SecretBytes, SecretError> {
                 Err(SecretError::Backend {
-                    provider: "fixture".to_string(),
+                    provider: self.namespace.clone(),
                     message: "value read attempted".to_string(),
                 })
             }
@@ -523,7 +525,7 @@ mod tests {
             }
 
             fn namespace(&self) -> &str {
-                "fixture"
+                &self.namespace
             }
 
             fn supports_versions(&self) -> bool {
@@ -531,10 +533,12 @@ mod tests {
             }
         }
 
-        let error = UnreadableProvider
-            .contains(&SecretId::new("alpha", "token"))
-            .await
-            .expect_err("the default presence check reads the value, so a read failure surfaces");
+        let error = UnreadableProvider {
+            namespace: "fixture".to_string(),
+        }
+        .contains(&SecretId::new("alpha", "token"))
+        .await
+        .expect_err("the default presence check reads the value, so a read failure surfaces");
         assert!(error.to_string().contains("value read attempted"));
     }
 
