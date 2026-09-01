@@ -340,7 +340,46 @@ fn assert_case_coverage(
                 run.transcript.message_count == 2,
                 "message count",
             )?;
-            ensure_case(case_name, run.providers.len() == 1, "provider count")
+            ensure_case(case_name, run.providers.len() == 1, "provider count")?;
+            ensure_case(
+                case_name,
+                run.evidence.execution_id.as_deref()
+                    == Some("hxe-019c13e0-8080-7000-8000-000000000001"),
+                "execution evidence identity",
+            )?;
+            ensure_case(
+                case_name,
+                run.evidence
+                    .trace_spans
+                    .iter()
+                    .map(|span| span.span_id)
+                    .collect::<Vec<_>>()
+                    == [2, 1],
+                "execution evidence span order",
+            )?;
+            let recording = run
+                .evidence
+                .flight_recording
+                .as_ref()
+                .ok_or_else(|| invalid(case_name, "flight recording metadata"))?;
+            ensure_case(
+                case_name,
+                recording.path.is_none(),
+                "public flight recording path suppression",
+            )?;
+            ensure_case(
+                case_name,
+                recording.retained_events == 64 && recording.dropped_events == 3,
+                "flight recording event counts",
+            )?;
+            ensure_case(
+                case_name,
+                run.evidence
+                    .gaps
+                    .iter()
+                    .any(|gap| gap.component == "otel_export" && gap.code == "export_failed"),
+                "explicit execution evidence gap",
+            )
         }
         "session-lineage-failure-approval" => {
             ensure_case(
