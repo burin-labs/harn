@@ -739,7 +739,7 @@ fn json_schema_large_integer_multiple_of_is_exact() {
 }
 
 #[test]
-fn jsonschema_arbitrary_precision_feature_preserves_large_integer_divisor() {
+fn jsonschema_preserves_large_integer_divisor_without_global_number_reencoding() {
     const LARGE: i64 = 9_007_199_254_740_993;
     let schema = serde_json::json!({"type": "integer", "multipleOf": LARGE});
     let validator = jsonschema::draft202012::new(&schema).expect("compile large-integer schema");
