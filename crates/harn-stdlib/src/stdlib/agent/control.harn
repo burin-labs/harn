@@ -74,17 +74,23 @@ pub fn agent_loop_remaining_calls(current_limit: int?, iteration: int?) -> int? 
 }
 
 /**
- * The calls the loop holds back so verification, recovery, and terminal
- * reporting can still run once the model's working budget is spent.
+ * The calls a run INTENDS to preserve for verification, recovery, and terminal
+ * reporting once the model's working budget is spent.
  *
- * ONE owner for that arithmetic. Before this there was a single reserve
- * (`reserved_terminal_verify_iterations`) covering verification alone; bounded
- * recovery and the terminal wrap-up spent unbudgeted calls AFTER the loop had
- * already declared itself exhausted, which is how a run reached its terminal
- * region with no way to finish reporting.
+ * NOT A WITHHOLDING MECHANISM TODAY. This is arithmetic: it computes a number
+ * that is measured and warned about, and nothing draws from it. The three
+ * spenders each enforce their own independent policy — verification decrements
+ * `terminal_verify_reserve_remaining` from `stall_config`, recovery is bounded
+ * by `__agent_loop_max_consecutive_recoveries`, and terminal reporting is gated
+ * by `final_wrapup`. Changing this total therefore moves the projection and its
+ * warning without reserving a single call. Making one shared policy actually
+ * drive those spenders is tracked separately; until then, read every value here
+ * as intent, not as a guarantee.
  *
- * `total` is computed here rather than passed in, so no caller can maintain a
- * second number that drifts from its parts.
+ * What it does own is the arithmetic. `total` is computed here rather than
+ * passed in, so no caller can maintain a second number that drifts from its
+ * parts, and the recovery input comes from the bound's owner rather than a
+ * literal.
  *
  * @effects: []
  * @errors: []

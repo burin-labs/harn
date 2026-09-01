@@ -4,9 +4,13 @@ import { __agent_loop_max_consecutive_recoveries } from "std/agent/loop_turn_sco
 import { agent_emit_event } from "std/agent/state"
 
 /**
- * Per-run call-budget state: the reserve this run holds back, whether the
- * shortfall warning has already been raised, and whether the agent-visible
+ * Per-run call-budget state: the reserve this run INTENDS to preserve, whether
+ * the shortfall warning has already been raised, and whether the agent-visible
  * signal is enabled at all.
+ *
+ * The reserve is a measured projection, not a withholding mechanism. Nothing
+ * draws from it; verification, recovery, and terminal reporting each enforce
+ * their own policy. See `agent_loop_call_reserve` for the full account.
  *
  * The warning is latched rather than recomputed per turn. Repeating it every
  * turn under the boundary would spend the agent's context to say the same
@@ -52,6 +56,12 @@ pub fn __agent_loop_call_budget_new(opts: any, verification: int?) -> dict {
  * Project the remaining call budget BEFORE the turn spends anything, so a
  * shortfall is visible while the agent can still act on it instead of being
  * discovered in the terminal region.
+ *
+ * This measures and warns. It does not reserve: no call is withheld here, and
+ * the emitted `reserve` is what the run intends to keep, not what it has
+ * secured. A reader of `harn.agent_loop_call_budget_projection.v1` should treat
+ * `reserve` and `reserve_shortfall` as a forecast about whether the remaining
+ * budget can cover the terminal work, not as evidence that it will.
  *
  * `state` carries the run's reserve and latch plus this turn's `iteration` and
  * `max`, so the loop hands over one value instead of threading four.
