@@ -657,6 +657,7 @@ const SINGLE_SUBSCHEMA_KEYWORDS: &[&str] = &[
 const ARRAY_SUBSCHEMA_KEYWORDS: &[&str] = &["allOf", "anyOf", "oneOf", "prefixItems"];
 const MAP_SUBSCHEMA_KEYWORDS: &[&str] = &[
     "$defs",
+    "definitions",
     "dependentSchemas",
     "patternProperties",
     "properties",
@@ -1303,6 +1304,27 @@ mod tests {
         serde_json::from_value::<ToolCatalog>(nested_resource)
             .expect("a local pointer resolves from its containing schema resource");
 
+        let mut legacy_definitions = valid_catalog_json();
+        legacy_definitions["tools"][0]["outputSchema"] = json!({
+            "definitions": {
+                "Legacy": {"$ref": "#/components/schemas/Result"}
+            },
+            "$ref": "#/definitions/Legacy"
+        });
+        let legacy_catalog: ToolCatalog = serde_json::from_value(legacy_definitions)
+            .expect("Draft 2020-12 retains definitions as a schema-valued map");
+        let legacy_projected = legacy_catalog
+            .mcp_tool(&legacy_catalog.tools[0])
+            .expect("legacy definitions receive the same standalone MCP projection");
+        assert_eq!(
+            legacy_projected["outputSchema"]["definitions"]["Legacy"]["$ref"],
+            "#/$defs/Result"
+        );
+        assert_eq!(
+            legacy_projected["outputSchema"]["$defs"]["Result"]["type"],
+            "object"
+        );
+
         let mut dangling_anchor = valid_catalog_json();
         dangling_anchor["tools"][0]["outputSchema"] = json!({"$ref": "#missing"});
         assert!(serde_json::from_value::<ToolCatalog>(dangling_anchor).is_err());
@@ -1329,7 +1351,8 @@ mod tests {
             "type": "object",
             "properties": {
                 "constant": {"const": literal.clone()},
-                "choice": {"enum": [literal.clone()]}
+                "choice": {"enum": [literal.clone()]},
+                "result": {"$ref": "#/components/schemas/Result"}
             }
         });
         let catalog: ToolCatalog = serde_json::from_value(value)
@@ -1345,7 +1368,11 @@ mod tests {
             projected["outputSchema"]["properties"]["choice"]["enum"][0],
             literal
         );
-        assert!(projected["outputSchema"].get("$defs").is_none());
+        assert_eq!(
+            projected["outputSchema"]["$defs"]["Result"]["type"],
+            "object"
+        );
+        assert!(projected["outputSchema"]["$defs"].get("Missing").is_none());
     }
 
     #[test]
