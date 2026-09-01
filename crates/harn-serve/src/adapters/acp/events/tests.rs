@@ -664,15 +664,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         },
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
-    events.push(AgentEvent::PurposeLabel {
-        session_id: "session-1".to_string(),
-        label: "Searching for GitHub issues".to_string(),
-        source: harn_vm::agent_events::PurposeLabelSource::Declared,
-        iteration: Some(0),
-        tool_call_ids: Vec::new(),
-        tool_call_count: Some(3),
-    });
-    events
+    schema_contract::with_purpose_label(events)
 }
 
 #[tokio::test(flavor = "current_thread")]

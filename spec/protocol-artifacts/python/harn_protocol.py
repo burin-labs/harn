@@ -310,6 +310,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
     "reserved_terminal_verify",

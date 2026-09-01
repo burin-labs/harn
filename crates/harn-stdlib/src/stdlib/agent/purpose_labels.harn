@@ -281,7 +281,7 @@ pub fn agent_purpose_label_emit(
   label: string,
   iteration: any = nil,
   tool_call_count: any = nil,
-) {
+) -> nil {
   if trim(label) == "" {
     return nil
   }
