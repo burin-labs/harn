@@ -172,6 +172,14 @@ pub(crate) fn prepare_command(
     let mut command = process_sandbox::std_command_for(&spec.program, &spec.args)
         .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
 
+    let mut env: Vec<_> = spec
+        .env
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let mut env_remove = spec.env_remove.clone();
+    process_sandbox::apply_active_rustc_wrapper_policy(&mut env, &mut env_remove);
+
     if let Some(cwd) = spec.cwd.as_ref() {
         process_sandbox::enforce_process_cwd(cwd)
             .map_err(|e| ProcessError::SandboxCwd(format!("{e:?}")))?;
@@ -203,10 +211,10 @@ pub(crate) fn prepare_command(
     // child harn/burin process that must not write into the parent's
     // event-log or transcript dirs). Applied before `spec.env`, so an
     // explicitly supplied override still wins.
-    for key in &spec.env_remove {
+    for key in &env_remove {
         command.env_remove(key);
     }
-    for (key, value) in &spec.env {
+    for (key, value) in &env {
         command.env(key, value);
     }
 

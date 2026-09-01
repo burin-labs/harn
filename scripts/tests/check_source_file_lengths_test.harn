@@ -63,6 +63,7 @@ fn init_repo(process: HarnessProcess, root: string) -> nil {
   git_ok(process, root, ["init", "-q", "."])
   git_ok(process, root, ["config", "user.name", "Source Ratchet Test"])
   git_ok(process, root, ["config", "user.email", "source-ratchet@example.invalid"])
+  git_ok(process, root, ["config", "commit.gpgsign", "false"])
   return nil
 }
 

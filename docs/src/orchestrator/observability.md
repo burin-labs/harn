@@ -118,7 +118,9 @@ histogram_quantile(
 ```
 
 `harn orchestrator inspect` also surfaces the persisted trigger metric snapshot
-for local diagnosis:
+for local diagnosis. Its JSON `recent_dispatches` entries include `trace_id`
+and `run_path` when Harn persisted a run, so trace viewers can open the stable
+run view without querying Harn's event database:
 
 ```bash
 harn orchestrator inspect --state-dir ./.harn/orchestrator
