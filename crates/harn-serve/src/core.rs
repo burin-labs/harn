@@ -13,7 +13,7 @@ use harn_vm::event_log::{
 use harn_vm::llm::vm_value_to_export_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
-use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm, VmValue};
+use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm};
 use tokio::task::LocalSet;
 use tracing::Instrument;
 
