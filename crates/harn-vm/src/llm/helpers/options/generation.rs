@@ -550,6 +550,7 @@ pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result
                 &opts.model,
                 &opts.thinking,
                 *option,
+                opts.provider_contract_probe,
             )
         };
         admitted.map_err(|error| {

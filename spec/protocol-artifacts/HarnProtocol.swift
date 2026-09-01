@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static let artifactVersion = "0.10.125-dev"
+    public static let artifactVersion = "0.10.126-dev"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let toolPermissionDecisionSchema = "harn.tool_permission_decision.v1"
     public static let toolPermissionActivitySchema = "harn.tool_permission_activity.v1"
@@ -113,6 +113,7 @@ public enum HarnProtocolConstants {
         "orchestration_decision",
         "pack_thinking_stripped",
         "progress_reported",
+        "purpose_label",
         "repair_output_contract_applied",
         "require_successful_tools_violation",
         "reserved_terminal_verify",

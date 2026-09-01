@@ -472,6 +472,7 @@ async fn vm_call_llm_api_with_body_inner(
             provider,
             model,
             &opts.thinking,
+            opts.provider_contract_probe,
         );
     }
     if provider == "openrouter"

@@ -637,6 +637,24 @@ pub fn provider_tool_probe_campaign_catalog_routes(
   return __catalog_routes_from_models(catalog, include_expensive)
 }
 
+pub fn provider_tool_probe_campaign_filter_routes(
+  routes: list<ProviderToolProbeRoute>,
+  providers: list<string>,
+  exclude_local: bool,
+) -> list<ProviderToolProbeRoute> {
+  let selected: list<ProviderToolProbeRoute> = []
+  for route in routes {
+    if exclude_local && route.local {
+      continue
+    }
+    if len(providers) > 0 && !providers.contains(route.provider) {
+      continue
+    }
+    selected = selected + [route]
+  }
+  return selected
+}
+
 pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
   if mode == "both" {
     return ["non-streaming", "streaming"]
@@ -699,29 +717,69 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "stop_sequences",
       category: "options",
-      description:
-        "Stop sequence option is either accepted by the route or catalog-gated before dispatch.",
-      runner: "planned_llm_call",
+      description: "Stop sequence acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "stop",
       modes: ["non-streaming"],
       tool_formats: ["none"],
       cheap: true,
     },
     {
-      id: "presence_frequency_penalties",
+      id: "presence_penalty",
       category: "options",
-      description:
-        "Presence/frequency penalties are provider-gated so unsupported routes fail before live API 400s.",
-      runner: "planned_llm_call",
+      description: "Presence-penalty acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "presence_penalty",
       modes: ["non-streaming"],
       tool_formats: ["none"],
       cheap: true,
     },
     {
-      id: "temperature_top_p_policy",
+      id: "frequency_penalty",
       category: "options",
-      description:
-        "Route-specific temperature/top_p policy is catalog-owned, including Kimi-style constraints.",
-      runner: "planned_llm_call",
+      description: "Frequency-penalty acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "frequency_penalty",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "temperature",
+      category: "options",
+      description: "Temperature acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "temperature",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "top_p",
+      category: "options",
+      description: "Top-p acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "top_p",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "top_k",
+      category: "options",
+      description: "Top-k acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "top_k",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "seed",
+      category: "options",
+      description: "Seed acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "seed",
       modes: ["non-streaming"],
       tool_formats: ["none"],
       cheap: true,

@@ -17,6 +17,7 @@ fn finalized_anthropic_body(payload: &LlmRequestPayload) -> serde_json::Value {
         &payload.provider,
         &payload.model,
         &payload.thinking,
+        None,
     );
     body
 }

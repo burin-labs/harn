@@ -943,6 +943,7 @@ pub(crate) fn extract_llm_options(
         presence_penalty,
         parallel_tool_calls,
         portable_option_intent,
+        provider_contract_probe: crate::llm::provider_contract_probe::current_portable_option(),
         fast,
         output_format,
         output_schema,
