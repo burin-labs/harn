@@ -632,6 +632,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
+	./scripts/tests/sccache_action_cache_size_test.sh
 	./scripts/tests/check_release_warm_build_budget_test.sh
 	./scripts/tests/ci_wait_for_run_artifacts_test.sh
 	./scripts/tests/ci_write_walltime_report_test.sh
@@ -655,6 +656,7 @@ test-pr-gate-scripts:
 	./scripts/tests/sign_local_macos_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
+	./scripts/tests/cargo_toolchain_pin_test.sh
 	./scripts/tests/cargo_target_seed_test.sh
 	./scripts/tests/cli_aot_merge_driver_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh

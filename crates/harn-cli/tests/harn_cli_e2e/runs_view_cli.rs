@@ -88,6 +88,62 @@ fn runs_view_prints_run_view_json() {
 }
 
 #[test]
+fn runs_view_rejects_unowned_execution_evidence_on_the_real_cli_path() {
+    let temp = TempDir::new().unwrap();
+    let run_path = temp.path().join("run.json");
+    fs::write(
+        &run_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "_type": "run_record",
+            "id": "host-run-id",
+            "workflow_id": "wf",
+            "task": "do work",
+            "status": "completed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "evidence": {
+                "schema_version": 1,
+                "execution_id": "host-run-id",
+                "trace_spans": [{
+                    "kind": "llm_call",
+                    "name": "untrusted span",
+                    "metadata": {"harn.execution.id": "host-run-id"}
+                }],
+                "flight_recording": {
+                    "schema_version": 1,
+                    "execution_id": "host-run-id",
+                    "format": "harn.flight.v1+json",
+                    "path": "/private/untrusted.json",
+                    "content_hash": format!("blake3:{}", "a".repeat(64)),
+                    "byte_length": 10,
+                    "retained_events": 1,
+                    "dropped_events": 0,
+                    "value_policy": "omitted"
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = run_harn(&["runs", "view", run_path.to_str().unwrap(), "--json"]);
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let evidence = &stdout_json(&output)["evidence"];
+    assert!(evidence["execution_id"].is_null());
+    assert!(evidence["flight_recording"].is_null());
+    assert!(evidence["trace_spans"][0]["metadata"]
+        .get("harn.execution.id")
+        .is_none());
+    assert!(evidence["gaps"].as_array().unwrap().iter().any(|gap| {
+        gap["component"] == "execution_identity" && gap["code"] == "projection_invalid"
+    }));
+}
+
+#[test]
 fn runs_view_prints_session_view_json_for_directory() {
     let temp = TempDir::new().unwrap();
     write_run(&temp.path().join("one.json"), "run_1", "session_1");

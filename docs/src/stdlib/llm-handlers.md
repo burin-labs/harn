@@ -571,7 +571,7 @@ shadow the builtins.
 | Function | Signature | Description |
 |---|---|---|
 | `model_info(selector)` | `(string) -> dict` | Wraps `llm_model_info`. Always returns a dict; `catalog` field is nil for unknown models. |
-| `execution_contract(selector)` | `(string) -> dict` | Wraps `llm_execution_contract`. Returns the resolved route facts safe for durable receipts; `generation_defaults` includes only Harn-validated fields, never arbitrary operator overlays. |
+| `execution_contract(selector)` | `(string) -> ModelExecutionContract` | Validates the closed `harn.llm.execution-contract/v2` result from `llm_execution_contract`. The receipt records the requested model, alias chain, resolved provider/model, and catalog version; `generation_defaults` includes only Harn-validated fields, never arbitrary operator overlays. |
 | `resolved_options(opts)` | `(dict) -> dict` | Wraps `llm_resolved_options`. Required: `opts.model`. |
 | `named_model_ladder(name)` | `(string) -> dict?` | Returns one catalog-owned `[model_ladders.<name>]` row, including its ordered `steps`; unknown names return `nil`. |
 | `has_capability(model, capability)` | `(string, string) -> bool` | Capability ∈ `{"thinking", "tool_search", "interleaved_thinking", "prompt_caching", "vision", "audio", "pdf", "files_api", "reasoning_effort", "native_tools"}`. |

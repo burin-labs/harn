@@ -1299,6 +1299,52 @@ harness.llm.call("...", nil, {model: "claude-sonnet-5"})
 The `HARN_LLM_MODEL` environment variable sets the default model when none
 is specified in the script.
 
+### Model resolution guarantees
+
+Harn resolves a model selector and its provider as one decision before a
+provider call. A qualified selector such as `openai:gpt-5.6-sol` is a hard
+provider constraint. Harn rejects it if the catalog assigns the model to a
+different provider, if a separate `provider` option disagrees, or if a later
+routing step changes the provider. It does not fall through to the default or
+local provider.
+
+Catalog ownership applies to Harn's built-in provider namespaces unless the
+provider registry declares the `model_proxy` feature. A custom adapter, the
+generic local OpenAI-compatible adapter, or a catalogued router may deliberately
+serve an upstream model identity, while its selected adapter remains a hard
+transport constraint. This keeps gateways and test adapters composable without
+allowing `ollama:gpt-5.6-sol` or another contradictory namespace-owned selector
+to escape to the wrong provider.
+
+An explicit provider can name a private or newly released model that is not in
+Harn's catalog, or proxy a catalogued upstream model:
+
+```harn
+harness.llm.call("...", nil, {
+  provider: "my_proxy",
+  model: "private-model-2026-08"
+})
+```
+
+An unqualified name close to a known alias fails with the compiled catalog
+version and suggested names. This catches alias drift while leaving explicit
+provider-native IDs extensible.
+
+Every provider-call request receipt records:
+
+- `requested_model`
+- `alias_chain`
+- `resolved_provider`
+- `resolved_model`
+- `model_catalog_version`
+
+The runtime compares that receipt identity with the transport route before
+dispatch. A mismatch fails without making a provider request. Use
+`std/llm/catalog.execution_contract` to inspect the same secret-free decision;
+its `harn.llm.execution-contract/v2` record uses `catalog_version` for the
+catalog field and also includes wire-model, tool-format, taxonomy, and validated
+generation defaults.
+
 ### Serverless vs. dedicated routes
 
 Each catalog row carries an `availability` field that distinguishes the

@@ -360,7 +360,9 @@ pub(super) fn prepare_workflow_state(
         optional_string_option(options, "root_run_id").or_else(|| parent_run_id.clone());
     let new_run_id = crate::orchestration::new_id("run");
     let execution_id = crate::current_execution_scope()
-        .unwrap_or_else(crate::mint_execution_scope)
+        .ok_or_else(|| {
+            VmError::Runtime("workflow_execute: active execution scope unavailable".to_string())
+        })?
         .to_string();
 
     let mut run = resumed_run.unwrap_or_else(|| RunRecord {

@@ -76,6 +76,36 @@ fn main(harness: Harness) {
     .unwrap();
 }
 
+fn write_governed_registry_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { tool_registry_from } from "std/tools"
+
+fn main(harness: Harness) {
+  const tools = tool_registry_from([
+    {
+      name: "operator_receipt",
+      description: "Read one operator receipt.",
+      parameters: {},
+      governance: {audiences: ["catalog", "cli"]},
+      handler: {_args -> {surface: "cli"}},
+    },
+    {
+      name: "remote_probe",
+      description: "Probe one remote integration.",
+      parameters: {},
+      governance: {audiences: ["catalog", "mcp"]},
+      handler: {_args -> {surface: "mcp"}},
+    },
+  ], {name: "governed-tools"})
+  harness.tools.mcp_tools(tools)
+}
+"#,
+    )
+    .unwrap();
+}
+
 fn write_reload_registry_fixture(temp: &TempDir, tool_name: &str, value: &str) {
     fs::write(
         temp.path().join("server.harn"),
@@ -233,6 +263,38 @@ fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
         called["result"]["structuredContent"]["message"],
         "Hello, Harn!"
     );
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface: runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_excludes_and_denies_tools_without_the_mcp_audience() {
+    let temp = TempDir::new().unwrap();
+    write_governed_registry_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("governed harn serve mcp", command);
+
+    let listed = client.request(stable_request(1, "tools/list", json!({})));
+    let names = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["remote_probe"]);
+
+    let denied = client.request(stable_request(
+        2,
+        "tools/call",
+        json!({"name": "operator_receipt", "arguments": {}}),
+    ));
+    assert_eq!(denied["error"]["code"], -32602);
+    assert_eq!(denied["error"]["message"], "Unknown tool: operator_receipt");
     client.shutdown_expect_success();
 }
 

@@ -80,6 +80,22 @@ impl TopLevelEntry {
 }
 
 impl Vm {
+    pub(super) fn prepare_top_level_ambient(
+        &mut self,
+    ) -> crate::orchestration::AmbientExecutionScope {
+        self.prepare_execution_for_top_level();
+        crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
+            self.execution_id.clone(),
+            self.llm_mock_context.clone(),
+            self.worker_registry.clone(),
+            self.daemon_registry.clone(),
+            self.trigger_registry.clone(),
+            self.session_runtime.clone(),
+            self.tracing_runtime.clone(),
+            self.agent_host_session_runtime.clone(),
+        )
+    }
+
     /// Execute a compiled callable entry with explicit values under a host
     /// wall-clock limit.
     ///
@@ -111,19 +127,8 @@ impl Vm {
         entry: TopLevelEntry,
     ) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
-        self.prepare_execution_for_top_level();
         let registry = self.pool_registry.clone();
-        let owner = self.execution_id.clone();
-        let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
-            owner,
-            self.llm_mock_context.clone(),
-            self.worker_registry.clone(),
-            self.daemon_registry.clone(),
-            self.trigger_registry.clone(),
-            self.session_runtime.clone(),
-            self.tracing_runtime.clone(),
-            self.agent_host_session_runtime.clone(),
-        );
+        let ambient = self.prepare_top_level_ambient();
         let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_entry_scoped(entry).await
         });

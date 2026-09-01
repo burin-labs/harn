@@ -405,6 +405,7 @@ mod tests {
 
     fn span(span_id: u64, parent_id: Option<u64>, kind: SpanKind, name: &str, dur: u64) -> Span {
         Span {
+            execution_id: None,
             trace_id: "trace_test".to_string(),
             span_id,
             parent_id,

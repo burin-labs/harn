@@ -50,6 +50,27 @@ pub(super) fn link_options_with_auth(
     link: &ChainLink,
 ) -> Result<LlmCallOptions, RoutingErrorSnapshot> {
     let mut opts = link_options(base, policy, link);
+    let mut resolution =
+        base.model_resolution
+            .clone()
+            .unwrap_or_else(|| crate::llm_config::ModelResolution {
+                requested_model: link.model.clone(),
+                alias_chain: Vec::new(),
+                resolved_provider: link.provider.clone(),
+                resolved_model: link.model.clone(),
+                catalog_version: crate::llm_config::MODEL_CATALOG_VERSION.to_string(),
+            });
+    if let Err(error) = resolution.resolve_route(&link.provider, &link.model) {
+        return Err(RoutingErrorSnapshot {
+            category: "invalid_request".to_string(),
+            code: Some("model_resolution_failed".to_string()),
+            reason: Some("route_identity_mismatch".to_string()),
+            attempt_count: Some(0),
+            message: error.to_string(),
+            status: None,
+        });
+    }
+    opts.model_resolution = Some(resolution);
     if let Err(error) = crate::llm::helpers::validate_options(&opts) {
         return Err(RoutingErrorSnapshot {
             category: "invalid_request".to_string(),
