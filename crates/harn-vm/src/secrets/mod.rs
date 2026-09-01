@@ -386,6 +386,23 @@ pub enum SecretError {
     All(Vec<SecretError>),
 }
 
+impl SecretError {
+    /// Whether this error means "the store does not hold it" rather than "the
+    /// store could not answer".
+    ///
+    /// The distinction decides a caller's policy — a missing credential is a
+    /// setup step, an unreachable backend is an outage — so it lives on the
+    /// error rather than being re-derived by each caller. A chain reports
+    /// absence only when every provider in it reported absence.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::NotFound { .. } => true,
+            Self::All(errors) => !errors.is_empty() && errors.iter().all(Self::is_not_found),
+            _ => false,
+        }
+    }
+}
+
 impl fmt::Display for SecretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -551,6 +568,26 @@ pub trait SecretProvider: Send + Sync {
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError>;
     async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError>;
 
+    /// Whether this provider holds `id`, without reading its value.
+    ///
+    /// Presence and value are the same question for most backends and a very
+    /// different one for an operating-system keychain: on macOS, reading an
+    /// item's data raises an access dialog for any binary not already on that
+    /// item's ACL, while enumerating item attributes raises none. Callers that
+    /// only need a yes or no — `connect status` deciding whether a connector is
+    /// usable, a doctor check — ask this so a machine with many stored
+    /// credentials does not answer one status command with a burst of dialogs.
+    ///
+    /// The default reads the value, which is correct wherever the two cost the
+    /// same. Backends where they differ override it.
+    async fn contains(&self, id: &SecretId) -> Result<bool, SecretError> {
+        match self.get(id).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_not_found() => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     async fn read_scoped(&self, request: SecretReadRequest) -> Result<SecretBytes, SecretError> {
         ensure_scoped_secret_access_allowed("read", &request.id)?;
         self.get(&request.id).await
@@ -676,6 +713,32 @@ impl SecretProvider for ChainSecretProvider {
         }
 
         Err(SecretError::All(errors))
+    }
+
+    async fn contains(&self, id: &SecretId) -> Result<bool, SecretError> {
+        if self.providers.is_empty() {
+            return Err(SecretError::NoProviders {
+                namespace: self.namespace.clone(),
+            });
+        }
+
+        // Mirrors `get`: the first provider that holds it answers, and a chain
+        // where every provider errored reports every error rather than a bare
+        // "absent" that would read as a definitive no.
+        let mut errors = Vec::new();
+        for provider in &self.providers {
+            match provider.contains(id).await {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => errors.push(error),
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(false)
+        } else {
+            Err(SecretError::All(errors))
+        }
     }
 
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
