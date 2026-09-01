@@ -112,6 +112,13 @@ pipeline test_reserve_boundary_is_projected_before_the_terminal_region(
       assert(len(projections) > 0, "the loop must project its remaining calls each turn")
       for projection in projections {
         assert_eq(projection.measured, true)
+        // The live loop carries the grant policy, not a number rebuilt for the
+        // receipt: every bucket reports a remaining count, and none exceeds the
+        // allowance it started from (#7762).
+        assert(projection.grants_remaining != nil, "the projection reports the live grant state")
+        assert(projection.grants_remaining.verification <= projection.reserve.verification)
+        assert(projection.grants_remaining.recovery <= projection.reserve.recovery)
+        assert(projection.grants_remaining.terminal_report <= projection.reserve.terminal_report)
         assert(projection.remaining != nil, "a projected turn carries a measurement")
         assert_eq(
           projection.reserve.total,
