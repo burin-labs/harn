@@ -116,7 +116,7 @@ reqwest-eventsource = "0.6"
 rmcp = { version = "3.1.0", default-features = false, features = ["client", "transport-child-process"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
-jsonschema = { version = "0.51", default-features = false }
+jsonschema = { version = "0.51", default-features = false, features = ["arbitrary-precision"] }
 rcgen = "0.14"
 libc = "0.2"
 tokio-stream = "0.1"

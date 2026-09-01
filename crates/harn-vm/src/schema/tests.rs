@@ -9,7 +9,7 @@ use super::validate::{validate_schema_value, ValidationOptions};
 use super::{
     normalize_provider_json_schema, reject_unsatisfiable_output_schema, schema_assert_param,
     schema_is_value, schema_report_value, schema_result_value, schema_to_json_schema_value,
-    schema_to_openapi_schema_value,
+    schema_to_openapi_schema_value, vm_value_to_serde_json,
 };
 
 fn s(v: &str) -> VmValue {
@@ -695,11 +695,92 @@ fn json_schema_fractional_multiple_of_accepts_and_rejects_consistently() {
     assert!(schema_is_value(&VmValue::Float(1.5), &schema).unwrap());
     assert!(!schema_is_value(&VmValue::Float(1.3), &schema).unwrap());
 
+    let decimal_tenth = make_vm_dict(vec![
+        ("type", s("number")),
+        ("multiple_of", VmValue::Float(0.1)),
+    ]);
+    let camel_tenth = make_vm_dict(vec![
+        ("type", s("number")),
+        ("multipleOf", VmValue::Float(0.1)),
+    ]);
+    assert!(schema_is_value(&VmValue::Float(0.3), &decimal_tenth).unwrap());
+    assert!(!schema_is_value(&VmValue::Float(0.31), &decimal_tenth).unwrap());
+    assert_eq!(
+        vm_value_to_serde_json(&schema_to_json_schema_value(&decimal_tenth).unwrap()),
+        vm_value_to_serde_json(&schema_to_json_schema_value(&camel_tenth).unwrap())
+    );
+
     let invalid = make_vm_dict(vec![
         ("type", s("number")),
         ("multipleOf", VmValue::Float(0.0)),
     ]);
     assert_schema_error_contains(&invalid, "greater than zero");
+
+    let decimal = make_vm_dict(vec![
+        ("type", s("number")),
+        (
+            "multipleOf",
+            VmValue::decimal(rust_decimal::Decimal::new(1, 1)),
+        ),
+    ]);
+    assert_schema_error_contains(&decimal, "finite number greater than zero");
+}
+
+#[test]
+fn json_schema_large_integer_multiple_of_is_exact() {
+    const LARGE: i64 = 9_007_199_254_740_993;
+    let schema = make_vm_dict(vec![
+        ("type", s("int")),
+        ("multipleOf", VmValue::Int(LARGE)),
+    ]);
+
+    assert!(schema_is_value(&VmValue::Int(LARGE), &schema).unwrap());
+    assert!(!schema_is_value(&VmValue::Int(LARGE - 1), &schema).unwrap());
+}
+
+#[test]
+fn jsonschema_arbitrary_precision_feature_preserves_large_integer_divisor() {
+    const LARGE: i64 = 9_007_199_254_740_993;
+    let schema = serde_json::json!({"type": "integer", "multipleOf": LARGE});
+    let validator = jsonschema::draft202012::new(&schema).expect("compile large-integer schema");
+
+    assert!(validator.is_valid(&serde_json::json!(LARGE)));
+    assert!(!validator.is_valid(&serde_json::json!(LARGE - 1)));
+}
+
+#[test]
+fn json_schema_export_preserves_integer_constraints() {
+    const LARGE: i64 = 9_007_199_254_740_993;
+    let schema = make_vm_dict(vec![
+        ("type", s("int")),
+        ("minimum", VmValue::Int(LARGE)),
+        ("maximum", VmValue::Int(LARGE + 2)),
+        ("multipleOf", VmValue::Int(LARGE)),
+    ]);
+    let exported = schema_to_json_schema_value(&schema).unwrap();
+    let dict = exported.as_dict().expect("exported schema dict");
+
+    assert!(matches!(dict.get("minimum"), Some(VmValue::Int(value)) if *value == LARGE));
+    assert!(matches!(dict.get("maximum"), Some(VmValue::Int(value)) if *value == LARGE + 2));
+    assert!(matches!(dict.get("multipleOf"), Some(VmValue::Int(value)) if *value == LARGE));
+}
+
+#[test]
+fn json_schema_rejects_non_finite_or_non_interface_numeric_constraints() {
+    let decimal_minimum = make_vm_dict(vec![
+        ("type", s("number")),
+        (
+            "minimum",
+            VmValue::decimal(rust_decimal::Decimal::new(1, 1)),
+        ),
+    ]);
+    assert_schema_error_contains(&decimal_minimum, "minimum must be a finite number");
+
+    let infinite_maximum = make_vm_dict(vec![
+        ("type", s("number")),
+        ("maximum", VmValue::Float(f64::INFINITY)),
+    ]);
+    assert_schema_error_contains(&infinite_maximum, "maximum must be a finite number");
 }
 
 #[test]
