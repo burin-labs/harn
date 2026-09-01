@@ -52,7 +52,12 @@ const catalog: ToolCatalog = {
       ],
       execution: { taskSupport },
       governance: { audiences: ["cli", audience, "catalog"] },
-      cli: { command: ["widgets", "get"], hidden: false, arguments: {} },
+      cli: {
+        command: ["widgets", "get"],
+        aliases: [],
+        hidden: false,
+        arguments: {},
+      },
       namespace: "widgets",
       deferLoading: false,
       source: {
@@ -88,5 +93,7 @@ if (
   tool.cli.command.join(" ") !== "widgets get" ||
   catalog.components?.schemas.Widget === undefined
 ) {
-  throw new Error("generated harn-tools binding lost the typed catalog fixture");
+  throw new Error(
+    "generated harn-tools binding lost the typed catalog fixture",
+  );
 }
