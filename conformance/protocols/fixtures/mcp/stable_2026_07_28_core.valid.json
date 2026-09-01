@@ -123,6 +123,33 @@
           "supported": ["2026-07-28"]
         }
       }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "data": "AQI=",
+            "mimeType": "image/png"
+          },
+          {
+            "type": "audio",
+            "data": "AwQ=",
+            "mimeType": "audio/wav"
+          },
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "harn://resource/blob",
+              "blob": "BQY=",
+              "mimeType": "application/octet-stream"
+            }
+          }
+        ],
+        "resultType": "complete"
+      }
     }
   ],
   "matrix": {
@@ -131,7 +158,7 @@
     "case": "discover-metadata-cache-input-required-unsupported-version",
     "source": {
       "kind": "hand_authored",
-      "description": "Pins Harn's stable MCP surface: request metadata, standard HTTP headers, server/discover, cache hints, input-required results, unsupported-version errors, and JSON Schema 2020-12 tool schemas."
+      "description": "Pins Harn's stable MCP surface: request metadata, standard HTTP headers, server/discover, cache hints, input-required results, unsupported-version errors, binary content annotations, and JSON Schema 2020-12 tool schemas."
     }
   }
 }
