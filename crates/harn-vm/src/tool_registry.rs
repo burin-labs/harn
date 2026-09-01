@@ -82,22 +82,12 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
     let entries = registry_entries(registry)?;
     let mut tools = Vec::with_capacity(entries.len());
     let mut names = BTreeSet::new();
-    let mut command_owners = BTreeMap::<Vec<String>, String>::new();
     for entry in entries {
         let catalog = catalog_entry(entry)?;
         if !names.insert(catalog.name.clone()) {
             return Err(VmError::Runtime(format!(
                 "tool registry contains duplicate tool name {:?}",
                 catalog.name
-            )));
-        }
-        if let Some(previous) =
-            command_owners.insert(catalog.cli.command.clone(), catalog.name.clone())
-        {
-            return Err(VmError::Runtime(format!(
-                "tool registry CLI command '{}' is ambiguous: tools {previous:?} and {:?} claim it",
-                catalog.cli.command.join(" "),
-                catalog.name,
             )));
         }
         tools.push(catalog);
@@ -954,6 +944,26 @@ mod tests {
         VmValue::dict(tool)
     }
 
+    fn governed_entry_with_cli(name: &str, audiences: &[&str], command: &[&str]) -> VmValue {
+        let mut tool = match governed_entry(name, audiences) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        let mut cli = DictMap::new();
+        cli.insert(
+            "command".into(),
+            VmValue::List(
+                command
+                    .iter()
+                    .map(|part| string(part))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+        );
+        tool.insert("cli".into(), VmValue::dict(cli));
+        VmValue::dict(tool)
+    }
+
     #[test]
     fn defaults_command_to_namespace_and_name() {
         let mut tool = match entry("get_widget", None) {
@@ -1063,6 +1073,34 @@ mod tests {
     }
 
     #[test]
+    fn live_registry_validates_cli_paths_only_within_the_cli_audience() {
+        let shared_path = ["inspect"];
+        let registry_value = registry(vec![
+            governed_entry_with_cli("cli_visible", &["cli", "mcp"], &shared_path),
+            governed_entry_with_cli("dashboard_only", &["dashboard"], &shared_path),
+        ]);
+
+        let catalog = tool_registry_catalog(&registry_value)
+            .expect("a non-CLI tool may reuse a CLI presentation path");
+        assert_eq!(catalog.tools.len(), 2);
+        let cli = tool_registry_catalog_for_audience(&registry_value, ToolAudience::Cli)
+            .expect("the live CLI projection must use the typed contract validator");
+        assert_eq!(cli.tools.len(), 1);
+        assert_eq!(cli.tools[0].name, "cli_visible");
+
+        let conflicting = registry(vec![
+            governed_entry_with_cli("first", &["cli"], &shared_path),
+            governed_entry_with_cli("second", &["cli"], &shared_path),
+        ]);
+        let error = tool_registry_catalog(&conflicting)
+            .expect_err("two CLI-visible tools must not share a command path");
+        assert!(
+            error.to_string().contains("duplicate CLI command path"),
+            "the typed contract validator must own the collision: {error}"
+        );
+    }
+
+    #[test]
     fn rejects_empty_unknown_and_open_governance() {
         let mut missing_audiences = match entry("missing_audiences", None) {
             VmValue::Dict(tool) => (*tool).clone(),
@@ -1142,7 +1180,7 @@ mod tests {
             entry("second", Some(command())),
         ]))
         .unwrap_err();
-        assert!(error.to_string().contains("ambiguous"));
+        assert!(error.to_string().contains("duplicate CLI command path"));
     }
 
     #[test]
