@@ -181,14 +181,14 @@ fn tool_schema_exports_is_offline_typed_and_byte_deterministic() {
     let execution_marker = temp.path().join("main-executed.txt");
     fs::write(
         &contracts,
-        r#"
+        r"
 pub struct Envelope<T> {
   value: T
   tags: list<string>
 }
 pub type Request = {query: string, options: {limit: int}}
 pub type Response = Envelope<{id: string, score: float}>
-"#,
+",
     )
     .expect("write imported contracts");
     fs::write(
