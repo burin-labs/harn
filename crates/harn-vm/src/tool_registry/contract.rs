@@ -608,7 +608,7 @@ fn refs_for_offline_validation(
             let resolved = reference_for_offline_validation(reference, component_uris)?;
             object.insert(keyword.to_string(), JsonValue::String(resolved));
         }
-        Ok(())
+        Ok::<(), String>(())
     })?;
     Ok(value)
 }
