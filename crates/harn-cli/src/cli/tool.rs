@@ -1,4 +1,4 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Debug, Args)]
 pub(crate) struct ToolArgs {
@@ -43,9 +43,21 @@ pub(crate) struct ToolRunArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ToolSchemaArgs {
-    /// Harn script whose main pipeline publishes a registry with mcp_tools(...).
+    /// Harn script to inspect.
     pub file: String,
+    /// Tool owner to inspect: execute a published registry or statically read exports.
+    #[arg(long, value_enum, default_value_t = ToolSchemaSurface::Script)]
+    pub surface: ToolSchemaSurface,
     /// Pretty-print the JSON catalog.
     #[arg(long)]
     pub pretty: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ToolSchemaSurface {
+    /// Execute main and inspect its script-published tool registry.
+    #[default]
+    Script,
+    /// Compile public exports and their types without executing the script.
+    Exports,
 }

@@ -61,6 +61,36 @@ fn tool_new_and_skill_new_share_the_same_shape() {
 }
 
 #[test]
+fn tool_schema_defaults_to_script_and_accepts_offline_exports() {
+    let cli = Cli::parse_from(["harn", "tool", "schema", "server.harn"]);
+    let Command::Tool(args) = cli.command.unwrap() else {
+        panic!("expected tool command");
+    };
+    let ToolCommand::Schema(schema) = args.command else {
+        panic!("expected tool schema command");
+    };
+    assert_eq!(schema.surface, ToolSchemaSurface::Script);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "tool",
+        "schema",
+        "server.harn",
+        "--surface",
+        "exports",
+        "--pretty",
+    ]);
+    let Command::Tool(args) = cli.command.unwrap() else {
+        panic!("expected tool command");
+    };
+    let ToolCommand::Schema(schema) = args.command else {
+        panic!("expected tool schema command");
+    };
+    assert_eq!(schema.surface, ToolSchemaSurface::Exports);
+    assert!(schema.pretty);
+}
+
+#[test]
 fn local_stop_all_does_not_infer_a_provider() {
     let cli = Cli::parse_from(["harn", "local", "stop", "--all"]);
     let Command::Local(args) = cli.command.unwrap() else {

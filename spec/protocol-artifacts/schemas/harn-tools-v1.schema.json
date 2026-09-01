@@ -1,0 +1,555 @@
+{
+  "$defs": {
+    "SideEffectLevel": {
+      "description": "Rough side-effect taxonomy for the capability-ceiling check.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "No side effect declared (conservative default; permission logic\ntreats this as \"unknown → deny unless explicitly allowed\").",
+          "type": "string"
+        },
+        {
+          "const": "read_only",
+          "description": "Pure reads only.",
+          "type": "string"
+        },
+        {
+          "const": "workspace_write",
+          "description": "Writes to workspace files.",
+          "type": "string"
+        },
+        {
+          "const": "process_exec",
+          "description": "Runs subprocesses.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "Reaches external services over the network.",
+          "type": "string"
+        },
+        {
+          "const": "desktop_control",
+          "description": "Drives the physical desktop — synthetic mouse/keyboard input and screen\ncapture. The most invasive local class: it can operate ANY application\n(not just a sandboxed subprocess or a single network sink), inject\nkeystrokes that paste secrets or dismiss dialogs, and every screenshot\nexfiltrates whatever is on screen to the model. It therefore sits at the\ntop of the ceiling ladder — a policy must opt into it explicitly, above\neven network access.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolAudience": {
+      "description": "Adapter projections that may discover and invoke a tool.",
+      "enum": [
+        "cli",
+        "mcp",
+        "catalog",
+        "dashboard",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "ToolCatalogComponents": {
+      "additionalProperties": false,
+      "description": "Reusable named JSON Schemas carried by a catalog.",
+      "properties": {
+        "schemas": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          },
+          "propertyNames": {
+            "pattern": ".*\\S.*"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "ToolCatalogEntry": {
+      "additionalProperties": false,
+      "description": "One normalized tool entry shared by every presentation adapter.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": true,
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolPresentationAnnotations"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cli": {
+          "$ref": "#/$defs/ToolCliSpec"
+        },
+        "deferLoading": {
+          "type": "boolean"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolExecution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "governance": {
+          "$ref": "#/$defs/ToolGovernance"
+        },
+        "icons": {
+          "items": {
+            "$ref": "#/$defs/ToolIcon"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ],
+          "uniqueItems": true
+        },
+        "inputSchema": {
+          "properties": {
+            "type": {
+              "const": "object"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": "string"
+        },
+        "namespace": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outputSchema": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "inputSchema",
+        "governance",
+        "cli",
+        "deferLoading"
+      ],
+      "type": "object"
+    },
+    "ToolCatalogSchemaVersion": {
+      "description": "Closed version discriminator for the portable catalog.",
+      "enum": [
+        "harn-tools/1.0"
+      ],
+      "type": "string"
+    },
+    "ToolCliSpec": {
+      "additionalProperties": false,
+      "description": "Deterministic command-line presentation for one tool.",
+      "properties": {
+        "command": {
+          "description": "Non-empty command path below `harn tool run <script>`.",
+          "items": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "hidden": {
+          "description": "Hide the command from help while retaining explicit invocation.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command",
+        "hidden"
+      ],
+      "type": "object"
+    },
+    "ToolExecution": {
+      "additionalProperties": false,
+      "description": "MCP task execution metadata. Runtime queues and retry policy stay outside\nthe portable tool contract.",
+      "properties": {
+        "taskSupport": {
+          "$ref": "#/$defs/ToolTaskSupport"
+        }
+      },
+      "required": [
+        "taskSupport"
+      ],
+      "type": "object"
+    },
+    "ToolGovernance": {
+      "additionalProperties": false,
+      "description": "Closed adapter-exposure policy owned by one tool entry.",
+      "properties": {
+        "audiences": {
+          "items": {
+            "$ref": "#/$defs/ToolAudience"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "audiences"
+      ],
+      "type": "object"
+    },
+    "ToolIcon": {
+      "additionalProperties": false,
+      "description": "One icon advertised by a tool.",
+      "properties": {
+        "mimeType": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sizes": {
+          "items": {
+            "minLength": 1,
+            "pattern": ".*\\S.*",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ],
+          "uniqueItems": true
+        },
+        "src": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": "string"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolIconTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "src"
+      ],
+      "type": "object"
+    },
+    "ToolIconTheme": {
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "type": "string"
+    },
+    "ToolKind": {
+      "description": "Canonical tool-kind vocabulary. Matches the ACP `ToolKind` enum so\nharn-cli's ACP server can forward the value unchanged in\n`sessionUpdate` variants.\n\nThe VM treats `Read`, `Search`, `Think`, and `Fetch` as read-only\nfor concurrent-dispatch purposes. `Other` is intentionally NOT\ntreated as read-only — unannotated tools should not slip through\nas auto-approved by default (fail-safe).",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Reads file/workspace content without mutation.",
+          "type": "string"
+        },
+        {
+          "const": "edit",
+          "description": "Mutates workspace content (write, patch, edit).",
+          "type": "string"
+        },
+        {
+          "const": "delete",
+          "description": "Removes content irreversibly.",
+          "type": "string"
+        },
+        {
+          "const": "move",
+          "description": "Relocates or renames content.",
+          "type": "string"
+        },
+        {
+          "const": "search",
+          "description": "Queries indexes or directories; no mutation.",
+          "type": "string"
+        },
+        {
+          "const": "execute",
+          "description": "Runs a subprocess or a shell command.",
+          "type": "string"
+        },
+        {
+          "const": "think",
+          "description": "Pure reasoning/thought invocation, no side effects.",
+          "type": "string"
+        },
+        {
+          "const": "fetch",
+          "description": "Retrieves remote content (HTTP, MCP fetch, etc.).",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything that doesn't map cleanly into the canonical kinds.\nNot treated as read-only — the fail-safe default.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolPolicy": {
+      "additionalProperties": false,
+      "description": "Harn-owned execution classification, separate from advisory MCP hints.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "side_effect_level": {
+          "$ref": "#/$defs/SideEffectLevel"
+        }
+      },
+      "required": [
+        "kind",
+        "side_effect_level"
+      ],
+      "type": "object"
+    },
+    "ToolPresentationAnnotations": {
+      "additionalProperties": false,
+      "description": "MCP-compatible presentation hints. They are advisory, never policy.",
+      "properties": {
+        "destructiveHint": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "idempotentHint": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "openWorldHint": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "readOnlyHint": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "title": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolRegistryInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "ToolSource": {
+      "additionalProperties": false,
+      "description": "Origin binding retained for diagnostics and generated projections.",
+      "properties": {
+        "binding": {
+          "additionalProperties": true,
+          "description": "Protocol-specific coordinates. This and `_meta` are the only open\nmetadata records in the contract.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Source-local operation identity.",
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "Stable source vocabulary such as `openapi` or `harn`.",
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ToolTaskSupport": {
+      "description": "Whether one tool may be invoked as a task, as `tools/list` reports it.\n\nMCP lets a server declare this per tool rather than server-wide, which is\nwhat makes an honest partial implementation possible: a server can serve the\nextension for the tools it can actually run that way and say `forbidden` for\nthe rest, instead of advertising a blanket capability and failing whichever\ncalls it cannot honor.",
+      "oneOf": [
+        {
+          "const": "forbidden",
+          "description": "The client must not ask for a task. This is the default: a tool has to\nopt in, so adding the extension cannot change how an existing tool\nbehaves.",
+          "type": "string"
+        },
+        {
+          "const": "optional",
+          "description": "The client may ask for a task; a plain call still works.",
+          "type": "string"
+        },
+        {
+          "const": "required",
+          "description": "The tool is only invocable as a task.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://harnlang.com/schemas/harn-tools-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Versioned, serializable projection of a tool registry or static exports.",
+  "properties": {
+    "components": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolCatalogComponents"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "info": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolRegistryInfo"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schema_version": {
+      "$ref": "#/$defs/ToolCatalogSchemaVersion"
+    },
+    "tools": {
+      "items": {
+        "$ref": "#/$defs/ToolCatalogEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "tools"
+  ],
+  "title": "Harn Tool Catalog",
+  "type": "object"
+}

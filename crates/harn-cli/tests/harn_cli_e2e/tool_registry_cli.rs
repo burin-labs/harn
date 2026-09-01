@@ -172,3 +172,86 @@ fn tool_registry_cli_rejects_schema_violations_before_dispatch() {
     assert!(stderr.contains("do not match its schema"), "{stderr}");
     assert!(stderr.contains("minimum"), "{stderr}");
 }
+
+#[test]
+fn tool_schema_exports_is_offline_typed_and_byte_deterministic() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let contracts = temp.path().join("contracts.harn");
+    let script = temp.path().join("server.harn");
+    let execution_marker = temp.path().join("main-executed.txt");
+    fs::write(
+        &contracts,
+        r#"
+pub struct Envelope<T> {
+  value: T
+  tags: list<string>
+}
+pub type Request = {query: string, options: {limit: int}}
+pub type Response = Envelope<{id: string, score: float}>
+"#,
+    )
+    .expect("write imported contracts");
+    fs::write(
+        &script,
+        format!(
+            r#"
+import {{ Request, Response }} from "./contracts"
+fn main(harness: Harness) {{
+  harness.fs.write_text({}, "executed")
+  panic("tool schema exports executed main")
+}}
+/// Search records
+pub fn search(request: Request) -> Response {{
+  return {{value: {{id: request.query, score: 1.0}}, tags: []}}
+}}
+"#,
+            serde_json::to_string(&execution_marker.display().to_string()).unwrap()
+        ),
+    )
+    .expect("write export server");
+
+    let run = || {
+        harn_e2e_command()
+            .args([
+                "tool",
+                "schema",
+                &script.display().to_string(),
+                "--surface",
+                "exports",
+            ])
+            .output()
+            .expect("tool schema exports command")
+    };
+    let first = run();
+    let second = run();
+    for output in [&first, &second] {
+        assert!(
+            output.status.success(),
+            "exports schema failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("executed main"), "{stderr}");
+        assert!(!stderr.contains("capability"), "{stderr}");
+    }
+    assert_eq!(first.stdout, second.stdout, "catalog bytes must be stable");
+    assert!(
+        !execution_marker.exists(),
+        "offline export discovery must not invoke main or filesystem capabilities"
+    );
+
+    let catalog: JsonValue = serde_json::from_slice(&first.stdout).expect("catalog JSON");
+    assert_eq!(catalog["schema_version"], "harn-tools/1.0");
+    assert_eq!(catalog["tools"][0]["name"], "search");
+    assert_eq!(
+        catalog["tools"][0]["inputSchema"]["properties"]["request"]["properties"]["options"]
+            ["properties"]["limit"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        catalog["tools"][0]["outputSchema"]["properties"]["value"]["properties"]["score"]["type"],
+        "number"
+    );
+    assert_eq!(catalog["tools"][0]["cli"]["hidden"], false);
+    assert_eq!(catalog["tools"][0]["deferLoading"], false);
+}

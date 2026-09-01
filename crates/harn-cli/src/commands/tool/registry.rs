@@ -5,7 +5,7 @@ use std::path::Path;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
-use crate::cli::{ToolRunArgs, ToolSchemaArgs};
+use crate::cli::{ToolRunArgs, ToolSchemaArgs, ToolSchemaSurface};
 
 #[derive(Debug)]
 pub(crate) struct ToolCommandError {
@@ -131,27 +131,46 @@ async fn run_loaded_registry(
 }
 
 pub(crate) async fn print_registry_schema(args: &ToolSchemaArgs) -> Result<(), ToolCommandError> {
-    let loaded = crate::commands::run::load_file_tool_registry(&args.file)
-        .await
-        .map_err(|error| ToolCommandError {
-            message: error.message,
-            exit_code: error.exit_code,
-        })?;
-    print_loaded_registry_schema(args, &loaded).map_err(ToolCommandError::message)
+    let catalog = load_schema_catalog(args).await?;
+    print_catalog(args, &catalog).map_err(ToolCommandError::message)
 }
 
-fn print_loaded_registry_schema(
+async fn load_schema_catalog(
     args: &ToolSchemaArgs,
-    loaded: &crate::commands::run::LoadedToolRegistry,
+) -> Result<harn_vm::tool_registry::ToolCatalog, ToolCommandError> {
+    let catalog = match args.surface {
+        ToolSchemaSurface::Script => {
+            let loaded = crate::commands::run::load_file_tool_registry(&args.file)
+                .await
+                .map_err(|error| ToolCommandError {
+                    message: error.message,
+                    exit_code: error.exit_code,
+                })?;
+            if !loaded.diagnostics.is_empty() {
+                eprint!("{}", loaded.diagnostics);
+            }
+            harn_vm::tool_registry::tool_registry_catalog_for_audience(
+                &loaded.registry,
+                harn_vm::tool_registry::ToolAudience::Catalog,
+            )
+            .map_err(|error| ToolCommandError::message(error.to_string()))?
+        }
+        ToolSchemaSurface::Exports => {
+            let catalog = harn_serve::ExportCatalog::from_path(Path::new(&args.file))
+                .map_err(|error| ToolCommandError::message(error.message()))?;
+            harn_serve::emit_export_diagnostics(catalog.diagnostics());
+            catalog
+                .tool_catalog()
+                .map_err(|error| ToolCommandError::message(error.message()))?
+        }
+    };
+    Ok(catalog)
+}
+
+fn print_catalog(
+    args: &ToolSchemaArgs,
+    catalog: &harn_vm::tool_registry::ToolCatalog,
 ) -> Result<(), String> {
-    if !loaded.diagnostics.is_empty() {
-        eprint!("{}", loaded.diagnostics);
-    }
-    let catalog = harn_vm::tool_registry::tool_registry_catalog_for_audience(
-        &loaded.registry,
-        harn_vm::tool_registry::ToolAudience::Catalog,
-    )
-    .map_err(|error| error.to_string())?;
     if args.pretty {
         println!(
             "{}",
@@ -276,6 +295,11 @@ fn command_tree(tools: &[harn_vm::tool_registry::ToolCatalogEntry]) -> Result<Co
     for (index, tool) in tools.iter().enumerate() {
         let mut node = &mut root;
         for part in &tool.cli.command {
+            if !harn_vm::tool_registry::is_valid_cli_command_component(part) {
+                return Err(format!(
+                    "CLI command component {part:?} must match ^[A-Za-z0-9_][A-Za-z0-9_-]*$"
+                ));
+            }
             if node.tool_index.is_some() {
                 return Err(format!(
                     "CLI command {:?} is both a tool and a parent command",
@@ -642,5 +666,51 @@ mod tests {
         .err()
         .expect("ambiguous tree");
         assert!(error.contains("both a tool and a parent"));
+    }
+
+    #[test]
+    fn generated_cli_tree_shares_the_portable_component_contract() {
+        command_tree(&[catalog_tool(
+            "nested",
+            &["inspect", "inspect"],
+            serde_json::json!({}),
+        )])
+        .expect("repeated components are a valid nested command path");
+
+        for invalid in [["-inspect"], ["inspect me"]] {
+            let error = command_tree(&[catalog_tool("invalid", &invalid, serde_json::json!({}))])
+                .err()
+                .expect("invalid component");
+            assert!(error.contains("must match ^[A-Za-z0-9_]"));
+        }
+    }
+
+    #[tokio::test]
+    async fn export_schema_surface_is_offline_even_when_main_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("offline.harn");
+        std::fs::write(
+            &script,
+            r#"
+fn main() { panic("must not execute") }
+pub fn inspect(input: {id: string}) -> {id: string} { return input }
+"#,
+        )
+        .expect("write script");
+        let args = ToolSchemaArgs {
+            file: script.display().to_string(),
+            surface: ToolSchemaSurface::Exports,
+            pretty: false,
+        };
+
+        let catalog = load_schema_catalog(&args)
+            .await
+            .expect("offline export catalog");
+        assert_eq!(catalog.tools.len(), 1);
+        assert_eq!(catalog.tools[0].name, "inspect");
+        assert_eq!(
+            catalog.tools[0].input_schema["properties"]["input"]["properties"]["id"]["type"],
+            "string"
+        );
     }
 }

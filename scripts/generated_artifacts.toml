@@ -306,14 +306,18 @@ check = "check-protocol-artifacts"
 outputs = [
   "spec/protocol-artifacts/harn-protocol.rs",
   "spec/protocol-artifacts/harn-protocol.ts",
+  "spec/protocol-artifacts/harn-tools.ts",
   "spec/protocol-artifacts/HarnProtocol.swift",
   "spec/protocol-artifacts/manifest.json",
+  "spec/protocol-artifacts/schemas/harn-tools-v1.schema.json",
   "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
 ]
 sources = [
   "spec/openapi.yaml",
   "crates/harn-cli/src/commands/",
   "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
+  "crates/harn-vm/src/tool_registry.rs",
+  "crates/harn-vm/src/tool_registry/",
 ]
 ci = true
 make_all = true
@@ -471,12 +475,14 @@ outputs = [
   "spec/protocol-artifacts/python/harn_protocol.py",
   "spec/protocol-artifacts/go/harnprotocol/harnprotocol.go",
   "spec/protocol-artifacts/harn-protocol.ts",
+  "spec/protocol-artifacts/harn-tools.ts",
   "spec/protocol-artifacts/HarnProtocol.swift",
 ]
 sources = [
   "spec/protocol-artifacts/",
   "scripts/check_protocol_bindings.harn",
   "scripts/tests/protocol_binding_session_recap.ts",
+  "scripts/tests/tool_catalog_contract.ts",
   "scripts/tests/protocol_binding_session_recap.swift",
 ]
 ci = true

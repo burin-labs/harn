@@ -17,7 +17,7 @@ use crate::transport::{
 };
 use schema::{
     build_call_request, derived_server_name, paged_result, parse_error_response, request_key,
-    tool_call_error, tool_call_success, tool_entry,
+    tool_call_error, tool_call_success,
 };
 use transport::{http_post_request, notify_channel};
 
@@ -100,6 +100,8 @@ pub struct McpServer {
     server_name: String,
     server_card: Option<JsonValue>,
     catalog: ExportCatalog,
+    tool_catalog: harn_vm::tool_registry::ToolCatalog,
+    mcp_tools: Vec<JsonValue>,
     context: McpContextCatalog,
     auth_policy: AuthPolicy,
     executor: DispatchRuntime,
@@ -219,6 +221,8 @@ impl McpServer {
             .unwrap_or_else(|| derived_server_name(config.core.catalog()));
         let core = Arc::new(config.core);
         let catalog = core.catalog().clone();
+        let tool_catalog = core.tool_catalog().clone();
+        let mcp_tools = core.mcp_tools().to_vec();
         let context = McpContextCatalog::discover(&catalog.script_path);
         let auth_policy = core.auth_policy().clone();
         Self {
@@ -232,6 +236,8 @@ impl McpServer {
             server_name,
             server_card: config.server_card,
             catalog,
+            tool_catalog,
+            mcp_tools,
             context,
             auth_policy,
             executor: DispatchRuntime::start("MCP", core),
@@ -694,16 +700,10 @@ impl McpServer {
         }
 
         let response = match result {
-            Ok(response) => {
-                let output_schema = self
-                    .catalog
-                    .function(&response.function)
-                    .and_then(|function| function.output_schema.as_ref());
-                harn_vm::jsonrpc::response(
-                    job.request_id,
-                    tool_call_success(response, output_schema),
-                )
-            }
+            Ok(response) => harn_vm::jsonrpc::response(
+                job.request_id,
+                tool_call_success(response, &self.tool_catalog),
+            ),
             Err(DispatchError::Validation(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }
@@ -754,13 +754,7 @@ impl McpServer {
     }
 
     fn tools_list_result(&self, params: &JsonValue) -> JsonValue {
-        let tools = self
-            .catalog
-            .functions
-            .values()
-            .map(tool_entry)
-            .collect::<Vec<_>>();
-        paged_result("tools", tools, params)
+        paged_result("tools", self.mcp_tools.clone(), params)
     }
 
     fn resources_list_result(&self, params: &JsonValue) -> JsonValue {

@@ -6,63 +6,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
 use serde_json::Value as JsonValue;
 
-use crate::mcp_server::convert::annotations_to_json;
+use crate::tool_annotations::{SideEffectLevel, ToolKind};
 use crate::value::{VmClosure, VmDictExt, VmError, VmValue};
 
-pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/1.0";
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ToolRegistryInfo {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-/// Deterministic command-line presentation for one tool.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ToolCliSpec {
-    /// Non-empty command path below `harn tool run <script>`.
-    pub command: Vec<String>,
-    /// Hide the command from help while retaining explicit invocation.
-    pub hidden: bool,
-}
-
-/// Adapter projections that may discover and invoke a registry tool.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolAudience {
-    Cli,
-    Mcp,
-    Catalog,
-    Dashboard,
-    Agent,
-}
-
-impl ToolAudience {
-    const ALL: [Self; 5] = [
-        Self::Cli,
-        Self::Mcp,
-        Self::Catalog,
-        Self::Dashboard,
-        Self::Agent,
-    ];
-
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "cli" => Self::Cli,
-            "mcp" => Self::Mcp,
-            "catalog" => Self::Catalog,
-            "dashboard" => Self::Dashboard,
-            "agent" => Self::Agent,
-            _ => return None,
-        })
-    }
-}
+mod contract;
+pub use contract::*;
 
 /// Retain the original executable entries and registry metadata while
 /// projecting one adapter audience. This is the closure-preserving companion
@@ -120,113 +70,6 @@ pub fn project_tools_for_audience(
     }
 }
 
-/// Closed adapter-exposure policy owned by one registry entry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ToolGovernance {
-    pub audiences: Vec<ToolAudience>,
-}
-
-impl ToolGovernance {
-    pub fn allows(&self, audience: ToolAudience) -> bool {
-        self.audiences.contains(&audience)
-    }
-}
-
-impl Default for ToolGovernance {
-    fn default() -> Self {
-        Self {
-            audiences: ToolAudience::ALL.to_vec(),
-        }
-    }
-}
-
-/// Origin binding retained for diagnostics and generated projections.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ToolSource {
-    /// Stable source vocabulary such as `openapi` or `harn`.
-    pub kind: String,
-    /// Source-local operation identity.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    /// Protocol-specific binding data. The typed outer record prevents an
-    /// unlabelled metadata bag while allowing integration protocols to retain
-    /// their native coordinates.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub binding: Option<JsonValue>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolPolicyKind {
-    Read,
-    Edit,
-    Delete,
-    Move,
-    Search,
-    Execute,
-    Think,
-    Fetch,
-    Other,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolSideEffectLevel {
-    None,
-    ReadOnly,
-    WorkspaceWrite,
-    ProcessExec,
-    Network,
-    DesktopControl,
-}
-
-/// Harn-owned execution classification, separate from advisory MCP hints.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-pub struct ToolPolicy {
-    pub kind: ToolPolicyKind,
-    pub side_effect_level: ToolSideEffectLevel,
-}
-
-/// One normalized tool entry shared by every presentation adapter.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolCatalogEntry {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub input_schema: JsonValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icons: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution: Option<JsonValue>,
-    pub governance: ToolGovernance,
-    pub cli: ToolCliSpec,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub namespace: Option<String>,
-    pub defer_loading: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<ToolSource>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy: Option<ToolPolicy>,
-    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
-    pub meta: Option<JsonValue>,
-}
-
-/// Versioned, serializable projection of a tool registry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ToolCatalog {
-    pub schema_version: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<ToolRegistryInfo>,
-    pub tools: Vec<ToolCatalogEntry>,
-}
-
 /// Normalized catalog entry paired with its one executable Harn handler.
 pub struct ExecutableTool {
     pub catalog: ToolCatalogEntry,
@@ -259,11 +102,16 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
         }
         tools.push(catalog);
     }
-    Ok(ToolCatalog {
-        schema_version: TOOL_CATALOG_SCHEMA_VERSION,
+    let catalog = ToolCatalog {
+        schema_version: ToolCatalogSchemaVersion::V1,
         info: registry_info(registry)?,
         tools,
-    })
+        components: None,
+    };
+    catalog
+        .validate()
+        .map_err(|error| VmError::Runtime(format!("invalid tool catalog: {error}")))?;
+    Ok(catalog)
 }
 
 /// Normalize and retain only tools exposed to one adapter audience.
@@ -283,18 +131,26 @@ pub fn tool_registry_schema(
     registry: &VmValue,
     components: Option<&VmValue>,
 ) -> Result<JsonValue, VmError> {
-    let catalog = tool_registry_catalog_for_audience(registry, ToolAudience::Catalog)?;
-    let mut schema = serde_json::to_value(catalog)
-        .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
+    let mut catalog = tool_registry_catalog_for_audience(registry, ToolAudience::Catalog)?;
     if let Some(components) = components.and_then(VmValue::as_dict) {
         let components = result_to_json(&VmValue::dict(components.clone())).map_err(|error| {
             VmError::Runtime(format!(
                 "tool_schema: components are not portable JSON: {error}"
             ))
         })?;
-        schema["components"] = serde_json::json!({"schemas": components});
+        catalog.components = Some(ToolCatalogComponents {
+            schemas: components
+                .as_object()
+                .expect("dict converts to object")
+                .iter()
+                .map(|(name, schema)| (name.clone(), schema.clone()))
+                .collect(),
+        });
     }
-    Ok(schema)
+    catalog
+        .validate()
+        .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
+    serde_json::to_value(catalog).map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))
 }
 
 /// Normalize a registry and require one local Harn closure per tool.
@@ -445,10 +301,10 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     if let Some(output_schema) = output_schema.as_ref() {
         validate_json_schema(output_schema, &format!("tool {name:?} output schema"))?;
     }
-    let annotations = entry.get("annotations").and_then(annotations_to_json);
-    let icons = optional_array(entry, "icons", &format!("tool {name:?}"))?;
-    let execution = optional_object(entry, "execution", &format!("tool {name:?}"))?;
-    let meta = optional_object(entry, "meta", &format!("tool {name:?}"))?;
+    let annotations = presentation_annotations(entry.get("annotations"), &name)?;
+    let icons = icons_spec(entry.get("icons"), &name)?;
+    let execution = execution_spec(entry.get("execution"), &name)?;
+    let meta = open_record(entry.get("meta"), &format!("tool {name:?} field 'meta'"))?;
     let governance = governance_spec(entry.get("governance"), &name)?;
     let cli = cli_spec(entry.get("cli"), &name, namespace.as_deref())?;
     let source = source_spec(entry.get("source"), &name)?;
@@ -564,7 +420,9 @@ fn cli_spec(
         Some(VmValue::List(parts)) if !parts.is_empty() => parts
             .iter()
             .map(|part| match part {
-                VmValue::String(part) if valid_command_part(part) => Ok(part.to_string()),
+                VmValue::String(part) if is_valid_cli_command_component(part) => {
+                    Ok(part.to_string())
+                }
                 _ => Err(VmError::Runtime(format!(
                     "tool {name:?} field 'cli.command' must contain only non-empty command names"
                 ))),
@@ -586,7 +444,11 @@ fn checked_cli_spec(
     hidden: bool,
     name: &str,
 ) -> Result<ToolCliSpec, VmError> {
-    if command.is_empty() || command.iter().any(|part| !valid_command_part(part)) {
+    if command.is_empty()
+        || command
+            .iter()
+            .any(|part| !is_valid_cli_command_component(part))
+    {
         return Err(VmError::Runtime(format!(
             "tool {name:?} CLI command must contain only non-empty portable command names"
         )));
@@ -617,8 +479,194 @@ fn source_spec(value: Option<&VmValue>, name: &str) -> Result<Option<ToolSource>
     }
     let kind = required_string(fields, "kind", &format!("tool {name:?} field 'source'"))?;
     let id = optional_string(fields, "id", &format!("tool {name:?} field 'source'"))?;
-    let binding = optional_object(fields, "binding", &format!("tool {name:?} field 'source'"))?;
+    let binding = open_record(
+        fields.get("binding"),
+        &format!("tool {name:?} field 'source.binding'"),
+    )?;
     Ok(Some(ToolSource { kind, id, binding }))
+}
+
+fn presentation_annotations(
+    value: Option<&VmValue>,
+    name: &str,
+) -> Result<Option<ToolPresentationAnnotations>, VmError> {
+    let Some(value) = value.filter(|value| !matches!(value, VmValue::Nil)) else {
+        return Ok(None);
+    };
+    let VmValue::Dict(fields) = value else {
+        return Err(VmError::Runtime(format!(
+            "tool {name:?} field 'annotations' must be an object"
+        )));
+    };
+    let allowed = BTreeSet::from([
+        "title",
+        "readOnlyHint",
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+        // Compatibility-only policy inputs. They project through `policy`,
+        // not the presentation annotations record.
+        "kind",
+        "side_effect_level",
+    ]);
+    for key in fields.keys() {
+        if !allowed.contains(key.as_str()) {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'annotations' contains unknown key {key:?}"
+            )));
+        }
+    }
+    let annotations = ToolPresentationAnnotations {
+        title: optional_string(fields, "title", &format!("tool {name:?} annotations"))?,
+        read_only_hint: optional_bool(
+            fields,
+            "readOnlyHint",
+            &format!("tool {name:?} annotations"),
+        )?,
+        destructive_hint: optional_bool(
+            fields,
+            "destructiveHint",
+            &format!("tool {name:?} annotations"),
+        )?,
+        idempotent_hint: optional_bool(
+            fields,
+            "idempotentHint",
+            &format!("tool {name:?} annotations"),
+        )?,
+        open_world_hint: optional_bool(
+            fields,
+            "openWorldHint",
+            &format!("tool {name:?} annotations"),
+        )?,
+    };
+    Ok((!annotations.is_empty()).then_some(annotations))
+}
+
+fn icons_spec(value: Option<&VmValue>, name: &str) -> Result<Option<Vec<ToolIcon>>, VmError> {
+    let Some(value) = value.filter(|value| !matches!(value, VmValue::Nil)) else {
+        return Ok(None);
+    };
+    let VmValue::List(values) = value else {
+        return Err(VmError::Runtime(format!(
+            "tool {name:?} field 'icons' must be a non-empty list"
+        )));
+    };
+    if values.is_empty() {
+        return Err(VmError::Runtime(format!(
+            "tool {name:?} field 'icons' must be a non-empty list"
+        )));
+    }
+    values
+        .iter()
+        .map(|value| {
+            let VmValue::Dict(fields) = value else {
+                return Err(VmError::Runtime(format!(
+                    "tool {name:?} icon must be an object"
+                )));
+            };
+            let allowed = BTreeSet::from(["src", "mimeType", "sizes", "theme"]);
+            for key in fields.keys() {
+                if !allowed.contains(key.as_str()) {
+                    return Err(VmError::Runtime(format!(
+                        "tool {name:?} icon contains unknown key {key:?}"
+                    )));
+                }
+            }
+            let sizes = match fields.get("sizes") {
+                None | Some(VmValue::Nil) => None,
+                Some(VmValue::List(values)) if !values.is_empty() => Some(
+                    values
+                        .iter()
+                        .map(|value| match value {
+                            VmValue::String(value) if !value.is_empty() => Ok(value.to_string()),
+                            _ => Err(VmError::Runtime(format!(
+                                "tool {name:?} icon field 'sizes' must contain non-empty strings"
+                            ))),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                _ => {
+                    return Err(VmError::Runtime(format!(
+                        "tool {name:?} icon field 'sizes' must be a non-empty list"
+                    )))
+                }
+            };
+            let theme = match optional_string(fields, "theme", &format!("tool {name:?} icon"))?
+                .as_deref()
+            {
+                None => None,
+                Some("light") => Some(ToolIconTheme::Light),
+                Some("dark") => Some(ToolIconTheme::Dark),
+                Some(value) => {
+                    return Err(VmError::Runtime(format!(
+                        "tool {name:?} icon field 'theme' has unknown value {value:?}"
+                    )))
+                }
+            };
+            Ok(ToolIcon {
+                src: required_string(fields, "src", &format!("tool {name:?} icon"))?,
+                mime_type: optional_string(fields, "mimeType", &format!("tool {name:?} icon"))?,
+                sizes,
+                theme,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn execution_spec(value: Option<&VmValue>, name: &str) -> Result<Option<ToolExecution>, VmError> {
+    let Some(value) = value.filter(|value| !matches!(value, VmValue::Nil)) else {
+        return Ok(None);
+    };
+    let VmValue::Dict(fields) = value else {
+        return Err(VmError::Runtime(format!(
+            "tool {name:?} field 'execution' must be an object"
+        )));
+    };
+    for key in fields.keys() {
+        if key.as_str() != "taskSupport" {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'execution' contains unknown key {key:?}"
+            )));
+        }
+    }
+    let task_support = match required_string(
+        fields,
+        "taskSupport",
+        &format!("tool {name:?} field 'execution'"),
+    )?
+    .as_str()
+    {
+        "forbidden" => ToolTaskSupport::Forbidden,
+        "optional" => ToolTaskSupport::Optional,
+        "required" => ToolTaskSupport::Required,
+        value => {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'execution.taskSupport' has unknown value {value:?}"
+            )))
+        }
+    };
+    Ok(Some(ToolExecution { task_support }))
+}
+
+fn open_record(
+    value: Option<&VmValue>,
+    owner: &str,
+) -> Result<Option<BTreeMap<String, JsonValue>>, VmError> {
+    let Some(value) = value.filter(|value| !matches!(value, VmValue::Nil)) else {
+        return Ok(None);
+    };
+    let VmValue::Dict(_) = value else {
+        return Err(VmError::Runtime(format!("{owner} must be an object")));
+    };
+    let json = portable_json(value, owner)?;
+    Ok(Some(
+        json.as_object()
+            .expect("dict converts to object")
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    ))
 }
 
 fn policy_spec(
@@ -689,39 +737,31 @@ fn policy_spec(
         }))
 }
 
-fn policy_kind(value: &str) -> Option<ToolPolicyKind> {
+fn policy_kind(value: &str) -> Option<ToolKind> {
     Some(match value {
-        "read" => ToolPolicyKind::Read,
-        "edit" => ToolPolicyKind::Edit,
-        "delete" => ToolPolicyKind::Delete,
-        "move" => ToolPolicyKind::Move,
-        "search" => ToolPolicyKind::Search,
-        "execute" => ToolPolicyKind::Execute,
-        "think" => ToolPolicyKind::Think,
-        "fetch" => ToolPolicyKind::Fetch,
-        "other" => ToolPolicyKind::Other,
+        "read" => ToolKind::Read,
+        "edit" => ToolKind::Edit,
+        "delete" => ToolKind::Delete,
+        "move" => ToolKind::Move,
+        "search" => ToolKind::Search,
+        "execute" => ToolKind::Execute,
+        "think" => ToolKind::Think,
+        "fetch" => ToolKind::Fetch,
+        "other" => ToolKind::Other,
         _ => return None,
     })
 }
 
-fn parse_side_effect_level(value: &str) -> Option<ToolSideEffectLevel> {
+fn parse_side_effect_level(value: &str) -> Option<SideEffectLevel> {
     Some(match value {
-        "none" => ToolSideEffectLevel::None,
-        "read_only" => ToolSideEffectLevel::ReadOnly,
-        "workspace_write" => ToolSideEffectLevel::WorkspaceWrite,
-        "process_exec" => ToolSideEffectLevel::ProcessExec,
-        "network" => ToolSideEffectLevel::Network,
-        "desktop_control" => ToolSideEffectLevel::DesktopControl,
+        "none" => SideEffectLevel::None,
+        "read_only" => SideEffectLevel::ReadOnly,
+        "workspace_write" => SideEffectLevel::WorkspaceWrite,
+        "process_exec" => SideEffectLevel::ProcessExec,
+        "network" => SideEffectLevel::Network,
+        "desktop_control" => SideEffectLevel::DesktopControl,
         _ => return None,
     })
-}
-
-fn valid_command_part(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('-')
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
 fn required_string(
@@ -786,20 +826,6 @@ fn optional_object(
         Some(value @ VmValue::Dict(_)) => Ok(Some(portable_json(value, owner)?)),
         _ => Err(VmError::Runtime(format!(
             "{owner} field {key:?} must be an object"
-        ))),
-    }
-}
-
-fn optional_array(
-    fields: &crate::value::DictMap,
-    key: &str,
-    owner: &str,
-) -> Result<Option<JsonValue>, VmError> {
-    match fields.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(value @ VmValue::List(_)) => Ok(Some(portable_json(value, owner)?)),
-        _ => Err(VmError::Runtime(format!(
-            "{owner} field {key:?} must be a list"
         ))),
     }
 }
@@ -961,6 +987,40 @@ mod tests {
             catalog.tools[0].cli.command,
             ["harn", "code", "search_examples"]
         );
+    }
+
+    #[test]
+    fn registry_cli_commands_share_the_portable_component_contract() {
+        fn cli(parts: &[&str]) -> VmValue {
+            let mut cli = DictMap::new();
+            cli.insert(
+                "command".into(),
+                VmValue::List(
+                    parts
+                        .iter()
+                        .map(|part| string(part))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+            );
+            VmValue::dict(cli)
+        }
+
+        let repeated = tool_registry_catalog(&registry(vec![entry(
+            "nested",
+            Some(cli(&["inspect", "inspect"])),
+        )]))
+        .expect("repeated command components form a valid nested path");
+        assert_eq!(repeated.tools[0].cli.command, ["inspect", "inspect"]);
+
+        for invalid in [vec!["-inspect"], vec!["inspect me"], Vec::new()] {
+            let error =
+                tool_registry_catalog(&registry(vec![entry("invalid", Some(cli(&invalid)))]))
+                    .expect_err(
+                        "the live registry must reject the generated schema's invalid paths",
+                    );
+            assert!(error.to_string().contains("cli.command"));
+        }
     }
 
     #[test]
@@ -1137,8 +1197,8 @@ mod tests {
         assert_eq!(
             catalog.tools[0].policy,
             Some(ToolPolicy {
-                kind: ToolPolicyKind::Fetch,
-                side_effect_level: ToolSideEffectLevel::Network,
+                kind: ToolKind::Fetch,
+                side_effect_level: SideEffectLevel::Network,
             })
         );
         assert!(catalog.tools[0].annotations.is_none());

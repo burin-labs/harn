@@ -435,34 +435,7 @@ impl McpServer {
         };
         let tools: Vec<serde_json::Value> = self.tools[page.start..page.end]
             .iter()
-            .map(|t| {
-                let mut entry = serde_json::json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "inputSchema": t.input_schema,
-                });
-                if let Some(ref title) = t.title {
-                    entry["title"] = serde_json::json!(title);
-                }
-                if let Some(ref output_schema) = t.output_schema {
-                    entry["outputSchema"] = output_schema.clone();
-                }
-                if let Some(ref annotations) = t.annotations {
-                    entry["annotations"] = annotations.clone();
-                }
-                if let Some(ref icons) = t.icons {
-                    entry["icons"] = icons.clone();
-                }
-                if let Some(ref meta) = t.meta {
-                    entry["_meta"] = meta.clone();
-                }
-                if t.task_support.allows_task() {
-                    entry["execution"] = serde_json::json!({
-                        "taskSupport": t.task_support.wire_name(),
-                    });
-                }
-                entry
-            })
+            .map(|tool| crate::tool_registry::tool_catalog_entry_to_mcp(&tool.catalog))
             .collect();
 
         let mut result = serde_json::json!({ "tools": tools });
@@ -484,7 +457,11 @@ impl McpServer {
         vm: &mut Vm,
     ) -> serde_json::Value {
         let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-        let tool = match self.tools.iter().find(|t| t.name == tool_name) {
+        let tool = match self
+            .tools
+            .iter()
+            .find(|tool| tool.catalog.name == tool_name)
+        {
             Some(t) => t,
             None => {
                 return serde_json::json!({
@@ -498,8 +475,14 @@ impl McpServer {
         // A tool that declares `required` refuses a plain call outright, so a
         // client cannot get the work done by simply not asking for a task.
         let wants_task = mcp_protocol::client_supports_tasks(params);
-        let as_task = tool.task_support.allows_task() && wants_task;
-        if tool.task_support == crate::mcp_tasks::McpTaskSupport::Required && !wants_task {
+        let task_support = tool
+            .catalog
+            .execution
+            .as_ref()
+            .map(|execution| execution.task_support)
+            .unwrap_or_default();
+        let as_task = task_support.allows_task() && wants_task;
+        if task_support == crate::mcp_tasks::McpTaskSupport::Required && !wants_task {
             return crate::jsonrpc::error_response(
                 id.clone(),
                 -32602,
@@ -551,16 +534,19 @@ impl McpServer {
                 &self.client_identity(),
                 Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS),
             );
-            self.tasks.complete(
-                &task.task_id,
-                match &result {
-                    Ok(value) => Ok(vm_value_to_json(value)),
-                    Err(VmError::McpInputRequired(_)) => {
-                        Err("Tool requested client input, which a task cannot carry".to_string())
-                    }
-                    Err(error) => Err(tool_error_text(error)),
-                },
-            );
+            match &result {
+                Ok(value) => self.tasks.complete_with_tool_result(
+                    &task.task_id,
+                    successful_tool_call_result(tool, value),
+                ),
+                Err(VmError::McpInputRequired(_)) => self.tasks.complete(
+                    &task.task_id,
+                    Err("Tool requested client input, which a task cannot carry".to_string()),
+                ),
+                Err(error) => self
+                    .tasks
+                    .complete(&task.task_id, Err(tool_error_text(error))),
+            }
             return crate::mcp_tasks::task_created_response(
                 id.clone(),
                 &task,
@@ -570,18 +556,10 @@ impl McpServer {
 
         match result {
             Ok(value) => {
-                let content = vm_value_to_content(&value);
-                let mut call_result = serde_json::json!({
-                    "content": content,
-                    "isError": false
-                });
-                if tool.output_schema.is_some() {
-                    call_result["structuredContent"] = vm_value_to_json(&value);
-                }
                 serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": call_result
+                    "result": successful_tool_call_result(tool, &value)
                 })
             }
             Err(VmError::McpInputRequired(required)) => {
@@ -1058,6 +1036,23 @@ impl McpServer {
             };
         crate::mcp_protocol::completion_result(id.clone(), candidates, value)
     }
+}
+
+fn successful_tool_call_result(
+    tool: &McpToolDef,
+    value: &crate::value::VmValue,
+) -> serde_json::Value {
+    let mut result = serde_json::json!({
+        "content": vm_value_to_content(value),
+        "isError": false,
+    });
+    if let Some(structured) = crate::tool_registry::tool_result_to_mcp_structured_content(
+        &tool.catalog,
+        vm_value_to_json(value),
+    ) {
+        result["structuredContent"] = structured;
+    }
+    result
 }
 
 /// Map a JSON-RPC method to its conservative cache hint. Read/list

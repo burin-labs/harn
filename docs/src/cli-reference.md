@@ -1757,6 +1757,7 @@ harn tool new acme-echo --description "Echo text for tests."
 harn tool run server.harn widgets get --widget-id 42 --json # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
 harn tool schema server.harn --pretty
+harn tool schema library.harn --surface exports --pretty
 ```
 
 The generated package includes `[[package.tools]]` metadata, a stable
@@ -1768,6 +1769,12 @@ contract. Run the entrypoint with `harn serve mcp server.harn`.
 `ToolRegistry` and invoke the same handler closures. See
 [Tool registry adapters](./tool-registry-adapters.md) for metadata, coercion,
 validation, and catalog details.
+
+`harn tool schema` emits the versioned `harn-tools/1.0` catalog. Its
+`--surface` value is `script` or `exports`; `script` is the default. The
+`exports` surface compiles public functions and resolves their input and output
+types without running `main` or acquiring runtime capabilities. Use
+`--pretty` for indented JSON.
 
 ## harn skill
 

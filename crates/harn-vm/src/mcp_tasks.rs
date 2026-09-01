@@ -24,8 +24,11 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use tokio::sync::Notify;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::mcp_protocol;
@@ -44,7 +47,10 @@ pub const DEFAULT_TASK_TTL_MS: u64 = 10 * 60 * 1000;
 /// extension for the tools it can actually run that way and say `forbidden` for
 /// the rest, instead of advertising a blanket capability and failing whichever
 /// calls it cannot honor.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "lowercase")]
+#[schemars(rename = "ToolTaskSupport")]
+#[ts(rename = "ToolTaskSupport")]
 pub enum McpTaskSupport {
     /// The client must not ask for a task. This is the default: a tool has to
     /// opt in, so adding the extension cannot change how an existing tool

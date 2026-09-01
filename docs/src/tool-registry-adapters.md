@@ -104,12 +104,39 @@ invocation. Duplicate paths and leaf/parent path conflicts are errors.
 ```bash
 harn serve mcp server.harn
 harn serve mcp --surface script --watch server.harn
+harn serve mcp --surface exports library.harn
 ```
 
-MCP `tools/list` receives the same name, description, input schema, output
-schema, annotations, icons, execution metadata, and `_meta` values as the
-canonical catalog. MCP-only wire fields are projections; they are not a second
-declaration.
+MCP `tools/list` preserves the catalog's identity and presentation metadata.
+Its input schema, output schema, and structured result are standalone semantic
+projections of the catalog contract. MCP-only wire fields are projections;
+they are not a second declaration.
+
+MCP schemas are semantic standalone projections, not byte-for-byte catalog
+copies. Harn follows every reachable `#/components/schemas/...` reference,
+places those schemas under the tool's `$defs`, and rebases local references.
+If an output schema doesn't guarantee an object, MCP advertises an object
+schema with one required `result` property. The matching
+`structuredContent` value is `{result: <handler-result>}`. Object outputs keep
+their original shape.
+
+The portable catalog accepts Draft 2020-12 schemas, including features that
+cannot yet move safely between JSON Schema resources. When a catalog has
+components, MCP projection rejects `$id`, `$anchor`, `$dynamicAnchor`,
+`$dynamicRef`, and external `$ref` values that could change meaning after
+bundling. Server preparation fails instead of publishing a misleading schema.
+Resource-aware bundling can add those cases later without weakening the
+portable catalog.
+
+Plain `tools/call` responses and completed MCP tasks use the same
+`CallToolResult` projection. Their `content`, `structuredContent`, and
+`isError` fields therefore follow one result-shaping path.
+
+The `exports` surface derives its MCP tools from public Harn functions through
+the same canonical catalog entries as `harn tool schema --surface exports`.
+The `script` surface reads an explicitly published `ToolRegistry`. `auto`
+selects exports when the module has public functions and otherwise loads the
+script surface.
 
 With `--watch`, Harn validates a complete replacement registry and VM before
 swapping the live stdio server. Successful reloads keep the client connection
@@ -121,10 +148,20 @@ leave the previous handlers live.
 
 ```bash
 harn tool schema server.harn --pretty
+harn tool schema server.harn --surface script --pretty
+harn tool schema library.harn --surface exports --pretty
 ```
 
-The result has `schema_version: "harn-tools/1.0"`, optional registry `info`,
-and a `tools` list. Handlers and capability values are intentionally absent.
+`--surface script` runs the script and reads its published registry. It is the
+default for compatibility. `--surface exports` compiles the module and derives
+entries from its public functions without running `main`, invoking handlers,
+acquiring capabilities, or contacting connectors. Use the exports surface for
+offline SDK generation and compatibility checks.
+
+Both surfaces return the same catalog shape. The result has
+`schema_version: "harn-tools/1.0"`, optional registry `info`, a `tools` list,
+and optional reusable schemas under `components.schemas`. Handlers and
+capability values are intentionally absent.
 Registry `info` supplies the default MCP server name/version/instructions and
 the generated CLI name/version/description. Explicit transport metadata wins.
 Each tool retains:
@@ -139,6 +176,23 @@ Each tool retains:
 
 Use the catalog for documentation, language bindings, completion generation,
 and compatibility checks. Use the live registry for execution.
+
+The generated contract files are:
+
+- `spec/protocol-artifacts/schemas/harn-tools-v1.schema.json` for structural
+  envelope validation and language generators;
+- `spec/protocol-artifacts/harn-tools.ts` for strict TypeScript consumers.
+
+Run `make check-protocol-artifacts` to detect drift between those files and the
+runtime contract. The artifact manifest records their paths and catalog
+version.
+
+The generated schema checks required fields, closed owned records, primitive
+types, and enum values. It treats embedded JSON Schema documents as open
+objects. Consumers that accept catalogs for execution must also deserialize
+them through Harn's `ToolCatalog` parser. That second stage checks Draft
+2020-12 semantics, local and component reference closure, command uniqueness,
+and other cross-entry invariants.
 
 ## Metadata types
 
@@ -160,6 +214,12 @@ mistaken for an execution classification.
 `source.binding` is the protocol-specific escape hatch. `_meta` remains the
 namespaced extension point for presentation protocols. Put behavior and policy
 in typed registry fields rather than `_meta`.
+
+All other owned records reject unknown fields. JSON Schema values remain open
+because their vocabulary evolves independently. They must be valid Draft
+2020-12 documents. `components.schemas` holds named reusable schemas, and
+catalog input or output schemas can reference them with
+`#/components/schemas/<name>`.
 
 ## Adapter governance
 

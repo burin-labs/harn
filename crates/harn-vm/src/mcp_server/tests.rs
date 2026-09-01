@@ -36,6 +36,38 @@ fn empty_closure(name: &str) -> VmClosure {
     }
 }
 
+fn tool_def(
+    name: &str,
+    description: &str,
+    meta: Option<serde_json::Map<String, serde_json::Value>>,
+    task_support: crate::mcp_tasks::McpTaskSupport,
+) -> McpToolDef {
+    McpToolDef {
+        catalog: crate::tool_registry::ToolCatalogEntry {
+            name: name.to_string(),
+            title: None,
+            description: Some(description.to_string()),
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
+            annotations: None,
+            icons: None,
+            execution: (task_support != crate::mcp_tasks::McpTaskSupport::Forbidden)
+                .then_some(crate::tool_registry::ToolExecution { task_support }),
+            governance: crate::tool_registry::ToolGovernance::default(),
+            cli: crate::tool_registry::ToolCliSpec {
+                command: vec![name.to_string()],
+                hidden: false,
+            },
+            namespace: None,
+            defer_loading: false,
+            source: None,
+            policy: None,
+            meta: meta.map(|meta| meta.into_iter().collect()),
+        },
+        handler: empty_closure(name),
+    }
+}
+
 #[test]
 fn test_params_to_json_schema_empty() {
     let schema = params_to_json_schema(None);
@@ -197,15 +229,26 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
     );
 
     let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
-    assert_eq!(tools[0].title.as_deref(), Some("Echo"));
-    assert_eq!(tools[0].annotations.as_ref().unwrap()["readOnlyHint"], true);
+    assert_eq!(tools[0].catalog.title.as_deref(), Some("Echo"));
     assert_eq!(
-        tools[0].icons.as_ref().unwrap()[0]["src"],
+        tools[0]
+            .catalog
+            .annotations
+            .as_ref()
+            .unwrap()
+            .read_only_hint,
+        Some(true)
+    );
+    assert_eq!(
+        tools[0].catalog.icons.as_ref().unwrap()[0].src,
         "https://example.com/tool.png"
     );
-    assert_eq!(tools[0].output_schema.as_ref().unwrap()["type"], "string");
     assert_eq!(
-        tools[0].meta.as_ref().unwrap()["ui"]["resourceUri"],
+        tools[0].catalog.output_schema.as_ref().unwrap()["type"],
+        "string"
+    );
+    assert_eq!(
+        tools[0].catalog.meta.as_ref().unwrap()["ui"]["resourceUri"],
         "ui://example/editor"
     );
 }
@@ -220,18 +263,12 @@ async fn server_projects_extension_metadata_on_tools_and_resource_content() {
     });
     let server = McpServer::new(
         "test".to_string(),
-        vec![McpToolDef {
-            name: "open_editor".to_string(),
-            title: None,
-            description: "Open the editor".to_string(),
-            input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
-            annotations: None,
-            icons: None,
-            meta: Some(extension_meta.clone()),
-            task_support: crate::mcp_tasks::McpTaskSupport::Forbidden,
-            handler: empty_closure("open_editor"),
-        }],
+        vec![tool_def(
+            "open_editor",
+            "Open the editor",
+            extension_meta.as_object().cloned(),
+            crate::mcp_tasks::McpTaskSupport::Forbidden,
+        )],
         vec![McpResourceDef {
             uri: "ui://example/editor".to_string(),
             name: "Editor".to_string(),
@@ -835,18 +872,12 @@ async fn server_stable_non_list_methods_carry_result_type_envelope() {
 async fn script_server_initializes_released_clients_without_stable_request_metadata() {
     let server = McpServer::new(
         "released-client-test".to_string(),
-        vec![McpToolDef {
-            name: "render_fixture".to_string(),
-            description: "Render a fixture".to_string(),
-            input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
-            title: None,
-            annotations: None,
-            icons: None,
-            meta: None,
-            task_support: crate::mcp_tasks::McpTaskSupport::Forbidden,
-            handler: empty_closure("render_fixture"),
-        }],
+        vec![tool_def(
+            "render_fixture",
+            "Render a fixture",
+            None,
+            crate::mcp_tasks::McpTaskSupport::Forbidden,
+        )],
         Vec::new(),
         Vec::new(),
         Vec::new(),
@@ -985,20 +1016,11 @@ async fn server_task_endpoints_report_a_genuinely_missing_task() {
 }
 
 fn task_capable_server(support: crate::mcp_tasks::McpTaskSupport) -> McpServer {
+    let mut tool = tool_def("slow_report", "Build a report", None, support);
+    tool.catalog.output_schema = Some(serde_json::json!({"type": "null"}));
     McpServer::new(
         "test".to_string(),
-        vec![McpToolDef {
-            name: "slow_report".to_string(),
-            title: None,
-            description: "Build a report".to_string(),
-            input_schema: serde_json::json!({"type": "object"}),
-            output_schema: None,
-            annotations: None,
-            icons: None,
-            meta: None,
-            task_support: support,
-            handler: empty_closure("slow_report"),
-        }],
+        vec![tool],
         Vec::new(),
         Vec::new(),
         Vec::new(),
@@ -1022,6 +1044,39 @@ fn task_client_params(rest: serde_json::Value) -> serde_json::Value {
 async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
     let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Optional);
     let mut vm = crate::Vm::new();
+
+    let listed = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                0,
+                "tools/list",
+                stable_metadata_params(serde_json::json!({})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        listed["result"]["tools"][0]["outputSchema"],
+        serde_json::json!({
+            "type": "object",
+            "properties": {"result": {"type": "null"}},
+            "required": ["result"],
+            "additionalProperties": false,
+        })
+    );
+
+    let inline = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                0,
+                "tools/call",
+                stable_metadata_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
 
     let created = server
         .handle_json_rpc(
@@ -1058,6 +1113,20 @@ async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
         read["result"]["result"].is_object(),
         "a completed task must carry the tool result, got {read}",
     );
+    for field in ["content", "isError", "structuredContent"] {
+        assert_eq!(
+            read["result"]["result"][field], inline["result"][field],
+            "inline and task completion must share CallToolResult field {field}"
+        );
+    }
+    assert_eq!(
+        read["result"]["result"]["structuredContent"],
+        serde_json::json!({"result": null})
+    );
+    let output_validator =
+        jsonschema::draft202012::new(&listed["result"]["tools"][0]["outputSchema"])
+            .expect("advertised output schema");
+    assert!(output_validator.is_valid(&read["result"]["result"]["structuredContent"]));
 
     // Cancelling something already terminal has to be refused rather than
     // quietly accepted, or a client cannot tell whether it beat the work.

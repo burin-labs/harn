@@ -77,6 +77,19 @@ the same normalized `agent` projection. A tool intentionally reserved for an
 operator surface therefore cannot leak its name or instructions to the model,
 appear in a search result, or execute through a forged call.
 
+MCP needs each tool schema to stand alone. Its projection follows reachable
+catalog components, moves them under `$defs`, and rebases their local
+references. This preserves schema meaning for ordinary component graphs. Harn
+fails server preparation when resource-scope keywords or external references
+make that move unsafe. The portable catalog remains able to represent the full
+Draft 2020-12 vocabulary; a transport projection must not narrow its owner.
+
+MCP also requires structured tool output to be an object. Harn wraps scalar,
+array, union, and other non-object output schemas in a required `result`
+property, then applies the same wrapper to `structuredContent`. Inline calls
+and task completions share one `CallToolResult` projection, so asynchronous
+execution cannot create a second result contract.
+
 ## Language bridges
 
 `harn-tools/1.0` is the stable boundary for documentation, compatibility
@@ -91,12 +104,24 @@ That separation keeps type generation reusable across in-process embedding,
 MCP, HTTP, and future transports. A bridge must not infer execution semantics
 from `_meta`; Harn policy and source coordinates have typed fields.
 
+Harn publishes the catalog contract as Draft 2020-12 JSON Schema and strict
+TypeScript. Both artifacts come from the Rust DTOs that validate live registry
+and export catalogs. This makes the DTO module the semantic owner and the
+published files mechanical projections. OpenAPI extensions, MCP fields, and
+SDK-local interfaces cannot silently become competing catalog definitions.
+
+Static Harn exports project into the same catalog without executing `main`.
+This route resolves Harn input and output types into JSON Schemas for SDK
+generation. It does not import route configuration, authentication, queues,
+retries, or worker policy into the portable contract.
+
 ## Current boundary
 
 The registry now covers executable tools, a nested CLI, MCP tool discovery and
-dispatch, and a portable static catalog. MCP resources and prompts share the
-script loader but are not yet generalized into the tool catalog because they
-have different invocation and content contracts. Streaming output, interactive
-CLI prompts, pagination UX, shell completion artifacts, and generated native
-language packages are later projections. They should extend this registry or a
-sibling typed capability registry, not create another operation owner.
+dispatch, static export inspection, and a portable generated contract. MCP
+resources and prompts share the script loader. They are not part of the tool
+catalog because they have different invocation and content contracts.
+Streaming output, interactive CLI prompts, pagination UX, shell completion
+artifacts, and generated native language packages are later projections. They
+should extend this registry or a sibling typed capability registry, not create
+another operation owner.

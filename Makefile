@@ -851,8 +851,9 @@ check-typescript-protocol-binding:
 	@set -eu; \
 		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-ts-binding.XXXXXX"); \
 		trap 'rm -rf "$$tmp"' EXIT; \
-		./node_modules/.bin/tsc --strict --module node16 --moduleResolution node16 --target es2022 --rootDir . --outDir "$$tmp" spec/protocol-artifacts/harn-protocol.ts scripts/tests/protocol_binding_session_recap.ts; \
-		node "$$tmp/scripts/tests/protocol_binding_session_recap.js" spec/protocol-artifacts/fixtures/round_trip.json
+		./node_modules/.bin/tsc --strict --module node16 --moduleResolution node16 --target es2022 --rootDir . --outDir "$$tmp" spec/protocol-artifacts/harn-protocol.ts spec/protocol-artifacts/harn-tools.ts scripts/tests/protocol_binding_session_recap.ts scripts/tests/tool_catalog_contract.ts; \
+		node "$$tmp/scripts/tests/protocol_binding_session_recap.js" spec/protocol-artifacts/fixtures/round_trip.json; \
+		node "$$tmp/scripts/tests/tool_catalog_contract.js"
 
 check-swift-protocol-binding:
 	@set -eu; \

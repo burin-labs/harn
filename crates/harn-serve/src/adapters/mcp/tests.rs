@@ -72,6 +72,13 @@ pub fn greet(name: string) -> string {
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let tools = server.tools_list_result(&json!({}));
+    assert_eq!(
+        tools["tools"][0],
+        server
+            .tool_catalog
+            .mcp_tool(&server.tool_catalog.tools[0])
+            .expect("MCP projection")
+    );
     assert_eq!(tools["tools"][0]["name"], "greet");
     assert_eq!(tools["tools"][0]["title"], "greet");
     assert_eq!(
