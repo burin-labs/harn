@@ -275,7 +275,7 @@ check-dependabot-groups:
 # `ARGS` replaces the default `--workspace` selector so `-p <crate>` also
 # narrows compilation instead of forming Cargo's additive workspace union.
 test:
-	@command -v cargo-nextest >/dev/null 2>&1 || { \
+	@$(HARN_CARGO_CMD) nextest --version >/dev/null 2>&1 || { \
 		echo "make test requires cargo-nextest; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
 		echo "for intentional plain cargo test (different isolation; includes e2e binaries): make test-cargo" >&2; \
 		exit 1; }
@@ -318,7 +318,7 @@ test-one:
 # compiling the Harn CLI.
 AFFECTED_BASE ?= origin/main
 test-affected:
-	@command -v cargo-nextest >/dev/null 2>&1 || { \
+	@$(HARN_CARGO_CMD) nextest --version >/dev/null 2>&1 || { \
 		echo "test-affected requires cargo-nextest; run 'make setup'"; exit 1; }
 	@args="$$(./scripts/ci/affected_crate_args.sh --base "$(AFFECTED_BASE)")"; \
 	if [ -z "$$args" ]; then \
