@@ -756,6 +756,14 @@ fn json_schema_large_integer_multiple_of_is_exact() {
         &nested
     )
     .unwrap());
+
+    let untyped = make_vm_dict(vec![("multipleOf", VmValue::Int(LARGE))]);
+    assert!(schema_is_value(&VmValue::Int(LARGE), &untyped).unwrap());
+    assert!(!schema_is_value(&VmValue::Int(LARGE - 1), &untyped).unwrap());
+
+    let numeric = make_vm_dict(vec![("type", s("number")), ("multipleOf", VmValue::Int(2))]);
+    assert!(schema_is_value(&VmValue::Float(4.0), &numeric).unwrap());
+    assert!(!schema_is_value(&VmValue::Float(3.0), &numeric).unwrap());
 }
 
 #[test]

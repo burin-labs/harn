@@ -209,16 +209,16 @@ fn validate_exported_json_schema(
 /// `arbitrary-precision` feature is enabled. That feature also enables
 /// serde_json's process-wide arbitrary number representation, which changes
 /// ordinary typed serde round trips. Harn already owns integer values as i64,
-/// so keep integer-schema divisibility at this typed boundary and omit only
-/// that delegated keyword from the generic validator.
+/// so keep integer-divisor semantics at this typed boundary and omit only that
+/// delegated keyword from the generic validator. Integer values use exact i64
+/// arithmetic; floats retain jsonschema's numeric semantics.
 fn delegate_integer_multiple_of_to_harn(schema: &mut serde_json::Value) {
     match schema {
         serde_json::Value::Object(object) => {
-            if matches!(object.get("type"), Some(serde_json::Value::String(kind)) if kind == "integer")
-                && object
-                    .get("multipleOf")
-                    .and_then(serde_json::Value::as_i64)
-                    .is_some()
+            if object
+                .get("multipleOf")
+                .and_then(serde_json::Value::as_i64)
+                .is_some()
             {
                 object.remove("multipleOf");
             }
@@ -391,11 +391,18 @@ fn validate_harn_types_inner(
             return;
         }
     }
-    if let (VmValue::Int(value), Some(VmValue::Int(divisor))) = (value, schema.get("multiple_of")) {
-        if *divisor <= 0 || value % divisor != 0 {
+    if let Some(VmValue::Int(divisor)) = schema.get("multiple_of") {
+        let valid = match value {
+            VmValue::Int(value) => *divisor > 0 && value % divisor == 0,
+            VmValue::Float(value) => {
+                *divisor > 0 && value.fract() == 0.0 && value % (*divisor as f64) == 0.0
+            }
+            _ => true,
+        };
+        if !valid {
             errors.push(ValidationIssue::schema(
                 path,
-                format!("{value} is not a multiple of {divisor}"),
+                format!("{} is not a multiple of {divisor}", value.display()),
             ));
         }
     }
