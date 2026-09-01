@@ -1350,8 +1350,8 @@ mod tests {
         value["tools"][0]["outputSchema"] = json!({
             "type": "object",
             "properties": {
-                "constant": {"const": literal.clone()},
-                "choice": {"enum": [literal.clone()]},
+                "constant": {"const": &literal},
+                "choice": {"enum": [&literal]},
                 "result": {"$ref": "#/components/schemas/Result"}
             }
         });
