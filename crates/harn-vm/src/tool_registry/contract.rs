@@ -11,12 +11,16 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value as JsonValue};
 use ts_rs::{Config, TS};
 
+#[cfg(test)]
+mod boundary_tests;
 mod schema;
+mod validation;
 
 use schema::{
-    decode_json_pointer_segment, encode_json_pointer_segment, try_transform_schema_nodes,
-    try_visit_schema_nodes,
+    decode_uri_fragment_json_pointer_segment, encode_uri_fragment_json_pointer_segment,
+    try_transform_schema_nodes, try_visit_schema_nodes,
 };
+use validation::validate_cli_projection;
 
 pub use crate::mcp_tasks::McpTaskSupport as ToolTaskSupport;
 use crate::tool_annotations::{SideEffectLevel, ToolKind};
@@ -342,7 +346,6 @@ impl ToolCatalog {
         }
 
         let mut names = std::collections::BTreeSet::new();
-        let mut commands = std::collections::BTreeSet::new();
         for (index, tool) in self.tools.iter().enumerate() {
             let context = format!("tools[{index}]");
             require_non_empty(&tool.name, &format!("{context}.name"))?;
@@ -364,12 +367,6 @@ impl ToolCatalog {
                         "{context}.cli.command[{part_index}] must match ^[A-Za-z0-9_][A-Za-z0-9_-]*$"
                     ));
                 }
-            }
-            if !commands.insert(tool.cli.command.as_slice()) {
-                return Err(format!(
-                    "duplicate CLI command path {:?}",
-                    tool.cli.command.join(" ")
-                ));
             }
             require_unique(
                 &tool.governance.audiences,
@@ -438,7 +435,27 @@ impl ToolCatalog {
                 )?;
             }
         }
-        Ok(())
+        validate_cli_projection(&self.tools)
+    }
+
+    /// Entries discoverable through one adapter projection.
+    pub fn tools_for_audience(
+        &self,
+        audience: ToolAudience,
+    ) -> impl Iterator<Item = &ToolCatalogEntry> {
+        self.tools
+            .iter()
+            .filter(move |entry| entry.governance.allows(audience))
+    }
+
+    /// A named entry only when the requesting adapter may discover and invoke it.
+    pub fn tool_for_audience(
+        &self,
+        name: &str,
+        audience: ToolAudience,
+    ) -> Option<&ToolCatalogEntry> {
+        self.tools_for_audience(audience)
+            .find(|entry| entry.name == name)
     }
 
     /// Project a catalog entry onto MCP while carrying every reachable schema
@@ -456,8 +473,7 @@ impl ToolCatalog {
     }
 
     pub fn mcp_tools(&self) -> Result<Vec<JsonValue>, ToolCatalogProjectionError> {
-        self.tools
-            .iter()
+        self.tools_for_audience(ToolAudience::Mcp)
             .map(|entry| self.mcp_tool(entry))
             .collect()
     }
@@ -628,7 +644,7 @@ fn reference_for_offline_validation(
         let (encoded_name, nested_path) = path
             .split_once('/')
             .map_or((path, None), |(name, path)| (name, Some(path)));
-        let name = decode_json_pointer_segment(encoded_name)
+        let name = decode_uri_fragment_json_pointer_segment(encoded_name)
             .ok_or_else(|| format!("invalid schema component reference {reference:?}"))?;
         let uri = component_uris
             .get(&name)
@@ -768,7 +784,7 @@ fn standalone_schema(
         .iter()
         .filter_map(|name| {
             components.get(name).map(|schema| {
-                let base = format!("#/$defs/{}", encode_json_pointer_segment(name));
+                let base = format!("#/$defs/{}", encode_uri_fragment_json_pointer_segment(name));
                 (
                     name.clone(),
                     rewrite_schema_refs(schema.clone(), Some(&base)),
@@ -794,7 +810,7 @@ fn collect_component_refs(value: &JsonValue, names: &mut std::collections::BTree
             .and_then(|reference| reference.strip_prefix("#/components/schemas/"))
         {
             let encoded_name = path.split('/').next().unwrap_or(path);
-            if let Some(name) = decode_json_pointer_segment(encoded_name) {
+            if let Some(name) = decode_uri_fragment_json_pointer_segment(encoded_name) {
                 names.insert(name);
             }
         }
@@ -839,8 +855,8 @@ fn rewrite_schema_refs(mut value: JsonValue, component_base: Option<&str>) -> Js
                 let (encoded_name, nested_path) = path
                     .split_once('/')
                     .map_or((path, None), |(name, path)| (name, Some(path)));
-                if let Some(name) = decode_json_pointer_segment(encoded_name) {
-                    let encoded_name = encode_json_pointer_segment(&name);
+                if let Some(name) = decode_uri_fragment_json_pointer_segment(encoded_name) {
+                    let encoded_name = encode_uri_fragment_json_pointer_segment(&name);
                     *reference = match nested_path {
                         Some(path) => format!("#/$defs/{encoded_name}/{path}"),
                         None => format!("#/$defs/{encoded_name}"),

@@ -596,7 +596,11 @@ impl McpServer {
             .and_then(JsonValue::as_str)
             .unwrap_or_default()
             .to_string();
-        if self.catalog.function(&tool_name).is_none() {
+        if self
+            .tool_catalog
+            .tool_for_audience(&tool_name, harn_vm::tool_registry::ToolAudience::Mcp)
+            .is_none()
+        {
             return Err(harn_vm::jsonrpc::error_response(
                 request_id,
                 -32602,

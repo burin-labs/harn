@@ -87,9 +87,10 @@ pub(super) fn tool_call_success(
         "isError": false,
     });
     let entry = catalog
-        .tools
-        .iter()
-        .find(|entry| entry.name == response.function)
+        .tool_for_audience(
+            &response.function,
+            harn_vm::tool_registry::ToolAudience::Mcp,
+        )
         .expect("prepared MCP tool catalog covers every dispatched export");
     if let Some(structured) = catalog
         .mcp_structured_content(entry, response.value)

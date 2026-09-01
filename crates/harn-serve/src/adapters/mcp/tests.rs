@@ -120,6 +120,38 @@ pub fn greet(name: string) -> string {
 }
 
 #[tokio::test]
+async fn forged_call_cannot_invoke_a_tool_outside_the_mcp_audience() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        "pub fn operator_only() -> string { return \"not reached\" }\n",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let mut server = McpServer::new(McpServerConfig::new(core));
+    assert!(
+        server.catalog.function("operator_only").is_some(),
+        "the exported function exists, so only typed audience admission can refuse it"
+    );
+    server.tool_catalog.tools[0].governance.audiences =
+        vec![harn_vm::tool_registry::ToolAudience::Dashboard];
+
+    let response = mcp_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            1,
+            "tools/call",
+            json!({"name": "operator_only", "arguments": {}}),
+        ),
+        SharedSession::new(),
+    )
+    .await;
+    assert_eq!(response["error"]["code"], json!(-32602));
+    assert_eq!(response["error"]["message"], "Unknown tool: operator_only");
+}
+
+#[tokio::test]
 async fn advertised_nominal_output_schema_validates_structured_tool_result() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
