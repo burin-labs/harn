@@ -1,4 +1,3 @@
-import { RuntimeContentFingerprint } from "std/runtime/content_fingerprint"
 import { assert_contains, assert_false, assert_true } from "std/testing"
 import {
   RuntimeContentFingerprint,
