@@ -60,6 +60,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
   const action = read_yaml(harness.fs, ACTION_PATH, nil)
   const node_action = read_yaml(harness.fs, NODE_ACTION_PATH, nil)
   const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
+  const sccache_action = read_yaml(harness.fs, SCCACHE_ACTION_PATH, nil)
   const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
@@ -80,6 +81,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     release_aot_runner_errors(workflows[RELEASE_BINARY_WORKFLOW]),
     release_warm_cache_prune_errors(workflows[RELEASE_BINARY_WORKFLOW]),
     setup_harn_cache_action_errors(setup_harn_action),
+    sccache_action_cache_size_errors(sccache_action),
     sccache_install_action_errors(sccache_install_action),
     ci_workflow_concurrency_errors(workflows["ci.yml"]),
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
