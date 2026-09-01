@@ -12,6 +12,7 @@ mkdir -p "$fixture/bin"
 git -C "$fixture" init -q
 git -C "$fixture" config user.name "Harn test"
 git -C "$fixture" config user.email "harn-test@example.invalid"
+git -C "$fixture" config commit.gpgSign false
 printf 'one\n' > "$fixture/source.txt"
 printf '.harn/\n' > "$fixture/.gitignore"
 git -C "$fixture" add source.txt .gitignore
