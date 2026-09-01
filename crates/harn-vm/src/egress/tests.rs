@@ -918,6 +918,40 @@ fn environment_and_script_policies_compose_instead_of_refusing() {
         .is_some());
 }
 
+#[test]
+fn repeated_semantic_contribution_is_idempotent() {
+    let _guard = test_env_guard();
+    for spelling in [
+        "API.Example.Test:443",
+        "api.example.test:443",
+        "api.example.test:8443",
+    ] {
+        let script = script_config(&[
+            ("allow", strings(&[spelling])),
+            ("deny", strings(&[spelling])),
+        ]);
+        let (policy, declared) = policy_from_config(&script).expect("script policy parses");
+        install_policy(policy, declared, "stdlib").expect("repeated policy composes");
+    }
+
+    let configured = configured_policy().expect("a policy is configured");
+    assert_eq!(configured.policy.allow.len(), 2);
+    assert_eq!(configured.policy.deny.len(), 2);
+    assert_eq!(configured.policy.allow[0].raw, "API.Example.Test:443");
+    assert_eq!(configured.policy.deny[0].raw, "API.Example.Test:443");
+    assert_eq!(configured.policy.allow[1].raw, "api.example.test:8443");
+    assert_eq!(configured.policy.deny[1].raw, "api.example.test:8443");
+    assert_eq!(configured.sources, vec!["stdlib"]);
+    assert_eq!(configured.axis_sources.allow, vec!["stdlib"]);
+    assert_eq!(configured.axis_sources.deny, vec!["stdlib"]);
+    assert!(
+        check_url("connector", "https://api.example.test:443")
+            .unwrap()
+            .is_some(),
+        "deduplicating each axis must preserve deny precedence"
+    );
+}
+
 /// Composition is tighten-only: no contribution can weaken a restriction another
 /// one declared. Without this the "compose" contract would be a silent way for a
 /// script to switch an operator's confinement off.

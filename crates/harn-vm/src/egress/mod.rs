@@ -97,12 +97,35 @@ pub(crate) struct EgressRule {
     port: Option<u16>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EgressMatcher {
     Host(String),
     Suffix(String),
     Ip(IpAddr),
     Cidr(IpNet),
+}
+
+// Equality is enforcement identity; `raw` preserves the first receipt spelling.
+impl PartialEq for EgressRule {
+    fn eq(&self, other: &Self) -> bool {
+        self.matcher == other.matcher && self.port == other.port
+    }
+}
+
+impl Eq for EgressRule {}
+
+fn extend_unique<T: PartialEq>(values: &mut Vec<T>, incoming: impl IntoIterator<Item = T>) {
+    for value in incoming {
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+}
+
+fn unique<T: PartialEq>(incoming: Vec<T>) -> Vec<T> {
+    let mut values = Vec::with_capacity(incoming.len());
+    extend_unique(&mut values, incoming);
+    values
 }
 
 #[derive(Clone, Debug, Default)]
@@ -177,7 +200,9 @@ impl ConfiguredPolicy {
         )
     }
 
-    fn first(policy: EgressPolicy, declared: DeclaredAxes, source: &'static str) -> Self {
+    fn first(mut policy: EgressPolicy, declared: DeclaredAxes, source: &'static str) -> Self {
+        policy.allow = unique(policy.allow);
+        policy.deny = unique(policy.deny);
         let mut axis_sources = AxisSources::default();
         if declared.allow {
             axis_sources.allow.push(source);
@@ -211,25 +236,23 @@ impl ConfiguredPolicy {
     ///   contribution asked for it; an `off` cannot switch a declared block off.
     /// * `allow_loopback` holds only while every declaring contribution allows it.
     fn compose(&mut self, incoming: EgressPolicy, declared: DeclaredAxes, source: &'static str) {
-        if !self.sources.contains(&source) {
-            self.sources.push(source);
-        }
+        extend_unique(&mut self.sources, [source]);
         if declared.allow {
-            self.policy.allow.extend(incoming.allow);
-            self.axis_sources.allow.push(source);
+            extend_unique(&mut self.policy.allow, incoming.allow);
+            extend_unique(&mut self.axis_sources.allow, [source]);
         }
         if declared.deny {
-            self.policy.deny.extend(incoming.deny);
-            self.axis_sources.deny.push(source);
+            extend_unique(&mut self.policy.deny, incoming.deny);
+            extend_unique(&mut self.axis_sources.deny, [source]);
         }
         if declared.default {
-            self.axis_sources.default.push(source);
+            extend_unique(&mut self.axis_sources.default, [source]);
             if incoming.default == DefaultAction::Deny {
                 self.policy.default = DefaultAction::Deny;
             }
         }
         if declared.block_private {
-            self.axis_sources.block_private.push(source);
+            extend_unique(&mut self.axis_sources.block_private, [source]);
             self.policy.block_private = match (self.policy.block_private, incoming.block_private) {
                 (Some(SsrfMode::BlockPrivate), _) | (_, Some(SsrfMode::BlockPrivate)) => {
                     Some(SsrfMode::BlockPrivate)
@@ -239,7 +262,7 @@ impl ConfiguredPolicy {
             };
         }
         if declared.allow_loopback {
-            self.axis_sources.allow_loopback.push(source);
+            extend_unique(&mut self.axis_sources.allow_loopback, [source]);
             self.allow_loopback_declared &= incoming.allow_loopback;
             self.policy.allow_loopback = self.allow_loopback_declared;
         }
