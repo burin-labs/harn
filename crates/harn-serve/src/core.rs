@@ -20,13 +20,15 @@ use tracing::Instrument;
 use crate::auth::{AuthPolicy, AuthRequest, AuthenticatedPrincipal, AuthorizationDecision};
 use crate::limits::{LimitContext, LimitDecision, LimitGuard, LimitRegistry};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
-use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
+use crate::{BudgetSpec, DispatchError, ExportedCallableKind};
 
 mod config;
 mod prepared_generation;
+mod prepared_tools;
 pub use config::DispatchCoreConfig;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
+use prepared_tools::PreparedTools;
 
 struct ActiveEventLogGuard {
     previous: Option<Arc<AnyEventLog>>,
@@ -299,47 +301,27 @@ impl VmConfigurator for NoopVmConfigurator {}
 
 pub struct DispatchCore {
     config: DispatchCoreConfig,
-    catalog: ExportCatalog,
-    tool_catalog: harn_vm::tool_registry::ToolCatalog,
-    mcp_tools: Vec<serde_json::Value>,
+    tools: PreparedTools,
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     generation: PreparedDispatchGeneration,
 }
 
 impl DispatchCore {
     pub fn new(config: DispatchCoreConfig) -> Result<Self, DispatchError> {
-        let catalog = ExportCatalog::from_path(&config.script_path)?;
-        let tool_catalog = prepare_tool_catalog(&catalog)?;
-        let mcp_tools = tool_catalog
-            .mcp_tools()
-            .map_err(|error| DispatchError::Validation(error.to_string()))?;
+        let tools = PreparedTools::prepare(&config.script_path)?;
         let event_log = install_default_for_base_dir(&config.base_dir).map_err(|error| {
             DispatchError::Io(format!(
                 "failed to initialize event log for {}: {error}",
                 config.base_dir.display()
             ))
         })?;
-        let generation = PreparedDispatchGeneration::prepare(&config, &catalog)?;
+        let generation = PreparedDispatchGeneration::prepare(&config, tools.exports())?;
         Ok(Self {
             config,
-            catalog,
-            tool_catalog,
-            mcp_tools,
+            tools,
             event_log,
             generation,
         })
-    }
-
-    pub fn catalog(&self) -> &ExportCatalog {
-        &self.catalog
-    }
-
-    pub fn tool_catalog(&self) -> &harn_vm::tool_registry::ToolCatalog {
-        &self.tool_catalog
-    }
-
-    pub(crate) fn mcp_tools(&self) -> &[serde_json::Value] {
-        &self.mcp_tools
     }
 
     pub fn auth_policy(&self) -> &AuthPolicy {
@@ -353,7 +335,7 @@ impl DispatchCore {
     pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
         let trace_id = request.trace_id.clone().unwrap_or_default();
         let function_scopes = self
-            .catalog
+            .catalog()
             .function(&request.function)
             .map(|function| function.required_scopes.clone())
             .unwrap_or_default();
@@ -429,11 +411,11 @@ impl DispatchCore {
             }
         }
 
-        let function = self.catalog.function(&request.function).ok_or_else(|| {
+        let function = self.catalog().function(&request.function).ok_or_else(|| {
             DispatchError::MissingExport(format!(
                 "function '{}' is not exported by {}",
                 request.function,
-                self.catalog.script_path.display()
+                self.catalog().script_path.display()
             ))
         })?;
 
@@ -769,12 +751,6 @@ impl DispatchCore {
     }
 }
 
-fn prepare_tool_catalog(
-    catalog: &ExportCatalog,
-) -> Result<harn_vm::tool_registry::ToolCatalog, DispatchError> {
-    catalog.tool_catalog()
-}
-
 fn build_vm_args(
     arguments: &CallArguments,
     function: &crate::ExportedFunction,
@@ -902,26 +878,6 @@ fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    #[test]
-    fn server_preparation_rejects_an_invalid_tool_catalog_before_requests() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            "pub fn inspect(input: string) -> string { return input }\n",
-        )
-        .expect("write script");
-        let mut exports = ExportCatalog::from_path(&script).expect("exports");
-        exports
-            .functions
-            .get_mut("inspect")
-            .expect("inspect export")
-            .input_schema = serde_json::json!({});
-
-        let error = prepare_tool_catalog(&exports).expect_err("invalid catalog must fail prepare");
-        assert!(error.message().contains("inputSchema"));
-    }
 
     #[derive(Default)]
     struct TrackingReplayCache {
