@@ -11,6 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value as JsonValue};
 use ts_rs::{Config, TS};
 
+mod cli;
 mod prepared;
 mod schema;
 
@@ -21,8 +22,12 @@ use schema::{
 
 pub use crate::mcp_tasks::McpTaskSupport as ToolTaskSupport;
 use crate::tool_annotations::{SideEffectLevel, ToolKind};
+pub use cli::{
+    ToolCliArgumentSpec, ToolCliCommandSpec, ToolCliSpec, ToolCliTreeSpec, ToolCliValueHint,
+};
 pub use prepared::{
-    PreparedToolCatalog, PreparedToolCatalogError, ToolContractPhase, ToolContractViolation,
+    PreparedCliArgument, PreparedCliCommand, PreparedCliTree, PreparedToolCatalog,
+    PreparedToolCatalogError, ToolContractPhase, ToolContractViolation,
 };
 
 pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/1.0";
@@ -63,17 +68,6 @@ pub struct ToolRegistryInfo {
     #[ts(optional = nullable)]
     #[schemars(length(min = 1), pattern(r".*\S.*"))]
     pub description: Option<String>,
-}
-
-/// Deterministic command-line presentation for one tool.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct ToolCliSpec {
-    /// Non-empty command path below `harn tool run <script>`.
-    #[schemars(length(min = 1), inner(pattern(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")))]
-    pub command: Vec<String>,
-    /// Hide the command from help while retaining explicit invocation.
-    pub hidden: bool,
 }
 
 /// Adapter projections that may discover and invoke a tool.
@@ -287,6 +281,9 @@ pub struct ToolCatalog {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub info: Option<ToolRegistryInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub cli: Option<ToolCliTreeSpec>,
     pub tools: Vec<ToolCatalogEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
@@ -298,6 +295,7 @@ pub struct ToolCatalog {
 struct RawToolCatalog {
     schema_version: ToolCatalogSchemaVersion,
     info: Option<ToolRegistryInfo>,
+    cli: Option<ToolCliTreeSpec>,
     tools: Vec<ToolCatalogEntry>,
     components: Option<ToolCatalogComponents>,
 }
@@ -311,6 +309,7 @@ impl<'de> Deserialize<'de> for ToolCatalog {
         let catalog = Self {
             schema_version: raw.schema_version,
             info: raw.info,
+            cli: raw.cli,
             tools: raw.tools,
             components: raw.components,
         };
@@ -996,6 +995,10 @@ pub fn tool_catalog_typescript() -> String {
     declaration!(ToolTaskSupport);
     declaration!(ToolIconTheme);
     declaration!(ToolRegistryInfo);
+    declaration!(ToolCliValueHint);
+    declaration!(ToolCliArgumentSpec);
+    declaration!(ToolCliCommandSpec);
+    declaration!(ToolCliTreeSpec);
     declaration!(ToolCliSpec);
     declaration!(ToolGovernance);
     declaration!(ToolSource);

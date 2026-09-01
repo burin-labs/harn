@@ -2281,10 +2281,10 @@ For declarative batches, `import { ToolRegistry, ToolDefinitionSpec,
 tool_define_many, tool_registry_from } from "std/tools"`.
 `tool_define_many(registry, specs: list<ToolDefinitionSpec>)` adds typed
 `{name, description, parameters, handler, ...}` specs to a `ToolRegistry`, and
-`tool_registry_from(specs, info?, components?)` creates a fresh registry from
-the same shape. `components` uses the same `{schemas: {...}}` envelope as the
-portable catalog, so reusable schemas remain attached through selection and
-adapter projection.
+`tool_registry_from(specs, options?)` creates a fresh registry from the same
+shape. `options` is the closed `{info?, components?, cli?}` record.
+`components` uses the same `{schemas: {...}}` envelope as the portable catalog,
+so reusable schemas remain attached through selection and adapter projection.
 Packages that forward registries should name `ToolRegistry` on public
 boundaries instead of `dict` or a local structural copy.
 
@@ -2614,7 +2614,7 @@ tool registry dict.
 | `tool_registry()` | — | `ToolRegistry` | Create an empty `{_type: "tool_registry", tools: []}` registry (`ToolRegistry` is exported from `std/tools`) |
 | `tool_define(registry, name, desc, config)` | registry: `ToolRegistry`, name, desc: string, config: dict | `ToolRegistry` | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
 | `tool_define_many(registry, specs)` | registry: `ToolRegistry`, specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
-| `tool_registry_from(specs, info?, components?)` | specs: `list<ToolDefinitionSpec>`, info: `ToolRegistryInfo?`, components: `ToolComponents?` | `ToolRegistry` | Stdlib helper from `std/tools`; create a registry from declarative tool specs and optional reusable schemas |
+| `tool_registry_from(specs, options?)` | specs: `list<ToolDefinitionSpec>`, options: `ToolRegistryOptions?` | `ToolRegistry` | Stdlib helper from `std/tools`; create a registry with optional info, reusable schemas, and CLI parent metadata |
 | `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |

@@ -41,6 +41,7 @@ impl ExportCatalog {
                 cli: ToolCliSpec {
                     command: vec![function.name.clone()],
                     hidden: false,
+                    arguments: BTreeMap::new(),
                 },
                 namespace: None,
                 defer_loading: false,
@@ -71,6 +72,7 @@ impl ExportCatalog {
                 version: None,
                 description: self.instructions.clone(),
             }),
+            cli: None,
             tools,
             components: None,
         };

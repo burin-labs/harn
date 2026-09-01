@@ -46,7 +46,7 @@ publishes or projects the registry. The normalized entry contains:
 - one declared execution backend, with a local handler closure for in-VM tools;
 - Harn execution policy and protocol annotations;
 - closed CLI, MCP, catalog, dashboard, and agent/model audiences;
-- CLI path and visibility;
+- CLI parent metadata plus leaf paths, argument tokens, help, and completion hints;
 - typed source coordinates with a protocol-specific binding object;
 - deferred-loading, icon, execution, and namespaced extension metadata.
 
@@ -92,9 +92,10 @@ execution cannot create a second result contract.
 
 At load time Harn turns the portable catalog into one immutable prepared
 catalog. It compiles Draft 2020-12 input and output validators, stable name
-lookup, and MCP discovery documents once. CLI, MCP, tasks, replay, and exported
-function dispatch all use that object. They do not compile schemas or recover
-component context per request.
+lookup, MCP discovery documents, and a framework-independent CLI tree once.
+CLI parsing, help, shell completion, MCP, tasks, replay, and exported function
+dispatch all use that object. They do not rebuild command trees, compile
+schemas, or recover component context per request.
 
 ## Language bridges
 
@@ -123,11 +124,13 @@ retries, or worker policy into the portable contract.
 
 ## Current boundary
 
-The registry now covers executable tools, a nested CLI, MCP tool discovery and
-dispatch, static export inspection, and a portable generated contract. MCP
+The registry now covers executable tools, a nested CLI with portable argument
+metadata and shell completion, MCP tool discovery and dispatch, static export
+inspection, and a portable generated contract. MCP
 resources and prompts share the script loader. They are not part of the tool
 catalog because they have different invocation and content contracts.
-Streaming output, interactive CLI prompts, pagination UX, shell completion
-artifacts, and generated native language packages are later projections. They
+Streaming output, interactive CLI prompts, pagination UX, installable
+completion packaging, and generated native language packages are later
+projections. They
 should extend this registry or a sibling typed capability registry, not create
 another operation owner.

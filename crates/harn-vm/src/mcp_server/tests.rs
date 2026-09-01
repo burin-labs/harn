@@ -57,6 +57,7 @@ fn tool_def(
             cli: crate::tool_registry::ToolCliSpec {
                 command: vec![name.to_string()],
                 hidden: false,
+                arguments: std::collections::BTreeMap::new(),
             },
             namespace: None,
             defer_loading: false,

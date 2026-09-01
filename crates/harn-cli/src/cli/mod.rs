@@ -260,7 +260,8 @@ pub(crate) use test_bench::{
 };
 pub(crate) use time::{TimeArgs, TimeCommand, TimeRunArgs};
 pub(crate) use tool::{
-    ToolArgs, ToolCommand, ToolNewArgs, ToolRunArgs, ToolSchemaArgs, ToolSchemaSurface,
+    ToolArgs, ToolCommand, ToolCompletionShell, ToolCompletionsArgs, ToolNewArgs, ToolRunArgs,
+    ToolSchemaArgs, ToolSchemaSurface,
 };
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs, TracePrefixStabilityArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};

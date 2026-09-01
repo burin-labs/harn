@@ -10,15 +10,52 @@ pub type ToolRegistryInfo = {name: string, version?: string, description?: strin
 /** Reusable named JSON Schemas shared by every adapter projection. */
 pub type ToolComponents = {schemas: dict}
 
+pub type ToolCliValueHint = "file" | "directory" | "path" | "url" | "email" | "hostname" | "command"
+
+pub type ToolCliArgumentSpec = {
+  long?: string,
+  short?: string,
+  aliases?: list<string>,
+  position?: int,
+  value_name?: string,
+  help?: string,
+  value_hint?: ToolCliValueHint,
+  repeatable?: bool,
+  display_order?: int,
+  help_group?: string,
+}
+
+pub type ToolCliCommandSpec = {
+  command: list<string>,
+  title?: string,
+  description?: string,
+  aliases?: list<string>,
+  hidden?: bool,
+  display_order?: int,
+}
+
+pub type ToolCliTreeSpec = {commands: list<ToolCliCommandSpec>}
+
+pub type ToolRegistryOptions = {
+  info?: ToolRegistryInfo,
+  components?: ToolComponents,
+  cli?: ToolCliTreeSpec,
+}
+
 pub type ToolRegistry = {
   _type: "tool_registry",
   tools: list,
   info?: ToolRegistryInfo,
   components?: ToolComponents,
+  cli?: ToolCliTreeSpec,
 }
 
 /** Deterministic command path projected by `harn tool run`. */
-pub type ToolCliSpec = {command: list<string>, hidden?: bool}
+pub type ToolCliSpec = {
+  command: list<string>,
+  hidden?: bool,
+  arguments?: dict<string, ToolCliArgumentSpec>,
+}
 
 /** Closed set of adapters that may discover and invoke a tool. */
 pub type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard" | "agent"
@@ -69,6 +106,7 @@ pub type ToolCatalogEntry = {
 pub type ToolCatalog = {
   schema_version: "harn-tools/1.0",
   info?: ToolRegistryInfo,
+  cli?: ToolCliTreeSpec,
   tools: list<ToolCatalogEntry>,
   components?: ToolComponents,
 }
@@ -212,8 +250,8 @@ pub fn tool_define_many(registry: ToolRegistry, specs: list<ToolDefinitionSpec>)
  */
 pub fn tool_registry_from(
   specs: list<ToolDefinitionSpec>,
-  info: ToolRegistryInfo? = nil,
-  components: ToolComponents? = nil,
+  options: ToolRegistryOptions? = nil,
 ) -> ToolRegistry {
-  return tool_define_many(tool_registry(info, components), specs)
+  const opts = options ?? {}
+  return tool_define_many(tool_registry(opts.info, opts.components, opts.cli), specs)
 }

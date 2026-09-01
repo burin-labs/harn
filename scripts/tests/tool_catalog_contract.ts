@@ -52,7 +52,7 @@ const catalog: ToolCatalog = {
       ],
       execution: { taskSupport },
       governance: { audiences: ["cli", audience, "catalog"] },
-      cli: { command: ["widgets", "get"], hidden: false },
+      cli: { command: ["widgets", "get"], hidden: false, arguments: {} },
       namespace: "widgets",
       deferLoading: false,
       source: {

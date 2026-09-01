@@ -213,10 +213,158 @@
       ],
       "type": "string"
     },
+    "ToolCliArgumentSpec": {
+      "additionalProperties": false,
+      "description": "Presentation and token mapping for one input-schema property.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "display_order": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "help": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "help_group": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "long": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "position": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "repeatable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "short": {
+          "maxLength": 1,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_hint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCliValueHint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value_name": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolCliCommandSpec": {
+      "additionalProperties": false,
+      "description": "Presentation for one non-runnable command path in the generated CLI tree.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "command": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "description": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "display_order": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "hidden": {
+          "default": false,
+          "type": "boolean"
+        },
+        "title": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
     "ToolCliSpec": {
       "additionalProperties": false,
       "description": "Deterministic command-line presentation for one tool.",
       "properties": {
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolCliArgumentSpec"
+          },
+          "default": {},
+          "description": "Token-to-property projections. Omitted properties retain Harn's\nzero-configuration `--property-name` projection.",
+          "type": "object"
+        },
         "command": {
           "description": "Non-empty command path below `harn tool run <script>`.",
           "items": {
@@ -236,6 +384,33 @@
         "hidden"
       ],
       "type": "object"
+    },
+    "ToolCliTreeSpec": {
+      "additionalProperties": false,
+      "description": "Portable command metadata owned once at the catalog level.",
+      "properties": {
+        "commands": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolCliCommandSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ToolCliValueHint": {
+      "description": "Closed, shell-portable completion hint for an argument value.",
+      "enum": [
+        "file",
+        "directory",
+        "path",
+        "url",
+        "email",
+        "hostname",
+        "command"
+      ],
+      "type": "string"
     },
     "ToolExecution": {
       "additionalProperties": false,
@@ -516,6 +691,16 @@
   "additionalProperties": false,
   "description": "Versioned, serializable projection of a tool registry or static exports.",
   "properties": {
+    "cli": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolCliTreeSpec"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "components": {
       "anyOf": [
         {

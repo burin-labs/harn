@@ -8,11 +8,7 @@ use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use crate::vm::Vm;
 
 thread_local! {
-    /// The tool registry bound to the current execution scope. Populated
-    /// by `agent_loop` at the start of its run and cleared on exit, or by
-    /// `tool_bind(registry)` in tests and prompt-building code. Consumed
-    /// by `tool_ref` / `tool_def` to resolve tool-name references without
-    /// threading the registry through every call site.
+    /// Execution-scoped registry read by agent loops, `tool_bind`, `tool_ref`, and `tool_def`.
     static CURRENT_TOOL_REGISTRY: RefCell<Option<VmValue>> = const { RefCell::new(None) };
     static TOOL_SYNTHESIS_CACHE: RefCell<BTreeMap<String, SynthesizedToolSpec>> = const { RefCell::new(std::collections::BTreeMap::new()) };
 }
@@ -42,8 +38,7 @@ struct SynthesizedToolSpec {
     executor: SynthesizedToolExecutor,
 }
 
-/// Install a registry as the current tool registry for this thread.
-/// Returns the previous binding so callers can restore it (RAII-style).
+/// Install a registry and return the prior binding for scoped restoration.
 pub fn install_current_tool_registry(registry: Option<VmValue>) -> Option<VmValue> {
     CURRENT_TOOL_REGISTRY.with(|slot| slot.replace(registry))
 }
@@ -53,8 +48,7 @@ pub fn current_tool_registry() -> Option<VmValue> {
     CURRENT_TOOL_REGISTRY.with(|slot| slot.borrow().clone())
 }
 
-/// Clear the thread-local tool registry. Used to reset state between
-/// tests.
+/// Clear the thread-local registry between execution scopes.
 pub fn clear_current_tool_registry() {
     CURRENT_TOOL_REGISTRY.with(|slot| *slot.borrow_mut() = None);
 }
@@ -223,7 +217,7 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_registry(info?: {name: string, version?: string, description?: string}?, components?: {schemas: dict}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}, components?: {schemas: dict}}",
+    sig = "tool_registry(info?: {name: string, version?: string, description?: string}?, components?: {schemas: dict}?, cli?: {commands: list}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}, components?: {schemas: dict}, cli?: {commands: list}}",
     category = "tools"
 )]
 fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -238,6 +232,9 @@ fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
     if let Some(components) = args.get(1).filter(|value| !matches!(value, VmValue::Nil)) {
         registry.insert(crate::value::intern_key("components"), components.clone());
+    }
+    if let Some(cli) = args.get(2).filter(|value| !matches!(value, VmValue::Nil)) {
+        registry.insert(crate::value::intern_key("cli"), cli.clone());
     }
     let registry = VmValue::dict(registry);
     crate::tool_registry::tool_registry_catalog(&registry).map_err(|error| {

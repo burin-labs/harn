@@ -10,6 +10,10 @@ use super::{
     ToolCatalogEntry,
 };
 
+mod cli;
+
+pub use cli::{PreparedCliArgument, PreparedCliCommand, PreparedCliTree};
+
 const RUNTIME_SCHEMA_ROOT_URI: &str = "https://harn.invalid/prepared-tool-schema";
 
 /// Failure while preparing a catalog for execution.
@@ -86,12 +90,14 @@ pub struct PreparedToolCatalog {
     entries: Vec<PreparedToolEntry>,
     names: BTreeMap<String, usize>,
     mcp_tools: Vec<JsonValue>,
+    cli_tree: PreparedCliTree,
 }
 
 impl PreparedToolCatalog {
     /// Validate and compile an immutable execution view of `catalog`.
     pub fn prepare(catalog: ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
         catalog.validate().map_err(PreparedToolCatalogError::new)?;
+        let cli_tree = PreparedCliTree::prepare(&catalog)?;
         let components = catalog
             .components
             .as_ref()
@@ -137,6 +143,7 @@ impl PreparedToolCatalog {
             entries,
             names,
             mcp_tools,
+            cli_tree,
         })
     }
 
@@ -152,6 +159,12 @@ impl PreparedToolCatalog {
 
     pub fn mcp_tools(&self) -> &[JsonValue] {
         &self.mcp_tools
+    }
+
+    /// Validated, normalized command tree shared by CLI adapters and
+    /// completion generators.
+    pub fn cli_tree(&self) -> &PreparedCliTree {
+        &self.cli_tree
     }
 
     pub fn validate_input(
@@ -326,6 +339,7 @@ mod tests {
         ToolCatalog {
             schema_version: ToolCatalogSchemaVersion::V1,
             info: None,
+            cli: None,
             tools: vec![ToolCatalogEntry {
                 name: "create_widget".to_string(),
                 title: None,
@@ -346,6 +360,7 @@ mod tests {
                 cli: ToolCliSpec {
                     command: vec!["widgets".to_string(), "create".to_string()],
                     hidden: false,
+                    arguments: BTreeMap::new(),
                 },
                 namespace: None,
                 defer_loading: false,

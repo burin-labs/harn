@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::ToolCompletionShell;
 
 #[test]
 fn serve_acp_accepts_attach_mode_without_a_file() {
@@ -88,6 +89,26 @@ fn tool_schema_defaults_to_script_and_accepts_offline_exports() {
     };
     assert_eq!(schema.surface, ToolSchemaSurface::Exports);
     assert!(schema.pretty);
+}
+
+#[test]
+fn tool_completions_requires_an_explicit_portable_shell() {
+    let cli = Cli::parse_from([
+        "harn",
+        "tool",
+        "completions",
+        "server.harn",
+        "--shell",
+        "power-shell",
+    ]);
+    let Command::Tool(args) = cli.command.unwrap() else {
+        panic!("expected tool command");
+    };
+    let ToolCommand::Completions(completions) = args.command else {
+        panic!("expected tool completions command");
+    };
+    assert_eq!(completions.file, "server.harn");
+    assert_eq!(completions.shell, ToolCompletionShell::PowerShell);
 }
 
 #[test]

@@ -3,6 +3,9 @@ use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
 
 use super::*;
 
+#[path = "modules_tests/tool_registry.rs"]
+mod tool_registry;
+
 static CACHE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn cache_test_guard() -> MutexGuard<'static, ()> {

@@ -29,7 +29,13 @@ fn registry() -> ToolRegistry {
       },
       annotations: {readOnlyHint: true, destructiveHint: false},
       execution_policy: {kind: "fetch", side_effect_level: "network"},
-      cli: {command: ["widgets", "get"]},
+      cli: {
+        command: ["widgets", "get"],
+        arguments: {
+          widget_id: {position: 0, value_name: "WIDGET"},
+          verbose: {long: "verbose", short: "v", aliases: ["detailed"]},
+        },
+      },
       source: {
         kind: "openapi",
         id: "getWidget",
@@ -53,7 +59,17 @@ fn registry() -> ToolRegistry {
       cli: {command: ["remote", "probe"]},
       handler: {_args -> {surface: "mcp"}},
     },
-  ], {name: "widgets", version: "1.2.3", description: "Widget integration"})
+  ], {
+    info: {name: "widgets", version: "1.2.3", description: "Widget integration"},
+    cli: {
+      commands: [{
+        command: ["widgets"],
+        title: "Manage widgets",
+        aliases: ["w"],
+        display_order: 1,
+      }],
+    },
+  })
 }
 
 fn main(harness: Harness) {
@@ -99,22 +115,14 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
         .expect("help command");
     assert!(help.status.success());
     let help = String::from_utf8_lossy(&help.stdout);
-    assert!(help.contains("--widget-id <INT>"), "{help}");
+    assert!(help.contains("[WIDGET]"), "{help}");
+    assert!(help.contains("-v, --verbose <VERBOSE>"), "{help}");
     assert!(help.contains("--harn-input"), "{help}");
     assert!(help.contains("--json"), "{help}");
 
     let run = harn_e2e_command()
         .args([
-            "tool",
-            "run",
-            &path,
-            "widgets",
-            "get",
-            "--widget-id",
-            "42",
-            "--verbose",
-            "false",
-            "--json",
+            "tool", "run", &path, "w", "get", "42", "-v", "false", "--json",
         ])
         .output()
         .expect("run command");
@@ -127,6 +135,27 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
         serde_json::from_slice::<JsonValue>(&run.stdout).expect("run JSON"),
         serde_json::json!({"id": 42, "verbose": false})
     );
+}
+
+#[test]
+fn tool_registry_generates_completion_from_the_same_command_tree() {
+    let (_temp, path) = fixture();
+
+    for shell in ["bash", "zsh", "fish", "power-shell"] {
+        let output = harn_e2e_command()
+            .args(["tool", "completions", &path, "--shell", shell])
+            .output()
+            .expect("completion command");
+        assert!(
+            output.status.success(),
+            "{shell} completion failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let script = String::from_utf8_lossy(&output.stdout);
+        for token in ["widgets", "get", "verbose"] {
+            assert!(script.contains(token), "{shell} omitted {token}: {script}");
+        }
+    }
 }
 
 #[test]

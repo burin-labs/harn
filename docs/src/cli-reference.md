@@ -1756,6 +1756,7 @@ harn tool new acme-echo --dir packages/acme-echo
 harn tool new acme-echo --description "Echo text for tests."
 harn tool run server.harn widgets get --widget-id 42 --json # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
+harn tool completions server.harn --shell zsh > _widgets
 harn tool schema server.harn --pretty
 harn tool schema library.harn --surface exports --pretty
 ```
@@ -1769,6 +1770,11 @@ contract. Run the entrypoint with `harn serve mcp server.harn`.
 `ToolRegistry` and invoke the same handler closures. See
 [Tool registry adapters](./tool-registry-adapters.md) for metadata, coercion,
 validation, and catalog details.
+
+`harn tool completions` emits static completion for Bash, Zsh, Fish, or
+PowerShell. It reads the same validated command tree as `harn tool run`, so
+command aliases, flags, positionals, enum values, and path hints cannot drift
+from parsing or help. Use `--shell bash`, `zsh`, `fish`, or `power-shell`.
 
 `harn tool schema` emits the versioned `harn-tools/1.0` catalog. Its
 `--surface` value is `script` or `exports`; `script` is the default. The

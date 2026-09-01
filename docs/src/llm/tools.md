@@ -21,7 +21,7 @@ from `std/tools`. Import the producer-owned `ToolRegistry` alias when a package
 accepts or forwards registries through a typed public API — do not widen to
 `dict` / `any` or duplicate the `{_type: "tool_registry", tools: ...}` shape.
 Pass reusable JSON Schemas to `tool_registry(info?, {schemas: {...}})` or
-`tool_registry_from(specs, info?, {schemas: {...}})`. The registry retains
+`tool_registry_from(specs, {info?, components: {schemas: {...}}, cli?})`. The registry retains
 those components through selection and every adapter projection, so tool input
 and output schemas can use `#/components/schemas/<name>` without a detached
 side table.

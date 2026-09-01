@@ -18,6 +18,14 @@ export type ToolIconTheme = "light" | "dark";
 
 export type ToolRegistryInfo = { name: string, version?: string | null, description?: string | null, };
 
+export type ToolCliValueHint = "file" | "directory" | "path" | "url" | "email" | "hostname" | "command";
+
+export type ToolCliArgumentSpec = { long?: string | null, short?: string | null, aliases: Array<string>, position?: number | null, value_name?: string | null, help?: string | null, value_hint?: ToolCliValueHint | null, repeatable: boolean, display_order?: number | null, help_group?: string | null, };
+
+export type ToolCliCommandSpec = { command: Array<string>, title?: string | null, description?: string | null, aliases: Array<string>, hidden: boolean, display_order?: number | null, };
+
+export type ToolCliTreeSpec = { commands: Array<ToolCliCommandSpec>, };
+
 export type ToolCliSpec = {
 /**
  * Non-empty command path below `harn tool run <script>`.
@@ -26,7 +34,12 @@ command: Array<string>,
 /**
  * Hide the command from help while retaining explicit invocation.
  */
-hidden: boolean, };
+hidden: boolean,
+/**
+ * Token-to-property projections. Omitted properties retain Harn's
+ * zero-configuration `--property-name` projection.
+ */
+arguments: { [key in string]: ToolCliArgumentSpec }, };
 
 export type ToolGovernance = { audiences: Array<ToolAudience>, };
 
@@ -57,4 +70,4 @@ export type ToolCatalogComponents = { schemas: Readonly<Record<string, JsonSchem
 
 export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null, annotations?: ToolPresentationAnnotations | null, icons?: Array<ToolIcon> | null, execution?: ToolExecution | null, governance: ToolGovernance, cli: ToolCliSpec, namespace?: string | null, deferLoading: boolean, source?: ToolSource | null, policy?: ToolPolicy | null, _meta?: Readonly<Record<string, JsonValue>> | null, };
 
-export type ToolCatalog = { schema_version: ToolCatalogSchemaVersion, info?: ToolRegistryInfo | null, tools: Array<ToolCatalogEntry>, components?: ToolCatalogComponents | null, };
+export type ToolCatalog = { schema_version: ToolCatalogSchemaVersion, info?: ToolRegistryInfo | null, cli?: ToolCliTreeSpec | null, tools: Array<ToolCatalogEntry>, components?: ToolCatalogComponents | null, };

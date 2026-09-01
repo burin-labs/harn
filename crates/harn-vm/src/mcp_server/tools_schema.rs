@@ -24,6 +24,7 @@ impl McpToolSet {
         let catalog = crate::tool_registry::ToolCatalog {
             schema_version: crate::tool_registry::ToolCatalogSchemaVersion::V1,
             info: None,
+            cli: None,
             tools: definitions
                 .iter()
                 .map(|tool| tool.catalog.clone())

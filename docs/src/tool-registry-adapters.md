@@ -12,27 +12,10 @@ deployment time.
 ## Registry declaration
 
 ```harn
-import { ToolRegistry, tool_define_many } from "std/tools"
+import { ToolRegistry, tool_registry_from } from "std/tools"
 
 fn widget_tools() -> ToolRegistry {
-  let registry = tool_registry(
-    {
-      name: "widgets",
-      version: "1.0.0",
-      description: "Widget integration",
-    },
-    {
-      schemas: {
-        Widget: {
-          type: "object",
-          properties: {id: {type: "integer"}, label: {type: "string"}},
-          required: ["id", "label"],
-          additionalProperties: false,
-        },
-      },
-    },
-  )
-  return tool_define_many(registry, [
+  return tool_registry_from([
     {
       name: "lookup_widget",
       description: "Fetch one widget by numeric id.",
@@ -51,7 +34,17 @@ fn widget_tools() -> ToolRegistry {
       governance: {
         audiences: ["cli", "mcp", "catalog", "dashboard", "agent"],
       },
-      cli: {command: ["widgets", "get"]},
+      cli: {
+        command: ["widgets", "get"],
+        arguments: {
+          widget_id: {
+            position: 0,
+            value_name: "WIDGET_ID",
+            help: "Numeric widget id",
+          },
+          verbose: {short: "v", help_group: "Display"},
+        },
+      },
       source: {
         kind: "openapi",
         id: "getWidget",
@@ -59,7 +52,28 @@ fn widget_tools() -> ToolRegistry {
       },
       handler: {args -> {id: args.widget_id, label: "example"}},
     },
-  ])
+  ], {
+    info: {
+      name: "widgets",
+      version: "1.0.0",
+      description: "Widget integration",
+    },
+    components: {
+      schemas: {
+        Widget: {
+          type: "object",
+          properties: {id: {type: "integer"}, label: {type: "string"}},
+          required: ["id", "label"],
+          additionalProperties: false,
+        },
+      },
+    },
+    cli: {commands: [{
+      command: ["widgets"],
+      title: "Manage widgets",
+      aliases: ["w"],
+    }]},
+  })
 }
 
 fn main(harness: Harness) {
@@ -80,12 +94,17 @@ field rather than presentation metadata.
 ## CLI projection
 
 ```bash
-harn tool run server.harn widgets get --widget-id 42 --verbose false # harn-doc-cli: allow-stale
+harn tool run server.harn widgets get 42 -v false # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
+harn tool completions server.harn --shell zsh > _widgets
 ```
 
-Each input property becomes a long flag. Underscores become hyphens in the
-flag spelling and retain their original names in the handler argument object.
+Each input property becomes a long flag by default. Underscores become hyphens
+in the flag spelling and retain their original names in the handler argument
+object. `cli.arguments` can make a property positional, change its long flag,
+add one short flag and long aliases, group and order help, mark an array as a
+repeatable flag, or attach a portable completion hint. These settings change
+presentation only; the input JSON Schema remains the validation owner.
 Harn coerces `string`, `integer`, `number`, and `boolean` values. Pass JSON for
 `object`, `array`, union, or untyped properties.
 
@@ -112,6 +131,12 @@ otherwise. Dots in an implicit namespace or tool name become nested commands,
 so `harn.code.search_examples` projects to `harn code search_examples`.
 `cli.hidden: true` removes it from generated help but does not block explicit
 invocation. Duplicate paths and leaf/parent path conflicts are errors.
+
+Catalog-level `cli.commands` supplies metadata for parent commands. A parent
+can set `title`, `description`, aliases, visibility, and display order without
+duplicating a leaf tool schema. `harn tool completions` emits Bash, Zsh, Fish,
+or PowerShell completion from this same prepared tree. Static enum schemas and
+`value_hint` values contribute value completions.
 
 ## MCP projection
 
@@ -175,9 +200,10 @@ acquiring capabilities, or contacting connectors. Use the exports surface for
 offline SDK generation and compatibility checks.
 
 Both surfaces return the same catalog shape. The result has
-`schema_version: "harn-tools/1.0"`, optional registry `info`, a `tools` list,
-and optional reusable schemas under `components.schemas`. Handlers and
-capability values are intentionally absent.
+`schema_version: "harn-tools/1.0"`, optional registry `info`, optional parent
+command metadata under `cli.commands`, a `tools` list, and optional reusable
+schemas under `components.schemas`. Handlers and capability values are
+intentionally absent.
 Registry `info` supplies the default MCP server name/version/instructions and
 the generated CLI name/version/description. Explicit transport metadata wins.
 Each tool retains:
@@ -214,7 +240,12 @@ and other cross-entry invariants.
 
 `std/tools` exports these closed presentation records:
 
-- `ToolCliSpec`: `{command: list<string>, hidden?: bool}`
+- `ToolRegistryOptions`: `{info?, components?, cli?}`
+- `ToolCliTreeSpec`: `{commands: list<ToolCliCommandSpec>}`
+- `ToolCliCommandSpec`: parent path, copy, aliases, visibility, and order
+- `ToolCliSpec`: `{command, hidden?, arguments?}` for one leaf tool
+- `ToolCliArgumentSpec`: token mapping, help, order, repeatability, and value hint
+- `ToolCliValueHint`: `file`, `directory`, `path`, `url`, `email`, `hostname`, or `command`
 - `ToolAudience`: `"cli" | "mcp" | "catalog" | "dashboard" | "agent"`
 - `ToolGovernance`: `{audiences: list<ToolAudience>}`
 - `ToolSource`: `{kind: string, id?: string, binding?: dict}`
@@ -277,7 +308,10 @@ Registry construction and adapter loading reject:
 - empty or invalid command parts
 - duplicate command paths
 - commands that are both a leaf tool and a parent group
-- CLI flag collisions after underscore-to-hyphen normalization
+- sparse or duplicate positional indexes
+- CLI command, long-flag, alias, short-flag, and framework-reserved collisions
+- repeatable arguments whose schema is not one array with an item schema
+- argument metadata that names no input-schema property
 - unresolved parameter `$ref` values at CLI construction
 - non-JSON handler results at the CLI output boundary
 - call arguments and handler results that violate the prepared catalog on CLI,

@@ -95,6 +95,7 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
     let catalog = ToolCatalog {
         schema_version: ToolCatalogSchemaVersion::V1,
         info: registry_info(registry)?,
+        cli: registry_cli(registry)?,
         tools,
         components: registry_components(registry)?,
     };
@@ -283,6 +284,22 @@ fn registry_components(
     }))
 }
 
+fn registry_cli(
+    registry: &crate::value::DictMap,
+) -> Result<Option<crate::tool_registry::ToolCliTreeSpec>, VmError> {
+    let Some(value) = registry.get("cli") else {
+        return Ok(None);
+    };
+    let json = result_to_json(value).map_err(|error| {
+        VmError::Runtime(format!(
+            "tool registry CLI metadata is not portable JSON: {error}"
+        ))
+    })?;
+    serde_json::from_value(json).map(Some).map_err(|error| {
+        VmError::Runtime(format!("tool registry CLI metadata is invalid: {error}"))
+    })
+}
+
 fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let entry = match entry {
         VmValue::Dict(entry) => entry,
@@ -397,10 +414,10 @@ fn cli_spec(
         .map(str::to_string)
         .collect::<Vec<_>>();
     let Some(value) = value else {
-        return checked_cli_spec(default_command, false, name);
+        return checked_cli_spec(default_command, false, BTreeMap::new(), name);
     };
     if matches!(value, VmValue::Nil) {
-        return checked_cli_spec(default_command, false, name);
+        return checked_cli_spec(default_command, false, BTreeMap::new(), name);
     }
     let fields = match value {
         VmValue::Dict(fields) => fields,
@@ -410,7 +427,7 @@ fn cli_spec(
             )))
         }
     };
-    let allowed = BTreeSet::from(["command", "hidden"]);
+    let allowed = BTreeSet::from(["arguments", "command", "hidden"]);
     for key in fields.keys() {
         if !allowed.contains(key.as_str()) {
             return Err(VmError::Runtime(format!(
@@ -439,12 +456,33 @@ fn cli_spec(
     };
     let hidden =
         optional_bool(fields, "hidden", &format!("tool {name:?} field 'cli'"))?.unwrap_or(false);
-    checked_cli_spec(command, hidden, name)
+    let arguments = match fields.get("arguments") {
+        None | Some(VmValue::Nil) => BTreeMap::new(),
+        Some(arguments @ VmValue::Dict(_)) => {
+            let json = result_to_json(arguments).map_err(|error| {
+                VmError::Runtime(format!(
+                    "tool {name:?} field 'cli.arguments' is not portable JSON: {error}"
+                ))
+            })?;
+            serde_json::from_value(json).map_err(|error| {
+                VmError::Runtime(format!(
+                    "tool {name:?} field 'cli.arguments' is invalid: {error}"
+                ))
+            })?
+        }
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field 'cli.arguments' must be an object keyed by input property"
+            )));
+        }
+    };
+    checked_cli_spec(command, hidden, arguments, name)
 }
 
 fn checked_cli_spec(
     command: Vec<String>,
     hidden: bool,
+    arguments: BTreeMap<String, crate::tool_registry::ToolCliArgumentSpec>,
     name: &str,
 ) -> Result<ToolCliSpec, VmError> {
     if command.is_empty()
@@ -456,7 +494,11 @@ fn checked_cli_spec(
             "tool {name:?} CLI command must contain only non-empty portable command names"
         )));
     }
-    Ok(ToolCliSpec { command, hidden })
+    Ok(ToolCliSpec {
+        command,
+        hidden,
+        arguments,
+    })
 }
 
 fn source_spec(value: Option<&VmValue>, name: &str) -> Result<Option<ToolSource>, VmError> {
