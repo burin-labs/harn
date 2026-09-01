@@ -751,6 +751,14 @@ fn jsonschema_arbitrary_precision_feature_preserves_large_integer_divisor() {
 #[test]
 fn json_schema_export_preserves_integer_constraints() {
     const LARGE: i64 = 9_007_199_254_740_993;
+    let minimum = make_vm_dict(vec![("type", s("int")), ("minimum", VmValue::Int(LARGE))]);
+    assert!(schema_is_value(&VmValue::Int(LARGE), &minimum).unwrap());
+    assert!(!schema_is_value(&VmValue::Int(LARGE - 1), &minimum).unwrap());
+
+    let maximum = make_vm_dict(vec![("type", s("int")), ("maximum", VmValue::Int(LARGE))]);
+    assert!(schema_is_value(&VmValue::Int(LARGE), &maximum).unwrap());
+    assert!(!schema_is_value(&VmValue::Int(LARGE + 1), &maximum).unwrap());
+
     let schema = make_vm_dict(vec![
         ("type", s("int")),
         ("minimum", VmValue::Int(LARGE)),
