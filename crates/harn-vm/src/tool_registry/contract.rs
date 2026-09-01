@@ -600,45 +600,126 @@ fn refs_for_offline_validation(
     mut value: JsonValue,
     component_uris: &BTreeMap<String, String>,
 ) -> Result<JsonValue, String> {
-    match &mut value {
-        JsonValue::Array(values) => {
-            for value in values {
-                *value = refs_for_offline_validation(std::mem::take(value), component_uris)?;
-            }
+    try_transform_schema_nodes(&mut value, &mut |object| {
+        for keyword in ["$ref", "$dynamicRef"] {
+            let Some(reference) = object.get(keyword).and_then(JsonValue::as_str) else {
+                continue;
+            };
+            let resolved = reference_for_offline_validation(reference, component_uris)?;
+            object.insert(keyword.to_string(), JsonValue::String(resolved));
         }
-        JsonValue::Object(object) => {
-            if let Some(JsonValue::String(reference)) = object.get_mut("$ref") {
-                if let Some(path) = reference.strip_prefix("#/components/schemas/") {
-                    let (encoded_name, nested_path) = path
-                        .split_once('/')
-                        .map_or((path, None), |(name, path)| (name, Some(path)));
-                    let name = decode_json_pointer_segment(encoded_name).ok_or_else(|| {
-                        format!("invalid schema component reference {reference:?}")
-                    })?;
-                    let uri = component_uris.get(&name).ok_or_else(|| {
-                        format!("dangling schema component reference {reference:?}")
-                    })?;
-                    *reference = match nested_path {
-                        Some(path) => format!("{uri}#/{path}"),
-                        None => uri.clone(),
-                    };
-                } else if !reference.starts_with('#') {
-                    *reference = OFFLINE_EXTERNAL_SCHEMA_URI.to_string();
-                }
-            }
-            // Dynamic references can depend on a caller's runtime dynamic scope.
-            // Their syntax is covered by meta-validation; this offline pass must
-            // not reject a portable catalog merely because that scope is absent.
-            if let Some(JsonValue::String(reference)) = object.get_mut("$dynamicRef") {
-                *reference = OFFLINE_EXTERNAL_SCHEMA_URI.to_string();
-            }
-            for value in object.values_mut() {
-                *value = refs_for_offline_validation(std::mem::take(value), component_uris)?;
-            }
-        }
-        _ => {}
-    }
+        Ok(())
+    })?;
     Ok(value)
+}
+
+fn reference_for_offline_validation(
+    reference: &str,
+    component_uris: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    if let Some(path) = reference.strip_prefix("#/components/schemas/") {
+        let (encoded_name, nested_path) = path
+            .split_once('/')
+            .map_or((path, None), |(name, path)| (name, Some(path)));
+        let name = decode_json_pointer_segment(encoded_name)
+            .ok_or_else(|| format!("invalid schema component reference {reference:?}"))?;
+        let uri = component_uris
+            .get(&name)
+            .ok_or_else(|| format!("dangling schema component reference {reference:?}"))?;
+        return Ok(match nested_path {
+            Some(path) => format!("{uri}#/{path}"),
+            None => uri.clone(),
+        });
+    }
+    if reference.starts_with('#') {
+        Ok(reference.to_string())
+    } else {
+        // A portable catalog can name a resource supplied by its eventual host.
+        // This offline pass proves only self-contained and catalog-component
+        // references, so an unavailable external resource becomes `true`.
+        Ok(OFFLINE_EXTERNAL_SCHEMA_URI.to_string())
+    }
+}
+
+const SINGLE_SUBSCHEMA_KEYWORDS: &[&str] = &[
+    "additionalProperties",
+    "contains",
+    "contentSchema",
+    "else",
+    "if",
+    "items",
+    "not",
+    "propertyNames",
+    "then",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+];
+const ARRAY_SUBSCHEMA_KEYWORDS: &[&str] = &["allOf", "anyOf", "oneOf", "prefixItems"];
+const MAP_SUBSCHEMA_KEYWORDS: &[&str] = &[
+    "$defs",
+    "dependentSchemas",
+    "patternProperties",
+    "properties",
+];
+
+fn try_visit_schema_nodes<E>(
+    schema: &JsonValue,
+    visitor: &mut impl FnMut(&serde_json::Map<String, JsonValue>) -> Result<(), E>,
+) -> Result<(), E> {
+    let Some(object) = schema.as_object() else {
+        return Ok(());
+    };
+    visitor(object)?;
+    for keyword in SINGLE_SUBSCHEMA_KEYWORDS {
+        if let Some(child) = object.get(*keyword) {
+            try_visit_schema_nodes(child, visitor)?;
+        }
+    }
+    for keyword in ARRAY_SUBSCHEMA_KEYWORDS {
+        if let Some(children) = object.get(*keyword).and_then(JsonValue::as_array) {
+            for child in children {
+                try_visit_schema_nodes(child, visitor)?;
+            }
+        }
+    }
+    for keyword in MAP_SUBSCHEMA_KEYWORDS {
+        if let Some(children) = object.get(*keyword).and_then(JsonValue::as_object) {
+            for child in children.values() {
+                try_visit_schema_nodes(child, visitor)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn try_transform_schema_nodes<E>(
+    schema: &mut JsonValue,
+    visitor: &mut impl FnMut(&mut serde_json::Map<String, JsonValue>) -> Result<(), E>,
+) -> Result<(), E> {
+    let Some(object) = schema.as_object_mut() else {
+        return Ok(());
+    };
+    visitor(object)?;
+    for keyword in SINGLE_SUBSCHEMA_KEYWORDS {
+        if let Some(child) = object.get_mut(*keyword) {
+            try_transform_schema_nodes(child, visitor)?;
+        }
+    }
+    for keyword in ARRAY_SUBSCHEMA_KEYWORDS {
+        if let Some(children) = object.get_mut(*keyword).and_then(JsonValue::as_array_mut) {
+            for child in children {
+                try_transform_schema_nodes(child, visitor)?;
+            }
+        }
+    }
+    for keyword in MAP_SUBSCHEMA_KEYWORDS {
+        if let Some(children) = object.get_mut(*keyword).and_then(JsonValue::as_object_mut) {
+            for child in children.values_mut() {
+                try_transform_schema_nodes(child, visitor)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn decode_json_pointer_segment(value: &str) -> Option<String> {
@@ -797,105 +878,76 @@ fn standalone_schema(
 }
 
 fn collect_component_refs(value: &JsonValue, names: &mut std::collections::BTreeSet<String>) {
-    match value {
-        JsonValue::Array(values) => {
-            for value in values {
-                collect_component_refs(value, names);
+    try_visit_schema_nodes(value, &mut |object| {
+        if let Some(path) = object
+            .get("$ref")
+            .and_then(JsonValue::as_str)
+            .and_then(|reference| reference.strip_prefix("#/components/schemas/"))
+        {
+            let encoded_name = path.split('/').next().unwrap_or(path);
+            if let Some(name) = decode_json_pointer_segment(encoded_name) {
+                names.insert(name);
             }
         }
-        JsonValue::Object(object) => {
-            if let Some(path) = object
-                .get("$ref")
-                .and_then(JsonValue::as_str)
-                .and_then(|reference| reference.strip_prefix("#/components/schemas/"))
-            {
-                let encoded_name = path.split('/').next().unwrap_or(path);
-                if let Some(name) = decode_json_pointer_segment(encoded_name) {
-                    names.insert(name);
-                }
-            }
-            for value in object.values() {
-                collect_component_refs(value, names);
-            }
-        }
-        _ => {}
-    }
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .expect("infallible schema traversal");
 }
 
 fn reject_unsafe_bundled_schema_keywords(
     value: &JsonValue,
     field: &str,
 ) -> Result<(), ToolCatalogProjectionError> {
-    match value {
-        JsonValue::Array(values) => {
-            for value in values {
-                reject_unsafe_bundled_schema_keywords(value, field)?;
-            }
-        }
-        JsonValue::Object(object) => {
-            for keyword in ["$id", "$anchor", "$dynamicAnchor", "$dynamicRef"] {
-                if object.contains_key(keyword) {
-                    return Err(ToolCatalogProjectionError {
-                        message: format!(
-                            "cannot project {field} through MCP components: {keyword} changes JSON Schema resource scope"
-                        ),
-                    });
-                }
-            }
-            if object
-                .get("$ref")
-                .and_then(JsonValue::as_str)
-                .is_some_and(|reference| !reference.starts_with('#'))
-            {
+    try_visit_schema_nodes(value, &mut |object| {
+        for keyword in ["$id", "$anchor", "$dynamicAnchor", "$dynamicRef"] {
+            if object.contains_key(keyword) {
                 return Err(ToolCatalogProjectionError {
                     message: format!(
-                        "cannot project {field} through MCP components: external $ref is not self-contained"
+                        "cannot project {field} through MCP components: {keyword} changes JSON Schema resource scope"
                     ),
                 });
             }
-            for value in object.values() {
-                reject_unsafe_bundled_schema_keywords(value, field)?;
-            }
         }
-        _ => {}
-    }
-    Ok(())
+        if object
+            .get("$ref")
+            .and_then(JsonValue::as_str)
+            .is_some_and(|reference| !reference.starts_with('#'))
+        {
+            return Err(ToolCatalogProjectionError {
+                message: format!(
+                    "cannot project {field} through MCP components: external $ref is not self-contained"
+                ),
+            });
+        }
+        Ok(())
+    })
 }
 
 fn rewrite_schema_refs(mut value: JsonValue, component_base: Option<&str>) -> JsonValue {
-    match &mut value {
-        JsonValue::Array(values) => {
-            for value in values {
-                *value = rewrite_schema_refs(std::mem::take(value), component_base);
-            }
-        }
-        JsonValue::Object(object) => {
-            if let Some(JsonValue::String(reference)) = object.get_mut("$ref") {
-                if let Some(path) = reference.strip_prefix("#/components/schemas/") {
-                    let (encoded_name, nested_path) = path
-                        .split_once('/')
-                        .map_or((path, None), |(name, path)| (name, Some(path)));
-                    if let Some(name) = decode_json_pointer_segment(encoded_name) {
-                        let encoded_name = encode_json_pointer_segment(&name);
-                        *reference = match nested_path {
-                            Some(path) => format!("#/$defs/{encoded_name}/{path}"),
-                            None => format!("#/$defs/{encoded_name}"),
-                        };
-                    }
-                } else if let Some(base) = component_base {
-                    if reference == "#" {
-                        *reference = base.to_string();
-                    } else if let Some(path) = reference.strip_prefix("#/") {
-                        *reference = format!("{base}/{path}");
-                    }
+    try_transform_schema_nodes(&mut value, &mut |object| {
+        if let Some(JsonValue::String(reference)) = object.get_mut("$ref") {
+            if let Some(path) = reference.strip_prefix("#/components/schemas/") {
+                let (encoded_name, nested_path) = path
+                    .split_once('/')
+                    .map_or((path, None), |(name, path)| (name, Some(path)));
+                if let Some(name) = decode_json_pointer_segment(encoded_name) {
+                    let encoded_name = encode_json_pointer_segment(&name);
+                    *reference = match nested_path {
+                        Some(path) => format!("#/$defs/{encoded_name}/{path}"),
+                        None => format!("#/$defs/{encoded_name}"),
+                    };
+                }
+            } else if let Some(base) = component_base {
+                if reference == "#" {
+                    *reference = base.to_string();
+                } else if let Some(path) = reference.strip_prefix("#/") {
+                    *reference = format!("{base}/{path}");
                 }
             }
-            for value in object.values_mut() {
-                *value = rewrite_schema_refs(std::mem::take(value), component_base);
-            }
         }
-        _ => {}
-    }
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .expect("infallible schema traversal");
     value
 }
 
@@ -1225,6 +1277,20 @@ mod tests {
         serde_json::from_value::<ToolCatalog>(anchored)
             .expect("a local anchor is a valid Draft 2020-12 reference target");
 
+        let mut dynamic_anchor = valid_catalog_json();
+        dynamic_anchor["tools"][0]["outputSchema"] = json!({
+            "$defs": {"result": {"$dynamicAnchor": "node", "type": "string"}},
+            "$dynamicRef": "#node"
+        });
+        serde_json::from_value::<ToolCatalog>(dynamic_anchor)
+            .expect("a local dynamic anchor is a valid Draft 2020-12 reference target");
+
+        let mut dynamic_component = valid_catalog_json();
+        dynamic_component["tools"][0]["outputSchema"] =
+            json!({"$dynamicRef": "#/components/schemas/Result"});
+        serde_json::from_value::<ToolCatalog>(dynamic_component)
+            .expect("a dynamic reference can target a catalog component");
+
         let mut nested_resource = valid_catalog_json();
         nested_resource["tools"][0]["outputSchema"] = json!({
             "$id": "https://example.test/root",
@@ -1237,16 +1303,49 @@ mod tests {
         serde_json::from_value::<ToolCatalog>(nested_resource)
             .expect("a local pointer resolves from its containing schema resource");
 
-        let mut instance_data = valid_catalog_json();
-        instance_data["tools"][0]["outputSchema"] = json!({
-            "const": {"$ref": "#not-a-schema-reference"}
-        });
-        serde_json::from_value::<ToolCatalog>(instance_data)
-            .expect("reference-shaped instance data is not a schema reference");
-
         let mut dangling_anchor = valid_catalog_json();
         dangling_anchor["tools"][0]["outputSchema"] = json!({"$ref": "#missing"});
         assert!(serde_json::from_value::<ToolCatalog>(dangling_anchor).is_err());
+
+        let mut dangling_dynamic_anchor = valid_catalog_json();
+        dangling_dynamic_anchor["tools"][0]["outputSchema"] = json!({"$dynamicRef": "#missing"});
+        assert!(serde_json::from_value::<ToolCatalog>(dangling_dynamic_anchor).is_err());
+
+        let mut dangling_dynamic_component = valid_catalog_json();
+        dangling_dynamic_component["tools"][0]["outputSchema"] =
+            json!({"$dynamicRef": "#/components/schemas/Missing"});
+        assert!(serde_json::from_value::<ToolCatalog>(dangling_dynamic_component).is_err());
+    }
+
+    #[test]
+    fn schema_projection_preserves_reference_shaped_instance_data() {
+        let literal = json!({
+            "$id": "literal-id",
+            "$ref": "#/components/schemas/Missing",
+            "$dynamicRef": "https://example.test/missing"
+        });
+        let mut value = valid_catalog_json();
+        value["tools"][0]["outputSchema"] = json!({
+            "type": "object",
+            "properties": {
+                "constant": {"const": literal.clone()},
+                "choice": {"enum": [literal.clone()]}
+            }
+        });
+        let catalog: ToolCatalog = serde_json::from_value(value)
+            .expect("reference-shaped instance data is not a schema reference");
+        let projected = catalog
+            .mcp_tool(&catalog.tools[0])
+            .expect("instance data does not make MCP projection unsafe");
+        assert_eq!(
+            projected["outputSchema"]["properties"]["constant"]["const"],
+            literal
+        );
+        assert_eq!(
+            projected["outputSchema"]["properties"]["choice"]["enum"][0],
+            literal
+        );
+        assert!(projected["outputSchema"].get("$defs").is_none());
     }
 
     #[test]
@@ -1301,7 +1400,7 @@ mod tests {
         }
 
         for (keyword, keyword_value) in [
-            ("$dynamicRef", json!("#node")),
+            ("$dynamicRef", json!("https://example.test/schema#node")),
             ("$ref", json!("https://example.test/schema")),
         ] {
             let mut value = valid_catalog_json();
