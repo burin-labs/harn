@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use crate::execute;
 
+const REPL_COMPLETION_MENU: &str = "completion_menu";
+
 /// Harn REPL keyword completer.
 struct HarnCompleter {
     keywords: Vec<String>,
@@ -235,6 +237,29 @@ fn repl_history_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".harn").join("repl_history"))
 }
 
+fn repl_completion_keybindings() -> reedline::Keybindings {
+    use reedline::{default_emacs_keybindings, KeyCode, KeyModifiers, ReedlineEvent};
+
+    let mut keybindings = default_emacs_keybindings();
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu(REPL_COMPLETION_MENU.to_string()),
+            ReedlineEvent::MenuNext,
+        ]),
+    );
+    keybindings
+}
+
+fn repl_completion_menu() -> reedline::ReedlineMenu {
+    use reedline::{ColumnarMenu, MenuBuilder, ReedlineMenu};
+
+    ReedlineMenu::EngineCompleter(Box::new(
+        ColumnarMenu::default().with_name(REPL_COMPLETION_MENU),
+    ))
+}
+
 /// Accumulated REPL state shared by the interactive and piped drivers.
 ///
 /// Replay model: each accepted line is appended to `accumulated` and the whole
@@ -401,7 +426,9 @@ async fn run_repl_piped() {
 }
 
 async fn run_repl_interactive() {
-    use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
+    use reedline::{
+        DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory, Reedline, Signal,
+    };
 
     println!("Harn REPL v{}", env!("CARGO_PKG_VERSION"));
     println!("Type expressions or statements. Ctrl+C or Ctrl+D to exit.");
@@ -428,6 +455,9 @@ async fn run_repl_interactive() {
 
     let mut line_editor = Reedline::create()
         .with_completer(completer)
+        .with_menu(repl_completion_menu())
+        .with_edit_mode(Box::new(Emacs::new(repl_completion_keybindings())))
+        .with_quick_completions(true)
         .with_highlighter(highlighter)
         .with_validator(validator)
         .with_history(history);
@@ -477,7 +507,10 @@ async fn run_repl_interactive() {
 
 #[cfg(test)]
 mod tests {
-    use super::{repl_builtin_names, scan_input_state, HarnCompleter};
+    use super::{
+        repl_builtin_names, repl_completion_keybindings, scan_input_state, HarnCompleter,
+        REPL_COMPLETION_MENU,
+    };
 
     #[test]
     fn completer_returns_fresh_keyword_suggestions() {
@@ -491,6 +524,23 @@ mod tests {
         assert_eq!(result.suggestions().len(), 1);
         assert_eq!(result.suggestions()[0].value, "return");
         assert_eq!(result.suggestions()[0].span, reedline::Span::new(0, 3));
+    }
+
+    #[test]
+    fn tab_dispatches_the_completion_menu_then_advances_it() {
+        use reedline::{KeyCode, KeyModifiers, ReedlineEvent};
+
+        let event = repl_completion_keybindings()
+            .find_binding(KeyModifiers::NONE, KeyCode::Tab)
+            .expect("Tab must have an explicit REPL binding");
+
+        assert_eq!(
+            event,
+            ReedlineEvent::UntilFound(vec![
+                ReedlineEvent::Menu(REPL_COMPLETION_MENU.to_string()),
+                ReedlineEvent::MenuNext,
+            ])
+        );
     }
 
     #[test]
@@ -536,12 +586,17 @@ mod tests {
     }
 
     #[test]
-    fn repl_exits_on_ctrl_c_and_ctrl_d() {
-        assert!(matches!(reedline::Signal::CtrlC, reedline::Signal::CtrlC));
-        assert!(matches!(reedline::Signal::CtrlD, reedline::Signal::CtrlD));
-        assert!(!matches!(
-            reedline::Signal::Success("__io_println(1)".into()),
-            reedline::Signal::CtrlC | reedline::Signal::CtrlD
-        ));
+    fn completion_keybindings_preserve_terminal_controls() {
+        use reedline::{KeyCode, KeyModifiers, ReedlineEvent};
+
+        let keybindings = repl_completion_keybindings();
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('c')),
+            Some(ReedlineEvent::CtrlC)
+        );
+        assert_eq!(
+            keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('d')),
+            Some(ReedlineEvent::CtrlD)
+        );
     }
 }

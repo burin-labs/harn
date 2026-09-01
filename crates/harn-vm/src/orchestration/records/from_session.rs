@@ -1173,6 +1173,7 @@ fn llm_call_spans(
                 ttft_ms: None,
                 metadata,
                 links: Vec::new(),
+                events: Vec::new(),
                 cost_usd: call.cost_usd,
             }
         })
