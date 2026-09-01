@@ -1,4 +1,5 @@
 import "std/agent/loop_tool_calls"
+import { agent_take_one_shot_prefill } from "std/agent/prefill"
 import {
   agent_purpose_label_config,
   agent_purpose_label_emit,
@@ -34,12 +35,8 @@ import {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn __purpose_label_arm(
-  agent: HarnessAgent,
-  session: dict,
-  opts: any,
-  taken_prefill: dict,
-) -> dict {
+pub fn __purpose_label_arm(agent: HarnessAgent, session: dict, opts: any) -> dict {
+  const taken_prefill = agent_take_one_shot_prefill(opts)
   const session_id = session.session_id
   const config = agent_purpose_label_config(opts?.purpose_labels)
   const nudge = agent_purpose_label_turn_nudge(config)

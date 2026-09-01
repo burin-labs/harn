@@ -141,9 +141,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           .read_only_streak
         stall_state = stall_state
           + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
-        const taken_prefill = agent_take_one_shot_prefill(opts)
-        opts = taken_prefill.options
-        const pending_prefill = __purpose_label_arm(harness.agent, session, opts, taken_prefill)
+        const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
+        opts = pending_prefill.options
         const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
         agent_emit_event(
           harness.agent,
@@ -189,6 +188,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           command_hold_cap_tokens = nil
         }
         const turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
+        turn_opts = turn_opts + {purpose_labels: opts?.purpose_labels}
         agent_stage(
           harness.agent,
           session.session_id,
@@ -361,11 +361,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         const llm_result = call.value
         consecutive_failure_count = 0
         iteration = iteration + 1
-        // `purpose_labels` is explicit: the projection drops unknown options.
-        const projection_context = {
-          llm_options: turn_llm_opts,
-          turn_options: turn_opts + {purpose_labels: opts?.purpose_labels},
-        }
+        const projection_context = {llm_options: turn_llm_opts, turn_options: turn_opts}
         const projected = __agent_loop_project_result(harness.agent, llm_result, projection_context)
         const raw_text = projected.raw_text
         const parsed = projected.parsed
