@@ -235,6 +235,57 @@ fn delegate_integer_multiple_of_to_harn(schema: &mut serde_json::Value) {
     }
 }
 
+fn integral_float_is_multiple_of(value: f64, divisor: i64) -> bool {
+    if divisor <= 0 || !value.is_finite() || value.fract() != 0.0 {
+        return false;
+    }
+    if value == 0.0 {
+        return true;
+    }
+
+    const FRACTION_BITS: u32 = 52;
+    const EXPONENT_BIAS: i32 = 1023;
+    const FRACTION_MASK: u64 = (1_u64 << FRACTION_BITS) - 1;
+
+    let bits = value.to_bits();
+    let raw_exponent = ((bits >> FRACTION_BITS) & 0x7ff) as i32;
+    let fraction = bits & FRACTION_MASK;
+    let (significand, binary_exponent) = if raw_exponent == 0 {
+        (fraction, 1 - EXPONENT_BIAS - FRACTION_BITS as i32)
+    } else {
+        (
+            fraction | (1_u64 << FRACTION_BITS),
+            raw_exponent - EXPONENT_BIAS - FRACTION_BITS as i32,
+        )
+    };
+    let modulus = divisor as u128;
+
+    if binary_exponent >= 0 {
+        let remainder = u128::from(significand) % modulus;
+        let scale = power_of_two_mod(binary_exponent as u32, modulus);
+        (remainder * scale).is_multiple_of(modulus)
+    } else {
+        let shift = (-binary_exponent) as u32;
+        // A non-zero integral f64 cannot need more bits removed than its
+        // significand contains. Keep the guard explicit so the shift remains
+        // total even if this helper is later called before the integrality check.
+        shift < u64::BITS && u128::from(significand >> shift).is_multiple_of(modulus)
+    }
+}
+
+fn power_of_two_mod(mut exponent: u32, modulus: u128) -> u128 {
+    let mut result = 1 % modulus;
+    let mut base = 2 % modulus;
+    while exponent > 0 {
+        if exponent & 1 == 1 {
+            result = (result * base) % modulus;
+        }
+        base = (base * base) % modulus;
+        exponent >>= 1;
+    }
+    result
+}
+
 fn sanitize_schema_types(schema: &mut serde_json::Value) {
     match schema {
         serde_json::Value::Object(object) => {
@@ -394,9 +445,7 @@ fn validate_harn_types_inner(
     if let Some(VmValue::Int(divisor)) = schema.get("multiple_of") {
         let valid = match value {
             VmValue::Int(value) => *divisor > 0 && value % divisor == 0,
-            VmValue::Float(value) => {
-                *divisor > 0 && value.fract() == 0.0 && value % (*divisor as f64) == 0.0
-            }
+            VmValue::Float(value) => integral_float_is_multiple_of(*value, *divisor),
             _ => true,
         };
         if !valid {

@@ -760,6 +760,17 @@ fn json_schema_large_integer_multiple_of_is_exact() {
     let untyped = make_vm_dict(vec![("multipleOf", VmValue::Int(LARGE))]);
     assert!(schema_is_value(&VmValue::Int(LARGE), &untyped).unwrap());
     assert!(!schema_is_value(&VmValue::Int(LARGE - 1), &untyped).unwrap());
+    assert!(!schema_is_value(&VmValue::Float((LARGE - 1) as f64), &untyped).unwrap());
+    assert!(schema_is_value(&VmValue::Float(0.0), &untyped).unwrap());
+
+    const EXACT_FLOAT_DIVISOR: i64 = 1_i64 << 54;
+    let exact_float = make_vm_dict(vec![("multipleOf", VmValue::Int(EXACT_FLOAT_DIVISOR))]);
+    assert!(schema_is_value(&VmValue::Float(EXACT_FLOAT_DIVISOR as f64), &exact_float).unwrap());
+    assert!(!schema_is_value(
+        &VmValue::Float((EXACT_FLOAT_DIVISOR - 2) as f64),
+        &exact_float
+    )
+    .unwrap());
 
     let numeric = make_vm_dict(vec![("type", s("number")), ("multipleOf", VmValue::Int(2))]);
     assert!(schema_is_value(&VmValue::Float(4.0), &numeric).unwrap());
