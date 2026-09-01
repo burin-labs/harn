@@ -736,16 +736,41 @@ fn json_schema_large_integer_multiple_of_is_exact() {
 
     assert!(schema_is_value(&VmValue::Int(LARGE), &schema).unwrap());
     assert!(!schema_is_value(&VmValue::Int(LARGE - 1), &schema).unwrap());
+
+    let nested = make_vm_dict(vec![
+        ("type", s("dict")),
+        (
+            "properties",
+            make_vm_dict(vec![(
+                "count",
+                make_vm_dict(vec![
+                    ("type", s("int")),
+                    ("multipleOf", VmValue::Int(LARGE)),
+                ]),
+            )]),
+        ),
+    ]);
+    assert!(schema_is_value(&make_vm_dict(vec![("count", VmValue::Int(LARGE))]), &nested).unwrap());
+    assert!(!schema_is_value(
+        &make_vm_dict(vec![("count", VmValue::Int(LARGE - 1))]),
+        &nested
+    )
+    .unwrap());
 }
 
 #[test]
-fn jsonschema_preserves_large_integer_divisor_without_global_number_reencoding() {
-    const LARGE: i64 = 9_007_199_254_740_993;
-    let schema = serde_json::json!({"type": "integer", "multipleOf": LARGE});
-    let validator = jsonschema::draft202012::new(&schema).expect("compile large-integer schema");
+fn jsonschema_dependency_does_not_change_typed_serde_number_shape() {
+    #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+    struct Measurement {
+        ratio: f64,
+    }
 
-    assert!(validator.is_valid(&serde_json::json!(LARGE)));
-    assert!(!validator.is_valid(&serde_json::json!(LARGE - 1)));
+    let encoded = serde_json::to_value(Measurement { ratio: 0.2 }).unwrap();
+    assert_eq!(encoded, serde_json::json!({"ratio": 0.2}));
+    assert_eq!(
+        serde_json::from_value::<Measurement>(encoded).unwrap(),
+        Measurement { ratio: 0.2 }
+    );
 }
 
 #[test]

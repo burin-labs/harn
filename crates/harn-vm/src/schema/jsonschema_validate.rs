@@ -178,6 +178,7 @@ fn validate_exported_json_schema(
     path_prefix: &str,
 ) -> Vec<ValidationIssue> {
     sanitize_schema_types(&mut json_schema);
+    delegate_integer_multiple_of_to_harn(&mut json_schema);
     let validator = match compile_validator(&json_schema) {
         CompiledValidator::Ready(validator) => validator,
         CompiledValidator::Invalid(error) => {
@@ -202,6 +203,36 @@ fn validate_exported_json_schema(
             ValidationIssue::json_schema(&path, error.kind().keyword(), error.to_string())
         })
         .collect()
+}
+
+/// `jsonschema` represents `multipleOf` divisors as `f64` unless its
+/// `arbitrary-precision` feature is enabled. That feature also enables
+/// serde_json's process-wide arbitrary number representation, which changes
+/// ordinary typed serde round trips. Harn already owns integer values as i64,
+/// so keep integer-schema divisibility at this typed boundary and omit only
+/// that delegated keyword from the generic validator.
+fn delegate_integer_multiple_of_to_harn(schema: &mut serde_json::Value) {
+    match schema {
+        serde_json::Value::Object(object) => {
+            if matches!(object.get("type"), Some(serde_json::Value::String(kind)) if kind == "integer")
+                && object
+                    .get("multipleOf")
+                    .and_then(serde_json::Value::as_i64)
+                    .is_some()
+            {
+                object.remove("multipleOf");
+            }
+            for child in object.values_mut() {
+                delegate_integer_multiple_of_to_harn(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                delegate_integer_multiple_of_to_harn(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn sanitize_schema_types(schema: &mut serde_json::Value) {
@@ -358,6 +389,14 @@ fn validate_harn_types_inner(
                 ),
             ));
             return;
+        }
+    }
+    if let (VmValue::Int(value), Some(VmValue::Int(divisor))) = (value, schema.get("multiple_of")) {
+        if *divisor <= 0 || value % divisor != 0 {
+            errors.push(ValidationIssue::schema(
+                path,
+                format!("{value} is not a multiple of {divisor}"),
+            ));
         }
     }
 
