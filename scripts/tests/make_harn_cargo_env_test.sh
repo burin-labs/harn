@@ -58,6 +58,11 @@ chmod +x "$fake_bin/cygpath"
 cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" = "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" ]]; then
+  mkdir -p "$HARN_HOST_LEASE_ROOT"
+  : > "$HARN_HOST_LEASE_ROOT/host-leases.wake"
+  exit 0
+fi
 for name in HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
   HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS \
   HARN_CARGO_LEASE_PRIORITY_CLASS HARN_CARGO_LEASE_MODE; do
@@ -352,11 +357,33 @@ if [[ -s "$record" || -s "$lease_record" ]]; then
   exit 1
 fi
 
+cat > "$fake_bin/harn" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_STALE_HARN_RECORD"
+case "$*" in
+  "host lease run cargo --help") exit 0 ;;
+  "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json")
+    mkdir -p "$HARN_HOST_LEASE_ROOT"
+    : > "$HARN_HOST_LEASE_ROOT/host-leases.sqlite"
+    exit 0
+    ;;
+  *)
+    echo "stale Harn lease runner reached workload execution" >&2
+    exit 97
+    ;;
+esac
+SH
+chmod +x "$fake_bin/harn"
+
 : > "$record"
+stale_harn_record="$tmp_root/stale-harn-record.txt"
+: > "$stale_harn_record"
 env -u HARN_CARGO_LEASE_MODE -u CI \
   PATH="$fake_bin:/usr/bin:/bin" \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
+  FAKE_STALE_HARN_RECORD="$stale_harn_record" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
   > "$tmp_root/auto-fallback-stdout.txt" \
   2> "$tmp_root/auto-fallback-stderr.txt"
@@ -370,6 +397,19 @@ if ! grep -Fq "no compatible prebuilt Harn binary" "$tmp_root/auto-fallback-stde
   cat "$tmp_root/auto-fallback-stderr.txt" >&2
   exit 1
 fi
+if ! grep -Fxq \
+    "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" \
+    "$stale_harn_record"; then
+  echo "automatic lease discovery did not prove the runner's idle-wait contract" >&2
+  cat "$stale_harn_record" >&2
+  exit 1
+fi
+if grep -Fq "host lease run cargo --owner" "$stale_harn_record"; then
+  echo "automatic lease discovery launched a runner without the idle-wait contract" >&2
+  cat "$stale_harn_record" >&2
+  exit 1
+fi
+rm -f "$fake_bin/harn"
 
 : > "$record"
 if HARN_CARGO_LEASE_MODE=required \
