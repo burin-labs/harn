@@ -109,6 +109,12 @@ pub(super) fn decode_json_pointer_segment(value: &str) -> Option<String> {
 /// `+` remains a literal plus because URI fragments do not use HTML form
 /// encoding.
 pub(super) fn decode_uri_fragment_json_pointer_segment(value: &str) -> Option<String> {
+    decode_json_pointer_segment(&decode_uri_fragment(value)?)
+}
+
+/// Decode RFC 3986 percent escapes without applying form encoding rules.
+/// JSON Pointer parsing happens after this step for URI fragment identifiers.
+pub(super) fn decode_uri_fragment(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -123,7 +129,7 @@ pub(super) fn decode_uri_fragment_json_pointer_segment(value: &str) -> Option<St
             index += 1;
         }
     }
-    decode_json_pointer_segment(std::str::from_utf8(&decoded).ok()?)
+    String::from_utf8(decoded).ok()
 }
 
 fn hex_value(value: u8) -> Option<u8> {

@@ -17,8 +17,8 @@ mod schema;
 mod validation;
 
 use schema::{
-    decode_uri_fragment_json_pointer_segment, encode_uri_fragment_json_pointer_segment,
-    try_transform_schema_nodes, try_visit_schema_nodes,
+    decode_uri_fragment, decode_uri_fragment_json_pointer_segment,
+    encode_uri_fragment_json_pointer_segment, try_transform_schema_nodes, try_visit_schema_nodes,
 };
 use validation::validate_cli_projection;
 
@@ -921,9 +921,9 @@ fn schema_node_guarantees_object<'a>(
         return true;
     }
     if let Some(reference) = schema.get("$ref").and_then(JsonValue::as_str) {
-        if let Some(pointer) = reference.strip_prefix('#') {
+        if let Some(pointer) = reference.strip_prefix('#').and_then(decode_uri_fragment) {
             return visited_refs.insert(reference)
-                && root.pointer(pointer).is_some_and(|target| {
+                && root.pointer(&pointer).is_some_and(|target| {
                     schema_node_guarantees_object(root, target, visited_refs)
                 });
         }
