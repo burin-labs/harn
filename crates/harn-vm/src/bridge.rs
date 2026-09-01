@@ -316,7 +316,7 @@ impl QueuedUserMessageMode {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::InterruptImmediate => "interrupt_immediate",
             Self::FinishStep => "finish_step",

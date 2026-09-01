@@ -1,0 +1,173 @@
+// Run: harn test tests/agent/steering_obligations_test.harn
+//
+// Contract coverage for `std/agent/obligations`, the one derivation of what a
+// run is currently obligated to deliver, plus the blast-radius control at the
+// real completion judge.
+//
+// The end-to-end claim — a bridge steer reaches the judge's own system prompt —
+// needs a host bridge and is owned by
+// `crates/harn-vm/tests/harn_vm/agent_loop_steering_seams.rs`
+// (`accepted_steer_updates_the_completion_judge_obligations`). What is proven
+// here is the contract that test depends on, and the control that proves an
+// unsteered run is untouched.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import {
+  completion_obligations_digest,
+  completion_obligations_from_messages,
+  completion_obligations_prompt,
+} from "std/agent/obligations"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+const TASK = "Implement one bounded improvement, add a focused test, and add a changelog fragment."
+
+const STEER = "Don't match the detail string with ==. If no typed code exists, say so and stop."
+
+fn steered_messages() -> list {
+  return [
+    {role: "user", content: TASK},
+    {role: "assistant", content: "I will compare the detail string with ==."},
+    {role: "user", content: STEER, messageId: "msg_inj_1", injectedMode: "finish_step"},
+    {role: "assistant", content: "Reverted. No typed code exists."},
+  ]
+}
+
+pipeline test_steer_is_identified_by_delivery_mode_not_position(harness: Harness, task: unknown) {
+  const obligations = completion_obligations_from_messages(steered_messages(), TASK)
+  assert_eq(obligations.original_task, TASK)
+  assert_eq(len(obligations.steers), 1)
+  assert_eq(obligations.steers[0].content, STEER)
+  assert_eq(obligations.steers[0].mode, "finish_step")
+  assert_eq(obligations.steers[0].message_id, "msg_inj_1")
+}
+
+pipeline test_opening_task_message_is_not_a_steer(harness: Harness, task: unknown) {
+  // The task the session opened with is the goal, not an amendment to it. It
+  // carries no delivery mode, so it can never be double-counted as a steer.
+  const obligations = completion_obligations_from_messages(
+    [{role: "user", content: TASK}, {role: "assistant", content: "working"}],
+    TASK,
+  )
+  assert_eq(len(obligations.steers), 0)
+  assert_eq(completion_obligations_prompt(obligations), "")
+  assert_eq(completion_obligations_digest(obligations), "")
+}
+
+pipeline test_audit_only_note_cannot_change_the_completion_target(harness: Harness, task: unknown) {
+  // `audit_only` drains at `loop_exit`, after the last model call. The model
+  // never saw it, so it cannot have changed what the model was asked to do.
+  const obligations = completion_obligations_from_messages(
+    [
+      {role: "user", content: TASK},
+      {
+        role: "user",
+        content: "note for the record",
+        messageId: "msg_inj_2",
+        injectedMode: "audit_only",
+      },
+    ],
+    TASK,
+  )
+  assert_eq(len(obligations.steers), 0)
+}
+
+pipeline test_interrupt_immediate_steer_counts(harness: Harness, task: unknown) {
+  // A preempting interrupt is delivered to the model too, so it amends the
+  // target exactly as a tool-boundary steer does.
+  const obligations = completion_obligations_from_messages(
+    [
+      {role: "user", content: TASK},
+      {
+        role: "user",
+        content: "stop and report",
+        messageId: "msg_inj_3",
+        injectedMode: "interrupt_immediate",
+      },
+    ],
+    TASK,
+  )
+  assert_eq(len(obligations.steers), 1)
+  assert_eq(obligations.steers[0].mode, "interrupt_immediate")
+}
+
+pipeline test_rendered_block_carries_supersession_authority(harness: Harness, task: unknown) {
+  const block = completion_obligations_prompt(
+    completion_obligations_from_messages(steered_messages(), TASK),
+  )
+  assert(contains(block, "Accepted user steering"), "the block names what it is")
+  assert(contains(block, STEER), "the steer's own words are carried, not a count")
+  assert(
+    contains(block, "supersedes any conflicting earlier requirement"),
+    "the steer is authoritative goal amendment, not conversation",
+  )
+  assert(
+    contains(block, "reverting or not doing it is compliance, not a gap"),
+    "withdrawn work must not read to the judge as a missing artifact",
+  )
+}
+
+pipeline test_steering_changes_the_terminal_evidence_identity(harness: Harness, task: unknown) {
+  // Two decisions that differ only in accepted steering were decided under
+  // different obligations and must not share an evidence identity.
+  const steered = completion_obligations_digest(
+    completion_obligations_from_messages(steered_messages(), TASK),
+  )
+  const unsteered = completion_obligations_digest(
+    completion_obligations_from_messages([{role: "user", content: TASK}], TASK),
+  )
+  assert(steered != "", "an accepted steer yields a digest")
+  assert_eq(unsteered, "")
+  assert(steered != unsteered, "the digests differ")
+}
+
+pipeline test_unsteered_run_prompt_is_unchanged_and_still_vetoed(harness: Harness, task: unknown) {
+  // Blast radius: the judge keeps its authority over a lazy stop, and its
+  // prompt is byte-identical to what it was before this seam existed.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Nothing was implemented, but I am calling it finished. ##DONE##"),
+      {
+        text: "{\"verdict\":\"continue\",\"detail\":\"The implementation is absent."
+          + " Implement the bounded improvement.\",\"gap_class\":\"missing_artifact\"}",
+      },
+      llm_text("Implemented the improvement, its test, and the changelog. ##DONE##"),
+      {text: "{\"verdict\":\"done\",\"detail\":\"The implementation and its test are present.\"}"},
+    ],
+    { ->
+      const session = "steer-obligations-control-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        verify_completion_judge: {provider: "mock", max_invocations: 3},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, TASK, nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      const judged = harness.llm.mock_calls().filter(
+        { call -> contains(to_string(call?.system ?? ""), "Stable completion goal") },
+      )
+        .to_list()
+      assert_eq(len(judged), 2)
+      for call in judged {
+        assert(
+          !contains(to_string(call.system), "Accepted user steering"),
+          "an unsteered run renders no steering block at all",
+        )
+      }
+      const vetoes = captured.events.filter(
+        { event -> event.type == "feedback_injected" && event.kind == "verify_completion" },
+      )
+        .to_list()
+      assert_eq(len(vetoes), 1)
+      assert(captured.result?.llm?.iterations >= 2, "the veto put the agent back to work")
+    },
+  )
+}
