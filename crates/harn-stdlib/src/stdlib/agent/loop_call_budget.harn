@@ -1,0 +1,102 @@
+import { agent_loop_call_reserve, agent_loop_remaining_calls } from "std/agent/control"
+import { __inject_feedback_with_tool_repair } from "std/agent/loop_tool_calls"
+import { agent_emit_event } from "std/agent/state"
+
+/**
+ * Per-run call-budget state: the reserve this run holds back, whether the
+ * shortfall warning has already been raised, and whether the agent-visible
+ * signal is enabled at all.
+ *
+ * The warning is latched rather than recomputed per turn. Repeating it every
+ * turn under the boundary would spend the agent's context to say the same
+ * thing.
+ *
+ * The receipt is unconditional: measuring is free, and every reader of a run
+ * should be able to see the projection. Putting the signal in the model's
+ * context is not free, so `signal` stays opt-in behind
+ * `call_budget_reserve_signal`.
+ *
+ * Turning it on by default is a product decision, not part of this fix. With
+ * the default reserve, any run capped at three turns trips the shortfall on its
+ * second turn, so the default would add a directive to most short runs. Flip it
+ * deliberately, with an eval behind it.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_call_budget_new(opts: any, verification: int?) -> dict {
+  return {
+    reserve: agent_loop_call_reserve(
+      {
+        verification: verification,
+        recovery: 1,
+        terminal_report: if opts?.final_wrapup ?? true {
+          1
+        } else {
+          0
+        },
+      },
+    ),
+    signal: opts?.call_budget_reserve_signal ?? false,
+    signalled: false,
+    iteration: 0,
+    max: nil,
+  }
+}
+
+/**
+ * Project the remaining call budget BEFORE the turn spends anything, so a
+ * shortfall is visible while the agent can still act on it instead of being
+ * discovered in the terminal region.
+ *
+ * `state` carries the run's reserve and latch plus this turn's `iteration` and
+ * `max`, so the loop hands over one value instead of threading four.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_project_call_budget(harness: Harness, session: dict, state: dict) -> dict {
+  const reserve = state.reserve
+  const current_max = state.max
+  const remaining_calls = agent_loop_remaining_calls(current_max, state.iteration)
+  // Only a run that HAD headroom can lose it. When the whole cap is no larger
+  // than the reserve, the shortfall is true from turn zero and carries no
+  // information, so signalling it would spend the agent's context to tell it
+  // something it could not have acted on.
+  const reserve_shortfall = remaining_calls != nil
+    && current_max > reserve.total
+    && remaining_calls <= reserve.total
+    && !state.signalled
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.agent_loop_call_budget_projection.v1",
+      kind: "call_budget_projection",
+      receipt_kind: "call_budget_projection",
+      iteration: state.iteration,
+      remaining: remaining_calls,
+      // `measured` keeps an unavailable measurement distinguishable from a
+      // measured zero for every reader of this receipt.
+      measured: remaining_calls != nil,
+      max_iterations: current_max,
+      reserve: reserve,
+      reserve_shortfall: reserve_shortfall,
+    },
+  )
+  if reserve_shortfall && state.signal {
+    __inject_feedback_with_tool_repair(
+      harness.agent,
+      session.session_id,
+      "call_budget_reserve",
+      "Remaining model calls ("
+        + to_string(remaining_calls)
+        + ") no longer cover the "
+        + to_string(reserve.total)
+        + " calls reserved for verification, recovery, and terminal reporting. "
+        + "Finish and report what you have now rather than starting new work.",
+    )
+  }
+  return state + {signalled: state.signalled || reserve_shortfall}
+}

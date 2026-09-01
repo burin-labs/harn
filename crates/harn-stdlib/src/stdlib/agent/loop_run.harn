@@ -4,7 +4,7 @@ import {
   command_ledger_new,
   command_wait_normalize,
 } from "std/agent/command_ledger"
-import { agent_loop_call_reserve, agent_loop_remaining_calls } from "std/agent/control"
+import "std/agent/loop_call_budget"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
 import "std/agent/loop_finalize"
@@ -81,22 +81,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       0
     }
     let terminal_callback_continues = 0
-    // One owner of the calls held back for verification, recovery, and terminal
-    // reporting, resolved once from the same config the reserve spender reads.
-    const call_reserve = agent_loop_call_reserve(
-      {
-        verification: terminal_verify_reserve_remaining,
-        recovery: 1,
-        terminal_report: if opts?.final_wrapup ?? true {
-          1
-        } else {
-          0
-        },
-      },
-    )
-    // The reserve warning is bounded to one per run: repeating it every turn
-    // under the boundary would spend context to say the same thing.
-    let reserve_shortfall_signalled = false
+    let call_budget = __agent_loop_call_budget_new(opts, terminal_verify_reserve_remaining)
     // Session-scoped ownership of long-running handles keeps polling out of the
     // model loop. Normalize thresholds and wording once here (harn#4456);
     // linked hosts predating `command_wait` receive the defaults.
@@ -146,67 +131,12 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stop_reason = "suspended"
           break
         }
-        // Project the remaining call budget BEFORE the turn spends anything, so
-        // the shortfall is visible while the agent can still act on it rather
-        // than being discovered in the terminal region.
-        const remaining_calls = agent_loop_remaining_calls(current_max, iteration)
-        // Only a run that HAD headroom can lose it. When the whole cap is no
-        // larger than the reserve, the shortfall is true from turn zero and
-        // carries no information — signalling it would spend the agent's context
-        // to tell it something it could not have acted on.
-        const reserve_has_headroom = current_max > call_reserve.total
-        const reserve_shortfall = remaining_calls != nil
-          && reserve_has_headroom
-          && remaining_calls <= call_reserve.total
-          && !reserve_shortfall_signalled
-        if reserve_shortfall {
-          reserve_shortfall_signalled = true
-        }
-        agent_emit_event(
-          harness.agent,
-          session.session_id,
-          "typed_checkpoint",
-          {
-            schema: "harn.agent_loop_call_budget_projection.v1",
-            kind: "call_budget_projection",
-            receipt_kind: "call_budget_projection",
-            iteration: iteration,
-            remaining: remaining_calls,
-            // `measured` keeps an unavailable measurement distinguishable from
-            // a measured zero for every reader of this receipt.
-            measured: remaining_calls != nil,
-            max_iterations: current_max,
-            reserve: call_reserve,
-            reserve_shortfall: reserve_shortfall,
-          },
-        )
-        // The RECEIPT above is unconditional: measuring is free and every reader
-        // of a run should be able to see the projection. Putting the signal in
-        // the model's context is not free, so it is opt-in.
-        //
-        // Turning it on by default is a product decision, not part of this fix:
-        // with the default reserve, any run capped at three turns trips the
-        // shortfall on its second turn, so the default would add a directive to
-        // most short runs. Flip it deliberately, with an eval behind it.
-        if reserve_shortfall && (opts?.call_budget_reserve_signal ?? false) {
-          __inject_feedback_with_tool_repair(
-            harness.agent,
-            session.session_id,
-            "call_budget_reserve",
-            "Remaining model calls ("
-              + to_string(remaining_calls)
-              + ") no longer cover the "
-              + to_string(call_reserve.total)
-              + " calls reserved for verification, recovery, and terminal reporting. "
-              + "Finish and report what you have now rather than starting new work.",
-          )
-        }
+        const turn_budget = call_budget + {iteration: iteration, max: current_max}
+        call_budget = __agent_loop_project_call_budget(harness, session, turn_budget)
         if agent_budget_pre_call_blocked(harness.agent, session, opts) {
           final_status = "budget_exhausted"
-          // Attribute the block. Leaving `stop_reason` unset made the host-side
-          // pre-call budget gate indistinguishable from an unexplained break:
-          // `loop_finalize.harn` stamps `kind: "unattributed"` for exactly this
-          // path.
+          // Unset, this gate is indistinguishable from an unexplained break:
+          // `loop_finalize.harn` stamps `kind: "unattributed"` for this path.
           stop_reason = "pre_call_budget_block"
           break
         }
