@@ -16,16 +16,18 @@ case "${HARN_BIN_NO_BUILD:-0}" in
     ;;
 esac
 print_only=0
+print_build_freshness=0
 record_receipt_only=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/harn_bin.sh [--print] [--no-build] [--record-receipt] [--] [harn args...]
+usage: scripts/harn_bin.sh [--print|--print-build-freshness] [--no-build] [--record-receipt] [--] [harn args...]
 
 Resolves a worktree harn binary through Cargo unless HARN_BIN is explicit. With
 command arguments, executes the resolved binary. No-build auto-resolution
 requires the Cargo dependency and Git content receipt written by a successful
 build-mode resolution; explicit HARN_BIN remains a caller-owned exact pin.
+The build-freshness print mode verifies that receipt before returning its ID.
 
 Environment:
   HARN_BIN           explicit executable to validate and use; the resolved path
@@ -41,6 +43,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --print)
       print_only=1
+      shift
+      ;;
+    --print-build-freshness)
+      print_build_freshness=1
       shift
       ;;
     --no-build)
@@ -66,8 +72,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$record_receipt_only" = "1" ]]; then
-  if [[ "$print_only" = "1" || $# -ne 0 ]]; then
-    echo "error: --record-receipt does not accept --print or harn arguments" >&2
+  if [[ "$print_only" = "1" || "$print_build_freshness" = "1" || $# -ne 0 ]]; then
+    echo "error: --record-receipt does not accept print modes or harn arguments" >&2
     exit 2
   fi
   # This producer intentionally ignores an inherited explicit HARN_BIN. A
@@ -82,7 +88,20 @@ if [[ "$record_receipt_only" = "1" ]]; then
   exit 0
 fi
 
+if [[ "$print_only" = "1" && "$print_build_freshness" = "1" ]]; then
+  echo "error: --print and --print-build-freshness are mutually exclusive" >&2
+  exit 2
+fi
+if [[ "$print_build_freshness" = "1" && $# -ne 0 ]]; then
+  echo "error: --print-build-freshness does not accept harn arguments" >&2
+  exit 2
+fi
+
 bin="$(harn_resolve_binary "$mode")"
+if [[ "$print_build_freshness" = "1" ]]; then
+  harn_verified_build_freshness_id "$bin"
+  exit 0
+fi
 if [[ "$print_only" = "1" ]]; then
   printf '%s\n' "$bin"
   exit 0
