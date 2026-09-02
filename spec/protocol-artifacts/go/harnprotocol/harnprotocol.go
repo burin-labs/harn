@@ -411,6 +411,64 @@ var AgentTerminalOwners = []AgentTerminalOwner{
 	"unknown",
 }
 
+// LlmErrorCategory is the named string type for the LlmErrorCategories wire vocabulary.
+type LlmErrorCategory string
+
+// LlmErrorCategories enumerates every wire value Harn currently emits for LlmErrorCategory.
+var LlmErrorCategories = []LlmErrorCategory{
+	"timeout",
+	"auth",
+	"invalid_request",
+	"rate_limit",
+	"overloaded",
+	"server_error",
+	"transient_network",
+	"resource_busy",
+	"schema_incompatible",
+	"schema_validation",
+	"schema_stream_aborted",
+	"tool_error",
+	"tool_rejected",
+	"egress_blocked",
+	"cancelled",
+	"channel_closed",
+	"not_found",
+	"circuit_open",
+	"budget_exceeded",
+	"internal",
+	"environment",
+	"generic",
+}
+
+// LlmErrorKind is the named string type for the LlmErrorKinds wire vocabulary.
+type LlmErrorKind string
+
+// LlmErrorKinds enumerates every wire value Harn currently emits for LlmErrorKind.
+var LlmErrorKinds = []LlmErrorKind{
+	"transient",
+	"terminal",
+}
+
+// LlmErrorReason is the named string type for the LlmErrorReasons wire vocabulary.
+type LlmErrorReason string
+
+// LlmErrorReasons enumerates every wire value Harn currently emits for LlmErrorReason.
+var LlmErrorReasons = []LlmErrorReason{
+	"rate_limit",
+	"server_error",
+	"network_error",
+	"timeout",
+	"auth_failure",
+	"context_overflow",
+	"content_policy",
+	"invalid_request",
+	"invalid_response",
+	"model_unavailable",
+	"empty_generation",
+	"output_budget_exhausted",
+	"unknown",
+}
+
 // ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.
 type ToolCallReceiptStatus string
 
