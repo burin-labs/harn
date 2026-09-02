@@ -68,6 +68,51 @@ pub(crate) fn gate(model: &str, mode_id: &str) -> ReasoningModeGate {
     }
 }
 
+/// Resolve a caller's `reasoning_mode` option against the catalog.
+///
+/// Returns the mode id to carry on the request, or `None` for the provider
+/// default. `standard` is folded to `None` here so exactly one representation
+/// of "no mode" reaches the rest of the pipeline. When `enforce_gates` is set,
+/// a mode the model does not declare is a thrown error rather than a silently
+/// ignored option: the caller is asking for materially more expensive work, so
+/// failing to deliver it must not look like success.
+pub(crate) fn resolve_requested(
+    requested: Option<&str>,
+    model: &str,
+    provider: &str,
+    enforce_gates: bool,
+) -> Result<Option<String>, crate::value::VmError> {
+    let mode_id = match requested {
+        None | Some(STANDARD_MODE_ID) => return Ok(None),
+        Some(other) => other,
+    };
+    if enforce_gates {
+        let thrown = |message: String| {
+            crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
+                message,
+            )))
+        };
+        match gate(model, mode_id) {
+            ReasoningModeGate::Usable => {}
+            ReasoningModeGate::Unsupported => {
+                return Err(thrown(format!(
+                    "reasoning_mode: model \"{model}\" (provider \"{provider}\") declares no \
+                     \"{mode_id}\" reasoning mode in the catalog; remove `reasoning_mode` or \
+                     pick a model that advertises it under `reasoning_modes`"
+                )));
+            }
+            ReasoningModeGate::Deprecated { note } => {
+                let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
+                return Err(thrown(format!(
+                    "reasoning_mode: the \"{mode_id}\" reasoning mode for model \"{model}\" is \
+                     deprecated{detail}"
+                )));
+            }
+        }
+    }
+    Ok(Some(mode_id.to_string()))
+}
+
 /// Inject the reasoning-mode knob into an already-built provider body.
 ///
 /// No-op when no mode is requested, when the request names the default mode,

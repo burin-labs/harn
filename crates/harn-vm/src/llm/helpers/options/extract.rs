@@ -896,40 +896,14 @@ pub(crate) fn extract_llm_options(
     }
 
     // `reasoning_mode` is the execution-path intent: "standard" (default) or a
-    // catalog-declared mode such as "pro". It is independent of effort, which
-    // tunes how hard the model works WITHIN the chosen path. The catalog owns
-    // the per-provider knob; the provider body builder reads
-    // `reasoning_modes[].request`.
-    let reasoning_mode = match opt_str(&options, "reasoning_mode").as_deref() {
-        None => None,
-        Some(crate::llm::reasoning_modes::STANDARD_MODE_ID) => None,
-        Some(other) => Some(other.to_string()),
-    };
-    if let Some(mode_id) = reasoning_mode.as_deref() {
-        if enforce_capability_gates {
-            match crate::llm::reasoning_modes::gate(&model, mode_id) {
-                crate::llm::reasoning_modes::ReasoningModeGate::Usable => {}
-                crate::llm::reasoning_modes::ReasoningModeGate::Unsupported => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                        format!(
-                        "reasoning_mode: model \"{model}\" (provider \"{provider}\") declares no \
-                         \"{mode_id}\" reasoning mode in the catalog; remove `reasoning_mode` or \
-                         pick a model that advertises it under `reasoning_modes`"
-                    ),
-                    ))));
-                }
-                crate::llm::reasoning_modes::ReasoningModeGate::Deprecated { note } => {
-                    let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                        format!(
-                        "reasoning_mode: the \"{mode_id}\" reasoning mode for model \"{model}\" is \
-                         deprecated{detail}"
-                    ),
-                    ))));
-                }
-            }
-        }
-    }
+    // catalog-declared mode such as "pro". Resolution and the catalog gate live
+    // in the owning module, not here.
+    let reasoning_mode = crate::llm::reasoning_modes::resolve_requested(
+        opt_str(&options, "reasoning_mode").as_deref(),
+        &model,
+        &provider,
+        enforce_capability_gates,
+    )?;
 
     let mut opts = LlmCallOptions {
         provider,
