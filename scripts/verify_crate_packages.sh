@@ -135,14 +135,8 @@ resolved_dependency_version() {
     --arg package "$package" \
     --arg package_version "$package_version" \
     --arg resolution_name "$resolution_name" \
-    '
-      [.packages[] | select(.name == $package and .version == $package_version) | .id]
-      | if length != 1 then error("expected exactly one packaged source node") else .[0] end as $source_id
-      | [.resolve.nodes[] | select(.id == $source_id) | .deps[] | select(.name == $resolution_name) | .pkg]
-      | if length != 1 then error("expected exactly one dependency resolution edge") else .[0] end as $dependency_id
-      | [.packages[] | select(.id == $dependency_id) | .version]
-      | if length != 1 then error("expected exactly one resolved dependency package") else .[0] end
-    ' "$metadata_path"
+    -f "$ROOT_DIR/scripts/verify_crate_dependency_resolution.jq" \
+    "$metadata_path"
 }
 
 emit_dependency_resolution_receipts() {
