@@ -62,6 +62,19 @@ pub struct CompactionReceipt {
     pub strategy: String,
     /// Engine strategy actually used after honoring any PreCompact `Modify`.
     pub engine_strategy: String,
+    /// Normalized strategy requested at the caller boundary, before lifecycle
+    /// hooks or fallback policy changed the engine choice. `None` on legacy
+    /// receipts whose request was not measured.
+    pub requested_strategy: Option<String>,
+    /// Resolved tier-1 threshold that admitted this compaction. `Some(0)` is a
+    /// measured force-compaction threshold; `None` means the initiating path
+    /// did not report threshold provenance.
+    pub resolved_threshold_tokens: Option<usize>,
+    /// Boundary field that supplied `resolved_threshold_tokens`, for example
+    /// `token_threshold`, `compact_threshold`, or `default`.
+    pub threshold_source: Option<String>,
+    /// Resolved tier-2 hard limit, when configured.
+    pub hard_limit_tokens: Option<usize>,
     pub archived_messages: usize,
     pub estimated_tokens_before: usize,
     pub estimated_tokens_after: usize,
@@ -75,11 +88,9 @@ pub struct CompactionReceipt {
     pub recap: Option<RecapMetrics>,
     /// Source-window and summary byte measurement for this compaction.
     ///
-    /// `None` means this compaction path took no measurement — host-script
-    /// receipts normalized at `__host_agent_record_compaction` never see the
-    /// engine's source window, so they cannot report one. That is deliberately
-    /// distinct from `Some(..)` carrying `Some(0)`, which is a measurement that
-    /// was taken and read zero.
+    /// `None` means this compaction path took no measurement. That is
+    /// deliberately distinct from `Some(..)` carrying `Some(0)`, which is a
+    /// measurement that was taken and read zero.
     pub source_measurement: Option<CompactionSourceMeasurement>,
 }
 
@@ -106,9 +117,9 @@ impl CompactionReceipt {
 
     /// Normalize a host-script compaction payload — the dict `.harn` code hands
     /// to `agent_record_compaction` / `__host_agent_record_compaction` — into a
-    /// receipt at the builtin boundary, minting a fresh `receipt_id`. This is the
-    /// one place the host-driven shape is validated, so the `.harn` auto-compact
-    /// path yields the same unified receipt as the Rust lifecycle paths.
+    /// receipt at the builtin boundary. Current callers forward the engine-owned
+    /// receipt, whose identity and measured outcome stay authoritative. Legacy
+    /// flat payloads still normalize here and receive a new identity.
     pub fn from_host_payload(session_id: &str, payload: &serde_json::Value) -> Self {
         let str_field = |key: &str| {
             payload
@@ -122,6 +133,27 @@ impl CompactionReceipt {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as usize
         };
+        if let Some(mut receipt) = Self::from_event_metadata(Some(payload))
+            .filter(|receipt| !receipt.receipt_id.is_empty())
+        {
+            receipt.session_id = Some(session_id.to_string());
+            if let Some(mode) = str_field("mode") {
+                receipt.mode = mode;
+            }
+            if let Some(reason) = str_field("reason") {
+                receipt.reason = reason;
+            }
+            if let Some(strategy) = str_field("strategy") {
+                receipt.strategy = strategy;
+            }
+            if let Some(requested_strategy) = str_field("requested_strategy") {
+                receipt.requested_strategy = Some(requested_strategy);
+            }
+            if let Some(threshold_source) = str_field("threshold_source") {
+                receipt.threshold_source = Some(threshold_source);
+            }
+            return receipt;
+        }
         let strategy = str_field("strategy")
             .or_else(|| str_field("engine_strategy"))
             .unwrap_or_default();
@@ -135,6 +167,16 @@ impl CompactionReceipt {
             reason: str_field("reason").unwrap_or_else(|| "threshold".to_string()),
             strategy,
             engine_strategy,
+            requested_strategy: str_field("requested_strategy"),
+            resolved_threshold_tokens: payload
+                .get("resolved_threshold_tokens")
+                .and_then(serde_json::Value::as_u64)
+                .map(|value| value as usize),
+            threshold_source: str_field("threshold_source"),
+            hard_limit_tokens: payload
+                .get("hard_limit_tokens")
+                .and_then(serde_json::Value::as_u64)
+                .map(|value| value as usize),
             archived_messages: usize_field("archived_messages"),
             estimated_tokens_before: usize_field("estimated_tokens_before"),
             estimated_tokens_after: usize_field("estimated_tokens_after"),
@@ -145,9 +187,8 @@ impl CompactionReceipt {
             recap: payload
                 .get("recap")
                 .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
-            // Host-script compaction reports its own metadata; it never sees the
-            // engine's source window, so it has no measurement to report. `None`
-            // here is "not measured", which readers must not read as zero.
+            // A host script may forward the engine's typed measurement. When it
+            // does not, `None` remains "not measured", never a measured zero.
             source_measurement: payload.get("source_measurement").and_then(|value| {
                 serde_json::from_value::<CompactionSourceMeasurement>(value.clone()).ok()
             }),
@@ -170,6 +211,10 @@ mod tests {
             reason: "threshold".to_string(),
             strategy: "hybrid".to_string(),
             engine_strategy: "observation_mask".to_string(),
+            requested_strategy: Some("hybrid".to_string()),
+            resolved_threshold_tokens: Some(3_000),
+            threshold_source: Some("token_threshold".to_string()),
+            hard_limit_tokens: Some(8_000),
             archived_messages: 7,
             estimated_tokens_before: 4000,
             estimated_tokens_after: 1200,
@@ -222,5 +267,96 @@ mod tests {
         assert_eq!(receipt.schema_version, COMPACTION_RECEIPT_SCHEMA_VERSION);
         assert_eq!(receipt.receipt_id, "compaction-xyz");
         assert!(receipt.recap.is_none());
+    }
+
+    #[test]
+    fn host_payload_preserves_engine_truth_and_measured_zeroes() {
+        let receipt = CompactionReceipt::from_host_payload(
+            "session-1",
+            &serde_json::json!({
+                "mode": "auto",
+                "reason": "threshold",
+                "strategy": "hybrid",
+                "requested_strategy": "llm",
+                "engine_strategy": "llm",
+                "resolved_threshold_tokens": 0,
+                "threshold_source": "token_threshold",
+                "hard_limit_tokens": 8_000,
+                "source_measurement": {
+                    "source_message_count": 4,
+                    "source_bytes": 2_048,
+                    "summary_bytes": 512,
+                    "carried_source_bytes": 0
+                }
+            }),
+        );
+
+        assert_eq!(receipt.requested_strategy.as_deref(), Some("llm"));
+        assert_eq!(receipt.engine_strategy, "llm");
+        assert_eq!(receipt.resolved_threshold_tokens, Some(0));
+        assert_eq!(receipt.threshold_source.as_deref(), Some("token_threshold"));
+        assert_eq!(receipt.hard_limit_tokens, Some(8_000));
+        assert_eq!(
+            receipt
+                .source_measurement
+                .expect("source measurement is retained")
+                .carried_source_bytes,
+            Some(0),
+        );
+    }
+
+    #[test]
+    fn host_payload_preserves_forwarded_engine_receipt_identity_and_outcome() {
+        let engine_receipt = CompactionReceipt {
+            receipt_id: "compaction-engine-owned".to_string(),
+            mode: "manual".to_string(),
+            reason: "manual".to_string(),
+            strategy: "llm".to_string(),
+            engine_strategy: "llm".to_string(),
+            requested_strategy: Some("llm".to_string()),
+            resolved_threshold_tokens: Some(7),
+            threshold_source: Some("token_threshold".to_string()),
+            hard_limit_tokens: Some(99),
+            source_measurement: Some(CompactionSourceMeasurement {
+                summary_bytes: Some(123),
+                ..CompactionSourceMeasurement::default()
+            }),
+            ..CompactionReceipt::default()
+        };
+        let receipt = CompactionReceipt::from_host_payload(
+            "session-live",
+            &serde_json::json!({
+                "receipt": engine_receipt.to_json(),
+                "mode": "auto",
+                "reason": "threshold",
+                "strategy": "policy-label",
+                "requested_strategy": "custom",
+                "threshold_source": "pre_compact_modify",
+                "engine_strategy": "stale-flat-value",
+                "resolved_threshold_tokens": 999,
+                "hard_limit_tokens": 1000,
+                "source_measurement": {"summary_bytes": 1}
+            }),
+        );
+
+        assert_eq!(receipt.receipt_id, "compaction-engine-owned");
+        assert_eq!(receipt.session_id.as_deref(), Some("session-live"));
+        assert_eq!(receipt.mode, "auto");
+        assert_eq!(receipt.reason, "threshold");
+        assert_eq!(receipt.strategy, "policy-label");
+        assert_eq!(receipt.requested_strategy.as_deref(), Some("custom"));
+        assert_eq!(receipt.engine_strategy, "llm");
+        assert_eq!(receipt.resolved_threshold_tokens, Some(7));
+        assert_eq!(
+            receipt.threshold_source.as_deref(),
+            Some("pre_compact_modify")
+        );
+        assert_eq!(receipt.hard_limit_tokens, Some(99));
+        assert_eq!(
+            receipt
+                .source_measurement
+                .and_then(|value| value.summary_bytes),
+            Some(123),
+        );
     }
 }

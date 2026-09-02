@@ -199,6 +199,82 @@ fn __compact_options(opts: dict, engine_strategy: string, keep_last: any) {
   return compact_opts
 }
 
+/**
+ * Join session-level request intent with the engine-owned lifecycle result.
+ * The session hook runs outside the raw-message workflow builtin, so Harn owns
+ * the original request while the engine owns what actually ran and measured.
+ * `agent_record_compaction` validates this joined shape into one receipt.
+ */
+fn __session_compaction_fields(
+  compact_result: dict,
+  session_id: string,
+  mode: string,
+  reason: string,
+  strategy: string,
+  requested_strategy: string,
+  threshold_modified: bool,
+) -> dict {
+  const receipt = compact_result.receipt
+  guard type_of(receipt) == "dict" else {
+    throw "transcript_auto_compact archived messages without an engine receipt"
+  }
+  guard type_of(receipt.engine_strategy) == "string" && receipt.engine_strategy != "" else {
+    throw "transcript_auto_compact receipt omitted the applied engine strategy"
+  }
+  const measurement = receipt.source_measurement
+  guard type_of(measurement) == "dict" else {
+    throw "transcript_auto_compact receipt omitted its source measurement"
+  }
+  const canonical_receipt = receipt
+    + {
+      session_id: session_id,
+      transcript_id: session_id,
+      mode: mode,
+      reason: reason,
+      strategy: strategy,
+      requested_strategy: requested_strategy,
+      threshold_source: if threshold_modified {
+        "pre_compact_modify"
+      } else {
+        receipt.threshold_source
+      },
+    }
+  return {
+    receipt: canonical_receipt,
+    requested_strategy: canonical_receipt.requested_strategy,
+    engine_strategy: canonical_receipt.engine_strategy,
+    resolved_threshold_tokens: canonical_receipt.resolved_threshold_tokens,
+    threshold_source: canonical_receipt.threshold_source,
+    hard_limit_tokens: canonical_receipt.hard_limit_tokens,
+    source_measurement: measurement,
+    // Flat compatibility projection for transcript readers that predate the
+    // typed source_measurement record. The receipt remains the semantic owner.
+    summary_bytes: measurement.summary_bytes,
+  }
+}
+
+fn __apply_pre_compact_modify(compact_opts: dict, control: dict) {
+  if control.control != "modify" || type_of(control.modify) != "dict" {
+    return {options: compact_opts, threshold_modified: false}
+  }
+  const modify = control.modify
+  let options = compact_opts
+  let threshold_modified = false
+  if type_of(modify.keep_last) == "int" {
+    options = options + {keep_last: modify.keep_last}
+  }
+  if type_of(modify.target_tokens) == "int" {
+    options = options
+      + {token_threshold: modify.target_tokens, hard_limit_tokens: modify.target_tokens}
+    threshold_modified = true
+  }
+  const strategy = modify.strategy ?? modify.engine_strategy
+  if type_of(strategy) == "string" && strategy != "" {
+    options = options + {compact_strategy: strategy}
+  }
+  return {options: options, threshold_modified: threshold_modified}
+}
+
 fn __compaction_enabled(opts: dict) {
   const auto_cfg = opts?.auto_compact
   const policy_cfg = opts?.compaction
@@ -386,18 +462,25 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   }
   const keep_last = __compaction_keep_last(opts)
   const compact_opts = __compact_options(opts, engine_strategy, keep_last)
+  const requested_strategy = if type_of(compact_opts.compact_strategy) == "string" {
+    compact_opts.compact_strategy
+  } else {
+    engine_strategy
+  }
   const messages = agent.session_messages(session.session_id)
   const policy = __compaction_policy_from_options(compact_opts)
   const policy_fields = __compaction_policy_event_fields(policy)
+  const receipt_strategy = if policy_label != "" {
+    policy_label
+  } else {
+    requested_strategy
+  }
   const pre_payload = {
     session: {id: session.session_id},
     reason: "threshold",
-    strategy: if policy_label != "" {
-      policy_label
-    } else {
-      engine_strategy
-    },
-    engine_strategy: engine_strategy,
+    strategy: receipt_strategy,
+    requested_strategy: requested_strategy,
+    engine_strategy: requested_strategy,
     message_count: len(messages),
     keep_last: keep_last ?? 0,
     estimated_tokens_before: estimate_tokens(messages),
@@ -407,7 +490,8 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   if pre_control?.control == "block" {
     return nil
   }
-  const compact_result = agent.transcript_auto_compact(messages, compact_opts)
+  const effective = __apply_pre_compact_modify(compact_opts, pre_control)
+  const compact_result = agent.transcript_auto_compact(messages, effective.options)
   const compacted = compact_result.messages
   // Trust the engine's archived count, not a length delta: when exactly one
   // message is archived and one summary is inserted, len(before) == len(after),
@@ -418,22 +502,27 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
+    const engine_fields = __session_compaction_fields(
+      compact_result,
+      session.session_id,
+      "auto",
+      "threshold",
+      receipt_strategy,
+      requested_strategy,
+      effective.threshold_modified,
+    )
     agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "auto",
       reason: "threshold",
-      strategy: if policy_label != "" {
-        policy_label
-      } else {
-        engine_strategy
-      },
-      engine_strategy: engine_strategy,
+      strategy: receipt_strategy,
       archived_messages: archived,
       new_summary_len: len(summary),
       keep_last: keep_last ?? 0,
       estimated_tokens_before: estimate_tokens(messages),
       estimated_tokens_after: estimate_tokens(compacted),
     }
+      + engine_fields
       + policy_fields
     agent_record_compaction(agent, session.session_id, metadata)
     const post_payload = pre_payload
@@ -444,6 +533,7 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
         summary: summary,
         estimated_tokens_after: estimate_tokens(compacted),
       }
+      + engine_fields
       + policy_fields
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(agent, session.session_id, "post_compact", post_payload, opts)
@@ -524,12 +614,20 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
+    const engine_fields = __session_compaction_fields(
+      compact_result,
+      session.session_id,
+      "emergency",
+      "context_overflow",
+      "observation_mask",
+      "observation_mask",
+      false,
+    )
     agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "emergency",
       reason: "context_overflow",
       strategy: "observation_mask",
-      engine_strategy: "observation_mask",
       archived_messages: archived,
       new_summary_len: len(summary),
       keep_last: keep_last,
@@ -537,6 +635,7 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
       estimated_tokens_before: estimate_tokens(messages),
       estimated_tokens_after: estimate_tokens(compacted),
     }
+      + engine_fields
     agent_record_compaction(agent, session.session_id, metadata)
     const post_payload = pre_payload
       + {
@@ -546,6 +645,7 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
         summary: summary,
         estimated_tokens_after: estimate_tokens(compacted),
       }
+      + engine_fields
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(agent, session.session_id, "post_compact", post_payload, opts)
   }
