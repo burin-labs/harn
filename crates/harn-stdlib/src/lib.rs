@@ -899,6 +899,19 @@ mod tests {
     }
 
     #[test]
+    fn tool_registry_from_catalog_includes_cli_metadata_parameter() {
+        let function = public_functions_for_module("tools")
+            .into_iter()
+            .find(|function| function.name == "tool_registry_from")
+            .expect("std/tools should export tool_registry_from");
+        assert_eq!(function.required_params, 1);
+        assert_eq!(function.total_params, 2);
+        assert!(function
+            .signature
+            .contains("options: ToolRegistryOptions? = nil"));
+    }
+
+    #[test]
     fn pace_cut_rule_module_owns_public_functions() {
         let cut_rule_exports = public_functions_for_module("agent/cut_rules")
             .into_iter()

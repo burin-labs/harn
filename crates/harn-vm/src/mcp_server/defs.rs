@@ -12,19 +12,9 @@ pub struct McpServerMetadata {
 
 /// A tool extracted from a Harn tool_registry, ready to serve over MCP.
 pub struct McpToolDef {
-    pub name: String,
-    pub title: Option<String>,
-    pub description: String,
-    pub input_schema: serde_json::Value,
-    pub output_schema: Option<serde_json::Value>,
-    pub annotations: Option<serde_json::Value>,
-    pub icons: Option<serde_json::Value>,
-    /// Protocol extension metadata projected as the MCP `_meta` field.
-    pub meta: Option<serde_json::Value>,
-    /// Whether the client may invoke this tool as an MCP task, declared in the
-    /// registry as `execution: {taskSupport: "optional"}`. Defaults to
-    /// `Forbidden`, so the tasks extension never changes an existing tool.
-    pub task_support: crate::mcp_tasks::McpTaskSupport,
+    /// The one transport-neutral entry projected by CLI, MCP, documentation,
+    /// and generated clients.
+    pub catalog: crate::tool_registry::ToolCatalogEntry,
     pub handler: VmClosure,
 }
 

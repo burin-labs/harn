@@ -221,6 +221,8 @@ pub(super) fn build_nested_budget_denial(
         "stop_reason": "nested_execution_budget_exhausted",
         "error": {
             "category": category,
+            "kind": "budget_exhausted",
+            "reason": "nested_execution_budget_exhausted",
             "message": message,
         },
         "text": "",

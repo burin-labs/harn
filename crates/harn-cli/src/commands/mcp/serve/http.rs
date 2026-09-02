@@ -171,7 +171,9 @@ async fn http_post_request(
         &body_id,
     ) {
         Ok(outcome) => outcome,
-        Err(error_response) => return Json(error_response).into_response(),
+        Err(error_response) => {
+            return (StatusCode::BAD_REQUEST, Json(error_response)).into_response()
+        }
     };
     let mut current = super::types::ConnectionState::default();
     if authenticated {
@@ -191,7 +193,9 @@ async fn http_post_request(
         return response;
     }
 
-    let mut response = if should_stream_post_response(&headers) {
+    let mut response = if mcp_protocol::requires_http_bad_request(&response_json) {
+        (StatusCode::BAD_REQUEST, Json(response_json)).into_response()
+    } else if should_stream_post_response(&headers) {
         sse_single_response(response_json).into_response()
     } else {
         Json(response_json).into_response()
