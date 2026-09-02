@@ -26,9 +26,14 @@ async fn host_agent_session_init(
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
 
-    let initialized =
-        live_transcript_journal::initialize(&session_id, &opts_map, system.clone(), ctx.task_id())
-            .await?;
+    let initialized = live_transcript_journal::initialize(
+        &session_id,
+        &opts_map,
+        system.clone(),
+        ctx.execution_id(),
+        ctx.task_id(),
+    )
+    .await?;
     let has_canonical_history = initialized.has_canonical_history;
     let run_id = initialized.run_id;
     let prompt_session_id = initialized.session_id;
@@ -174,6 +179,7 @@ async fn host_agent_session_init(
         let session = AgentHostSession {
             session_id: resolved.clone(),
             run_id: run_id.clone(),
+            execution_id: ctx.execution_id(),
             task_id: ctx.task_id(),
             owns_session,
             task: message.clone(),
@@ -206,6 +212,7 @@ async fn host_agent_session_init(
             daemon_idle_backoff_ms: 100,
             host_bridge,
             last_llm_stop_reason: None,
+            pending_finalization: None,
             file_provenance: crate::security::FileProvenanceLedger::default(),
             nested_policy_guard,
         };
@@ -351,7 +358,7 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_finalize(
+pub(super) async fn host_agent_session_finalize(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -360,13 +367,20 @@ async fn host_agent_session_finalize(
         .map(|v| v.display())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| VmError::Runtime(format!("{HOST_SESSION_FINALIZE}: missing session_id")))?;
-    let status_dict = opts_dict(args.get(1));
+    let supplied_status = opts_dict(args.get(1));
+    let retry_run_id = opt_str(&supplied_status, "retry_run_id");
+    let mut finalization = match retry_run_id.as_deref() {
+        Some(run_id) => cancellation::AgentSessionFinalization::take_retry(&session_id, run_id)?,
+        None => cancellation::AgentSessionFinalization::take(&session_id)?,
+    };
+    let (status_dict, mut finalization_stage) = finalization
+        .session_mut()
+        .begin_finalization(supplied_status);
     let mut final_status = opt_str(&status_dict, "final_status").unwrap_or_default();
     let mut stop_reason = opt_str(&status_dict, "stop_reason").unwrap_or_default();
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
 
-    let mut finalization = cancellation::AgentSessionFinalization::take(&session_id)?;
     let session = finalization.session_mut();
 
     // Promote model-less success before the terminal marker so the durable
@@ -396,57 +410,68 @@ async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
-    if let Some(dir) = session.transcript_dir.as_deref() {
-        crate::llm::agent_session_transcript::append_finalized_marker(
-            &session_id,
-            dir,
-            &canonical_status,
-            &stop_reason,
-            iterations,
-        );
+    if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
+        if let Some(dir) = session.transcript_dir.as_deref() {
+            crate::llm::agent_session_transcript::append_finalized_marker(
+                &session_id,
+                dir,
+                &canonical_status,
+                &stop_reason,
+                iterations,
+            );
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::TranscriptMarkerWritten);
+        finalization_stage = super::AgentFinalizationStage::TranscriptMarkerWritten;
     }
-    if terminal_error.is_some() || session_status_indicates_error(&final_status) {
-        let error_payload = serde_json::json!({
-            "event": crate::orchestration::HookEvent::SessionError.as_str(),
+    if finalization_stage < super::AgentFinalizationStage::ErrorHookCompleted {
+        if terminal_error.is_some() || session_status_indicates_error(&final_status) {
+            let error_payload = serde_json::json!({
+                "event": crate::orchestration::HookEvent::SessionError.as_str(),
+                "session": {"id": &session_id},
+                "final_status": &canonical_status,
+                "stop_reason": stop_reason,
+                "error": terminal_error.clone(),
+            });
+            // SessionError hooks are advisory — log but do not propagate so
+            // session cleanup always runs.
+            if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
+                Some(&ctx),
+                crate::orchestration::HookEvent::SessionError,
+                &error_payload,
+            )
+            .await
+            {
+                crate::events::log_warn(
+                    "agent.session_error_hook",
+                    &format!("session={session_id} hook error: {err}"),
+                );
+            }
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::ErrorHookCompleted);
+        finalization_stage = super::AgentFinalizationStage::ErrorHookCompleted;
+    }
+    if finalization_stage < super::AgentFinalizationStage::EndHookCompleted {
+        let end_payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::SessionEnd.as_str(),
             "session": {"id": &session_id},
             "final_status": &canonical_status,
             "stop_reason": stop_reason,
-            "error": terminal_error.clone(),
+            "iterations": opt_int(&status_dict, "iterations").unwrap_or(0),
         });
-        // SessionError hooks are advisory — log but do not propagate so
-        // session cleanup always runs.
         if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
             Some(&ctx),
-            crate::orchestration::HookEvent::SessionError,
-            &error_payload,
+            crate::orchestration::HookEvent::SessionEnd,
+            &end_payload,
         )
         .await
         {
             crate::events::log_warn(
-                "agent.session_error_hook",
+                "agent.session_end_hook",
                 &format!("session={session_id} hook error: {err}"),
             );
         }
-    }
-
-    let end_payload = serde_json::json!({
-        "event": crate::orchestration::HookEvent::SessionEnd.as_str(),
-        "session": {"id": &session_id},
-        "final_status": &canonical_status,
-        "stop_reason": stop_reason,
-        "iterations": opt_int(&status_dict, "iterations").unwrap_or(0),
-    });
-    if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
-        Some(&ctx),
-        crate::orchestration::HookEvent::SessionEnd,
-        &end_payload,
-    )
-    .await
-    {
-        crate::events::log_warn(
-            "agent.session_end_hook",
-            &format!("session={session_id} hook error: {err}"),
-        );
+        session.advance_finalization_to(super::AgentFinalizationStage::EndHookCompleted);
+        finalization_stage = super::AgentFinalizationStage::EndHookCompleted;
     }
 
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or_else(|| session.tool_mode.clone());
@@ -465,25 +490,32 @@ async fn host_agent_session_finalize(
         terminal_error.is_some(),
     )
     .with_error(terminal_error.as_ref());
-    if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
-        bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+    if finalization_stage < super::AgentFinalizationStage::TerminalErrorAppended {
+        if let Some(error) = terminal_error.as_ref() {
+            let transcript_event = crate::llm::helpers::transcript_event(
+                "agent_loop_terminal_error",
+                "assistant",
+                "internal",
+                "Agent loop ended with a provider/tool-protocol failure",
+                Some(serde_json::json!({
+                    "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
+                    "final_status": final_status,
+                    "stop_reason": stop_reason,
+                    "terminal_class": terminal_class,
+                    "error": error,
+                })),
+            );
+            crate::agent_sessions::append_event(&session_id, transcript_event)
+                .map_err(VmError::Runtime)?;
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::TerminalErrorAppended);
+        finalization_stage = super::AgentFinalizationStage::TerminalErrorAppended;
     }
-    if let Some(error) = terminal_error.as_ref() {
-        let transcript_event = crate::llm::helpers::transcript_event(
-            "agent_loop_terminal_error",
-            "assistant",
-            "internal",
-            "Agent loop ended with a provider/tool-protocol failure",
-            Some(serde_json::json!({
-                "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
-                "final_status": final_status,
-                "stop_reason": stop_reason,
-                "terminal_class": terminal_class,
-                "error": error,
-            })),
-        );
-        crate::agent_sessions::append_event(&session_id, transcript_event)
-            .map_err(VmError::Runtime)?;
+    if finalization_stage < super::AgentFinalizationStage::PromptOutcomeProjected {
+        if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
+            bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::PromptOutcomeProjected);
     }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
     let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);

@@ -12,6 +12,10 @@ use crate::stdlib::args::{Args, ErrorKind, Options};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
+#[path = "agent_sessions_close_status.rs"]
+mod close_status;
+use close_status::close_status_arg;
+
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
 use crate::vm::Vm;
@@ -220,51 +224,6 @@ fn ok_result(fields: &[(&str, serde_json::Value)]) -> VmValue {
     crate::stdlib::json_to_vm_value(&serde_json::Value::Object(result))
 }
 
-fn dict_string_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
-    match dict.get(key) {
-        Some(VmValue::String(value)) if !value.trim().is_empty() => Some(value.to_string()),
-        _ => None,
-    }
-}
-
-fn close_status_arg(args: &[VmValue]) -> Result<(String, String, serde_json::Value), VmError> {
-    match args.get(1) {
-        None | Some(VmValue::Nil) => Ok((
-            "closed".to_string(),
-            "closed".to_string(),
-            serde_json::Value::Null,
-        )),
-        Some(VmValue::String(value)) => {
-            let reason = value.trim();
-            if reason.is_empty() {
-                return Err(err(
-                    "agent_session_close: `status` string must not be empty",
-                ));
-            }
-            Ok((
-                reason.to_string(),
-                reason.to_string(),
-                serde_json::Value::Null,
-            ))
-        }
-        Some(VmValue::Dict(dict)) => {
-            let reason = dict_string_field(dict, "reason")
-                .or_else(|| dict_string_field(dict, "stop_reason"))
-                .or_else(|| dict_string_field(dict, "status"))
-                .unwrap_or_else(|| "closed".to_string());
-            let status = dict_string_field(dict, "status").unwrap_or_else(|| reason.clone());
-            Ok((
-                reason,
-                status,
-                crate::llm::helpers::vm_value_to_json(args.get(1).expect("status arg")),
-            ))
-        }
-        _ => Err(err(
-            "agent_session_close: `status` must be a string, dict, or nil",
-        )),
-    }
-}
-
 const AGENT_SESSION_OPEN_OPT_KEYS: &[&str] = &["workspace_anchor", "workspace_policy"];
 const AGENT_SESSION_ADD_ROOT_OPT_KEYS: &[&str] = &["mount_mode", "reason"];
 const AGENT_SESSION_ATTACH_OPT_KEYS: &[&str] = &[
@@ -321,7 +280,8 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             .map_err(|message| err(format!("agent_session_open: {message}")))?,
         ),
     };
-    let resolved = agent_sessions::open_or_create(id);
+    let resolved = agent_sessions::open_or_create(id)
+        .map_err(|error| err(format!("agent_session_open: {error}")))?;
     if let Some(policy) = workspace_policy {
         agent_sessions::set_workspace_policy(&resolved, policy)
             .map_err(|message| err(format!("agent_session_open: {message}")))?;
@@ -959,7 +919,9 @@ fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             "agent_session_fork: unknown session id '{src}'"
         )));
     }
-    match agent_sessions::fork(&src, dst) {
+    match agent_sessions::fork(&src, dst)
+        .map_err(|error| err(format!("agent_session_fork: {error}")))?
+    {
         Some(new_id) => Ok(VmValue::String(arcstr::ArcStr::from(new_id))),
         None => Err(err(format!(
             "agent_session_fork: failed to fork session '{src}'"
@@ -986,7 +948,9 @@ fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<
             "agent_session_fork_at: unknown session id '{src}'"
         )));
     }
-    match agent_sessions::fork_at(&src, keep_first as usize, dst) {
+    match agent_sessions::fork_at(&src, keep_first as usize, dst)
+        .map_err(|error| err(format!("agent_session_fork_at: {error}")))?
+    {
         Some(new_id) => Ok(VmValue::String(arcstr::ArcStr::from(new_id))),
         None => Err(err(format!(
             "agent_session_fork_at: failed to fork session '{src}'"
@@ -1057,7 +1021,8 @@ fn agent_session_close_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         )));
     }
     let (reason, status, metadata) = close_status_arg(args)?;
-    agent_sessions::close_with_status(&id, reason, status, metadata);
+    agent_sessions::close_with_status(&id, reason, status, metadata)
+        .map_err(|message| err(format!("agent_session_close: {message}")))?;
     Ok(VmValue::Nil)
 }
 
@@ -1599,11 +1564,13 @@ async fn agent_session_reanchor_builtin(
     let target_id = if carry_transcript {
         id.clone()
     } else {
-        let dst = agent_sessions::fork(&id, None).ok_or_else(|| {
-            err(format!(
+        let dst = agent_sessions::fork(&id, None)
+            .map_err(|error| err(format!("agent_session_reanchor: {error}")))?
+            .ok_or_else(|| {
+                err(format!(
                 "agent_session_reanchor: failed to fork session '{id}' for carry_transcript=false"
             ))
-        })?;
+            })?;
         if !agent_sessions::reset_transcript(&dst) {
             return Err(err(format!(
                 "agent_session_reanchor: failed to reset forked transcript '{dst}'"
@@ -2073,7 +2040,7 @@ mod tests {
     fn actor_chain_returns_current_session_chain() {
         crate::reset_thread_local_state();
         let chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
-        let id = crate::agent_sessions::open_or_create_with_actor_chain(
+        let id = crate::agent_sessions::open_or_create_with_actor_chain_for_test(
             Some("actor-chain-current".to_string()),
             Some(chain.clone()),
         );

@@ -132,7 +132,8 @@ mod nested_budget_tests {
 #[test]
 fn session_totals_expose_cumulative_input_and_output_token_split() {
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("totals-token-split".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("totals-token-split".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     super::super::with_session(&session_id, "totals-token-split", |session| {
         session.input_tokens = 140;
@@ -160,8 +161,9 @@ fn session_totals_expose_cumulative_input_and_output_token_split() {
 #[test]
 fn session_totals_distinguish_measured_zero_from_two_provider_dispatches() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("totals-provider-dispatches".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "totals-provider-dispatches".to_string(),
+    ));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
 
     let read_count = || {
@@ -184,8 +186,9 @@ fn session_totals_distinguish_measured_zero_from_two_provider_dispatches() {
 #[test]
 fn record_usage_accumulates_cache_tokens_from_top_level_and_nested_usage() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("totals-cache-token-split".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "totals-cache-token-split".to_string(),
+    ));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
 
     let first = json_to_vm(&serde_json::json!({
@@ -233,7 +236,7 @@ fn record_usage_accumulates_cache_tokens_from_top_level_and_nested_usage() {
 fn record_usage_preserves_unknown_cost_and_reports_the_known_floor() {
     reset_agent_session_host_state();
     let session_id =
-        crate::agent_sessions::open_or_create(Some("totals-cost-certainty".to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some("totals-cost-certainty".to_string()));
     seed_host_session_provider_model(&session_id, "fireworks", "unpriced/model");
 
     let unknown = json_to_vm(&serde_json::json!({

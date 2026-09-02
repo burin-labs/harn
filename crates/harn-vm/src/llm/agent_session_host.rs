@@ -47,6 +47,22 @@ const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
 const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
 const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
 
+#[derive(Clone)]
+struct PendingAgentFinalization {
+    status: crate::value::DictMap,
+    stage: AgentFinalizationStage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum AgentFinalizationStage {
+    Preparing,
+    TranscriptMarkerWritten,
+    ErrorHookCompleted,
+    EndHookCompleted,
+    TerminalErrorAppended,
+    PromptOutcomeProjected,
+}
+
 mod assistant_messages;
 pub(crate) mod cancellation;
 mod daemon_bridge;
@@ -107,6 +123,7 @@ use tool_result_messages::{
 struct AgentHostSession {
     session_id: String,
     run_id: String,
+    execution_id: String,
     task_id: String,
     owns_session: bool,
     task: String,
@@ -155,6 +172,10 @@ struct AgentHostSession {
     /// the last call truncated due to its `max_tokens` parameter) and
     /// `refusal` (Anthropic refusal stop_reason).
     last_llm_stop_reason: Option<String>,
+    /// Exact first-attempt inputs retained until terminal persistence commits.
+    /// A retry resumes the prepared terminal write instead of reconstructing
+    /// status or replaying lifecycle hooks with caller-supplied values.
+    pending_finalization: Option<PendingAgentFinalization>,
     /// Untrusted-origin file provenance ledger: workspace paths whose content
     /// came from an untrusted step (fetch/clone/MCP, or a write made while
     /// context was tainted). Owned here so it drops with the session. Read on the
@@ -164,6 +185,36 @@ struct AgentHostSession {
     /// on drop. Declared last so it Drops last in `AgentHostSession`'s
     /// natural field-order drop, after every other cleanup completes.
     nested_policy_guard: Option<CancelSafeNestedExecutionGuard>,
+}
+
+impl AgentHostSession {
+    fn begin_finalization(
+        &mut self,
+        supplied_status: crate::value::DictMap,
+    ) -> (crate::value::DictMap, AgentFinalizationStage) {
+        match self.pending_finalization.as_ref() {
+            Some(pending) => (pending.status.clone(), pending.stage),
+            None => {
+                self.pending_finalization = Some(PendingAgentFinalization {
+                    status: supplied_status.clone(),
+                    stage: AgentFinalizationStage::Preparing,
+                });
+                (supplied_status, AgentFinalizationStage::Preparing)
+            }
+        }
+    }
+
+    fn advance_finalization_to(&mut self, stage: AgentFinalizationStage) {
+        let pending = self
+            .pending_finalization
+            .as_mut()
+            .expect("finalization receipt installed before terminal preparation");
+        assert!(
+            stage >= pending.stage,
+            "agent finalization stage cannot move backward"
+        );
+        pending.stage = stage;
+    }
 }
 
 /// Tracks which scoped policy stacks were pushed for a guarded tool
@@ -262,6 +313,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
     let session = AgentHostSession {
         session_id: session_id.to_string(),
         run_id: format!("agent_run_{}", uuid::Uuid::now_v7()),
+        execution_id: String::new(),
         task_id: String::new(),
         owns_session: false,
         task: String::new(),
@@ -294,6 +346,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         daemon_idle_backoff_ms: 100,
         host_bridge: None,
         last_llm_stop_reason: None,
+        pending_finalization: None,
         file_provenance: crate::security::FileProvenanceLedger::default(),
         nested_policy_guard: None,
     };

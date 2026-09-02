@@ -13,6 +13,10 @@ use lifecycle::{
     SubagentStopDetails,
 };
 
+#[path = "agents_sub_agent_string_list.rs"]
+mod string_list;
+use string_list::parse_string_list;
+
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
 
 #[cfg(test)]
@@ -32,30 +36,6 @@ struct SubAgentPolicyResolution {
     worker_policy: Option<CapabilityPolicy>,
     carry_policy: agents_workers::WorkerCarryPolicy,
     execution: agents_workers::WorkerExecutionProfile,
-}
-
-fn parse_string_list(value: Option<&VmValue>, label: &str) -> Result<Vec<String>, VmError> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    let VmValue::List(list) = value else {
-        return Err(VmError::Runtime(format!(
-            "{label}: expected a list of strings"
-        )));
-    };
-    let mut values = Vec::new();
-    for item in list.iter() {
-        let VmValue::String(text) = item else {
-            return Err(VmError::Runtime(format!(
-                "{label}: expected a list of strings"
-            )));
-        };
-        let text = text.trim();
-        if !text.is_empty() && !values.iter().any(|existing| existing == text) {
-            values.push(text.to_string());
-        }
-    }
-    Ok(values)
 }
 
 fn sub_agent_requested_policy(
@@ -809,9 +789,11 @@ pub(super) async fn execute_sub_agent(
             parent_session_id,
             Some(spec.session_id.clone()),
             Some(&spec.name),
-        );
+        )
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
     } else {
-        crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
+        crate::agent_sessions::open_or_create(Some(spec.session_id.clone()))
+            .map_err(|error| VmError::Runtime(error.to_string()))?;
     }
     if let Some(anchor) = spec.workspace_anchor.as_ref() {
         crate::agent_sessions::set_workspace_anchor(&spec.session_id, Some(anchor.clone()))
@@ -1332,8 +1314,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let project = dir.path().join("project");
         let project_text = path_string(&project);
-        let parent_id =
-            crate::agent_sessions::open_or_create(Some("anchor-inherit-parent".to_string()));
+        let parent_id = crate::agent_sessions::open_or_create_for_test(Some(
+            "anchor-inherit-parent".to_string(),
+        ));
         crate::agent_sessions::set_workspace_anchor(
             &parent_id,
             Some(crate::workspace_anchor::WorkspaceAnchor {
@@ -1370,8 +1353,9 @@ mod tests {
         let child = project.join("child");
         let explicit_cwd = dir.path().join("explicit-cwd");
         let explicit_cwd_text = path_string(&explicit_cwd);
-        let parent_id =
-            crate::agent_sessions::open_or_create(Some("anchor-explicit-cwd-parent".to_string()));
+        let parent_id = crate::agent_sessions::open_or_create_for_test(Some(
+            "anchor-explicit-cwd-parent".to_string(),
+        ));
         crate::agent_sessions::set_workspace_anchor(
             &parent_id,
             Some(crate::workspace_anchor::WorkspaceAnchor {
@@ -1416,7 +1400,8 @@ mod tests {
         let sibling_sub = sibling.join("sub");
         let parent_nested_text = path_string(&parent_nested);
         let sibling_sub_text = path_string(&sibling_sub);
-        let parent_id = crate::agent_sessions::open_or_create(Some("anchor-parent".to_string()));
+        let parent_id =
+            crate::agent_sessions::open_or_create_for_test(Some("anchor-parent".to_string()));
         crate::agent_sessions::set_workspace_anchor(
             &parent_id,
             Some(crate::workspace_anchor::WorkspaceAnchor {
@@ -1450,7 +1435,8 @@ mod tests {
         let parent = dir.path().join("parent");
         let outside = dir.path().join("elsewhere");
         let outside_text = path_string(&outside);
-        let parent_id = crate::agent_sessions::open_or_create(Some("anchor-parent".to_string()));
+        let parent_id =
+            crate::agent_sessions::open_or_create_for_test(Some("anchor-parent".to_string()));
         crate::agent_sessions::set_workspace_anchor(
             &parent_id,
             Some(crate::workspace_anchor::WorkspaceAnchor {
@@ -1561,7 +1547,7 @@ mod tests {
         crate::agent_sessions::reset_session_store();
         reset_llm_mock_state();
         let _policy = push_recursion_policy(0);
-        let parent = crate::agent_sessions::open_or_create(Some("parent-budget".into()));
+        let parent = crate::agent_sessions::open_or_create_for_test(Some("parent-budget".into()));
         let mut options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),

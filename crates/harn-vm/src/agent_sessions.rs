@@ -18,7 +18,7 @@
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,7 +30,8 @@ use crate::agent_events::{
     SanitizationAction, SanitizationVerdict, ToolCallStatus,
 };
 use crate::agent_transcript_budget::{
-    apply_transcript_with_budget, transcript_budget_policy_json, transcript_budget_usage_json,
+    apply_transcript_with_budget, apply_transcript_with_budget_deferred_event,
+    publish_transcript_budget_event, transcript_budget_policy_json, transcript_budget_usage_json,
     transcript_message_count, transcript_usage,
 };
 use crate::runtime_limits::RuntimeLimits;
@@ -55,8 +56,10 @@ pub(crate) use journal::{
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
 const LIVE_CLIENT_PERMISSION_EVENT_KIND: &str = "live_session_permission_route";
 
-/// Default cap on concurrent sessions per VM thread. Beyond this the
-/// least-recently-accessed session is evicted on the next `open`.
+/// Default cap on concurrent sessions per VM execution tree. At the ceiling,
+/// the least-recently-accessed idle session is evicted on the next `open`.
+/// Sessions with live journals are protected; creation fails if preserving
+/// them leaves no room.
 pub const DEFAULT_SESSION_CAP: usize = RuntimeLimits::DEFAULT.max_agent_sessions;
 
 /// Default cap on retained prompt-visible messages per session. The
@@ -70,6 +73,42 @@ pub const DEFAULT_TRANSCRIPT_EVENT_CAP: usize = 32768;
 pub const MAX_SCRATCHPAD_BYTES: usize = 16 * 1024;
 #[cfg(debug_assertions)]
 const CACHE_STABLE_SYSTEM_PROMPT_DIAGNOSTIC: &str = "HARN-CACHE-001";
+
+/// A new session could not be admitted without discarding a live transcript
+/// journal. Existing sessions remain addressable at the ceiling; only creation
+/// can fail.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionOpenError {
+    CapacityExhausted {
+        limit: usize,
+        active: usize,
+        protected: usize,
+    },
+    LineageRejected {
+        session_id: String,
+        reason: String,
+    },
+}
+
+impl std::fmt::Display for SessionOpenError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CapacityExhausted {
+                limit,
+                active,
+                protected,
+            } => write!(
+                formatter,
+                "agent session capacity exhausted: limit={limit} active={active} protected={protected}"
+            ),
+            Self::LineageRejected { session_id, reason } => {
+                write!(formatter, "agent session lineage rejected for `{session_id}`: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SessionOpenError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TranscriptBudgetRecovery {
@@ -244,12 +283,32 @@ impl SessionState {
         self.last_accessed = Instant::now();
     }
 
-    pub(crate) fn replace_transcript(&mut self, transcript: VmValue) {
+    pub(crate) fn replace_transcript(&mut self, transcript: VmValue) -> Result<(), String> {
+        self.ensure_run_accepts_mutation("replace_transcript")?;
         if !crate::values_equal(&self.transcript, &transcript) {
             self.redo_stack.clear();
         }
         self.transcript = transcript;
         self.touch();
+        Ok(())
+    }
+
+    /// Reject mutations once this run has queued its terminal boundary.
+    /// The journal remains installed through recap projection so same-session
+    /// admission stays closed, but it is sealed against work that could be
+    /// queued behind the already-persisted terminal and then discarded.
+    pub(crate) fn ensure_run_accepts_mutation(&self, action: &str) -> Result<(), String> {
+        if self
+            .transcript_journal
+            .as_ref()
+            .is_some_and(crate::agent_session_journal::JournalState::terminal_queued)
+        {
+            return Err(format!(
+                "session '{}' is terminal; {action} cannot mutate it",
+                self.id
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -282,6 +341,7 @@ pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
 mod metadata;
+mod runtime_store;
 mod scratchpad;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
@@ -296,65 +356,24 @@ pub use host_injection::*;
 pub use live_clients::*;
 pub use metadata::*;
 use metadata::{
-    branch_event_index, clone_transcript_with_id, empty_transcript, session_snapshot,
-    transcript_with_session_metadata, update_lineage,
+    branch_event_index, clone_transcript_with_id, clone_transcript_with_parent, empty_transcript,
+    prepare_lineage_update, session_snapshot, transcript_with_session_metadata, update_lineage,
+};
+#[cfg(test)]
+pub(crate) use runtime_store::fresh_session_runtime;
+pub(crate) use runtime_store::{
+    active_session_runtime, mark_unknown_host_event_warning, swap_active_session_runtime,
+    AgentSessionRuntime,
+};
+use runtime_store::{
+    clear_unknown_host_event_warnings, DEFAULT_TRANSCRIPT_BUDGET_POLICY, SESSIONS, SESSION_CAP,
 };
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
 pub use transcript_lifecycle::*;
 pub use types::*;
 
-struct SharedCell<T>(parking_lot::RwLock<T>);
-
-impl<T> SharedCell<T> {
-    fn borrow(&self) -> parking_lot::RwLockReadGuard<'_, T> {
-        self.0.read()
-    }
-
-    fn borrow_mut(&self) -> parking_lot::RwLockWriteGuard<'_, T> {
-        self.0.write()
-    }
-
-    fn try_borrow(&self) -> Result<parking_lot::RwLockReadGuard<'_, T>, ()> {
-        self.0.try_read().ok_or(())
-    }
-}
-
-struct SharedValue<T: Copy>(parking_lot::Mutex<T>);
-
-impl<T: Copy> SharedValue<T> {
-    fn get(&self) -> T {
-        *self.0.lock()
-    }
-
-    fn set(&self, value: T) {
-        *self.0.lock() = value;
-    }
-}
-
-pub(crate) struct AgentSessionRuntime {
-    sessions: SharedCell<HashMap<String, SessionState>>,
-    unknown_host_event_warnings: SharedCell<HashSet<(String, String)>>,
-    session_cap: SharedValue<usize>,
-    default_transcript_budget_policy: SharedCell<SessionTranscriptBudgetPolicy>,
-}
-
-impl Default for AgentSessionRuntime {
-    fn default() -> Self {
-        Self {
-            sessions: SharedCell(parking_lot::RwLock::new(HashMap::new())),
-            unknown_host_event_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),
-            session_cap: SharedValue(parking_lot::Mutex::new(DEFAULT_SESSION_CAP)),
-            default_transcript_budget_policy: SharedCell(parking_lot::RwLock::new(
-                SessionTranscriptBudgetPolicy::default(),
-            )),
-        }
-    }
-}
-
 thread_local! {
-    static ACTIVE_SESSION_RUNTIME: RefCell<Arc<AgentSessionRuntime>> =
-        RefCell::new(fresh_session_runtime());
     static CURRENT_SESSION_STACK: RefCell<Vec<CurrentSessionFrame>> = const { RefCell::new(Vec::new()) };
     static CURRENT_TOOL_CALL_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
@@ -396,71 +415,6 @@ impl PartialEq for CurrentSessionFrame {
 }
 
 impl Eq for CurrentSessionFrame {}
-
-pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
-    Arc::new(AgentSessionRuntime::default())
-}
-
-pub(crate) fn active_session_runtime() -> Arc<AgentSessionRuntime> {
-    ACTIVE_SESSION_RUNTIME.with(|slot| Arc::clone(&slot.borrow()))
-}
-
-/// Record an unknown host event name in the runtime that owns the session.
-/// The runtime is shared across worker-thread migration, unlike ambient
-/// thread-local storage.
-pub(crate) fn mark_unknown_host_event_warning(session_id: &str, event_type: &str) -> bool {
-    active_session_runtime()
-        .unknown_host_event_warnings
-        .borrow_mut()
-        .insert((session_id.to_string(), event_type.to_string()))
-}
-
-fn clear_unknown_host_event_warnings(session_id: &str) {
-    active_session_runtime()
-        .unknown_host_event_warnings
-        .borrow_mut()
-        .retain(|(warned_session_id, _)| warned_session_id != session_id);
-}
-
-pub(crate) fn swap_active_session_runtime(
-    next: Arc<AgentSessionRuntime>,
-) -> Arc<AgentSessionRuntime> {
-    ACTIVE_SESSION_RUNTIME.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
-}
-
-struct SessionsSlot;
-static SESSIONS: SessionsSlot = SessionsSlot;
-impl SessionsSlot {
-    fn with<T>(
-        &self,
-        use_sessions: impl FnOnce(&SharedCell<HashMap<String, SessionState>>) -> T,
-    ) -> T {
-        let runtime = active_session_runtime();
-        use_sessions(&runtime.sessions)
-    }
-}
-
-struct SessionCapSlot;
-static SESSION_CAP: SessionCapSlot = SessionCapSlot;
-impl SessionCapSlot {
-    fn with<T>(&self, use_cap: impl FnOnce(&SharedValue<usize>) -> T) -> T {
-        let runtime = active_session_runtime();
-        use_cap(&runtime.session_cap)
-    }
-}
-
-struct DefaultTranscriptBudgetPolicySlot;
-static DEFAULT_TRANSCRIPT_BUDGET_POLICY: DefaultTranscriptBudgetPolicySlot =
-    DefaultTranscriptBudgetPolicySlot;
-impl DefaultTranscriptBudgetPolicySlot {
-    fn with<T>(
-        &self,
-        use_policy: impl FnOnce(&SharedCell<SessionTranscriptBudgetPolicy>) -> T,
-    ) -> T {
-        let runtime = active_session_runtime();
-        use_policy(&runtime.default_transcript_budget_policy)
-    }
-}
 
 tokio::task_local! {
     static CURRENT_TOOL_CALL_TASK: String;
@@ -781,21 +735,34 @@ pub fn next_message_index(id: &str) -> Option<usize> {
 /// `HARN_EVENT_LOG_DIR` at a directory, we preserve the older JSONL sink
 /// as a compatibility fallback. Re-opening an existing session does not
 /// re-register — sinks are per-session, owned by the first opener.
-pub fn open_or_create(id: Option<String>) -> String {
+pub fn open_or_create(id: Option<String>) -> Result<String, SessionOpenError> {
     open_or_create_with_actor_chain(id, None)
+}
+
+#[cfg(test)]
+pub(crate) fn open_or_create_for_test(id: Option<String>) -> String {
+    open_or_create(id).expect("open fixture session")
+}
+
+#[cfg(test)]
+pub(crate) fn open_or_create_with_actor_chain_for_test(
+    id: Option<String>,
+    requested_actor_chain: Option<ActorChain>,
+) -> String {
+    open_or_create_with_actor_chain(id, requested_actor_chain).expect("open fixture session")
 }
 
 pub fn open_or_create_with_actor_chain(
     id: Option<String>,
     requested_actor_chain: Option<ActorChain>,
-) -> String {
+) -> Result<String, SessionOpenError> {
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let parent_session = current_session_id();
     let inherited_actor_chain = requested_actor_chain
         .clone()
         .or_else(|| parent_session.as_deref().and_then(actor_chain));
     let mut was_new = false;
-    let mut evicted = None;
+    let mut evicted = Vec::new();
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
@@ -803,25 +770,39 @@ pub fn open_or_create_with_actor_chain(
                 state.actor_chain = Some(actor_chain);
             }
             state.touch();
-            return;
+            return Ok(());
         }
-        was_new = true;
         let cap = SESSION_CAP.with(|c| c.get());
-        if map.len() >= cap {
-            if let Some(victim) = map
+        let required_evictions = map.len().saturating_add(1).saturating_sub(cap);
+        if required_evictions > 0 {
+            let mut victims = map
                 .iter()
-                .min_by_key(|(_, state)| state.last_accessed)
-                .map(|(id, _)| id.clone())
-            {
+                .filter(|(_, state)| state.transcript_journal.is_none())
+                .map(|(id, state)| (id.clone(), state.last_accessed))
+                .collect::<Vec<_>>();
+            if victims.len() < required_evictions {
+                return Err(SessionOpenError::CapacityExhausted {
+                    limit: cap,
+                    active: map.len(),
+                    protected: map
+                        .values()
+                        .filter(|state| state.transcript_journal.is_some())
+                        .count(),
+                });
+            }
+            victims.sort_by_key(|(_, last_accessed)| *last_accessed);
+            for (victim, _) in victims.into_iter().take(required_evictions) {
                 map.remove(&victim);
-                evicted = Some(victim);
+                evicted.push(victim);
             }
         }
+        was_new = true;
         let mut state = SessionState::new(resolved.clone());
         state.actor_chain = inherited_actor_chain.clone();
         map.insert(resolved.clone(), state);
-    });
-    if let Some(evicted) = evicted {
+        Ok(())
+    })?;
+    for evicted in evicted {
         clear_session_changed_paths(&evicted);
     }
     if was_new {
@@ -833,10 +814,10 @@ pub fn open_or_create_with_actor_chain(
         }
         try_register_event_log(&resolved);
     }
-    resolved
+    Ok(resolved)
 }
 
-pub fn open_child_session(parent_id: &str, id: Option<String>) -> String {
+pub fn open_child_session(parent_id: &str, id: Option<String>) -> Result<String, SessionOpenError> {
     open_child_session_with_actor(parent_id, id, None)
 }
 
@@ -844,34 +825,116 @@ pub fn open_child_session_with_actor(
     parent_id: &str,
     id: Option<String>,
     actor: Option<&str>,
-) -> String {
+) -> Result<String, SessionOpenError> {
     let actor_chain = actor_chain(parent_id).map(|chain| match actor {
         Some(actor) if !actor.trim().is_empty() => chain.pushed(actor.trim()),
         _ => chain,
     });
-    let resolved = open_or_create_with_actor_chain(id, actor_chain);
-    link_child_session(parent_id, &resolved);
-    resolved
+    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    admit_linked_sessions(parent_id, &resolved, actor_chain, None)?;
+    Ok(resolved)
 }
 
-pub fn link_child_session(parent_id: &str, child_id: &str) {
-    link_child_session_with_branch(parent_id, child_id, None);
+pub fn link_child_session(parent_id: &str, child_id: &str) -> Result<(), SessionOpenError> {
+    link_child_session_with_branch(parent_id, child_id, None)
 }
 
 pub fn link_child_session_with_branch(
     parent_id: &str,
     child_id: &str,
     branched_at_event_index: Option<usize>,
-) {
+) -> Result<(), SessionOpenError> {
     if parent_id == child_id {
-        return;
+        return Ok(());
     }
-    open_or_create(Some(parent_id.to_string()));
-    open_or_create(Some(child_id.to_string()));
+    admit_linked_sessions(parent_id, child_id, None, branched_at_event_index)
+}
+
+fn admit_linked_sessions(
+    parent_id: &str,
+    child_id: &str,
+    requested_child_actor_chain: Option<ActorChain>,
+    branched_at_event_index: Option<usize>,
+) -> Result<(), SessionOpenError> {
+    let ambient_parent = current_session_id();
+    let inherited_actor_chain = ambient_parent.as_deref().and_then(actor_chain);
+    let child_actor_chain = requested_child_actor_chain
+        .clone()
+        .or_else(|| inherited_actor_chain.clone());
+    let mut evicted = Vec::new();
+    let mut created = Vec::new();
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
-        update_lineage(&mut map, parent_id, child_id, branched_at_event_index);
-    });
+        let lineage = prepare_lineage_update(&map, parent_id, child_id)?;
+        let missing =
+            usize::from(!map.contains_key(parent_id)) + usize::from(!map.contains_key(child_id));
+        let cap = SESSION_CAP.with(|limit| limit.get());
+        let required_evictions = if missing == 0 {
+            0
+        } else {
+            map.len().saturating_add(missing).saturating_sub(cap)
+        };
+        if required_evictions > 0 {
+            let mut victims = map
+                .iter()
+                .filter(|(id, state)| {
+                    id.as_str() != parent_id
+                        && id.as_str() != child_id
+                        && state.transcript_journal.is_none()
+                })
+                .map(|(id, state)| (id.clone(), state.last_accessed))
+                .collect::<Vec<_>>();
+            if victims.len() < required_evictions {
+                let protected = map
+                    .iter()
+                    .filter(|(id, state)| {
+                        id.as_str() == parent_id
+                            || id.as_str() == child_id
+                            || state.transcript_journal.is_some()
+                    })
+                    .count();
+                return Err(SessionOpenError::CapacityExhausted {
+                    limit: cap,
+                    active: map.len(),
+                    protected,
+                });
+            }
+            victims.sort_by_key(|(_, last_accessed)| *last_accessed);
+            for (victim, _) in victims.into_iter().take(required_evictions) {
+                map.remove(&victim);
+                evicted.push(victim);
+            }
+        }
+        if !map.contains_key(parent_id) {
+            let mut parent = SessionState::new(parent_id.to_string());
+            parent.actor_chain = inherited_actor_chain.clone();
+            map.insert(parent_id.to_string(), parent);
+            created.push(parent_id.to_string());
+        }
+        if !map.contains_key(child_id) {
+            let mut child = SessionState::new(child_id.to_string());
+            child.actor_chain = child_actor_chain.clone();
+            map.insert(child_id.to_string(), child);
+            created.push(child_id.to_string());
+        } else if let Some(actor_chain) = requested_child_actor_chain {
+            if let Some(child) = map.get_mut(child_id) {
+                child.actor_chain = Some(actor_chain);
+            }
+        }
+        lineage.commit(&mut map, parent_id, child_id, branched_at_event_index);
+        Ok(())
+    })?;
+    for id in evicted {
+        clear_session_changed_paths(&id);
+    }
+    for id in created {
+        clear_session_changed_paths(&id);
+        if let Some(parent) = ambient_parent.as_deref() {
+            crate::agent_events::mirror_session_sinks(parent, &id);
+        }
+        try_register_event_log(&id);
+    }
+    Ok(())
 }
 
 pub fn parent_id(id: &str) -> Option<String> {
@@ -938,8 +1001,29 @@ pub fn register_event_log_sink(session_id: &str) {
     try_register_event_log(session_id);
 }
 
-pub fn close(id: &str) {
-    let removed = SESSIONS.with(|s| s.borrow_mut().remove(id).is_some());
+/// Close an idle session.
+///
+/// A live journal owns an unfinished persistence obligation. Dropping that
+/// state here would also drop its writer lease and lifecycle reservation, so
+/// callers must finalize or explicitly clear the journal before closing.
+pub fn close(id: &str) -> bool {
+    let (removed, active_run) = SESSIONS.with(|s| {
+        let mut sessions = s.borrow_mut();
+        if sessions
+            .get(id)
+            .is_some_and(|state| state.transcript_journal.is_some())
+        {
+            return (false, true);
+        }
+        (sessions.remove(id).is_some(), false)
+    });
+    if active_run {
+        crate::events::log_warn(
+            "agent.session_close_refused",
+            &format!("session={id} active journal must be finalized before close"),
+        );
+        return false;
+    }
     if removed {
         clear_session_changed_paths(id);
     }
@@ -949,6 +1033,7 @@ pub fn close(id: &str) {
     crate::orchestration::agent_inbox::clear_session(id);
     crate::agent_events::clear_session_sinks(id);
     clear_unknown_host_event_warnings(id);
+    removed
 }
 
 pub fn close_with_status(
@@ -956,10 +1041,7 @@ pub fn close_with_status(
     reason: impl Into<String>,
     status: impl Into<String>,
     metadata: serde_json::Value,
-) -> bool {
-    if !exists(id) {
-        return false;
-    }
+) -> Result<bool, String> {
     let reason = reason.into();
     let status = status.into();
     let event_metadata = serde_json::json!({
@@ -974,15 +1056,35 @@ pub fn close_with_status(
         "Agent session closed",
         Some(event_metadata),
     );
-    let _ = append_event(id, transcript_event);
+    validate_session_event(&transcript_event, "agent_session_close")?;
+    let removed = SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let Some(state) = sessions.get_mut(id) else {
+            return Ok(false);
+        };
+        if state.transcript_journal.is_some() {
+            return Err(format!(
+                "agent session '{id}' has an active run; finalize it before closing"
+            ));
+        }
+        append_event_to_state(state, transcript_event, "close_with_status")?;
+        sessions.remove(id);
+        Ok(true)
+    })?;
+    if !removed {
+        return Ok(false);
+    }
+    clear_session_changed_paths(id);
+    crate::orchestration::agent_inbox::clear_session(id);
+    clear_unknown_host_event_warnings(id);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {
         session_id: id.to_string(),
         reason,
         status,
         metadata,
     });
-    close(id);
-    true
+    crate::agent_events::clear_session_sinks(id);
+    Ok(true)
 }
 
 pub fn reset_transcript(id: &str) -> bool {
@@ -991,7 +1093,9 @@ pub fn reset_transcript(id: &str) -> bool {
         let Some(state) = map.get_mut(id) else {
             return false;
         };
-        state.transcript = empty_transcript(id);
+        if state.replace_transcript(empty_transcript(id)).is_err() {
+            return false;
+        }
         state.tool_format = None;
         state.system_prompt = None;
         state.scratchpad = None;
@@ -1011,101 +1115,93 @@ pub fn reset_transcript(id: &str) -> bool {
 /// Touches `src`'s `last_accessed` before evicting, so the fork
 /// operation itself can't make `src` look stale and kick it out of
 /// the LRU just to make room for the new fork.
-pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
-    let (
-        src_transcript,
-        src_tool_format,
-        src_system_prompt,
-        src_pinned_model,
-        src_pinned_reasoning_policy,
-        src_actor_chain,
-        src_workspace_anchor,
-        src_workspace_policy,
-        src_scratchpad,
-        src_scratchpad_version,
-        src_transcript_budget_policy,
-        src_last_transcript_budget_action,
-        src_text_tool_call_seq,
-        src_taint,
-        dst,
-    ) = SESSIONS.with(|s| {
+pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, SessionOpenError> {
+    let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    if dst == src_id {
+        return Ok(None);
+    }
+    let ambient_parent = current_session_id();
+    let mut evicted = Vec::new();
+    let mut budget_event = None;
+    let forked = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
-        let src = map.get_mut(src_id)?;
-        src.touch();
-        let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
-        Some((
-            forked_transcript,
-            src.tool_format.clone(),
-            src.system_prompt.clone(),
-            src.pinned_model.clone(),
-            src.pinned_reasoning_policy.clone(),
-            src.actor_chain.clone(),
-            src.workspace_anchor.clone(),
-            src.workspace_policy.clone(),
-            src.scratchpad.clone(),
-            src.scratchpad_version,
-            src.transcript_budget_policy.clone(),
-            src.last_transcript_budget_action.clone(),
-            src.text_tool_call_seq,
-            src.taint.clone(),
-            dst,
-        ))
-    })?;
-    // Ensure cap is respected when inserting the fork.
-    open_or_create(Some(dst.clone()));
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        if let Some(state) = map.get_mut(&dst) {
-            state.transcript = src_transcript;
-            state.tool_format = src_tool_format;
-            state.system_prompt = src_system_prompt;
-            state.pinned_model = src_pinned_model;
-            state.pinned_reasoning_policy = src_pinned_reasoning_policy;
-            state.actor_chain = src_actor_chain;
-            state.workspace_anchor = src_workspace_anchor;
-            state.workspace_policy = src_workspace_policy;
-            state.scratchpad = src_scratchpad;
-            state.scratchpad_version = src_scratchpad_version;
-            state.transcript_budget_policy = src_transcript_budget_policy;
-            state.last_transcript_budget_action = src_last_transcript_budget_action;
-            state.text_tool_call_seq = src_text_tool_call_seq;
-            state.taint = src_taint;
-            state.touch();
-        }
-        update_lineage(&mut map, src_id, &dst, None);
-    });
-    let budget_ok = SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(&dst) else {
-            return false;
+        let Some(src) = map.get(src_id) else {
+            return Ok(false);
         };
+        // A fork destination is a new session. Refusing an occupied destination
+        // prevents a compound admission from overwriting an unrelated live run.
+        if map.contains_key(&dst) {
+            return Ok(false);
+        }
+
+        let cap = SESSION_CAP.with(|limit| limit.get());
+        let required_evictions = map.len().saturating_add(1).saturating_sub(cap);
+        let mut victims = map
+            .iter()
+            .filter(|(id, state)| id.as_str() != src_id && state.transcript_journal.is_none())
+            .map(|(id, state)| (id.clone(), state.last_accessed))
+            .collect::<Vec<_>>();
+        if victims.len() < required_evictions {
+            let protected = map
+                .iter()
+                .filter(|(id, state)| id.as_str() == src_id || state.transcript_journal.is_some())
+                .count();
+            return Err(SessionOpenError::CapacityExhausted {
+                limit: cap,
+                active: map.len(),
+                protected,
+            });
+        }
+
+        let mut state = SessionState::new(dst.clone());
+        state.transcript =
+            clone_transcript_with_parent(&clone_transcript_with_id(&src.transcript, &dst), src_id);
+        state.tool_format = src.tool_format.clone();
+        state.system_prompt = src.system_prompt.clone();
+        state.pinned_model = src.pinned_model.clone();
+        state.pinned_reasoning_policy = src.pinned_reasoning_policy.clone();
+        state.actor_chain = src.actor_chain.clone();
+        state.workspace_anchor = src.workspace_anchor.clone();
+        state.workspace_policy = src.workspace_policy.clone();
+        state.scratchpad = src.scratchpad.clone();
+        state.scratchpad_version = src.scratchpad_version;
+        state.transcript_budget_policy = src.transcript_budget_policy.clone();
+        state.last_transcript_budget_action = src.last_transcript_budget_action.clone();
+        state.text_tool_call_seq = src.text_tool_call_seq;
+        state.taint = src.taint.clone();
+        state.parent_id = Some(src_id.to_string());
         let candidate = state.transcript.clone();
-        apply_transcript_with_budget(state, candidate, "fork").is_ok()
-    });
-    if !budget_ok {
-        // The lineage edge was established before the budget check ran
-        // (update_lineage rewrites dst's transcript with the parent
-        // metadata that the check budgets). Undo it so a rejected fork
-        // never leaves a dangling child_id pointing at the session we
-        // are about to close.
-        SESSIONS.with(|s| {
-            let mut map = s.borrow_mut();
-            if let Some(parent) = map.get_mut(src_id) {
-                parent.child_ids.retain(|id| id != &dst);
-            }
-        });
-        close(&dst);
-        return None;
+        budget_event =
+            match apply_transcript_with_budget_deferred_event(&mut state, candidate, "fork") {
+                Ok(event) => event,
+                Err(_) => return Ok(false),
+            };
+
+        victims.sort_by_key(|(_, last_accessed)| *last_accessed);
+        for (victim, _) in victims.into_iter().take(required_evictions) {
+            map.remove(&victim);
+            evicted.push(victim);
+        }
+        map.insert(dst.clone(), state);
+        map.get_mut(src_id)
+            .expect("fork source remains protected during atomic admission")
+            .touch();
+        update_lineage(&mut map, src_id, &dst, None)?;
+        Ok(true)
+    })?;
+    if !forked {
+        return Ok(None);
     }
-    // open_or_create evicts BEFORE inserting, so the dst slot is
-    // guaranteed once we get here. The existence check is cheap
-    // insurance against a future refactor that breaks that invariant.
-    if exists(&dst) {
-        Some(dst)
-    } else {
-        None
+    for id in evicted {
+        clear_session_changed_paths(&id);
     }
+    clear_session_changed_paths(&dst);
+    if let Some(parent) = ambient_parent.as_deref() {
+        crate::agent_events::mirror_session_sinks(parent, &dst);
+    }
+    try_register_event_log(&dst);
+    publish_transcript_budget_event(budget_event);
+    Ok(Some(dst))
 }
 
 /// Fork `src_id` and truncate the destination transcript to the
@@ -1116,18 +1212,28 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
 /// `fork`), so sibling events don't double-fan into the parent's
 /// consumers.
 ///
-/// Returns the new session id on success, `None` if `src_id` doesn't
-/// exist.
-pub fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<String> {
-    let branched_at_event_index = SESSIONS.with(|s| {
+/// Returns the new session id on success, `Ok(None)` if `src_id` doesn't
+/// exist, and an admission error if no idle session can make room.
+pub fn fork_at(
+    src_id: &str,
+    keep_first: usize,
+    dst_id: Option<String>,
+) -> Result<Option<String>, SessionOpenError> {
+    let Some(branched_at_event_index) = SESSIONS.with(|s| {
         let map = s.borrow();
         let src = map.get(src_id)?;
         Some(branch_event_index(&src.transcript, keep_first))
-    })?;
-    let new_id = fork(src_id, dst_id)?;
-    link_child_session_with_branch(src_id, &new_id, Some(branched_at_event_index));
-    truncate(&new_id, keep_first).ok().flatten()?;
-    Some(new_id)
+    }) else {
+        return Ok(None);
+    };
+    let Some(new_id) = fork(src_id, dst_id)? else {
+        return Ok(None);
+    };
+    link_child_session_with_branch(src_id, &new_id, Some(branched_at_event_index))?;
+    if truncate(&new_id, keep_first).ok().flatten().is_none() {
+        return Ok(None);
+    }
+    Ok(Some(new_id))
 }
 
 mod truncation;
@@ -1231,7 +1337,7 @@ pub fn seed_from_messages(
     if exists(&resolved) {
         return Err(format!("agent session '{resolved}' already exists"));
     }
-    open_or_create(Some(resolved.clone()));
+    open_or_create(Some(resolved.clone())).map_err(|error| error.to_string())?;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(&resolved) else {
@@ -1342,14 +1448,15 @@ pub fn replace_messages_with_summary(
     })
 }
 
-pub fn append_subscriber(id: &str, callback: VmValue) {
-    open_or_create(Some(id.to_string()));
+pub fn append_subscriber(id: &str, callback: VmValue) -> Result<(), SessionOpenError> {
+    open_or_create(Some(id.to_string()))?;
     SESSIONS.with(|s| {
         if let Some(state) = s.borrow_mut().get_mut(id) {
             state.subscribers.push(callback);
             state.touch();
         }
     });
+    Ok(())
 }
 
 pub fn subscribers_for(id: &str) -> Vec<VmValue> {

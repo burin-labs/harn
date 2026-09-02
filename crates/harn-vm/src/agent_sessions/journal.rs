@@ -63,11 +63,23 @@ pub(crate) fn clear_journal(id: &str) {
 
 pub(crate) fn claim_journal_task(
     id: &str,
+    execution_id: &str,
     task_id: String,
     owns_session: bool,
 ) -> Result<(), VmError> {
     super::SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
+        let claimed = sessions
+            .values()
+            .filter_map(|state| state.transcript_journal.as_ref())
+            .filter(|journal| journal.is_claimed())
+            .count();
+        let cap = super::SESSION_CAP.with(|limit| limit.get());
+        if claimed >= cap {
+            return Err(VmError::Runtime(format!(
+                "agent lifecycle admission refused before session start: pending={claimed} limit={cap}"
+            )));
+        }
         let journal = sessions
             .get_mut(id)
             .and_then(|state| state.transcript_journal.as_mut())
@@ -76,22 +88,20 @@ pub(crate) fn claim_journal_task(
                     "agent transcript journal: session `{id}` has no active journal"
                 ))
             })?;
-        journal.claim_task(task_id, owns_session);
-        Ok(())
+        journal.claim_task(execution_id, id, task_id, owns_session)
     })
 }
 
-pub(crate) fn journal_sessions_for_task(task_id: &str) -> Vec<String> {
+pub(crate) fn journal_sessions_for_task(execution_id: &str, task_id: &str) -> Vec<String> {
     super::SESSIONS.with(|sessions| {
         sessions
             .borrow()
             .iter()
             .filter(|(_, state)| {
-                state
-                    .transcript_journal
-                    .as_ref()
-                    .and_then(crate::agent_session_journal::JournalState::task_id)
-                    == Some(task_id)
+                state.transcript_journal.as_ref().is_some_and(|journal| {
+                    journal.execution_id() == Some(execution_id)
+                        && journal.task_id() == Some(task_id)
+                })
             })
             .map(|(session_id, _)| session_id.clone())
             .collect()

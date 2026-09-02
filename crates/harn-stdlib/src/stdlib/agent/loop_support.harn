@@ -381,11 +381,28 @@ pub fn __agent_loop_finalize_failed(
   error: unknown,
 ) -> AgentLoopTerminalError {
   const terminal = __agent_loop_measured_error(agent, session, error)
-  const _ = try {
+  const finalized = try {
     agent_session_finalize(
       agent,
       session.session_id,
       {final_status: "failed", stop_reason: "error", iterations: iteration, error: error},
+    )
+  }
+  if is_err(finalized) {
+    return __agent_loop_terminal_error(
+      {
+        kind: "agent_loop_terminal_persistence_failed",
+        category: "internal",
+        reason: "terminal_persistence_failed",
+        message: "agent loop failed and its terminal record could not be persisted",
+        retry: {
+          kind: "agent_session_finalize",
+          session_id: session.session_id,
+          run_id: session.run_id,
+        },
+        cause: {terminal_error: terminal, persistence_error: unwrap_err(finalized)},
+      },
+      terminal.provider_call_count,
     )
   }
   return terminal

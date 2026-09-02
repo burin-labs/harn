@@ -237,6 +237,13 @@ pub type AgentResult = {
   ...rest,
 }
 
+/** Exact retained-run receipt for retrying a failed terminal persistence write. */
+pub type AgentFinalizationRetry = {
+  kind: "agent_session_finalize",
+  session_id: string,
+  run_id: string,
+}
+
 /** Additive error envelope for an agent loop that aborts by throwing. */
 pub type AgentLoopTerminalError = {
   kind: string,
@@ -245,6 +252,7 @@ pub type AgentLoopTerminalError = {
   message: string,
   cause: unknown,
   provider_call_count: int?,
+  retry: AgentFinalizationRetry?,
   ...rest,
 }
 // Nil means the session ledger itself was unavailable. A measured zero is

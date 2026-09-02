@@ -298,7 +298,7 @@ pub struct Vm {
     /// Force-cancelled tasks whose durable agent terminalization failed.
     /// The public handle remains a retry key even though its join handle has
     /// already stopped.
-    pub(crate) pending_task_cleanups: BTreeMap<String, String>,
+    pub(crate) pending_task_cleanups: BTreeMap<String, super::PendingTaskCleanup>,
     /// Shared terminal process-exit latch for this execution tree.
     pub(crate) process_exit_request: Arc<ProcessExitRequest>,
     /// Shared process-local synchronization primitives inherited by child VMs.
@@ -1236,15 +1236,6 @@ impl Vm {
         self.process_exit_request.code()
     }
 
-    /// Request cancellation for every outstanding child task owned by this VM
-    /// and then abort the join handles. This prevents un-awaited spawned tasks
-    /// from outliving their parent execution scope.
-    pub(crate) fn cancel_spawned_tasks(&mut self) {
-        for (_, task) in std::mem::take(&mut self.spawned_tasks) {
-            super::ops::abort_task_detached(self.pool_registry.clone(), task);
-        }
-    }
-
     /// Set the source directory for import resolution and introspection.
     /// Also auto-detects the project root if not already set.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
@@ -1413,7 +1404,7 @@ impl Vm {
                 let scope = self.task_scopes.remove(i);
                 for id in &scope.task_ids {
                     if let Some(task) = self.spawned_tasks.remove(id) {
-                        super::ops::abort_task_detached(self.pool_registry.clone(), task);
+                        super::ops::abort_task_detached(task, self.agent_cleanup_runtimes());
                     }
                 }
             } else {

@@ -641,7 +641,7 @@ mod tests {
         let _guard = crate::llm::env_guard();
         llm_config::clear_user_overrides();
         crate::agent_sessions::reset_session_store();
-        let session_id = crate::agent_sessions::open_or_create(Some(
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(
             "tool-probe-catalog-reasoning-default".to_string(),
         ));
         crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("off".to_string()))

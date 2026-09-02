@@ -63,6 +63,7 @@ pub(crate) fn append_journal_event(id: &str, event: VmValue) -> Result<(), Strin
                 "agent_session_append_journal_event: unknown session id '{id}'"
             ));
         };
+        state.ensure_run_accepts_mutation("append_journal_event")?;
         crate::agent_session_journal::enqueue_audit_event(
             &mut state.transcript_journal,
             journal_event,
@@ -71,7 +72,7 @@ pub(crate) fn append_journal_event(id: &str, event: VmValue) -> Result<(), Strin
     })
 }
 
-fn validate_session_event(event: &VmValue, action: &str) -> Result<(), String> {
+pub(super) fn validate_session_event(event: &VmValue, action: &str) -> Result<(), String> {
     let Some(event_dict) = event.as_dict() else {
         return Err(format!("{action}: event must be a dict"));
     };
@@ -219,6 +220,7 @@ fn checkpoint_summary(checkpoint: &SessionTurnCheckpoint) -> SessionCheckpointSu
 fn checkpoint_error_status(error: SessionCheckpointError) -> &'static str {
     match error {
         SessionCheckpointError::UnknownSession => "unknown_session",
+        SessionCheckpointError::TerminalSession => "terminal_session",
         SessionCheckpointError::NoCheckpoint => "no_checkpoint",
         SessionCheckpointError::NoRedo => "no_redo",
     }
@@ -323,10 +325,15 @@ pub fn rollback_last_completed_turn(
         let Some(state) = map.get_mut(id) else {
             return Err(SessionCheckpointError::UnknownSession);
         };
+        state
+            .ensure_run_accepts_mutation("rollback_last_completed_turn")
+            .map_err(|_| SessionCheckpointError::TerminalSession)?;
         let Some(checkpoint) = state.completed_turn_checkpoints.pop() else {
             return Err(SessionCheckpointError::NoCheckpoint);
         };
-        state.transcript = checkpoint.before_transcript.clone();
+        state
+            .replace_transcript(checkpoint.before_transcript.clone())
+            .expect("terminal state was checked before checkpoint mutation");
         state.redo_stack.push(SessionRedoEntry {
             checkpoint: checkpoint.clone(),
             redo_fs_snapshot_ids: redo_fs_snapshot_ids.clone(),
@@ -346,11 +353,16 @@ pub fn redo_last_rollback(id: &str) -> Result<SessionCheckpointOutcome, SessionC
         let Some(state) = map.get_mut(id) else {
             return Err(SessionCheckpointError::UnknownSession);
         };
+        state
+            .ensure_run_accepts_mutation("redo_last_rollback")
+            .map_err(|_| SessionCheckpointError::TerminalSession)?;
         let Some(entry) = state.redo_stack.pop() else {
             return Err(SessionCheckpointError::NoRedo);
         };
         let checkpoint = entry.checkpoint;
-        state.transcript = checkpoint.after_transcript.clone();
+        state
+            .replace_transcript(checkpoint.after_transcript.clone())
+            .expect("terminal state was checked before checkpoint mutation");
         state.completed_turn_checkpoints.push(checkpoint.clone());
         state.touch();
         Ok(SessionCheckpointOutcome {
@@ -403,12 +415,15 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
                 crate::value::intern_key("events"),
                 VmValue::List(std::sync::Arc::new(kept)),
             );
-            let _ = apply_transcript_with_budget(
+            if apply_transcript_with_budget(
                 state,
                 VmValue::dict(next),
                 "prune_invalid_reminder_events",
-            );
-            state.touch();
+            )
+            .is_err()
+            {
+                return 0;
+            }
         }
         pruned
     })

@@ -54,6 +54,7 @@ pub(super) async fn initialize(
     session_id: &str,
     options: &DictMap,
     system_prompt: Option<String>,
+    execution_id: String,
     task_id: String,
 ) -> Result<InitializedSession, VmError> {
     let has_live_session = crate::agent_sessions::exists(session_id);
@@ -91,11 +92,12 @@ pub(super) async fn initialize(
         seeded_session_id
     } else {
         crate::agent_sessions::open_or_create(Some(session_id.to_string()))
+            .map_err(|error| VmError::Runtime(error.to_string()))?
     };
     let owns_session = !has_live_session;
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
     if let Err(error) =
-        crate::agent_sessions::claim_journal_task(&session_id, task_id, owns_session)
+        crate::agent_sessions::claim_journal_task(&session_id, &execution_id, task_id, owns_session)
     {
         crate::agent_sessions::clear_journal(&session_id);
         if owns_session {

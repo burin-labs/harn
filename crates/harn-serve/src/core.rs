@@ -23,8 +23,12 @@ use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKe
 use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
 
 mod config;
+mod error_classification;
 mod prepared_generation;
 pub use config::DispatchCoreConfig;
+#[cfg(test)]
+use error_classification::budget_category_from_error;
+use error_classification::classify_vm_error;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
 
@@ -67,53 +71,6 @@ fn install_dispatch_vm_runtime(
     vm.set_source_dir(store_base);
     vm.install_cancel_token(cancel_token);
     vm.set_harness(harn_vm::Harness::real());
-}
-
-/// Translate a VM-level error into the dispatcher's typed error.
-///
-/// Three signals get hoisted out of `Generic` so adapters can render
-/// each correctly:
-///
-/// * `ErrorCategory::Cancelled` — caller-initiated cancel (HTTP 499).
-/// * `ErrorCategory::BudgetExceeded` — a `@budget(...)` ceiling fired
-///   (HTTP 429, `code = "budget_exceeded"`).
-/// * everything else → `Execution` (HTTP 500).
-fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
-    let category = harn_vm::error_to_category(&error);
-    let message = error.to_string();
-    match category {
-        harn_vm::ErrorCategory::Cancelled => DispatchError::Cancelled(message),
-        harn_vm::ErrorCategory::BudgetExceeded => DispatchError::BudgetExceeded {
-            category: budget_category_from_error(&error)
-                .unwrap_or_else(|| "llm_cost_usd".to_string()),
-            message,
-        },
-        _ => DispatchError::Execution(message),
-    }
-}
-
-/// Best-effort attempt to recover the specific budget dimension that
-/// fired (one of `llm_cost_usd`, `llm_tokens`, `mcp_calls`,
-/// `pg_queries`) from a `VmError` so per-class rejection telemetry stays
-/// accurate. The structured form (`VmError::Thrown(Dict)` — the
-/// preflight LLM check and the mcp/pg call-count guards) carries it as
-/// the `limit` field. The LLM cost/token guards raise the categorised
-/// mid-call variant instead, where we disambiguate on the message.
-fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
-    match error {
-        harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => d
-            .get("limit")
-            .map(|value| value.display())
-            .filter(|s| !s.is_empty()),
-        harn_vm::VmError::CategorizedError { message, .. } if message.contains("LLM") => {
-            if message.contains("token") {
-                Some("llm_tokens".to_string())
-            } else {
-                Some("llm_cost_usd".to_string())
-            }
-        }
-        _ => None,
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -583,13 +540,19 @@ impl DispatchCore {
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
                 harn_vm::llm::scope_agent_event_sink(agent_event_sink, async move {
                     let _event_log = install_scoped_event_log(self.event_log.clone());
-                    let _session_guard = agent_session_id.as_deref().map(|session_id| {
-                        harn_vm::agent_sessions::open_or_create_with_actor_chain(
-                            Some(session_id.to_string()),
-                            actor_chain.clone(),
-                        );
-                        harn_vm::agent_sessions::enter_current_session(session_id.to_string())
-                    });
+                    let _session_guard = match agent_session_id.as_deref() {
+                        Some(session_id) => {
+                            harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                                Some(session_id.to_string()),
+                                actor_chain.clone(),
+                            )
+                            .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                            Some(harn_vm::agent_sessions::enter_current_session(
+                                session_id.to_string(),
+                            ))
+                        }
+                        None => None,
+                    };
                     let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
                     let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                     let _request_id_guard = request_id.map(harn_vm::enter_request_id);
@@ -662,13 +625,19 @@ impl DispatchCore {
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
                 harn_vm::llm::scope_agent_event_sink(agent_event_sink, async move {
                     let _event_log = install_scoped_event_log(self.event_log.clone());
-                    let _session_guard = agent_session_id.as_deref().map(|session_id| {
-                        harn_vm::agent_sessions::open_or_create_with_actor_chain(
-                            Some(session_id.to_string()),
-                            actor_chain.clone(),
-                        );
-                        harn_vm::agent_sessions::enter_current_session(session_id.to_string())
-                    });
+                    let _session_guard = match agent_session_id.as_deref() {
+                        Some(session_id) => {
+                            harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                                Some(session_id.to_string()),
+                                actor_chain.clone(),
+                            )
+                            .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                            Some(harn_vm::agent_sessions::enter_current_session(
+                                session_id.to_string(),
+                            ))
+                        }
+                        None => None,
+                    };
                     let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
                     let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
                     let _request_id_guard = request_id.map(harn_vm::enter_request_id);

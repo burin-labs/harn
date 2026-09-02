@@ -13,7 +13,6 @@
     "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
     "crates/harn-parser/src/typechecker/inference/expressions.rs",
     "crates/harn-parser/src/typechecker/tests/narrowing.rs",
-    "crates/harn-serve/src/adapters/a2a/tests/tasks.rs",
     "crates/harn-serve/src/adapters/acp/events/tests.rs",
     "crates/harn-serve/src/adapters/acp/tests/modes.rs",
     "crates/harn-serve/src/adapters/acp/tests/sessions.rs",

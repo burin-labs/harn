@@ -251,6 +251,42 @@ impl AcpServer {
         }
     }
 
+    pub(super) fn send_session_open_error(
+        &self,
+        id: &serde_json::Value,
+        error: &harn_vm::agent_sessions::SessionOpenError,
+    ) {
+        match error {
+            harn_vm::agent_sessions::SessionOpenError::CapacityExhausted {
+                limit,
+                active,
+                protected,
+            } => self.send_error_with_data(
+                id,
+                -32000,
+                &error.to_string(),
+                serde_json::json!({
+                    "code": "agent_session_capacity_exhausted",
+                    "limit": limit,
+                    "active": active,
+                    "protected": protected,
+                }),
+            ),
+            harn_vm::agent_sessions::SessionOpenError::LineageRejected { session_id, reason } => {
+                self.send_error_with_data(
+                    id,
+                    -32000,
+                    &error.to_string(),
+                    serde_json::json!({
+                        "code": "agent_session_lineage_rejected",
+                        "session_id": session_id,
+                        "reason": reason,
+                    }),
+                )
+            }
+        }
+    }
+
     pub(super) fn emit_control_outcome(
         &self,
         session_id: &str,

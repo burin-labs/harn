@@ -366,7 +366,8 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
             "agent_subscribe(session_id, callback): callback must be a closure".into(),
         ));
     }
-    crate::agent_sessions::append_subscriber(&session_id, callback);
+    crate::agent_sessions::append_subscriber(&session_id, callback)
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
     Ok(VmValue::Nil)
 }
 

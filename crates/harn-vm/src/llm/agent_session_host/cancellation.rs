@@ -75,6 +75,42 @@ impl AgentSessionFinalization {
             .expect("finalization owner always contains its session before commit")
     }
 
+    pub(super) fn take_retry(session_id: &str, run_id: &str) -> Result<Self, VmError> {
+        let session = super::AGENT_HOST_SESSIONS.with(|sessions| {
+            let mut sessions = sessions.borrow_mut();
+            let session = sessions.get(session_id).ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "{}: unknown session `{session_id}`",
+                    super::HOST_SESSION_FINALIZE
+                ))
+            })?;
+            if session.run_id != run_id {
+                return Err(VmError::Runtime(format!(
+                    "{}: retry receipt names run `{run_id}`, but session `{session_id}` owns run `{}`",
+                    super::HOST_SESSION_FINALIZE,
+                    session.run_id
+                )));
+            }
+            if session.pending_finalization.is_none() {
+                return Err(VmError::Runtime(format!(
+                    "{}: run `{run_id}` has no pending finalization",
+                    super::HOST_SESSION_FINALIZE
+                )));
+            }
+            sessions.remove(session_id).ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "{}: session `{session_id}` disappeared while claiming retry `{run_id}`",
+                    super::HOST_SESSION_FINALIZE
+                ))
+            })
+        })?;
+        Ok(Self {
+            session_id: session_id.to_string(),
+            run_id: session.run_id.clone(),
+            session: Some(session),
+        })
+    }
+
     pub(super) fn commit(mut self) -> super::AgentHostSession {
         self.session
             .take()
@@ -253,13 +289,16 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
 }
 
 /// Finish every live agent session owned by one cancelled VM task.
-pub(crate) async fn abandon_task_sessions(task_id: &str) -> Result<(), VmError> {
-    let mut session_ids = crate::agent_sessions::journal_sessions_for_task(task_id);
+pub(crate) async fn abandon_task_sessions(
+    execution_id: &str,
+    task_id: &str,
+) -> Result<(), VmError> {
+    let mut session_ids = crate::agent_sessions::journal_sessions_for_task(execution_id, task_id);
     let host_session_ids = super::AGENT_HOST_SESSIONS.with(|sessions| {
         sessions
             .borrow()
             .values()
-            .filter(|session| session.task_id == task_id)
+            .filter(|session| session.execution_id == execution_id && session.task_id == task_id)
             .map(|session| session.session_id.clone())
             .collect::<Vec<_>>()
     });

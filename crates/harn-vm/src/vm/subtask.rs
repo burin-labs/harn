@@ -260,6 +260,30 @@ where
     spawn(prepare(registry, future))
 }
 
+/// Run lifecycle cleanup independently of the caller's Tokio runtime.
+///
+/// VM destruction is synchronous and may coincide with embedding-runtime
+/// shutdown. Cleanup spawned on that runtime can therefore be cancelled
+/// before its first poll. This process-owned runtime is deliberately tiny and
+/// exists only for terminal persistence and release of task-owned sessions.
+pub(crate) fn spawn_lifecycle_cleanup<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    static CLEANUP_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
+        std::sync::OnceLock::new();
+    let runtime = CLEANUP_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("harn-lifecycle-cleanup")
+            .enable_all()
+            .build()
+            .expect("build Harn lifecycle cleanup runtime")
+    });
+    runtime.spawn(future)
+}
+
 /// Spawn a long-lived child that inherits execution policy but owns an
 /// independent session lifecycle.
 pub(crate) fn spawn_inherited_child<F>(

@@ -480,7 +480,16 @@ impl AcpServer {
         self.descriptor.clone()
     }
 
-    pub(super) fn insert_session(&mut self, session_id: String, cwd: PathBuf, info: SessionInfo) {
+    pub(super) fn insert_session(
+        &mut self,
+        session_id: String,
+        cwd: PathBuf,
+        info: SessionInfo,
+    ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
+        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+            Some(session_id.clone()),
+            self.actor_chain(),
+        )?;
         let cancellation = self.register_session_cancellation(&session_id);
         let concurrent_control = ConcurrentSessionControl::new();
         self.concurrent_controls
@@ -504,13 +513,10 @@ impl AcpServer {
                 environment_policy: harn_vm::security::SessionEnvironment::inherited(),
             },
         );
-        harn_vm::agent_sessions::open_or_create_with_actor_chain(
-            Some(session_id.clone()),
-            self.actor_chain(),
-        );
         #[cfg(feature = "hostlib")]
         if let Some(session) = self.sessions.get(&session_id) {
             harn_hostlib::fs::configure_session_root(&session_id, &session.project_root);
         }
+        Ok(())
     }
 }
