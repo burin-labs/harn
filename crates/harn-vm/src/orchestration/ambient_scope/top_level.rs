@@ -6,7 +6,7 @@ impl AmbientExecutionScope {
     /// Capture the full ambient context and typed owners for one top-level VM
     /// run. Interleaved executions cannot observe each other's state.
     pub(crate) fn capture_for_top_level_execution(
-        owner: Arc<str>,
+        owner: crate::ExecutionId,
         llm_mock: LlmMockContext,
         worker_registry: Arc<crate::stdlib::agents::agents_workers::WorkerRegistry>,
         daemon_registry: Arc<crate::stdlib::agents_daemon::DaemonRegistry>,

@@ -49,8 +49,11 @@ async fn run_loaded_registry(
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
-    let tools = harn_vm::tool_registry::executable_tools(&loaded.registry)
-        .map_err(|error| error.to_string())?;
+    let tools = harn_vm::tool_registry::executable_tools_for_audience(
+        &loaded.registry,
+        harn_vm::tool_registry::ToolAudience::Cli,
+    )
+    .map_err(|error| error.to_string())?;
     let registry_info = harn_vm::tool_registry::tool_registry_catalog(&loaded.registry)
         .map_err(|error| error.to_string())?
         .info;
@@ -144,8 +147,11 @@ fn print_loaded_registry_schema(
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
-    let catalog = harn_vm::tool_registry::tool_registry_catalog(&loaded.registry)
-        .map_err(|error| error.to_string())?;
+    let catalog = harn_vm::tool_registry::tool_registry_catalog_for_audience(
+        &loaded.registry,
+        harn_vm::tool_registry::ToolAudience::Catalog,
+    )
+    .map_err(|error| error.to_string())?;
     if args.pretty {
         println!(
             "{}",
@@ -505,6 +511,7 @@ mod tests {
             annotations: None,
             icons: None,
             execution: None,
+            governance: harn_vm::tool_registry::ToolGovernance::default(),
             cli: harn_vm::tool_registry::ToolCliSpec {
                 command: command.iter().map(|part| (*part).to_string()).collect(),
                 hidden: false,

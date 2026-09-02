@@ -87,6 +87,27 @@ fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
 }
 
 #[test]
+fn option_probe_preserves_only_the_selected_interactions_sampling_field() {
+    use crate::llm::capabilities::PortableOption;
+
+    let mut payload = gemini_payload(
+        "gemini-3.6-flash",
+        ThinkingConfig::Effort {
+            level: ReasoningEffort::Medium,
+        },
+    );
+    payload.temperature = Some(0.2);
+    payload.top_p = Some(0.8);
+    payload.top_k = Some(20);
+    payload.provider_contract_probe = Some(PortableOption::TopK);
+    let body = crate::llm::api::DialectContract::for_request(&payload).build_request_body(&payload);
+
+    assert!(body["generation_config"].get("temperature").is_none());
+    assert!(body["generation_config"].get("top_p").is_none());
+    assert_eq!(body["generation_config"]["top_k"], json!(20));
+}
+
+#[test]
 fn disabled_thinking_uses_the_models_lowest_supported_interactions_level() {
     let caps = crate::llm::capabilities::Capabilities {
         reasoning_effort_levels: vec!["low".into(), "medium".into(), "high".into()],

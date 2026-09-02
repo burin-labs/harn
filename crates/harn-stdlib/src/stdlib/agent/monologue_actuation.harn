@@ -3,10 +3,10 @@ import {
   MonologueActuationDecision,
   MonologueActuationState,
 } from "std/agent/monologue_actuation_types"
+import { agent_prefill_eligibility } from "std/agent/prefill"
 import { agent_has_tools, agent_render_tool_call_prefix } from "std/agent/preflight"
 import { agent_emit_event } from "std/agent/state"
 import { agent_tool_resolve_workspace_write_name } from "std/agent/tool_annotations"
-import { llm_has_explicit_routing_owner } from "std/llm/options"
 
 /**
  * Bounded, opt-in recovery for tool-less action narration or a repeated
@@ -130,25 +130,17 @@ pub fn agent_monologue_actuation_observe_completed_dispatch(
   return next + {pending: true, pending_trigger: "read_only_streak"}
 }
 
-fn __agent_monologue_actuation_route_suppression(llm: HarnessLlm, options: dict) -> string {
-  if options?._llm_caller != nil
-    && !(options?._llm_caller_transport?.forwards_assistant_prefill
-      ?? false) {
-    return "external_llm_caller_unsupported"
+fn __agent_monologue_actuation_route_suppression(
+  llm: HarnessLlm,
+  prefill: string,
+  options: dict,
+) -> string {
+  const eligibility = agent_prefill_eligibility(llm, prefill, options)
+  return if eligibility.allowed {
+    ""
+  } else {
+    eligibility.reason
   }
-  if llm_has_explicit_routing_owner(options) || options?.equivalent_failover != nil {
-    return "multi_route_prefill_unsupported"
-  }
-  const capabilities = try {
-    llm.provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
-  }
-  if is_err(capabilities) || type_of(unwrap(capabilities)) != "dict" {
-    return "assistant_prefill_unsupported"
-  }
-  if !(unwrap(capabilities)?.supports_assistant_prefill ?? false) {
-    return "assistant_prefill_unsupported"
-  }
-  return ""
 }
 
 fn __agent_monologue_actuation_receipt(
@@ -225,7 +217,11 @@ pub fn agent_monologue_actuation_take(
   } else {
     call_open
   }
-  const route_suppression = __agent_monologue_actuation_route_suppression(llm, llm_options)
+  const route_suppression = __agent_monologue_actuation_route_suppression(
+    llm,
+    actuation_prefill,
+    llm_options,
+  )
   const decision = if !config.enabled {
     {
       state: cleared,

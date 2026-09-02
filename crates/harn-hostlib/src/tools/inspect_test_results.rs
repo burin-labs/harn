@@ -174,7 +174,7 @@ pub(crate) struct StoredRun {
     /// active scope to still equal this at mint time, so a handle cannot bless a
     /// later, different run. `None` when no owning execution was active at
     /// record time (fail-closed: such a record can never mint a pass).
-    pub(crate) execution_scope: Option<std::sync::Arc<str>>,
+    pub(crate) execution_scope: Option<harn_vm::ExecutionId>,
 }
 
 #[derive(Default)]

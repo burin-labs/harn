@@ -365,7 +365,7 @@ pub fn tool_schema_hash(tool: &serde_json::Value) -> String {
         .unwrap_or_default();
     let schema = tool
         .get("inputSchema")
-        .map(|v| v.to_string())
+        .map(crate::canonical_json::to_string)
         .unwrap_or_default();
     let mut hasher = Sha256::new();
     hasher.update(name.as_bytes());

@@ -111,6 +111,10 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     // event so reconnect/restart can project it without adding a provider-visible
     // message.
     host_event("progress_reported", ASSISTANT),
+    // A purpose label is user-facing product state with no provider-visible
+    // effect. Journalling it lets a reconnect or replay redraw the same
+    // headings the live client saw.
+    host_event("purpose_label", ASSISTANT),
     host_event("tool_search_query", ASSISTANT),
     host_event("tool_search_result", TOOL),
     host_event("skill_narrow", ASSISTANT),
@@ -532,6 +536,10 @@ fn apply_host_payload_defaults(
             set_default(obj, "entries", Value::Array(Vec::new()));
             set_default(obj, "replace", Value::Bool(true));
             set_default(obj, "metadata", Value::Object(Map::new()));
+        }
+        "purpose_label" => {
+            set_default(obj, "source", Value::String("declared".to_string()));
+            set_default(obj, "tool_call_ids", Value::Array(Vec::new()));
         }
         "tool_search_query" => set_default(obj, "query", Value::Null),
         "tool_search_result" => set_default(obj, "promoted", Value::Array(Vec::new())),

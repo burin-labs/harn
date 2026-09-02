@@ -750,8 +750,10 @@ impl Vm {
         ) || crate::vm::tool_callable::is_single_harn_tool_registry_value(v)
     }
 
-    /// Public wrapper for `call_closure`, used by the MCP server to invoke
-    /// tool handler closures from outside the VM execution loop.
+    /// Public wrapper for `call_closure`, used by hosts to invoke exported
+    /// closures from outside the VM execution loop. A host call installs the
+    /// VM's top-level ambient owner; a nested call already under that owner
+    /// keeps the current execution intact.
     pub async fn call_closure_pub(
         &mut self,
         closure: &VmClosure,
@@ -759,7 +761,16 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
         self.cancel_grace_instructions_remaining = None;
-        self.call_closure(closure, args).await
+        if crate::current_execution_scope().as_ref() == Some(&self.execution_id) {
+            return self.call_closure(closure, args).await;
+        }
+
+        let registry = self.pool_registry.clone();
+        let ambient = self.prepare_top_level_ambient();
+        let call = crate::stdlib::pool::with_pool_registry_scope(registry, async {
+            self.call_closure(closure, args).await
+        });
+        Box::pin(crate::orchestration::scope_ambient(ambient, call)).await
     }
 
     /// Resolve a named builtin: sync builtins → async builtins → bridge → error.

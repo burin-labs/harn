@@ -275,7 +275,7 @@ check-dependabot-groups:
 # `ARGS` replaces the default `--workspace` selector so `-p <crate>` also
 # narrows compilation instead of forming Cargo's additive workspace union.
 test:
-	@command -v cargo-nextest >/dev/null 2>&1 || { \
+	@$(HARN_CARGO_CMD) nextest --version >/dev/null 2>&1 || { \
 		echo "make test requires cargo-nextest; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
 		echo "for intentional plain cargo test (different isolation; includes e2e binaries): make test-cargo" >&2; \
 		exit 1; }
@@ -318,7 +318,7 @@ test-one:
 # compiling the Harn CLI.
 AFFECTED_BASE ?= origin/main
 test-affected:
-	@command -v cargo-nextest >/dev/null 2>&1 || { \
+	@$(HARN_CARGO_CMD) nextest --version >/dev/null 2>&1 || { \
 		echo "test-affected requires cargo-nextest; run 'make setup'"; exit 1; }
 	@args="$$(./scripts/ci/affected_crate_args.sh --base "$(AFFECTED_BASE)")"; \
 	if [ -z "$$args" ]; then \
@@ -632,6 +632,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
+	./scripts/tests/sccache_action_cache_size_test.sh
 	./scripts/tests/check_release_warm_build_budget_test.sh
 	./scripts/tests/ci_wait_for_run_artifacts_test.sh
 	./scripts/tests/ci_write_walltime_report_test.sh
@@ -656,6 +657,7 @@ test-pr-gate-scripts:
 	./scripts/tests/sign_local_macos_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
+	./scripts/tests/cargo_toolchain_pin_test.sh
 	./scripts/tests/cargo_target_seed_test.sh
 	./scripts/tests/cli_aot_merge_driver_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh

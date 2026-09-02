@@ -18,7 +18,30 @@ pub fn __provider_catalog_claim(llm: HarnessLlm, route: ProviderToolProbeRoute) 
     frequency_penalty_supported: caps?.frequency_penalty_supported,
     temperature_supported: caps?.temperature_supported,
     top_p_supported: caps?.top_p_supported,
+    top_k_supported: caps?.top_k_supported,
+    seed_supported: caps?.seed_supported,
   }
+}
+
+pub fn __option_probe_command(
+  harn_bin: string,
+  route: ProviderToolProbeRoute,
+  option: ProviderPortableProbeOption,
+) -> list<string> {
+  return [
+    harn_bin,
+    "provider",
+    "option-probe",
+    route.provider,
+    "--model",
+    route.model,
+    "--option",
+    option,
+    "--max-tokens",
+    "8",
+    "--fail-on-drift",
+    "--json",
+  ]
 }
 
 pub type ProviderToolProbeCommandRequest = {
@@ -124,8 +147,8 @@ pub fn __planned_cell(
       mode: mode,
       format: format,
       status: "planned",
-      reason: if behavior.runner == "provider_tool_probe" {
-        "dry run; pass --live to execute harn provider tool-probe for the executable transport cells"
+      reason: if __campaign_runner_is_executable(behavior.runner) {
+        "dry run; pass --live to execute the typed provider contract probe"
       } else {
         "behavior case is declared in the campaign matrix but does not yet have an executable runner"
       },
@@ -147,6 +170,10 @@ pub fn __planned_cell(
           },
         ),
       }
+  }
+  if behavior.runner == "provider_option_probe" {
+    return cell
+      + {command: __option_probe_command(harn_bin, route, behavior.probe_option ?? "temperature")}
   }
   return cell
 }
@@ -228,14 +255,14 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
           probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
           continue
         }
-        if behavior.runner == "provider_tool_probe" && max_probes > 0
+        if __campaign_runner_is_executable(behavior.runner) && max_probes > 0
           && executable_units_selected
             >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
         }
         probe_units_selected = probe_units_selected + 1
-        if behavior.runner == "provider_tool_probe" {
+        if __campaign_runner_is_executable(behavior.runner) {
           executable_units_selected = executable_units_selected + 1
         }
         for format in behavior.tool_formats {

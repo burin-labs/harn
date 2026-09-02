@@ -195,6 +195,7 @@ pub(super) fn probe_request_payload_for_format(
     );
     let max_tokens = tool_probe_max_tokens(default_int("max_tokens"), &thinking);
     let mut payload = LlmRequestPayload {
+        data_controls: crate::llm_config::DataPosture::Default,
         provider: provider.to_string(),
         model: model.to_string(),
         region: None,
@@ -218,6 +219,7 @@ pub(super) fn probe_request_payload_for_format(
         frequency_penalty: None,
         presence_penalty: None,
         parallel_tool_calls: None,
+        provider_contract_probe: None,
         fast: false,
         output_format: OutputFormat::Text,
         output_schema: None,

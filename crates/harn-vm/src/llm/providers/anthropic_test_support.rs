@@ -6,6 +6,7 @@ use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
 
 pub(super) fn base_payload() -> LlmRequestPayload {
     LlmRequestPayload {
+        data_controls: crate::llm_config::DataPosture::Default,
         provider: "anthropic".to_string(),
         model: "claude-sonnet-4-6".to_string(),
         region: None,
@@ -30,6 +31,7 @@ pub(super) fn base_payload() -> LlmRequestPayload {
         frequency_penalty: None,
         presence_penalty: None,
         parallel_tool_calls: None,
+        provider_contract_probe: None,
         fast: false,
         output_format: crate::llm::api::OutputFormat::Text,
         output_schema: None,

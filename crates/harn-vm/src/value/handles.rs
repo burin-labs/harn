@@ -296,7 +296,7 @@ pub struct VmVerdictReceipt {
     /// record time, not at receipt-mint time. `verdict_all` rejects receipts
     /// whose `execution_scope` differ (cross-run replay) AND requires the active
     /// scope to still equal it, so a receipt cannot be replayed into a later run.
-    pub execution_scope: Arc<str>,
+    pub execution_scope: crate::ExecutionId,
     /// Optional subject identity (which unit-of-work the evidence attests). Folded
     /// in when the artifact carries it; when absent it is a NAMED limit (PR body).
     pub subject: Option<Arc<str>>,

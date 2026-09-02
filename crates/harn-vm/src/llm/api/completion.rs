@@ -155,8 +155,10 @@ async fn vm_call_completion_openai_style(
     if crate::llm::provider::provider_uses_anthropic_messages(&opts.provider, &opts.model) {
         crate::llm::providers::anthropic::reconcile_request_body(
             &mut body,
+            &opts.provider,
             &opts.model,
             &opts.thinking,
+            opts.provider_contract_probe,
         );
     }
 

@@ -21,6 +21,51 @@ fn blacksmith_timeout_expression() -> string {
     + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 20 || 40 }}"
 }
 
+/** Keep the action's effective cache ceiling aligned with its caller contract. */
+pub fn sccache_action_cache_size_errors(action: dict) -> list<string> {
+  guard action != nil else {
+    return ["${SCCACHE_ACTION_PATH} must exist as the persistent sccache owner"]
+  }
+  const cache_size_input = action?.inputs?.["cache-size"]
+  guard type_of(cache_size_input) == "dict" else {
+    return ["${SCCACHE_ACTION_PATH} must declare the cache-size input"]
+  }
+  let errors: list<string> = []
+  if trim(to_string(cache_size_input?.default ?? "")) != "" {
+    errors = errors
+      + [
+        "${SCCACHE_ACTION_PATH} cache-size must default empty so the caller's SCCACHE_CACHE_SIZE is not overwritten",
+      ]
+  }
+  const configure_steps = (action?.runs?.steps ?? []).filter(
+    { step -> contains(to_string(step?.run ?? ""), "configure-env.sh") },
+  )
+    .to_list()
+  if len(configure_steps) != 1 {
+    return errors
+      + [
+        "${SCCACHE_ACTION_PATH} must invoke configure-env.sh exactly once as the sole environment owner",
+      ]
+  }
+  const step = configure_steps[0]
+  if trim(to_string(step?.run ?? "")) != SCCACHE_CONFIGURE_ENV_COMMAND {
+    errors = errors
+      + [
+        "${SCCACHE_ACTION_PATH} must invoke configure-env.sh exactly once as the sole environment owner",
+      ]
+  }
+  if trim(to_string(step?.env?.HARN_SCCACHE_CACHE_SIZE_INPUT ?? ""))
+    != SCCACHE_CACHE_SIZE_INPUT_EXPRESSION {
+    errors = errors
+      + ["${SCCACHE_ACTION_PATH} must pass the explicit cache-size input to configure-env.sh"]
+  }
+  if contains((step?.env ?? {}).keys(), "SCCACHE_CACHE_SIZE") {
+    errors = errors
+      + ["${SCCACHE_ACTION_PATH} must inherit SCCACHE_CACHE_SIZE instead of shadowing the caller"]
+  }
+  return errors
+}
+
 /** Keep a compile lane on free hosted capacity with one complete coarse cache. */
 fn hosted_compile_lane_errors(
   workflow: dict,

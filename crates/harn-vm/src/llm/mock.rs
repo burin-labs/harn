@@ -293,6 +293,18 @@ struct LlmMockState {
     next_tool_call_id: u64,
 }
 
+impl LlmMockState {
+    fn reset(&mut self) {
+        self.cli_scope = None;
+        self.builtin_queue = MockQueue::default();
+        self.calls.clear();
+        self.prompt_cache.clear();
+        self.scopes.clear();
+        self.receipts.clear();
+        self.next_tool_call_id = 0;
+    }
+}
+
 /// Shared mutable mock state for one VM execution tree.
 ///
 /// Child VMs and inline async tasks clone this handle, while independently
@@ -313,6 +325,21 @@ impl LlmMockContext {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_mock(&self, mock: LlmMock) {
+        self.lock().builtin_queue.push_v0(mock);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn calls(&self) -> Vec<LlmMockCall> {
+        self.lock().calls.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset(&self) {
+        self.lock().reset();
     }
 }
 
@@ -486,15 +513,7 @@ pub(crate) fn builtin_llm_mock_strict_scopes() -> bool {
 }
 
 pub(crate) fn reset_llm_mock_state() {
-    with_mock_state_mut(|state| {
-        state.cli_scope = None;
-        state.builtin_queue = MockQueue::default();
-        state.calls.clear();
-        state.prompt_cache.clear();
-        state.scopes.clear();
-        state.receipts.clear();
-        state.next_tool_call_id = 0;
-    });
+    with_mock_state_mut(LlmMockState::reset);
 }
 
 /// Save the current builtin LLM mock queue and recorded-calls list, then
@@ -795,13 +814,12 @@ fn mock_prompt_cache_key(
     system: Option<&str>,
     mock_scope: &str,
 ) -> String {
-    serde_json::to_string(&serde_json::json!({
+    crate::canonical_json::to_string(&serde_json::json!({
         "model": model,
         "system": system,
         "messages": messages,
         "mock_scope": mock_scope,
     }))
-    .unwrap_or_default()
 }
 
 fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
@@ -1140,8 +1158,7 @@ pub(crate) fn fixture_hash(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     model.hash(&mut hasher);
     // Canonical JSON hashing is stable across Debug-format changes.
-    serde_json::to_string(messages)
-        .unwrap_or_default()
+    crate::canonical_json::to_string(&serde_json::Value::Array(messages.to_vec()))
         .hash(&mut hasher);
     system.hash(&mut hasher);
     if mock_scope.is_some_and(|scope| scope != DEFAULT_MOCK_SCOPE) {

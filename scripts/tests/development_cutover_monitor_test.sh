@@ -14,6 +14,7 @@ git -C "$fixture" init --quiet
 git -C "$fixture" config user.name "Development Cutover Monitor Test"
 git -C "$fixture" config user.email "development-cutover-monitor@example.com"
 git -C "$fixture" config commit.gpgsign false
+git -C "$fixture" config tag.gpgSign false
 printf '[workspace.package]\nversion = "1.2.3"\n' > "$fixture/Cargo.toml"
 git -C "$fixture" add Cargo.toml
 git -C "$fixture" commit --quiet -m 'Release v1.2.3'

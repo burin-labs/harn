@@ -43,8 +43,9 @@ mod tests;
 mod tool_taxonomy_tests;
 
 pub use agent::{
-    AgentEvent, FinalWrapupToolCallParseStatus, FinalWrapupUnconsumedToolCall, StagedWriteSummary,
-    ToolBatchDisposition, ToolBatchDispositionReceipt, ToolBatchPhase, ToolBatchProposalStatus,
+    AgentEvent, FinalWrapupToolCallParseStatus, FinalWrapupUnconsumedToolCall, PurposeLabelSource,
+    StagedWriteSummary, ToolBatchDisposition, ToolBatchDispositionReceipt, ToolBatchPhase,
+    ToolBatchProposalStatus,
 };
 pub use durable_projection::DurableAgentEventProjector;
 pub use host_injection::{

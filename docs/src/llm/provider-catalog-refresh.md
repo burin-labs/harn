@@ -207,6 +207,84 @@ recorded separately as a rate-limited case. Suggested catalog changes in the
 scorecard remain review-only data patches; the campaign never edits catalog
 TOML.
 
+## Measuring portable option claims
+
+Use `harn provider option-probe` when the catalog says an endpoint accepts or
+rejects one of Harn's portable generation options. The command makes one small
+request through the normal provider adapter and compares the provider's answer
+with the exact catalog field:
+
+```bash
+# No provider call. Shows the endpoint, claim, field, and request count.
+harn provider option-probe anthropic \
+  --model claude-opus-4-7 \
+  --option temperature \
+  --plan --json
+
+# One live request. Exit 1 means drift; exit 2 means no provider measurement.
+harn provider option-probe anthropic \
+  --model claude-opus-4-7 \
+  --option temperature \
+  --fail-on-drift --json
+```
+
+The typed option vocabulary is `temperature`, `top_p`, `top_k`, `seed`,
+`frequency_penalty`, `presence_penalty`, and `stop`. Each report names the
+provider and model endpoint, catalog field, declared value, request count,
+measured count, provider verdict, and one of `match`, `drift`, or `unmeasured`.
+Authentication, throttling, missing models, and local admission failures are
+`unmeasured`; they cannot turn an absent provider observation into a match.
+So are unrelated terminal outcomes such as content-policy blocks. Only the
+provider error taxonomy's structured `invalid_request` reason proves that the
+wire shape was rejected. The attempt owns its physical request count: a local
+gate reports zero requests and remains unmeasured, while a provider response or
+served-empty response reports one.
+
+Normal calls use the catalog to reject or remove unsupported options before
+egress. A truthful negative probe must let its selected option reach the
+provider, or it can only confirm the catalog against itself. The CLI selects
+probe authority in a typed async-task scope, then option extraction captures it
+in the resolved call contract and carries it through spawned transport work.
+It suspends shaping for the selected option only; sibling calls and unrelated
+options keep normal catalog policy. Pass `--gated` for a confirm-only run that
+leaves every guard enabled.
+
+An `accepted` verdict proves that the endpoint accepted a meaningful,
+non-default value on the wire. It does not prove that a provider honored the
+value semantically; providers that silently ignore unknown fields require a
+separate output-sensitive conformance test.
+
+This distinction matters because provider APIs change at model boundaries.
+Anthropic's current [Messages API
+reference](https://platform.claude.com/docs/en/api/messages/create) says models
+after Claude Opus 4.6 reject non-default `temperature`, `top_p`, and `top_k`.
+Google's [model resource](https://ai.google.dev/api/models) exposes whether a
+Gemini model uses top-k sampling; an empty `topK` means requests may not set it.
+The catalog records those endpoint-specific facts instead of treating a field
+present in an SDK type as universally supported.
+
+The existing spend-capped campaign executes every portable option without a
+second orchestration path:
+
+```bash
+harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
+  --catalog-routes \
+  --exclude-local \
+  --behavior provider_option_probe \
+  --max-probes 20 \
+  --max-cost-usd 2 \
+  --output-dir .harn-runs/provider-option-probes
+```
+
+Review the dry run, then add `--live`. A live option campaign is incomplete
+unless it contains at least one measured-supported and one measured-unsupported
+control. Its `claim_controls` receipt prints both counts and the unmeasured
+count, so zero observations cannot read as healthy. Individual
+`option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
+sharding, credential-name readiness, and budget ledger as tool-call receipts.
+Credential-missing and otherwise skipped option cells count as unmeasured in a
+live campaign, so partial endpoint coverage cannot satisfy the control.
+
 Fixture mode intentionally covers only deterministic public sources.
 Live mode adds provider-owned `/models` sources across the hosted
 provider set: Anthropic, OpenAI, Hugging Face Router, Gemini, Mistral,

@@ -33,9 +33,7 @@ use std::time::Duration;
 use wasmtime::{Caller, Engine, Linker, Module, Store};
 use wasmtime_wasi::p1::{add_to_linker_sync, WasiP1Ctx};
 use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
-use wasmtime_wasi::{
-    DirPerms, FilePerms, HostMonotonicClock, HostWallClock, I32Exit, WasiCtxBuilder,
-};
+use wasmtime_wasi::{FsPerms, HostMonotonicClock, HostWallClock, I32Exit, WasiCtxBuilder};
 
 use crate::testbench::overlay_fs::{active_overlay, OverlayFs};
 
@@ -224,7 +222,7 @@ fn run_wasm_module_inner(
     }
 
     builder
-        .preopened_dir(tmpdir.path(), "/", DirPerms::all(), FilePerms::all())
+        .preopened_dir(tmpdir.path(), "/", FsPerms::ReadWrite)
         .map_err(|e| format!("preopen dir: {e}"))?;
 
     let ctx = builder.build_p1();
@@ -716,6 +714,10 @@ mod tests {
         );
         let bytes = overlay.read(&workdir.path().join("out.txt")).expect("read");
         assert_eq!(&bytes, b"hello\n");
+        assert!(
+            !workdir.path().join("out.txt").exists(),
+            "WASI writes must remain in the ephemeral preopen and overlay"
+        );
     }
 
     #[test]

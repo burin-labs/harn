@@ -294,6 +294,9 @@ pub type AgentModelSpec = {
   provider_options?: dict,
   max_tool_calls?: int,
   previous_response_id?: string,
+  // Requested provider retention/training posture. See LlmCallOptions; every
+  // turn's telemetry.data_controls receipt reports what actually happened.
+  data_controls?: "default" | "strictest_available",
   store?: bool | dict,
   background?: bool,
   truncation?: string,
@@ -428,7 +431,16 @@ pub type AgentContextSpec = {
 }
 
 /** Observability extensions that do not alter agent semantics. */
-pub type AgentObservabilitySpec = {llm_transcript_dir?: string, on_delta?: any}
+pub type AgentObservabilitySpec = {
+  llm_transcript_dir?: string,
+  on_delta?: any,
+  /**
+   * Ask the agent to declare a plain-language heading for each run of tool
+   * calls, published as `purpose_label` events. Default off. Presentation
+   * only: a label never gates or delays a call.
+   */
+  purpose_labels?: bool | PurposeLabelOptions,
+}
 
 /**
  * Complete typed contract accepted by `agent_loop`.
@@ -475,6 +487,8 @@ pub type AgentPresetOptions = AgentSpec \
 import { LlmCallerTransport } from "std/agent/caller_transport"
 
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
+
+import { PurposeLabelOptions } from "std/agent/purpose_labels"
 
 import { AgentLoopRetryOptions } from "std/agent/retry"
 

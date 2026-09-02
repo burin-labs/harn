@@ -112,7 +112,7 @@ pub fn find_nearest_ancestor(start: &Path, filename: impl AsRef<Path>) -> Option
     None
 }
 
-fn normalize_lexically(path: &Path) -> PathBuf {
+pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
