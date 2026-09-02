@@ -24,6 +24,7 @@ import {
   completion_requirement_contract_prompt,
   completion_requirement_pending_feedback,
   completion_requirement_report,
+  completion_requirement_report_omitted,
   completion_requirement_unassessed_feedback,
 } from "std/agent/completion_requirements"
 pub import {
@@ -907,7 +908,17 @@ fn __judge_invoke_structured(
   )
   const requirement_report = decoded.requirement_report
   const unassessed = resolved.omitted && requirement_report != nil
-  const requirements_pending = requirement_report != nil && !requirement_report.complete
+  // A judge that REFUSED and itemized nothing has assessed nothing either, but
+  // unlike the approval path there is nothing to fail closed against: a
+  // `continue` closes no ledger. Charging it as pending would hand the actor a
+  // complaint about rows nobody looked at, naming evidence kinds the actor does
+  // not supply, in place of the reason the judge actually gave.
+  const declined_unassessed = requirement_report != nil
+    && !resolved.omitted
+    && completion_requirement_report_omitted(contract, resolved.data?.requirement_report)
+  const requirements_pending = requirement_report != nil
+    && !requirement_report.complete
+    && !declined_unassessed
   const verdict = requirements_pending ? "continue" : decoded.verdict
   const detail = if unassessed {
     completion_requirement_unassessed_feedback(requirement_report)
