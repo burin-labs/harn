@@ -607,15 +607,6 @@ impl McpServer {
         }
     }
 
-    /// Self-reported client label used only for tracing and diagnostics.
-    fn client_identity(&self) -> String {
-        self.connection
-            .lock()
-            .expect("MCP session lock poisoned")
-            .client_identity()
-            .to_string()
-    }
-
     async fn handle_hitl_respond(
         &self,
         id: &serde_json::Value,
