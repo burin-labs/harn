@@ -29,6 +29,52 @@ pub const MCP_META_KEY_PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protoco
 pub const MCP_META_KEY_CLIENT_INFO: &str = "io.modelcontextprotocol/clientInfo";
 pub const MCP_META_KEY_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
 
+/// Validate one application-owned MCP `_meta` key.
+///
+/// Harn authors protocol keys itself. Catalog extensions must therefore use
+/// the standard key grammar without claiming an MCP-reserved vendor prefix.
+pub fn validate_application_meta_key(key: &str) -> Result<(), String> {
+    let (prefix, name) = match key.split_once('/') {
+        Some((prefix, name)) if !name.contains('/') => (Some(prefix), name),
+        Some(_) => return Err("must contain at most one '/' separator".to_string()),
+        None => (None, key),
+    };
+
+    if let Some(prefix) = prefix {
+        let labels: Vec<_> = prefix.split('.').collect();
+        if labels.iter().any(|label| {
+            let bytes = label.as_bytes();
+            bytes.is_empty()
+                || !bytes[0].is_ascii_alphabetic()
+                || !bytes[bytes.len() - 1].is_ascii_alphanumeric()
+                || !bytes
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+        }) {
+            return Err("has an invalid reverse-DNS prefix".to_string());
+        }
+        if labels
+            .get(1)
+            .is_some_and(|label| *label == "mcp" || *label == "modelcontextprotocol")
+        {
+            return Err("uses an MCP-reserved prefix".to_string());
+        }
+    }
+
+    if !name.is_empty() {
+        let bytes = name.as_bytes();
+        if !bytes[0].is_ascii_alphanumeric()
+            || !bytes[bytes.len() - 1].is_ascii_alphanumeric()
+            || !bytes
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'.'))
+        {
+            return Err("has an invalid metadata name".to_string());
+        }
+    }
+    Ok(())
+}
+
 /// Standard HTTP routing headers for the stable protocol.
 pub const MCP_HEADER_PROTOCOL_VERSION: &str =
     rmcp::transport::common::http_header::HEADER_MCP_PROTOCOL_VERSION;
@@ -238,9 +284,10 @@ impl McpServerSession {
         if uses_inline_lifecycle {
             let metadata = parse_request_metadata(params);
             enforce_request_protocol_version(id, &metadata)?;
-            if let Some(info) = metadata.client_info() {
-                self.client_identity = format!("{}/{}", info.name, info.version);
-            }
+            self.client_identity = metadata
+                .client_info()
+                .map(|info| format!("{}/{}", info.name, info.version))
+                .unwrap_or_else(|| "unknown".to_string());
             self.notifications_ready = true;
             return Ok(McpRequestProfile {
                 protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
@@ -365,27 +412,44 @@ where
             ));
         }
         outcome.protocol_version = Some(value.to_string());
+    } else if body_method.is_some_and(|method| method != "initialize") {
+        return Err(crate::jsonrpc::error_response(
+            request_id.clone(),
+            HEADER_MISMATCH_CODE,
+            "MCP-Protocol-Version header is required",
+        ));
     }
 
-    if let Some(method_header) = headers(MCP_HEADER_METHOD) {
-        if let Some(body_method) = body_method {
-            if method_header != body_method {
-                return Err(crate::jsonrpc::error_response_with_data(
-                    request_id.clone(),
-                    HEADER_MISMATCH_CODE,
-                    "Mcp-Method header does not match request body",
-                    json!({
-                        "headerValue": method_header,
-                        "bodyMethod": body_method,
-                    }),
-                ));
-            }
+    let Some(method_header) = headers(MCP_HEADER_METHOD) else {
+        return Err(crate::jsonrpc::error_response(
+            request_id.clone(),
+            HEADER_MISMATCH_CODE,
+            "Mcp-Method header is required",
+        ));
+    };
+    if let Some(body_method) = body_method {
+        if method_header != body_method {
+            return Err(crate::jsonrpc::error_response_with_data(
+                request_id.clone(),
+                HEADER_MISMATCH_CODE,
+                "Mcp-Method header does not match request body",
+                json!({
+                    "headerValue": method_header,
+                    "bodyMethod": body_method,
+                }),
+            ));
         }
     }
 
-    if let Some(name_header) = headers(MCP_HEADER_NAME) {
-        let expected = body_name.unwrap_or_default();
-        if !expected.is_empty() && name_header != expected {
+    if let Some(expected) = body_name.filter(|name| !name.is_empty()) {
+        let Some(name_header) = headers(MCP_HEADER_NAME) else {
+            return Err(crate::jsonrpc::error_response(
+                request_id.clone(),
+                HEADER_MISMATCH_CODE,
+                "Mcp-Name header is required for this request",
+            ));
+        };
+        if name_header != expected {
             return Err(crate::jsonrpc::error_response_with_data(
                 request_id.clone(),
                 HEADER_MISMATCH_CODE,
@@ -399,6 +463,17 @@ where
     }
 
     Ok(outcome)
+}
+
+/// Whether a JSON-RPC protocol error must be projected as HTTP 400 by MCP.
+pub fn requires_http_bad_request(response: &JsonValue) -> bool {
+    matches!(
+        response.pointer("/error/code").and_then(JsonValue::as_i64),
+        Some(-32602)
+            | Some(HEADER_MISMATCH_CODE)
+            | Some(MISSING_REQUIRED_CLIENT_CAPABILITY_CODE)
+            | Some(UNSUPPORTED_PROTOCOL_VERSION_CODE)
+    )
 }
 
 /// Pulls the standard `Mcp-Name` header value for a request body. Stable
@@ -873,6 +948,30 @@ mod tests {
     }
 
     #[test]
+    fn application_metadata_keys_follow_mcp_grammar_and_reservations() {
+        for valid in [
+            "progressToken",
+            "com.example/tool-version",
+            "com.harnlang/toolContract",
+        ] {
+            validate_application_meta_key(valid).expect(valid);
+        }
+        for invalid in [
+            "vendor.example/version/extra",
+            "1example.vendor/version",
+            "com..vendor/version",
+            "com.mcp.tools/version",
+            "io.modelcontextprotocol/private",
+            "com.example/-version",
+        ] {
+            assert!(
+                validate_application_meta_key(invalid).is_err(),
+                "invalid MCP metadata key accepted: {invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn task_protocol_shapes_match_latest_spec_names() {
         assert_eq!(mcp_task_status_wire_name(McpTaskStatus::Working), "working");
         assert_eq!(
@@ -1024,10 +1123,13 @@ mod tests {
 
     #[test]
     fn negotiate_standard_http_headers_detects_stable_protocol_header() {
-        let headers = std::collections::HashMap::from([(
-            MCP_HEADER_PROTOCOL_VERSION.to_string(),
-            PROTOCOL_VERSION.to_string(),
-        )]);
+        let headers = std::collections::HashMap::from([
+            (
+                MCP_HEADER_PROTOCOL_VERSION.to_string(),
+                PROTOCOL_VERSION.to_string(),
+            ),
+            (MCP_HEADER_METHOD.to_string(), "tools/list".to_string()),
+        ]);
         let outcome = negotiate_http_request(
             |key| headers.get(key).map(String::as_str),
             Some("tools/list"),
@@ -1040,10 +1142,13 @@ mod tests {
 
     #[test]
     fn negotiate_standard_http_headers_rejects_method_body_mismatch() {
-        let headers = std::collections::HashMap::from([(
-            MCP_HEADER_METHOD.to_string(),
-            "tools/list".to_string(),
-        )]);
+        let headers = std::collections::HashMap::from([
+            (
+                MCP_HEADER_PROTOCOL_VERSION.to_string(),
+                PROTOCOL_VERSION.to_string(),
+            ),
+            (MCP_HEADER_METHOD.to_string(), "tools/list".to_string()),
+        ]);
         let err = negotiate_http_request(
             |key| headers.get(key).map(String::as_str),
             Some("tools/call"),
@@ -1059,6 +1164,10 @@ mod tests {
     #[test]
     fn negotiate_standard_http_headers_rejects_name_body_mismatch() {
         let headers = std::collections::HashMap::from([
+            (
+                MCP_HEADER_PROTOCOL_VERSION.to_string(),
+                PROTOCOL_VERSION.to_string(),
+            ),
             (MCP_HEADER_METHOD.to_string(), "tools/call".to_string()),
             (MCP_HEADER_NAME.to_string(), "wrong".to_string()),
         ]);
@@ -1071,6 +1180,65 @@ mod tests {
         .expect_err("name mismatch must error");
         assert_eq!(err["error"]["code"], json!(HEADER_MISMATCH_CODE));
         assert_eq!(err["error"]["data"]["bodyName"], json!("right"));
+    }
+
+    #[test]
+    fn negotiate_standard_http_headers_rejects_missing_required_headers() {
+        let none = std::collections::HashMap::<String, String>::new();
+        let missing_protocol = negotiate_http_request(
+            |key| none.get(key).map(String::as_str),
+            Some("tools/list"),
+            None,
+            &json!(4),
+        )
+        .expect_err("modern requests require a protocol header");
+        assert_eq!(
+            missing_protocol["error"]["code"],
+            json!(HEADER_MISMATCH_CODE)
+        );
+
+        let headers = std::collections::HashMap::from([
+            (
+                MCP_HEADER_PROTOCOL_VERSION.to_string(),
+                PROTOCOL_VERSION.to_string(),
+            ),
+            (MCP_HEADER_METHOD.to_string(), "tools/call".to_string()),
+        ]);
+        let missing_name = negotiate_http_request(
+            |key| headers.get(key).map(String::as_str),
+            Some("tools/call"),
+            Some("weather"),
+            &json!(5),
+        )
+        .expect_err("named requests require Mcp-Name");
+        assert_eq!(missing_name["error"]["code"], json!(HEADER_MISMATCH_CODE));
+    }
+
+    #[test]
+    fn stable_request_identity_never_leaks_from_a_previous_request() {
+        let mut session = McpServerSession::default();
+        let with_identity = json!({
+            "_meta": {
+                MCP_META_KEY_PROTOCOL_VERSION: PROTOCOL_VERSION,
+                MCP_META_KEY_CLIENT_INFO: {"name": "first", "version": "1"},
+                MCP_META_KEY_CLIENT_CAPABILITIES: {},
+            }
+        });
+        session
+            .accept_request(&json!(1), METHOD_SERVER_DISCOVER, &with_identity)
+            .unwrap();
+        assert_eq!(session.client_identity(), "first/1");
+
+        let without_identity = json!({
+            "_meta": {
+                MCP_META_KEY_PROTOCOL_VERSION: PROTOCOL_VERSION,
+                MCP_META_KEY_CLIENT_CAPABILITIES: {},
+            }
+        });
+        session
+            .accept_request(&json!(2), METHOD_SERVER_DISCOVER, &without_identity)
+            .unwrap();
+        assert_eq!(session.client_identity(), "unknown");
     }
 
     #[test]

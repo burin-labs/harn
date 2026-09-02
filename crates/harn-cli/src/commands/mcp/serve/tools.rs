@@ -338,7 +338,7 @@ impl McpOrchestratorService {
         params: JsonValue,
         ttl: Option<u64>,
     ) -> JsonValue {
-        let task = self.tasks.create(session.mcp.client_identity(), ttl);
+        let task = self.tasks.create(ttl);
         let task_id = task.task_id.clone();
         let service = self.clone();
         let task_session = session.clone();
@@ -394,31 +394,28 @@ impl McpOrchestratorService {
     pub(super) fn handle_tasks_get(
         &self,
         id: JsonValue,
-        session: &ConnectionState,
+        _session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        self.tasks
-            .handle_get(id, session.mcp.client_identity(), params)
+        self.tasks.handle_get(id, params)
     }
 
     pub(super) fn handle_tasks_update(
         &self,
         id: JsonValue,
-        session: &ConnectionState,
+        _session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        self.tasks
-            .handle_update(id, session.mcp.client_identity(), params)
+        self.tasks.handle_update(id, params)
     }
 
     pub(super) fn handle_tasks_cancel(
         &self,
         id: JsonValue,
-        session: &ConnectionState,
+        _session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        self.tasks
-            .handle_cancel(id, session.mcp.client_identity(), params)
+        self.tasks.handle_cancel(id, params)
     }
 
     pub(super) async fn tool_secret_scan(&self, arguments: JsonValue) -> Result<JsonValue, String> {

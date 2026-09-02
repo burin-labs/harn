@@ -303,6 +303,9 @@ namespaced extension point for presentation protocols. Put behavior and policy
 in typed registry fields rather than `_meta`. The reverse-DNS key
 `_meta["com.harnlang/toolContract"]` is reserved for Harn's generated MCP
 adapter projection.
+Other catalog `_meta` keys must follow MCP's metadata-key grammar. Prefer a
+reverse-DNS vendor prefix such as `com.example/toolVersion`; prefixes whose
+second label is `mcp` or `modelcontextprotocol` are reserved by MCP.
 
 All other owned records reject unknown fields. JSON Schema values remain open
 because their vocabulary evolves independently. They must be valid Draft

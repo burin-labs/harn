@@ -435,6 +435,12 @@ impl ToolCatalog {
                     "{context}._meta[{HARN_MCP_TOOL_CONTRACT_META_KEY:?}] is reserved for Harn-owned adapter projections"
                 ));
             }
+            if let Some(meta) = tool.meta.as_ref() {
+                for key in meta.keys() {
+                    crate::mcp_protocol::validate_application_meta_key(key)
+                        .map_err(|error| format!("{context}._meta key {key:?} {error}"))?;
+                }
+            }
             validate_schema_document(&tool.input_schema, true, &format!("{context}.inputSchema"))?;
             validate_portable_schema_extensions(
                 &tool.input_schema,
@@ -1092,7 +1098,7 @@ mod tests {
             "namespace": "hypotheses",
             "policy": {"kind": "read", "side_effect_level": "read_only"},
             "source": {"kind": "harn", "id": "inspect", "binding": {"callableKind": "function"}},
-            "_meta": {"vendor.example/version": 1}
+            "_meta": {"com.example.vendor/version": 1}
           }],
           "components": {"schemas": {"Result": {"type": "object"}}}
         })

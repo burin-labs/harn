@@ -61,6 +61,10 @@ The generated `MCPDiscoverResult` follows the released SDK shape: `ttlMs` and
 `cacheScope` are required, and server identity lives at
 `_meta["io.modelcontextprotocol/serverInfo"]`, not in a top-level
 `serverInfo` field.
+Harn's HTTP servers enforce those routing headers as well as authoring them.
+Missing or mismatched required headers, malformed stable request metadata, and
+missing required capabilities retain their JSON-RPC error body and use HTTP
+`400 Bad Request`.
 
 ## Stability
 

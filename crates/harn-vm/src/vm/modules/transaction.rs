@@ -7,6 +7,9 @@ impl Vm {
         transaction.imported_paths = self.imported_paths.clone();
         transaction.deferred_cyclic_imports = self.deferred_cyclic_imports.clone();
         transaction.task_counter = self.task_counter;
+        transaction.runtime_context_counter = self.runtime_context_counter;
+        transaction.interrupt_handlers = self.interrupt_handlers.clone();
+        transaction.next_interrupt_handle = self.next_interrupt_handle;
         transaction.staged_module_load_count = Some(0);
         transaction
     }
@@ -20,6 +23,9 @@ impl Vm {
         self.deferred_cyclic_imports = transaction.deferred_cyclic_imports.clone();
         self.output.push_str(&transaction.output);
         self.task_counter = transaction.task_counter;
+        self.runtime_context_counter = transaction.runtime_context_counter;
+        self.interrupt_handlers = transaction.interrupt_handlers.clone();
+        self.next_interrupt_handle = transaction.next_interrupt_handle;
         let loaded_count = transaction.staged_module_load_count.take().unwrap_or(0);
         for _ in 0..loaded_count {
             self.record_module_loaded();

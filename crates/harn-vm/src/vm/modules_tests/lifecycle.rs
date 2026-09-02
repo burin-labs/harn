@@ -41,6 +41,67 @@ pub fn value() {
 }
 
 #[test]
+fn successful_module_initializer_commits_interrupt_and_parallel_identity_state() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        vm.load_module_from_source(
+            PathBuf::from("<test>/stateful_initializer.harn"),
+            r#"
+import "std/signal"
+
+let registration = on_interrupt({ -> 1 }, {once: false})
+let initialized = parallel 1 { index -> index }
+
+pub fn interrupt_handle() { return registration.handle }
+pub fn initialized_value() { return initialized[0] }
+"#,
+        )
+        .await
+        .expect("successful initializer commits its runtime registrations");
+
+        assert_eq!(vm.interrupt_handlers.len(), 1);
+        assert_eq!(vm.interrupt_handlers[0].handle, 1);
+        assert_eq!(vm.next_interrupt_handle, 2);
+        assert_eq!(vm.runtime_context_counter, 1);
+    });
+}
+
+#[test]
+fn failed_module_initializer_discards_interrupt_and_parallel_identity_state() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        let result = vm
+            .load_module_from_source(
+                PathBuf::from("<test>/failed_stateful_initializer.harn"),
+                r#"
+import "std/signal"
+
+let registration = on_interrupt({ -> 1 }, {once: false})
+let initialized = parallel 1 { index -> index }
+fn fail() { throw {message: "rollback"} }
+let failed = fail()
+"#,
+            )
+            .await;
+
+        assert!(matches!(result, Err(VmError::Thrown(_))));
+        assert!(vm.interrupt_handlers.is_empty());
+        assert_eq!(vm.next_interrupt_handle, 1);
+        assert_eq!(vm.runtime_context_counter, 0);
+    });
+}
+
+#[test]
 fn failed_module_initializer_restores_the_calling_vm_scope() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -116,6 +177,11 @@ fn cancelled_module_initializer_never_displaces_the_calling_vm_state() {
             .expect("caller binding");
         let caller_dir = PathBuf::from("<test>/caller");
         vm.source_dir = Some(caller_dir.clone());
+        vm.task_scopes.push(super::super::super::TaskScope {
+            task_ids: Vec::new(),
+            frame_depth: 0,
+            env_scope_depth: vm.env.scope_depth(),
+        });
         let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
         vm.register_async_builtin("wait_in_initializer", move |_ctx, _args| {
             let entered_tx = entered_tx.clone();
@@ -148,6 +214,9 @@ pub fn value() {
         assert!(vm.imported_paths.is_empty());
         assert!(vm.deferred_cyclic_imports.is_empty());
         assert!(vm.module_cache.is_empty());
+        assert_eq!(vm.task_scopes.len(), 1);
+        assert!(vm.spawned_tasks.is_empty());
+        assert_eq!(vm.staged_module_load_count, None);
     });
 }
 

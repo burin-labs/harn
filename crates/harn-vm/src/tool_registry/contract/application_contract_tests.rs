@@ -71,6 +71,22 @@ fn catalog_rejects_nested_runtime_only_harn_schema_types() {
 }
 
 #[test]
+fn catalog_rejects_invalid_or_reserved_mcp_metadata_keys() {
+    for key in [
+        "io.modelcontextprotocol/private",
+        "com.mcp.vendor/private",
+        "bad key",
+    ] {
+        let mut invalid = valid_catalog_json();
+        invalid["tools"][0]["_meta"] =
+            JsonValue::Object(serde_json::Map::from_iter([(key.to_string(), json!(true))]));
+        let error = serde_json::from_value::<ToolCatalog>(invalid)
+            .expect_err("invalid MCP metadata key must be rejected");
+        assert!(error.to_string().contains("._meta key"), "{error}");
+    }
+}
+
+#[test]
 fn serde_rejects_unknown_owned_fields_and_versions() {
     assert!(serde_json::from_value::<ToolCatalog>(json!({
         "schema_version": "harn-tools/2.0", "tools": [], "extra": true

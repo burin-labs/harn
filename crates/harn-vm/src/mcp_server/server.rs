@@ -324,18 +324,9 @@ impl McpServer {
             "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
             "tools/list" => self.handle_tools_list(&id, &params),
             "tools/call" => self.handle_tools_call(&id, &params, vm).await,
-            mcp_protocol::METHOD_TASKS_GET => {
-                self.tasks
-                    .handle_get(id.clone(), &self.client_identity(), &params)
-            }
-            mcp_protocol::METHOD_TASKS_UPDATE => {
-                self.tasks
-                    .handle_update(id.clone(), &self.client_identity(), &params)
-            }
-            mcp_protocol::METHOD_TASKS_CANCEL => {
-                self.tasks
-                    .handle_cancel(id.clone(), &self.client_identity(), &params)
-            }
+            mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(id.clone(), &params),
+            mcp_protocol::METHOD_TASKS_UPDATE => self.tasks.handle_update(id.clone(), &params),
+            mcp_protocol::METHOD_TASKS_CANCEL => self.tasks.handle_cancel(id.clone(), &params),
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
@@ -534,10 +525,9 @@ impl McpServer {
         // behave, whereas the previous stub advertised the capability and told
         // every `tasks/get` its task did not exist.
         if as_task {
-            let task = self.tasks.create(
-                &self.client_identity(),
-                Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS),
-            );
+            let task = self
+                .tasks
+                .create(Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS));
             match crate::tool_registry::classify_tool_result(
                 self.tools.prepared(),
                 &tool.catalog.name,

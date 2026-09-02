@@ -444,18 +444,9 @@ impl McpServer {
                 Ok((job, None)) => return ImmediateResult::Stream(Box::new(job)),
                 Err(response) => return ImmediateResult::Response(response),
             },
-            mcp_protocol::METHOD_TASKS_GET => {
-                self.tasks
-                    .handle_get(id, connection.client_identity(), &params)
-            }
-            mcp_protocol::METHOD_TASKS_UPDATE => {
-                self.tasks
-                    .handle_update(id, connection.client_identity(), &params)
-            }
-            mcp_protocol::METHOD_TASKS_CANCEL => {
-                self.tasks
-                    .handle_cancel(id, connection.client_identity(), &params)
-            }
+            mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(id, &params),
+            mcp_protocol::METHOD_TASKS_UPDATE => self.tasks.handle_update(id, &params),
+            mcp_protocol::METHOD_TASKS_CANCEL => self.tasks.handle_cancel(id, &params),
             "resources/list" => harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
             "resources/read" => self.handle_resources_read(id, &params),
             "resources/templates/list" => {
@@ -626,10 +617,8 @@ impl McpServer {
             .is_some_and(|function| function.job.is_some())
             && mcp_protocol::client_supports_tasks(&params))
         .then(|| {
-            self.tasks.create(
-                connection.client_identity(),
-                Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS),
-            )
+            self.tasks
+                .create(Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS))
         });
         let task_response = task.as_ref().map(|task| {
             harn_vm::mcp_tasks::task_created_response(

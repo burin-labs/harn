@@ -16,7 +16,7 @@
 //!
 //! So the lifecycle lives here, once, and a server supplies only the part that
 //! is actually its own: how to run the work. Everything a client can observe —
-//! ids, ownership, status transitions, terminal-status rules, the JSON
+//! ids, bearer access, status transitions, terminal-status rules, the JSON
 //! projections, the wake-up on completion — is decided in this file, which is
 //! what makes the three surfaces answer the same way by construction rather
 //! than by three sets of matching tests.
@@ -95,10 +95,6 @@ impl McpTaskSupport {
 #[derive(Clone, Debug)]
 pub struct McpTaskState {
     pub task_id: String,
-    /// Client identity that created the task. Reads and cancels from any other
-    /// identity are answered as `task not found` rather than as a permission
-    /// error, so one client cannot probe another's task ids.
-    pub owner: String,
     pub status: mcp_protocol::McpTaskStatus,
     pub status_message: Option<String>,
     pub created_at: String,
@@ -178,18 +174,17 @@ impl McpTaskStore {
         Self::default()
     }
 
-    /// Register a new working task owned by `owner` and return its state.
+    /// Register a new working task and return its unguessable bearer handle.
     ///
     /// The caller then runs the work however that surface runs work, and
     /// reports back through [`McpTaskStore::complete`]. The store deliberately
     /// does not own execution: a script tool runs on the VM thread, an
     /// orchestrator tool can enter a child VM, and pretending one scheduler
     /// fits both is how the two implementations diverged in the first place.
-    pub fn create(&self, owner: &str, ttl: Option<u64>) -> McpTaskState {
+    pub fn create(&self, ttl: Option<u64>) -> McpTaskState {
         let now = now_rfc3339();
         let task = McpTaskState {
             task_id: Uuid::now_v7().to_string(),
-            owner: owner.to_string(),
             status: mcp_protocol::McpTaskStatus::Working,
             status_message: Some("The operation is now in progress.".to_string()),
             created_at: now.clone(),
@@ -288,12 +283,8 @@ impl McpTaskStore {
             .map(|record| record.notify.clone())
     }
 
-    /// The record `params.taskId` names, if `owner` is the one who created it.
-    pub fn record_for_owner(
-        &self,
-        owner: &str,
-        params: &JsonValue,
-    ) -> Result<McpTaskRecord, String> {
+    /// The record named by the unguessable bearer handle in `params.taskId`.
+    pub fn record_for_task(&self, params: &JsonValue) -> Result<McpTaskRecord, String> {
         let task_id = params
             .get("taskId")
             .and_then(JsonValue::as_str)
@@ -302,14 +293,11 @@ impl McpTaskStore {
         let record = tasks
             .get(task_id)
             .ok_or_else(|| "Failed to retrieve task: task not found".to_string())?;
-        if record.task.owner != owner {
-            return Err("Failed to retrieve task: task not found".to_string());
-        }
         Ok(record.clone())
     }
 
-    pub fn handle_get(&self, id: JsonValue, owner: &str, params: &JsonValue) -> JsonValue {
-        match self.record_for_owner(owner, params) {
+    pub fn handle_get(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        match self.record_for_task(params) {
             Ok(record) => crate::jsonrpc::response(id, record.to_detailed_json()),
             Err(error) => crate::jsonrpc::error_response(id, -32602, &error),
         }
@@ -321,8 +309,8 @@ impl McpTaskStore {
     /// answered as "nothing outstanding" — but the shape of the refusal still
     /// distinguishes a malformed call from a well-formed one against a task
     /// that simply is not waiting, which is what a client needs to know.
-    pub fn handle_update(&self, id: JsonValue, owner: &str, params: &JsonValue) -> JsonValue {
-        if let Err(error) = self.record_for_owner(owner, params) {
+    pub fn handle_update(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
+        if let Err(error) = self.record_for_task(params) {
             return crate::jsonrpc::error_response(id, -32602, &error);
         }
         let supplied = params
@@ -337,7 +325,7 @@ impl McpTaskStore {
         crate::jsonrpc::error_response(id, -32602, message)
     }
 
-    pub fn handle_cancel(&self, id: JsonValue, owner: &str, params: &JsonValue) -> JsonValue {
+    pub fn handle_cancel(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
         let task_id = match params.get("taskId").and_then(JsonValue::as_str) {
             Some(task_id) if !task_id.is_empty() => task_id.to_string(),
             _ => {
@@ -357,22 +345,8 @@ impl McpTaskStore {
                     "Cannot cancel task: task not found",
                 );
             };
-            if record.task.owner != owner {
-                return crate::jsonrpc::error_response(
-                    id,
-                    -32602,
-                    "Cannot cancel task: task not found",
-                );
-            }
             if record.task.status.is_terminal() {
-                return crate::jsonrpc::error_response(
-                    id,
-                    -32602,
-                    &format!(
-                        "Cannot cancel task: already in terminal status '{}'",
-                        mcp_protocol::mcp_task_status_wire_name(record.task.status)
-                    ),
-                );
+                return crate::jsonrpc::response(id, json!({}));
             }
             record.task.status = mcp_protocol::McpTaskStatus::Cancelled;
             record.task.status_message = Some("The task was cancelled by request.".to_string());
@@ -396,7 +370,9 @@ pub fn task_created_response(id: JsonValue, task: &McpTaskState, note: &str) -> 
     let mut result = task.to_json();
     result["resultType"] = json!("task");
     result["_meta"] = json!({
-        "io.modelcontextprotocol/model-immediate-response": note,
+        crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY: {
+            "immediateResponse": note,
+        },
     });
     crate::jsonrpc::response(id, result)
 }
@@ -435,30 +411,28 @@ mod tests {
     }
 
     #[test]
-    fn a_created_task_is_readable_by_its_owner_and_invisible_to_everyone_else() {
+    fn a_created_task_is_retrievable_by_its_unguessable_bearer_handle() {
         let store = McpTaskStore::new();
-        let task = store.create("client-a", Some(DEFAULT_TASK_TTL_MS));
+        let task = store.create(Some(DEFAULT_TASK_TTL_MS));
 
-        let mine = store.handle_get(json!(1), "client-a", &params(&task.task_id));
-        assert_eq!(mine["result"]["taskId"], json!(task.task_id));
-        assert_eq!(mine["result"]["status"], json!("working"));
-
-        // Not "forbidden": a distinguishable error would let one client
-        // confirm another client's task ids by probing.
-        let theirs = store.handle_get(json!(2), "client-b", &params(&task.task_id));
+        let read = store.handle_get(json!(1), &params(&task.task_id));
+        assert_eq!(read["result"]["taskId"], json!(task.task_id));
+        assert_eq!(read["result"]["status"], json!("working"));
         assert_eq!(
-            theirs["error"]["message"],
-            json!("Failed to retrieve task: task not found")
+            uuid::Uuid::parse_str(&task.task_id)
+                .unwrap()
+                .get_version_num(),
+            7
         );
     }
 
     #[test]
     fn completing_a_task_publishes_its_result() {
         let store = McpTaskStore::new();
-        let task = store.create("client-a", None);
+        let task = store.create(None);
         store.complete(&task.task_id, Ok(json!({ "answer": 42 })));
 
-        let read = store.handle_get(json!(1), "client-a", &params(&task.task_id));
+        let read = store.handle_get(json!(1), &params(&task.task_id));
         assert_eq!(read["result"]["status"], json!("completed"));
         assert_eq!(
             read["result"]["result"]["structuredContent"],
@@ -469,7 +443,7 @@ mod tests {
     #[test]
     fn a_completed_tool_error_remains_a_typed_result() {
         let store = McpTaskStore::new();
-        let task = store.create("client-a", None);
+        let task = store.create(None);
         let result = json!({
             "content": [{"type": "text", "text": "NotFound"}],
             "isError": true,
@@ -481,7 +455,7 @@ mod tests {
         });
         store.complete_with_tool_result(&task.task_id, result.clone());
 
-        let read = store.handle_get(json!(1), "client-a", &params(&task.task_id));
+        let read = store.handle_get(json!(1), &params(&task.task_id));
         assert_eq!(read["result"]["status"], "completed");
         assert_eq!(read["result"]["result"], result);
     }
@@ -489,10 +463,10 @@ mod tests {
     #[test]
     fn a_failed_task_reports_an_error_rather_than_an_empty_result() {
         let store = McpTaskStore::new();
-        let task = store.create("client-a", None);
+        let task = store.create(None);
         store.complete(&task.task_id, Err("boom".to_string()));
 
-        let read = store.handle_get(json!(1), "client-a", &params(&task.task_id));
+        let read = store.handle_get(json!(1), &params(&task.task_id));
         assert_eq!(read["result"]["status"], json!("failed"));
         assert_eq!(read["result"]["error"]["code"], json!(-32603));
         assert!(read["result"]["error"]["message"]
@@ -504,31 +478,28 @@ mod tests {
     #[test]
     fn cancel_is_terminal_and_late_work_cannot_overwrite_it() {
         let store = McpTaskStore::new();
-        let task = store.create("client-a", None);
+        let task = store.create(None);
 
-        let cancelled = store.handle_cancel(json!(1), "client-a", &params(&task.task_id));
+        let cancelled = store.handle_cancel(json!(1), &params(&task.task_id));
         assert_eq!(cancelled["result"], json!({}));
 
         // The work was already in flight and finishes after the cancel. If it
         // won, `tasks/cancel` would mean "maybe", and a client that cancelled a
         // destructive operation would still see it succeed.
         store.complete(&task.task_id, Ok(json!({ "answer": 42 })));
-        let read = store.handle_get(json!(2), "client-a", &params(&task.task_id));
+        let read = store.handle_get(json!(2), &params(&task.task_id));
         assert_eq!(read["result"]["status"], json!("cancelled"));
 
-        let again = store.handle_cancel(json!(3), "client-a", &params(&task.task_id));
-        assert!(again["error"]["message"]
-            .as_str()
-            .expect("a second cancel is refused with a message")
-            .contains("already in terminal status 'cancelled'"));
+        let again = store.handle_cancel(json!(3), &params(&task.task_id));
+        assert_eq!(again["result"], json!({}));
     }
 
     #[test]
     fn an_unknown_task_id_is_not_found_rather_than_a_silent_success() {
         let store = McpTaskStore::new();
         for response in [
-            store.handle_get(json!(1), "client-a", &params("missing")),
-            store.handle_update(json!(2), "client-a", &params("missing")),
+            store.handle_get(json!(1), &params("missing")),
+            store.handle_update(json!(2), &params("missing")),
         ] {
             assert_eq!(
                 response["error"]["message"],
@@ -536,7 +507,7 @@ mod tests {
             );
         }
         assert_eq!(
-            store.handle_cancel(json!(3), "client-a", &params("missing"))["error"]["message"],
+            store.handle_cancel(json!(3), &params("missing"))["error"]["message"],
             json!("Cannot cancel task: task not found")
         );
     }
@@ -544,9 +515,9 @@ mod tests {
     #[test]
     fn update_separates_a_malformed_call_from_a_task_that_is_not_waiting() {
         let store = McpTaskStore::new();
-        let task = store.create("client-a", None);
+        let task = store.create(None);
 
-        let empty = store.handle_update(json!(1), "client-a", &params(&task.task_id));
+        let empty = store.handle_update(json!(1), &params(&task.task_id));
         assert_eq!(
             empty["error"]["message"],
             json!("tasks/update requires at least one input response")
@@ -554,7 +525,6 @@ mod tests {
 
         let supplied = store.handle_update(
             json!(2),
-            "client-a",
             &json!({ "taskId": task.task_id, "inputResponses": { "q": "a" } }),
         );
         assert_eq!(

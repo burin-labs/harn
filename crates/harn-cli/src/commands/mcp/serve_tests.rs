@@ -1290,7 +1290,7 @@ async fn http_stable_request_rejects_method_header_mismatch() {
     let status = response.status();
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: JsonValue = serde_json::from_slice(&body).unwrap();
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], json!(-32020));
     assert_eq!(body["error"]["data"]["headerValue"], "tools/list");
     assert_eq!(body["error"]["data"]["bodyMethod"], "tools/call");
