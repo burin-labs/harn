@@ -1244,7 +1244,7 @@ fn rewrite_jsonrpc_id(response: &mut JsonValue, id: Option<JsonValue>) {
 }
 
 pub fn json_digest(value: &JsonValue) -> String {
-    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    let bytes = crate::canonical_json::to_vec(value);
     format!("blake3:{}", blake3::hash(&bytes).to_hex())
 }
 

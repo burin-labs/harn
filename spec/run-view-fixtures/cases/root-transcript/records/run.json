@@ -45,10 +45,15 @@
     "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
     "trace_spans": [
       {
+        "trace_id": "trace_fixture_root",
+        "span_id": 2,
+        "parent_span_id": 1,
         "kind": "llm_call",
         "name": "fixture completion",
-        "start_ms": 0,
-        "duration_ms": 3000,
+        "start_ms": 250,
+        "duration_ms": 2750,
+        "ttft_ms": 375,
+        "cost_usd": 0.02,
         "metadata": {
           "harn.execution.id": "hxe-019c13e0-8080-7000-8000-000000000001",
           "provider": "fixture-provider",
@@ -57,6 +62,32 @@
           "output_tokens": 8,
           "cost_usd": 0.02
         }
+      },
+      {
+        "trace_id": "trace_fixture_root",
+        "span_id": 1,
+        "kind": "pipeline",
+        "name": "main",
+        "start_ms": 0,
+        "duration_ms": 3000
+      }
+    ],
+    "flight_recording": {
+      "schema_version": 1,
+      "execution_id": "hxe-019c13e0-8080-7000-8000-000000000001",
+      "format": "harn.flight.v1+json",
+      "path": "/private/workspace/.harn/receipts/root.flight.json",
+      "content_hash": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "byte_length": 4096,
+      "retained_events": 64,
+      "dropped_events": 3,
+      "value_policy": "omitted"
+    },
+    "gaps": [
+      {
+        "component": "otel_export",
+        "code": "export_failed",
+        "message": "The durable record remains complete while telemetry is unavailable."
       }
     ]
   },

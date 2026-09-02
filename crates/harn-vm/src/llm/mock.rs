@@ -814,13 +814,12 @@ fn mock_prompt_cache_key(
     system: Option<&str>,
     mock_scope: &str,
 ) -> String {
-    serde_json::to_string(&serde_json::json!({
+    crate::canonical_json::to_string(&serde_json::json!({
         "model": model,
         "system": system,
         "messages": messages,
         "mock_scope": mock_scope,
     }))
-    .unwrap_or_default()
 }
 
 fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
@@ -1159,8 +1158,7 @@ pub(crate) fn fixture_hash(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     model.hash(&mut hasher);
     // Canonical JSON hashing is stable across Debug-format changes.
-    serde_json::to_string(messages)
-        .unwrap_or_default()
+    crate::canonical_json::to_string(&serde_json::Value::Array(messages.to_vec()))
         .hash(&mut hasher);
     system.hash(&mut hasher);
     if mock_scope.is_some_and(|scope| scope != DEFAULT_MOCK_SCOPE) {

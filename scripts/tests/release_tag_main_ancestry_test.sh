@@ -10,6 +10,8 @@ git init --bare -q "$tmp_root/origin.git"
 git init -q -b main "$tmp_root/work"
 git -C "$tmp_root/work" config user.name Test
 git -C "$tmp_root/work" config user.email test@example.com
+git -C "$tmp_root/work" config commit.gpgSign false
+git -C "$tmp_root/work" config tag.gpgSign false
 git -C "$tmp_root/work" remote add origin "$tmp_root/origin.git"
 printf '[workspace.package]\nversion = "1.2.2"\n' >"$tmp_root/work/Cargo.toml"
 git -C "$tmp_root/work" add Cargo.toml
