@@ -116,7 +116,7 @@ pipeline test_dependency_contract_fails_closed_when_the_normal_dependency_is_abs
     + {
       packages: META.packages.map(
         { package ->
-          if package?.name == "harn-vm" {
+          if package.name == "harn-vm" {
             return package + {dependencies: [{name: "rmcp", req: "=3.1.4", kind: "dev"}]}
           }
           return package
@@ -138,7 +138,7 @@ pipeline test_dependency_contract_fails_closed_when_minimum_is_missing(
     + {
       packages: META.packages.map(
         { package ->
-          if package?.name == "harn-vm" {
+          if package.name == "harn-vm" {
             return package
               + {
                 metadata: {
