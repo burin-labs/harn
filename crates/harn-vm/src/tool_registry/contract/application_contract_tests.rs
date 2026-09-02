@@ -109,8 +109,10 @@ fn non_object_output_schema_and_result_preserve_the_canonical_value() {
     let catalog: ToolCatalog = serde_json::from_value(value).expect("valid catalog");
     let entry = &catalog.tools[0];
     let projected = catalog.mcp_tool(entry).expect("MCP projection");
-    let structured =
-        tool_result_to_mcp_structured_content(entry, json!("ok")).expect("declared output");
+    let structured = catalog
+        .mcp_structured_content(entry, json!("ok"))
+        .expect("MCP projection")
+        .expect("declared output");
     assert_eq!(
         projected["outputSchema"],
         json!({

@@ -986,14 +986,7 @@ fn rewrite_schema_refs(mut value: JsonValue, component_base: Option<&str>) -> Js
     value
 }
 
-pub fn tool_result_to_mcp_structured_content(
-    entry: &ToolCatalogEntry,
-    result: JsonValue,
-) -> Option<JsonValue> {
-    tool_output_to_mcp_structured_content(entry.output_schema.as_ref(), result)
-}
-
-pub fn tool_output_to_mcp_structured_content(
+fn tool_output_to_mcp_structured_content(
     output_schema: Option<&JsonValue>,
     result: JsonValue,
 ) -> Option<JsonValue> {
