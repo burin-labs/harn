@@ -91,6 +91,9 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
             );
         }
     };
+    // Observed before the spawn, so a rebuild that lands mid-run is visible
+    // when the worker is reaped without a terminal state of its own.
+    let binary = BinaryWitness::observe(PathBuf::from(&executable));
     let worker = match harn_hostlib::process::spawn_process(harn_hostlib::process::SpawnSpec {
         builtin: "harn_host_lease_run_cargo",
         program: executable,
@@ -118,7 +121,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
         Ok(completion) => completion,
         Err(error) => return print_error("host_lease_run_cargo", &error, false),
     };
-    match finalize_run(store, &run.run_id, completion) {
+    match finalize_run(store, &run.run_id, completion, &binary) {
         Ok(exit) => exit,
         Err(error) => print_error("host_lease_run_cargo_receipt", &error, false),
     }
@@ -127,6 +130,49 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
 enum WorkerCompletion {
     Exited(harn_hostlib::process::ExitStatus),
     Cancelled,
+}
+
+/// Identity of the executable the supervisor resolved, at one moment.
+///
+/// Length and modification time rather than a content hash: the binary is
+/// large, this is read on every supervised run, and a rebuild moves both.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BinaryIdentity {
+    len: u64,
+    modified: std::time::SystemTime,
+}
+
+/// The executable the supervisor spawned, and what it looked like then.
+///
+/// A worker that dies without writing a terminal state leaves no clue about
+/// why. One recoverable cause is visible from the supervisor alone: the file
+/// it launched is no longer the file at that path.
+struct BinaryWitness {
+    path: PathBuf,
+    at_spawn: Option<BinaryIdentity>,
+}
+
+impl BinaryWitness {
+    fn observe(path: PathBuf) -> Self {
+        let at_spawn = binary_identity(&path);
+        Self { path, at_spawn }
+    }
+
+    /// `None` when either observation failed, so an unreadable path never
+    /// reads as a verified-unchanged binary.
+    fn replaced_since_spawn(&self) -> Option<bool> {
+        let at_spawn = self.at_spawn.as_ref()?;
+        let now = binary_identity(&self.path)?;
+        Some(&now != at_spawn)
+    }
+}
+
+fn binary_identity(path: &Path) -> Option<BinaryIdentity> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(BinaryIdentity {
+        len: metadata.len(),
+        modified: metadata.modified().ok()?,
+    })
 }
 
 async fn wait_for_worker(
@@ -200,6 +246,7 @@ fn finalize_run(
     store: &harn_hostlib::HostLeaseStore,
     run_id: &str,
     completion: WorkerCompletion,
+    binary: &BinaryWitness,
 ) -> Result<i32, String> {
     let current = store.load_run(run_id).map_err(|error| error.to_string())?;
     let worker_exit_code = match &completion {
@@ -215,6 +262,7 @@ fn finalize_run(
                 // Discarding it is what collapsed an external kill, a startup
                 // failure, and a genuine early return into one opaque label.
                 worker_exit: Some(process_exit(&status)),
+                worker_binary_replaced: binary.replaced_since_spawn(),
             },
             WorkerCompletion::Cancelled => harn_hostlib::HostLeaseRunState::CancelledBeforeStart {
                 finished_at_ms: unix_now_ms(),
@@ -288,6 +336,18 @@ fn format_worker_exit(exit: Option<&harn_hostlib::HostLeaseProcessExit>) -> Stri
     }
 }
 
+/// Render whether the executable was swapped underneath a running invocation.
+///
+/// `unverified` is deliberately distinct from `unchanged`: a path the
+/// supervisor could not read twice proves nothing either way.
+fn format_worker_binary(replaced: Option<bool>) -> &'static str {
+    match replaced {
+        Some(true) => "replaced-during-run",
+        Some(false) => "unchanged",
+        None => "unverified",
+    }
+}
+
 /// Render the wait facts that decide whether a failure was starvation.
 ///
 /// Elapsed, configured limit, and queue position travel with the terminal
@@ -342,13 +402,17 @@ fn terminal_projection(
 ) -> Result<TerminalProjection, String> {
     let projection = match state {
         harn_hostlib::HostLeaseRunState::StartFailed {
-            error, worker_exit, ..
+            error,
+            worker_exit,
+            worker_binary_replaced,
+            ..
         } => TerminalProjection {
             exit_code: EX_TEMPFAIL,
             diagnostic: Some(format!(
-                "error: Cargo workload did not start (state=start-failed error={} worker_exit={}{})",
+                "error: Cargo workload did not start (state=start-failed error={} worker_exit={} worker_binary={}{})",
                 error.as_str(),
                 format_worker_exit(worker_exit.as_ref()),
+                format_worker_binary(*worker_binary_replaced),
                 format_wait_context(receipt)
             )),
         },
@@ -413,6 +477,7 @@ fn fail_run_start(
         observed_at_ms: unix_now_ms(),
         error,
         worker_exit: None,
+        worker_binary_replaced: None,
     };
     let recorded = match store.transition_run(run_id, terminal.clone()) {
         Ok(receipt) => Some(receipt),
@@ -548,6 +613,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
                     observed_at_ms: unix_now_ms(),
                     error: harn_hostlib::HostLeaseRunStartFailure::ResourceAcquire,
                     worker_exit: None,
+                    worker_binary_replaced: None,
                 },
             );
             eprintln!("error: {error}");
@@ -1076,6 +1142,7 @@ fn fail_acquired_before_running(
             observed_at_ms: unix_now_ms(),
             error,
             worker_exit: None,
+            worker_binary_replaced: None,
         },
     );
 }
@@ -1091,6 +1158,7 @@ fn record_start_failure(
             observed_at_ms: unix_now_ms(),
             error,
             worker_exit: None,
+            worker_binary_replaced: None,
         },
     );
 }
@@ -1117,8 +1185,8 @@ fn status_code(status: harn_hostlib::process::ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        finalize_run, format_lease_wait, path_argument, terminal_projection,
-        wait_for_cargo_workload, WorkerCompletion, EX_TEMPFAIL, EX_TIMEOUT,
+        finalize_run, format_lease_wait, format_worker_binary, path_argument, terminal_projection,
+        wait_for_cargo_workload, BinaryWitness, WorkerCompletion, EX_TEMPFAIL, EX_TIMEOUT,
     };
     use harn_hostlib::process::{
         EnvMode, MockProcessConfig, MockSpawner, OutputCapture, OwnerDeathPolicy, ProcessSpawner,
@@ -1150,10 +1218,15 @@ mod tests {
             )
             .unwrap();
 
+        let binary = temp.path().join("worker-binary");
+        std::fs::write(&binary, b"original").unwrap();
+        let witness = BinaryWitness::observe(binary.clone());
+
         let exit = finalize_run(
             &store,
             &run.run_id,
             WorkerCompletion::Exited(harn_hostlib::process::ExitStatus::from_code(101)),
+            &witness,
         )
         .unwrap();
 
@@ -1180,6 +1253,35 @@ mod tests {
         );
     }
 
+    /// A concurrent rebuild of a shared `target/debug` is one of the causes
+    /// the old single label hid. The supervisor can see it without the worker.
+    #[test]
+    fn a_binary_swapped_under_a_running_worker_is_named_in_the_receipt() {
+        let temp = TempDir::new().unwrap();
+        let binary = temp.path().join("worker-binary");
+        std::fs::write(&binary, b"original").unwrap();
+        let witness = BinaryWitness::observe(binary.clone());
+        assert_eq!(
+            witness.replaced_since_spawn(),
+            Some(false),
+            "an untouched binary must not read as replaced"
+        );
+
+        std::fs::write(&binary, b"a rebuild landed here mid-run").unwrap();
+        assert_eq!(
+            witness.replaced_since_spawn(),
+            Some(true),
+            "a rebuilt binary was not detected under the running worker"
+        );
+
+        // An unreadable path proves nothing, and must never read as verified.
+        let missing = BinaryWitness::observe(temp.path().join("never-existed"));
+        assert_eq!(missing.replaced_since_spawn(), None);
+        assert_eq!(format_worker_binary(None), "unverified");
+        assert_eq!(format_worker_binary(Some(false)), "unchanged");
+        assert_eq!(format_worker_binary(Some(true)), "replaced-during-run");
+    }
+
     #[test]
     fn start_failed_uses_a_reserved_supervisor_status_and_stable_diagnostic() {
         let projection = terminal_projection(
@@ -1187,6 +1289,7 @@ mod tests {
                 observed_at_ms: 1,
                 error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
                 worker_exit: None,
+                worker_binary_replaced: None,
             },
             101,
             None,
@@ -1197,7 +1300,7 @@ mod tests {
         assert_eq!(
             projection.diagnostic.as_deref(),
             Some(
-                "error: Cargo workload did not start (state=start-failed error=worker-exited-before-acquire worker_exit=unrecorded waited=unrecorded limit=unrecorded queue_position=unrecorded)"
+                "error: Cargo workload did not start (state=start-failed error=worker-exited-before-acquire worker_exit=unrecorded worker_binary=unverified waited=unrecorded limit=unrecorded queue_position=unrecorded)"
             )
         );
     }
@@ -1214,6 +1317,7 @@ mod tests {
                     code: None,
                     signal: Some(9),
                 }),
+                worker_binary_replaced: None,
             },
             0,
             None,
@@ -1227,6 +1331,7 @@ mod tests {
                     code: Some(75),
                     signal: None,
                 }),
+                worker_binary_replaced: None,
             },
             0,
             None,
