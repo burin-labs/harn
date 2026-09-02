@@ -417,6 +417,9 @@ pub struct Vm {
     pub(crate) module_provenance: crate::module_artifact::ModuleProvenance,
     /// Optional timing recorder shared by this VM execution tree.
     pub(crate) module_phase_recorder: Option<super::ModulePhaseRecorder>,
+    /// Successful module loads staged by an isolated graph transaction.
+    /// `None` records immediately; `Some` commits the count with the graph.
+    pub(crate) staged_module_load_count: Option<usize>,
     /// Lazy manifest modules initialized by any child in this execution tree.
     /// The complete export set is retained so handlers and predicates from the
     /// same module share one module state across repeated child invocations.
@@ -606,6 +609,7 @@ impl VmBaseline {
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: self.module_provenance,
             module_phase_recorder: None,
+            staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
@@ -880,6 +884,7 @@ impl Vm {
             prepared_module_validation: crate::prepared_module::PreparedModuleValidation::default(),
             module_provenance: crate::module_artifact::ModuleProvenance::User,
             module_phase_recorder: None,
+            staged_module_load_count: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
             graph_link_table: None,
@@ -1164,6 +1169,7 @@ impl Vm {
             prepared_module_validation: self.prepared_module_validation.clone(),
             module_provenance: self.module_provenance,
             module_phase_recorder: self.module_phase_recorder.clone(),
+            staged_module_load_count: None,
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
@@ -1401,7 +1407,7 @@ impl Vm {
 
     /// Cancel and remove every task scope matching `doomed`, aborting its bound
     /// tasks (used when a `scope {}` is torn down without a normal join).
-    fn cancel_task_scopes_where<F: Fn(&TaskScope) -> bool>(&mut self, doomed: F) {
+    pub(crate) fn cancel_task_scopes_where<F: Fn(&TaskScope) -> bool>(&mut self, doomed: F) {
         let mut i = 0;
         while i < self.task_scopes.len() {
             if doomed(&self.task_scopes[i]) {

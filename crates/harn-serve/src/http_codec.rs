@@ -553,6 +553,22 @@ pub fn dispatch_error_payload(error: DispatchError, request_id: &str) -> (Status
             message,
             Value::Null,
         ),
+        DispatchError::Application(error) => {
+            let message = format!("tool {:?} failed: {}", error.tool, error.summary());
+            let details = error.to_json();
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "application_error",
+                message,
+                details,
+            )
+        }
+        DispatchError::Contract(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "contract_error",
+            error.to_string(),
+            Value::Null,
+        ),
         DispatchError::MissingExport(message) => {
             (StatusCode::NOT_FOUND, "not_found", message, Value::Null)
         }
@@ -787,6 +803,32 @@ mod tests {
         assert_eq!(parsed["code"], "invalid_request");
         assert_eq!(parsed["message"], "missing field");
         assert_eq!(parsed["request_id"], "req_xyz");
+    }
+
+    #[test]
+    fn declared_application_error_is_typed_and_human_text_is_safe() {
+        let (status, payload) = dispatch_error_payload(
+            DispatchError::Application(harn_vm::tool_registry::ToolApplicationError {
+                tool: "lookup".to_string(),
+                data: json!({
+                    "variant": "NotFound",
+                    "message": "PRIVATE-CUSTOMER-DIAGNOSTIC-123456",
+                }),
+            }),
+            "req_typed_error",
+        );
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(payload["code"], "application_error");
+        assert_eq!(payload["details"]["tool"], "lookup");
+        assert_eq!(payload["details"]["data"]["variant"], "NotFound");
+        assert_eq!(payload["request_id"], "req_typed_error");
+        let message = payload["message"].as_str().expect("safe message");
+        assert!(message.contains("declared application error"), "{message}");
+        assert!(
+            !message.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"),
+            "{message}"
+        );
     }
 
     #[tokio::test]

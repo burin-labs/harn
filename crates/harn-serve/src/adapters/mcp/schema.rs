@@ -78,97 +78,26 @@ pub(super) fn parse_cursor(params: &JsonValue) -> (usize, usize) {
     (offset, 50)
 }
 
-pub(super) fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
-    let title = function
-        .title
-        .clone()
-        .unwrap_or_else(|| function.name.clone());
-    let description = function
-        .description
-        .clone()
-        .unwrap_or_else(|| format!("Exported Harn function '{}'.", function.name));
-    let mut annotations = serde_json::Map::new();
-    annotations.insert("title".to_string(), json!(title));
-    if let Some(hints) = function.annotations {
-        if let Some(value) = hints.read_only {
-            annotations.insert("readOnlyHint".to_string(), json!(value));
-        }
-        if let Some(value) = hints.destructive {
-            annotations.insert("destructiveHint".to_string(), json!(value));
-        }
-        if let Some(value) = hints.idempotent {
-            annotations.insert("idempotentHint".to_string(), json!(value));
-        }
-        if let Some(value) = hints.open_world {
-            annotations.insert("openWorldHint".to_string(), json!(value));
-        }
-    }
-    let mut entry = json!({
-        "name": function.name,
-        "title": title,
-        "description": description,
-        "annotations": annotations,
-        "inputSchema": function.input_schema,
-    });
-    if let Some(output_schema) = function.output_schema.as_ref() {
-        entry["outputSchema"] = mcp_output_schema(output_schema);
-    }
-    // `@job` already means "this entrypoint is long-running" everywhere else in
-    // Harn -- it is what routes a function through the trigger dispatcher. An
-    // MCP client asking the same question deserves the same answer from the
-    // same declaration rather than a second attribute that could disagree with
-    // it. `optional`, not `required`: a plain `tools/call` on a job export still
-    // works, so a client without the extension is not locked out.
-    if function.job.is_some() {
-        entry["execution"] = json!({
-            "taskSupport": harn_vm::mcp_tasks::McpTaskSupport::Optional.wire_name(),
-        });
-    }
-    entry
-}
-
 pub(super) fn tool_call_success(
     response: CallResponse,
-    output_schema: Option<&JsonValue>,
+    catalog: &harn_vm::tool_registry::ToolCatalog,
 ) -> JsonValue {
     let mut result = json!({
         "content": content_blocks(&response.value),
         "isError": false,
     });
-    if let Some(output_schema) = output_schema {
-        result["structuredContent"] = if schema_guarantees_object(output_schema) {
-            response.value
-        } else {
-            json!({"result": response.value})
-        };
+    let entry = catalog
+        .tools
+        .iter()
+        .find(|entry| entry.name == response.function)
+        .expect("prepared MCP tool catalog covers every dispatched export");
+    if let Some(structured) = catalog
+        .mcp_structured_content(entry, response.value)
+        .expect("MCP tool schemas were projected during server preparation")
+    {
+        result["structuredContent"] = structured;
     }
     result
-}
-
-fn mcp_output_schema(output_schema: &JsonValue) -> JsonValue {
-    if schema_guarantees_object(output_schema) {
-        return output_schema.clone();
-    }
-    json!({
-        "type": "object",
-        "properties": {"result": output_schema},
-        "required": ["result"],
-        "additionalProperties": false,
-    })
-}
-
-fn schema_guarantees_object(schema: &JsonValue) -> bool {
-    if schema.get("type").and_then(JsonValue::as_str) == Some("object") {
-        return true;
-    }
-    ["oneOf", "anyOf"].iter().any(|keyword| {
-        schema
-            .get(keyword)
-            .and_then(JsonValue::as_array)
-            .is_some_and(|branches| {
-                !branches.is_empty() && branches.iter().all(schema_guarantees_object)
-            })
-    })
 }
 
 pub(super) fn tool_call_error(message: String) -> JsonValue {
