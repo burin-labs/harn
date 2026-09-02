@@ -882,7 +882,11 @@ enum GoalRetargetInjection {
     RepeatedId,
 }
 
-fn goal_retarget_pipeline(session_id: &str, injection: GoalRetargetInjection) -> String {
+fn goal_retarget_pipeline(
+    session_id: &str,
+    injection: GoalRetargetInjection,
+    max_nudges: usize,
+) -> String {
     let injection_block = match injection {
         GoalRetargetInjection::None => String::new(),
         GoalRetargetInjection::Steer => r#"          agent_session_push_user_message(
@@ -964,6 +968,7 @@ pipeline main(harness: Harness, task: unknown) {{
       loop_until_done: true,
       done_sentinel: "##DONE##",
       max_iterations: 3,
+      max_nudges: {max_nudges},
       llm_caller: mock_llm,
       post_turn_callback: {{ info ->
         if info.iteration == 0 {{
@@ -1032,6 +1037,7 @@ fn accepted_steer_retargets_the_next_real_loop_model_call_once() {
     let raw = run_with_bridge(&goal_retarget_pipeline(
         &fresh_session_id("goal-retarget-steer"),
         GoalRetargetInjection::Steer,
+        8,
     ))
     .expect("script must run");
     let lines = out_lines(&raw);
@@ -1063,6 +1069,7 @@ fn no_steer_keeps_the_original_goal_and_emits_no_transition() {
     let raw = run_with_bridge(&goal_retarget_pipeline(
         &fresh_session_id("goal-retarget-control"),
         GoalRetargetInjection::None,
+        8,
     ))
     .expect("script must run");
     let lines = out_lines(&raw);
@@ -1082,6 +1089,7 @@ fn audit_only_message_never_retargets_a_model_call() {
     let raw = run_with_bridge(&goal_retarget_pipeline(
         &fresh_session_id("goal-retarget-audit-only"),
         GoalRetargetInjection::AuditOnly,
+        8,
     ))
     .expect("script must run");
     let lines = out_lines(&raw);
@@ -1108,6 +1116,7 @@ fn repeated_message_id_emits_one_transition_and_one_retarget() {
     let raw = run_with_bridge(&goal_retarget_pipeline(
         &fresh_session_id("goal-retarget-repeated-id"),
         GoalRetargetInjection::RepeatedId,
+        8,
     ))
     .expect("script must run");
     let lines = out_lines(&raw);
@@ -1126,4 +1135,23 @@ fn repeated_message_id_emits_one_transition_and_one_retarget() {
         lines[7], "2",
         "the duplicate-id control must actually carry two delivered turns; lines: {lines:?}"
     );
+}
+
+#[test]
+fn accepted_retarget_resets_the_retired_goals_nudge_terminal() {
+    let raw = run_with_bridge(&goal_retarget_pipeline(
+        &fresh_session_id("goal-retarget-nudge-reset"),
+        GoalRetargetInjection::Steer,
+        0,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "2",
+        "the replacement goal must get a model turn before any soft terminal; lines: {lines:?}"
+    );
+    assert_eq!(lines[2], "alpha_only", "lines: {lines:?}");
+    assert_eq!(lines[3], "bravo_only", "lines: {lines:?}");
 }

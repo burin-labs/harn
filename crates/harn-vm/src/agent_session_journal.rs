@@ -151,6 +151,7 @@ pub(crate) fn run_writer_lease_path(store_dir: &Path, session_id: &str) -> PathB
 #[derive(Default)]
 pub(crate) struct HydratedTranscript {
     pub messages: Vec<serde_json::Value>,
+    pub events: Vec<serde_json::Value>,
     pub source_event_ids: Vec<Option<String>>,
 }
 
@@ -453,8 +454,23 @@ fn apply_identity(
     Ok(())
 }
 
+fn transcript_event_survives_compaction(event: &serde_json::Value) -> bool {
+    let kind = event.get("kind").and_then(serde_json::Value::as_str);
+    let preserve_on_compact = event
+        .get("reminder")
+        .and_then(|reminder| reminder.get("preserve_on_compact"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    crate::agent_sessions::transcript_event_survives_compaction(kind, preserve_on_compact)
+}
+
 fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
     let mut messages: Vec<(Option<String>, serde_json::Value)> = Vec::new();
+    // The final flag distinguishes projections derived from the replaceable
+    // message list from durable audit/control events. Compaction rewrites only
+    // the former; otherwise a cold hydrate silently loses exactly-once
+    // checkpoints that the live transcript retained across compaction.
+    let mut transcript_events: Vec<(Option<String>, serde_json::Value, bool)> = Vec::new();
     let mut summary = None;
     for event in events {
         if matches!(
@@ -462,7 +478,11 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
             SessionEventKind::Message | SessionEventKind::ToolCall | SessionEventKind::ToolResult
         ) {
             if let Some(message) = event.payload.get("raw_message").cloned() {
-                messages.push((event.headers.get("source_event_id").cloned(), message));
+                let source_event_id = event.headers.get("source_event_id").cloned();
+                messages.push((source_event_id.clone(), message));
+                if let Some(transcript_event) = event.payload.get("transcript_event").cloned() {
+                    transcript_events.push((source_event_id, transcript_event, true));
+                }
                 continue;
             }
         }
@@ -488,6 +508,26 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
                             (source_event_id, message.clone())
                         })
                         .collect();
+                    transcript_events.retain(|(_, event, message_derived)| {
+                        !*message_derived && transcript_event_survives_compaction(event)
+                    });
+                    let vm_messages = crate::llm::helpers::json_messages_to_vm(replaced);
+                    transcript_events.extend(
+                        crate::llm::helpers::transcript_events_from_messages(&vm_messages)
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, event)| {
+                                let source_event_id = source_event_ids
+                                    .and_then(|ids| ids.get(index))
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(str::to_string);
+                                (
+                                    source_event_id,
+                                    crate::llm::helpers::vm_value_to_json(&event),
+                                    true,
+                                )
+                            }),
+                    );
                 }
                 summary = event
                     .payload
@@ -506,17 +546,64 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
                         .rposition(|(source, _)| source.as_deref() == Some(source_event_id))
                     {
                         messages.remove(index);
+                        if let Some(index) =
+                            transcript_events
+                                .iter()
+                                .rposition(|(source, _, message_derived)| {
+                                    *message_derived && source.as_deref() == Some(source_event_id)
+                                })
+                        {
+                            transcript_events.remove(index);
+                        }
                     } else if let Some(raw_message) = event.payload.get("raw_message") {
                         if let Some(index) = messages
                             .iter()
                             .rposition(|(_, message)| message == raw_message)
                         {
                             messages.remove(index);
+                            let vm_message = crate::stdlib::json_to_vm_value(raw_message);
+                            let projected = crate::llm::helpers::vm_value_to_json(
+                                &crate::llm::helpers::transcript_event_from_message(&vm_message),
+                            );
+                            if let Some(index) = transcript_events.iter().rposition(
+                                |(_, transcript_event, message_derived)| {
+                                    *message_derived && transcript_event == &projected
+                                },
+                            ) {
+                                transcript_events.remove(index);
+                            }
                         }
                     }
                 }
             }
-            _ => {}
+            _ => {
+                if let Some(transcript_event) = event.payload.get("transcript_event").cloned() {
+                    if transcript_event
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("system_reminder")
+                    {
+                        if let Some(dedupe_key) = transcript_event
+                            .get("reminder")
+                            .and_then(|reminder| reminder.get("dedupe_key"))
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            transcript_events.retain(|(_, existing, _)| {
+                                existing
+                                    .get("reminder")
+                                    .and_then(|reminder| reminder.get("dedupe_key"))
+                                    .and_then(serde_json::Value::as_str)
+                                    != Some(dedupe_key)
+                            });
+                        }
+                    }
+                    let source_event_id = transcript_event
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string);
+                    transcript_events.push((source_event_id, transcript_event, false));
+                }
+            }
         }
     }
     let (mut source_event_ids, mut messages): (Vec<_>, Vec<_>) = messages.into_iter().unzip();
@@ -526,15 +613,27 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
                 && message.get("content").and_then(serde_json::Value::as_str) == Some(summary_text)
         });
         if !summary_is_present {
-            messages.insert(
-                0,
-                serde_json::json!({"role": "user", "content": summary_text}),
-            );
+            let summary_message = serde_json::json!({"role": "user", "content": summary_text});
+            messages.insert(0, summary_message.clone());
             source_event_ids.insert(0, None);
+            let vm_message = crate::stdlib::json_to_vm_value(&summary_message);
+            let summary_event = crate::llm::helpers::transcript_event_from_message(&vm_message);
+            transcript_events.insert(
+                0,
+                (
+                    None,
+                    crate::llm::helpers::vm_value_to_json(&summary_event),
+                    true,
+                ),
+            );
         }
     }
     HydratedTranscript {
         messages,
+        events: transcript_events
+            .into_iter()
+            .map(|(_, event, _)| event)
+            .collect(),
         source_event_ids,
     }
 }

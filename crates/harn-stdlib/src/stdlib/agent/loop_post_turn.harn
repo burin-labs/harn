@@ -39,6 +39,7 @@ import {
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
 import { agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
+import { agent_stall_initial_state } from "std/agent/stall_config"
 import { AgentStallState } from "std/agent/stall_types"
 import {
   agent_stall_no_net_progress,
@@ -119,6 +120,39 @@ pub type AgentLoopPostTurnState = {
 }
 
 pub type AgentLoopPostTurnResult = {action: AgentLoopPostTurnAction, state: AgentLoopPostTurnState}
+
+pub type AgentGoalTransitionLoopReset = {
+  consecutive_text_only: int,
+  turn_end_judge_invocations: int,
+  turn_end_judge_vetoes: int,
+  feedback_history: dict,
+  last_tool_count: int,
+  stall_state: AgentStallState,
+  terminal_write_unverified: bool,
+  turns_since_loop_progress: int,
+  turns_since_progress: int,
+  verify_attempts: int,
+  verify_completion_judge_invocations: int,
+  verify_completion_judge_vetoes: int,
+}
+
+/** Reset only evidence and progress scoped to the objective being retired. */
+pub fn agent_loop_goal_transition_reset() -> AgentGoalTransitionLoopReset {
+  return {
+    consecutive_text_only: 0,
+    turn_end_judge_invocations: 0,
+    turn_end_judge_vetoes: 0,
+    feedback_history: {},
+    last_tool_count: 0,
+    stall_state: agent_stall_initial_state(),
+    terminal_write_unverified: false,
+    turns_since_loop_progress: 0,
+    turns_since_progress: 0,
+    verify_attempts: 0,
+    verify_completion_judge_invocations: 0,
+    verify_completion_judge_vetoes: 0,
+  }
+}
 
 /**
  * Arbitrate a no-tool turn while the loop owns awaited command handles.
@@ -333,6 +367,25 @@ pub fn agent_loop_post_turn_transition(
   let updated_opts = __apply_post_turn_options(next.opts, outcome)
   updated_opts = agent_stance_post_turn(harness.agent, harness.runtime, session, updated_opts)
   next = next + {opts: updated_opts}
+  const goal_changed = context.goal_transitions_applied > 0
+  if goal_changed {
+    const reset = agent_loop_goal_transition_reset()
+    next = next
+      + {
+        consecutive_text_only: reset.consecutive_text_only,
+        turn_end_judge_invocations: reset.turn_end_judge_invocations,
+        turn_end_judge_vetoes: reset.turn_end_judge_vetoes,
+        feedback_history: reset.feedback_history,
+        last_tool_count: reset.last_tool_count,
+        stall_state: reset.stall_state,
+        terminal_write_unverified: reset.terminal_write_unverified,
+        turns_since_loop_progress: reset.turns_since_loop_progress,
+        turns_since_progress: reset.turns_since_progress,
+        verify_attempts: reset.verify_attempts,
+        verify_completion_judge_invocations: reset.verify_completion_judge_invocations,
+        verify_completion_judge_vetoes: reset.verify_completion_judge_vetoes,
+      }
+  }
   const repair_cfg = agent_stall_repair_config(context.turn_opts?.stall_diagnostics)
   const reverify_mandated = __agent_loop_post_edit_reverify_mandated(
     repair_cfg,
@@ -399,10 +452,10 @@ pub fn agent_loop_post_turn_transition(
     }
   }
   if should_continue {
-    if next.opts?.daemon && tool_count == 0 {
+    if !goal_changed && next.opts?.daemon && tool_count == 0 {
       agent_daemon_step(harness.agent, harness.fs, session, next.opts, context.iteration)
     }
-  } else {
+  } else if !goal_changed {
     if outcome.needs_verify || reverify_mandated {
       if next.verify_attempts >= max_verify_attempts {
         return {
@@ -476,7 +529,10 @@ pub fn agent_loop_post_turn_transition(
       return {action: "break", state: next + {stop_reason: outcome.stop_reason}}
     }
   }
-  if should_continue && post_edit_reverify_confirmed && context.iteration >= next.current_max {
+  if should_continue
+    && !goal_changed
+    && post_edit_reverify_confirmed
+    && context.iteration >= next.current_max {
     const missing_after_reverify = agent_required_tools_missing_from_session(
       next.opts,
       context.successful_tools_seen,
@@ -488,7 +544,7 @@ pub fn agent_loop_post_turn_transition(
       }
     }
   }
-  if should_continue {
+  if should_continue && !goal_changed {
     const repeated_verified_pass = agent_stall_repeated_verified_pass(
       context.turn_opts?.stall_diagnostics,
       next.stall_state,
@@ -574,7 +630,7 @@ pub fn agent_loop_post_turn_transition(
       session_successful: context.successful_tools_seen,
       session_rejected: context.rejected_tools_seen,
       missing_required_tools: missing_required_for_loop,
-      completion_proposed: outcome.kind == "break",
+      completion_proposed: outcome.kind == "break" && !goal_changed,
       verdict: verdict_record,
       progress_no_net_advance: loop_no_net_progress,
       progress_no_information_gain: context.completed_no_information_gain,

@@ -12,7 +12,12 @@ import { JudgeConfig } from "std/agent/options_types"
 // (design-only there; built here).
 import { pin } from "std/agent/pins"
 import { __replace_prompt_fragment } from "std/agent/preflight"
-import { agent_emit_event, agent_session_events, agent_session_messages } from "std/agent/state"
+import {
+  agent_emit_event,
+  agent_session_events,
+  agent_session_inject_reminder,
+  agent_session_messages,
+} from "std/agent/state"
 import { system_prompt_part } from "std/llm/prompts"
 
 // Bounded re-loop cap: if the goal is not met at loop end, re-enter with
@@ -62,6 +67,7 @@ pub type GoalTransitionState = {
   initialized: bool,
   current: GoalSpec,
   applied_message_ids: list<string>,
+  managed_goal_pin: bool,
 }
 
 pub type GoalTransitionSync = {options: dict, applied: int}
@@ -215,7 +221,14 @@ pub fn with_goal(agent_options: any, g: GoalSpec) {
   const normalized = goal(g)
   const options = __replace_prompt_fragment(agent_options, goal_context_fragment(normalized))
   return options
-    + {_goal_transition: {initialized: false, current: normalized, applied_message_ids: []}}
+    + {
+      _goal_transition: {
+        initialized: false,
+        current: normalized,
+        applied_message_ids: [],
+        managed_goal_pin: false,
+      },
+    }
 }
 
 fn __goal_receipt_spec(g: GoalSpec) -> dict {
@@ -227,6 +240,30 @@ fn __goal_receipt_spec(g: GoalSpec) -> dict {
     constraints: g.constraints ?? [],
     budget: g.budget ?? {},
   }
+}
+
+fn __goal_managed_pin_present(events: list) -> bool {
+  for event in events {
+    if event?.kind == "system_reminder"
+      && (event?.reminder?.dedupe_key ?? event?.metadata?.dedupe_key) == "pin/goal" {
+      return true
+    }
+  }
+  return false
+}
+
+fn __goal_replace_managed_pin(agent: HarnessAgent, session_id: string, g: GoalSpec) {
+  return agent_session_inject_reminder(
+    agent,
+    session_id,
+    {
+      body: __render_goal_text(g),
+      dedupe_key: "pin/goal",
+      preserve_on_compact: true,
+      role_hint: "system",
+      tags: ["pin", "goal"],
+    },
+  )
 }
 
 /**
@@ -269,8 +306,12 @@ pub fn agent_goal_sync_delivered_steers(
   // invocation needs to reconcile the event journal; later checkpoints trust
   // the typed state instead of repeatedly scanning every historical event.
   let receipted_message_ids: list<string> = applied_message_ids
+  let events = []
+  let managed_pin_present = raw_state?.managed_goal_pin == true
   if !initialized {
-    for event in agent_session_events(agent, session_id) {
+    events = agent_session_events(agent, session_id)
+    managed_pin_present = __goal_managed_pin_present(events)
+    for event in events {
       if event?.metadata?.schema == "harn.goal_transition.v1" {
         const receipted_id = to_string(event?.metadata?.message_id ?? "")
         if receipted_id != "" && !contains(receipted_message_ids, receipted_id) {
@@ -303,6 +344,18 @@ pub fn agent_goal_sync_delivered_steers(
       applied_message_ids = applied_message_ids.appending(steer.message_id)
     }
     if !contains(receipted_message_ids, steer.message_id) {
+      if !managed_pin_present {
+        // A caller may add the managed projection after the first sync. Check
+        // only when a new transition needs committing, not on every loop turn.
+        managed_pin_present = __goal_managed_pin_present(agent_session_events(agent, session_id))
+      }
+      if managed_pin_present {
+        // The typed session goal owns both projections. Replace an existing
+        // public goal pin before committing the transition receipt so a crash
+        // can repair the pin and receipt together without ever preserving the
+        // abandoned objective beside the replacement.
+        __goal_replace_managed_pin(agent, session_id, current)
+      }
       agent_emit_event(
         agent,
         session_id,
@@ -329,6 +382,7 @@ pub fn agent_goal_sync_delivered_steers(
         initialized: true,
         current: current,
         applied_message_ids: applied_message_ids,
+        managed_goal_pin: managed_pin_present,
       },
     }
   return {options: options, applied: applied}

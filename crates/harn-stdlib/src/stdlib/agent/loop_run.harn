@@ -12,6 +12,7 @@ import "std/agent/loop_finalize"
 import "std/agent/loop_foundation"
 import {
   agent_loop_command_hold_transition,
+  agent_loop_goal_transition_reset,
   agent_loop_post_turn_transition,
 } from "std/agent/loop_post_turn"
 import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
@@ -1161,6 +1162,23 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           iteration_index + 1,
         )
         opts = pre_dispatch_goal_sync.options
+        if pre_dispatch_goal_sync.applied > 0 {
+          const reset = agent_loop_goal_transition_reset()
+          consecutive_text_only = reset.consecutive_text_only
+          turn_end_judge_invocations = reset.turn_end_judge_invocations
+          turn_end_judge_vetoes = reset.turn_end_judge_vetoes
+          feedback_history = reset.feedback_history
+          last_tool_count = reset.last_tool_count
+          stall_state = reset.stall_state
+          terminal_write_unverified = reset.terminal_write_unverified
+          turns_since_loop_progress = reset.turns_since_loop_progress
+          turns_since_progress = reset.turns_since_progress
+          verify_attempts = reset.verify_attempts
+          verify_completion_judge_invocations = reset.verify_completion_judge_invocations
+          verify_completion_judge_vetoes = reset.verify_completion_judge_vetoes
+          step_judge_attempts = 0
+          structural_validator_attempts = 0
+        }
         if pre_dispatch_checkpoint.dispatch_skipped {
           agent_session_record_undispatched_tool_results(
             harness.agent,

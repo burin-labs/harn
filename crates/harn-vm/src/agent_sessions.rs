@@ -1283,6 +1283,22 @@ pub fn seed_from_messages(
     system_prompt: Option<String>,
     tool_format: Option<String>,
 ) -> Result<String, String> {
+    seed_from_messages_and_events(id, messages, None, metadata, system_prompt, tool_format)
+}
+
+/// Create a session from canonical messages plus its non-conversational event
+/// projection without re-emitting historic observability. Cold journal
+/// hydration uses this path so typed checkpoints and lifecycle receipts remain
+/// queryable after process restart instead of being reconstructed from messages
+/// alone.
+pub(crate) fn seed_from_messages_and_events(
+    id: Option<String>,
+    messages: &[serde_json::Value],
+    events: Option<&[serde_json::Value]>,
+    metadata: serde_json::Value,
+    system_prompt: Option<String>,
+    tool_format: Option<String>,
+) -> Result<String, String> {
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     if exists(&resolved) {
         return Err(format!("agent session '{resolved}' already exists"));
@@ -1318,7 +1334,7 @@ pub fn seed_from_messages(
         }
         let text_tool_call_seq = next_text_tool_call_seq_from_json_messages(messages);
         let vm_messages = crate::llm::helpers::json_messages_to_vm(messages);
-        let candidate = crate::llm::helpers::new_transcript_with(
+        let mut candidate = crate::llm::helpers::new_transcript_with(
             Some(resolved.clone()),
             vm_messages,
             None,
@@ -1326,6 +1342,17 @@ pub fn seed_from_messages(
                 metadata,
             ))),
         );
+        if let Some(events) = events {
+            if let Some(mut transcript) = candidate.as_dict().cloned() {
+                transcript.insert(
+                    crate::value::intern_key("events"),
+                    VmValue::List(std::sync::Arc::new(
+                        events.iter().map(crate::stdlib::json_to_vm_value).collect(),
+                    )),
+                );
+                candidate = VmValue::dict(transcript);
+            }
+        }
         apply_transcript_with_budget(state, candidate, "seed_from_messages")?;
         state.text_tool_call_seq = text_tool_call_seq;
         Ok(resolved)
@@ -1336,6 +1363,30 @@ pub fn seed_from_messages(
 /// in-loop compaction path, which operates on JSON messages.
 pub fn replace_messages(id: &str, messages: &[serde_json::Value]) -> Result<(), String> {
     replace_messages_with_summary(id, messages, None)
+}
+
+pub(crate) fn transcript_event_survives_compaction(
+    kind: Option<&str>,
+    preserve_on_compact: bool,
+) -> bool {
+    match kind {
+        Some("message" | "tool_call" | "tool_result") => false,
+        Some("system_reminder") => preserve_on_compact,
+        _ => true,
+    }
+}
+
+fn vm_transcript_event_survives_compaction(event: &VmValue) -> bool {
+    let Some(event) = event.as_dict() else {
+        return true;
+    };
+    let kind = event.get("kind").map(VmValue::display);
+    let preserve_on_compact = event
+        .get("reminder")
+        .and_then(VmValue::as_dict)
+        .and_then(|reminder| reminder.get("preserve_on_compact"))
+        .is_some_and(|value| matches!(value, VmValue::Bool(true)));
+    transcript_event_survives_compaction(kind.as_deref(), preserve_on_compact)
 }
 
 /// Replace the transcript's message list and optionally update the
@@ -1373,10 +1424,24 @@ pub fn replace_messages_with_summary(
                     .map(VmValue::display)
             })
             .collect();
+        let mut retained_events = dict
+            .get("events")
+            .and_then(|events| match events {
+                VmValue::List(events) => Some(
+                    events
+                        .iter()
+                        .filter(|event| vm_transcript_event_survives_compaction(event))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        retained_events.extend(replacement_events);
         let mut next = dict;
         next.insert(
             crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(replacement_events)),
+            VmValue::List(std::sync::Arc::new(retained_events)),
         );
         next.insert(
             crate::value::intern_key("messages"),

@@ -36,11 +36,13 @@ pub(super) async fn initialize(
         format!("agent_loop_{}", uuid::Uuid::now_v7()),
     )
     .await?;
-    let has_canonical_history = !prepared.transcript.messages.is_empty();
+    let has_canonical_history =
+        !prepared.transcript.messages.is_empty() || !prepared.transcript.events.is_empty();
     let session_id = if has_canonical_history && !has_live_session {
-        let seeded_session_id = crate::agent_sessions::seed_from_messages(
+        let seeded_session_id = crate::agent_sessions::seed_from_messages_and_events(
             Some(session_id.to_string()),
             &prepared.transcript.messages,
+            Some(&prepared.transcript.events),
             serde_json::json!({}),
             system_prompt,
             None,
@@ -240,4 +242,133 @@ const LIVE_TRANSCRIPT_JOURNAL_BUILTINS: &[&VmBuiltinDef] =
 
 pub(super) fn register_live_transcript_journal_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, LIVE_TRANSCRIPT_JOURNAL_BUILTINS);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::VmDictExt;
+
+    #[tokio::test]
+    async fn cold_initialize_restores_non_message_typed_checkpoints() {
+        crate::agent_sessions::reset_session_store();
+        let root = tempfile::tempdir().expect("temp root");
+        let mut options = DictMap::new();
+        options.put_str("root", root.path().to_string_lossy().as_ref());
+        let session_id = "cold-typed-checkpoint-rehydration";
+
+        initialize(session_id, &options, None)
+            .await
+            .expect("initialize first run");
+        crate::agent_sessions::inject_message(
+            session_id,
+            crate::stdlib::json_to_vm_value(
+                &serde_json::json!({"role": "user", "content": "persist the run"}),
+            ),
+        )
+        .expect("inject canonical message");
+        let checkpoint = super::super::helpers::transcript_event(
+            "typed_checkpoint",
+            "system",
+            "internal",
+            "",
+            Some(serde_json::json!({
+                "schema": "harn.goal_transition.v1",
+                "message_id": "steer-cold-1",
+            })),
+        );
+        crate::agent_sessions::append_event(session_id, checkpoint)
+            .expect("append typed checkpoint");
+        let durable_goal_pin = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "id": "goal-pin-bravo",
+            "kind": "system_reminder",
+            "role": "system",
+            "visibility": "public",
+            "content": "Goal: BRAVO",
+            "reminder": {
+                "dedupe_key": "pin/goal",
+                "preserve_on_compact": true,
+                "body": "Goal: BRAVO"
+            }
+        }));
+        crate::agent_sessions::append_event(session_id, durable_goal_pin)
+            .expect("append durable goal pin");
+        let transient_old_goal = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "id": "transient-goal-alpha",
+            "kind": "system_reminder",
+            "role": "system",
+            "visibility": "public",
+            "content": "Goal: ALPHA",
+            "reminder": {
+                "dedupe_key": "transient/old-goal",
+                "preserve_on_compact": false,
+                "body": "Goal: ALPHA"
+            }
+        }));
+        crate::agent_sessions::append_event(session_id, transient_old_goal)
+            .expect("append transient old goal");
+        crate::agent_sessions::replace_messages_with_summary(
+            session_id,
+            &[serde_json::json!({"role": "user", "content": "compacted history"})],
+            Some("compacted history"),
+        )
+        .expect("compact live transcript");
+        crate::agent_session_journal::flush(session_id)
+            .await
+            .expect("flush first run");
+        crate::agent_sessions::reset_session_store();
+
+        let rehydrated = initialize(session_id, &options, None)
+            .await
+            .expect("cold initialize second run");
+        assert!(rehydrated.has_canonical_history);
+        let transcript = crate::agent_sessions::transcript(session_id).expect("rehydrated session");
+        let events = transcript
+            .as_dict()
+            .and_then(|transcript| transcript.get("events"))
+            .and_then(|events| match events {
+                VmValue::List(events) => Some(events),
+                _ => None,
+            })
+            .expect("rehydrated events");
+        let receipts = events
+            .iter()
+            .filter(|event| {
+                event
+                    .as_dict()
+                    .and_then(|event| event.get("metadata"))
+                    .and_then(VmValue::as_dict)
+                    .and_then(|metadata| metadata.get("schema"))
+                    .map(VmValue::display)
+                    .as_deref()
+                    == Some("harn.goal_transition.v1")
+            })
+            .count();
+        assert_eq!(receipts, 1, "cold hydration must not drop typed receipts");
+        let goal_pins = events
+            .iter()
+            .filter(|event| {
+                event
+                    .as_dict()
+                    .and_then(|event| event.get("reminder"))
+                    .and_then(VmValue::as_dict)
+                    .and_then(|reminder| reminder.get("dedupe_key"))
+                    .map(VmValue::display)
+                    .as_deref()
+                    == Some("pin/goal")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(goal_pins.len(), 1, "durable managed goal pin must survive");
+        assert!(
+            goal_pins[0].display().contains("BRAVO"),
+            "retargeted goal pin must retain the current goal"
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !event.display().contains("transient-goal-alpha")),
+            "non-durable reminders must still be removed by compaction"
+        );
+        crate::agent_sessions::reset_session_store();
+    }
 }

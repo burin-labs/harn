@@ -11,10 +11,13 @@ import {
   agent_goal_sync_delivered_steers,
   goal,
   goal_check,
+  goal_pin,
   goal_reloop,
   with_goal,
 } from "std/agent/goal"
 import { agent_loop_options } from "std/agent/options"
+import { agent_pin } from "std/agent/pins"
+import { agent_session_events } from "std/agent/state"
 
 fn __manual_omit(o: dict, drop: any) {
   let out = {}
@@ -327,4 +330,35 @@ pipeline test_goal_sync_without_goal_state_is_a_no_io_noop(harness: Harness, tas
   const sync = agent_goal_sync_delivered_steers(harness.agent, "session-does-not-exist", options, 0)
   assert_eq(sync.applied, 0)
   assert_eq(sync.options, options)
+}
+
+pipeline test_goal_sync_replaces_existing_managed_goal_pin(harness: Harness, task: unknown) {
+  const session_id = "goal-transition-pin-" + harness.random.uuid()
+  harness.agent.open(session_id)
+  const original = goal({objective: "ALPHA", success_criteria: ["finish ALPHA"]})
+  let options = with_goal({}, original)
+  agent_pin(harness.agent, session_id, goal_pin(harness.random, original))
+  options = agent_goal_sync_delivered_steers(harness.agent, session_id, options, 0).options
+  harness.agent.inject(
+    session_id,
+    {
+      role: "user",
+      content: "BRAVO",
+      messageId: "goal_pin_steer",
+      injectedMode: "finish_step",
+    },
+  )
+  const synced = agent_goal_sync_delivered_steers(harness.agent, session_id, options, 1)
+  const reminders = agent_session_events(harness.agent, session_id).filter(
+    { event ->
+      event?.kind == "system_reminder"
+        && (event?.reminder?.dedupe_key ?? event?.metadata?.dedupe_key) == "pin/goal"
+    },
+  )
+    .to_list()
+  assert_eq(synced.options._goal_transition.current.objective, "BRAVO")
+  assert_eq(len(reminders), 1, "the managed goal pin stays a singleton")
+  assert(contains(reminders[0].reminder.body, "BRAVO"))
+  assert(!contains(reminders[0].reminder.body, "ALPHA"))
+  harness.agent.close(session_id)
 }
