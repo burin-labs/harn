@@ -14,11 +14,9 @@ use lifecycle::{
 };
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
-
 #[cfg(test)]
 #[path = "agents_sub_agent_lifecycle_tests.rs"]
 mod lifecycle_tests;
-
 pub(super) struct ParsedSubAgentRequest {
     pub(super) spec: SubAgentRunSpec,
     pub(super) background: bool,

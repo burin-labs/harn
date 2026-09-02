@@ -87,6 +87,13 @@ export type ToolPolicy = { kind: ToolKind, side_effect_level: SideEffectLevel, }
 
 export type ToolCatalogComponents = { schemas: Readonly<Record<string, JsonSchema202012>>, };
 
-export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null, errorSchema?: JsonSchema202012 | null, annotations?: ToolPresentationAnnotations | null, icons?: Array<ToolIcon> | null, execution?: ToolExecution | null, governance: ToolGovernance, cli: ToolCliSpec, namespace?: string | null, deferLoading: boolean, source?: ToolSource | null, policy?: ToolPolicy | null, _meta?: Readonly<Record<string, JsonValue>> | null, };
+export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null,
+/**
+ * Portable shape of values deliberately thrown by this tool.
+ *
+ * Runtime faults remain adapter errors. Only a raw Harn `throw` from a
+ * handler with this contract is application error data.
+ */
+errorSchema?: JsonSchema202012 | null, annotations?: ToolPresentationAnnotations | null, icons?: Array<ToolIcon> | null, execution?: ToolExecution | null, governance: ToolGovernance, cli: ToolCliSpec, namespace?: string | null, deferLoading: boolean, source?: ToolSource | null, policy?: ToolPolicy | null, _meta?: Readonly<Record<string, JsonValue>> | null, };
 
 export type ToolCatalog = { schema_version: ToolCatalogSchemaVersion, info?: ToolRegistryInfo | null, cli?: ToolCliTreeSpec | null, tools: Array<ToolCatalogEntry>, components?: ToolCatalogComponents | null, };

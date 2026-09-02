@@ -324,6 +324,11 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let namespace = optional_string(entry, "namespace", &format!("tool {name:?}"))?;
     let defer_loading =
         optional_bool(entry, "defer_loading", &format!("tool {name:?}"))?.unwrap_or(false);
+    if entry.contains_key("inputSchema") && entry.contains_key("parameters") {
+        return Err(VmError::Runtime(format!(
+            "tool {name:?} must use either \"inputSchema\" or legacy \"parameters\", not both"
+        )));
+    }
     let input_schema = match entry.get("inputSchema") {
         Some(schema @ VmValue::Dict(_)) => portable_json(schema, &format!("tool {name:?}"))?,
         Some(_) => {
@@ -820,15 +825,24 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
                         for (key, value) in definition.iter() {
                             if key.as_str() != "required" {
                                 if key.as_str() == "type" {
-                                    if let VmValue::String(kind) = value {
-                                        if let Some(kind) = json_schema_type(kind.as_str()) {
-                                            fields.insert(
-                                                key.to_string(),
-                                                JsonValue::String(kind.to_string()),
-                                            );
-                                        }
-                                        continue;
+                                    let VmValue::String(kind) = value else {
+                                        return Err(VmError::Runtime(format!(
+                                            "tool parameter {name:?} field \"type\" must be a string"
+                                        )));
+                                    };
+                                    if let Some(kind) = json_schema_type(kind.as_str()).map_err(
+                                        |kind| {
+                                            VmError::Runtime(format!(
+                                                "tool parameter {name:?} has unknown type {kind:?}"
+                                            ))
+                                        },
+                                    )? {
+                                        fields.insert(
+                                            key.to_string(),
+                                            JsonValue::String(kind.to_string()),
+                                        );
                                     }
+                                    continue;
                                 }
                                 fields.insert(
                                     key.to_string(),
@@ -856,13 +870,14 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
                 }
                 property
             }
-            VmValue::String(kind) => json_schema_type(kind.as_str())
-                .map(|kind| serde_json::json!({"type": kind}))
-                .ok_or_else(|| {
-                    VmError::Runtime(format!(
-                        "tool parameter {name:?} has unknown shorthand type {kind:?}"
-                    ))
-                })?,
+            VmValue::String(kind) => match json_schema_type(kind.as_str()).map_err(|kind| {
+                VmError::Runtime(format!(
+                    "tool parameter {name:?} has unknown shorthand type {kind:?}"
+                ))
+            })? {
+                Some(kind) => serde_json::json!({"type": kind}),
+                None => serde_json::json!({}),
+            },
             _ => {
                 return Err(VmError::Runtime(format!(
                     "tool parameter {name:?} must be a type string or definition object"
@@ -890,16 +905,17 @@ fn validate_json_schema(schema: &JsonValue, owner: &str) -> Result<(), VmError> 
         .map_err(|error| VmError::Runtime(format!("{owner} is invalid: {error}")))
 }
 
-fn json_schema_type(kind: &str) -> Option<&str> {
-    Some(match kind {
-        "any" | "unknown" => return None,
+fn json_schema_type(kind: &str) -> Result<Option<&str>, &str> {
+    Ok(Some(match kind {
+        "any" | "unknown" => return Ok(None),
         "int" => "integer",
         "float" => "number",
         "bool" => "boolean",
         "list" => "array",
         "dict" => "object",
-        other => other,
-    })
+        "string" | "number" | "integer" | "boolean" | "array" | "object" | "null" => kind,
+        unknown => return Err(unknown),
+    }))
 }
 
 #[cfg(test)]
@@ -1050,6 +1066,7 @@ mod tests {
             VmValue::Dict(tool) => (*tool).clone(),
             _ => unreachable!(),
         };
+        tool.remove("parameters");
         tool.insert(
             "inputSchema".into(),
             crate::schema::json_to_vm_value(&serde_json::json!({
@@ -1070,6 +1087,27 @@ mod tests {
     }
 
     #[test]
+    fn registry_rejects_competing_complete_and_legacy_input_shapes() {
+        let mut tool = match entry("lookup", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        tool.insert(
+            "inputSchema".into(),
+            crate::schema::json_to_vm_value(&serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })),
+        );
+
+        let error = tool_registry_catalog(&registry(vec![VmValue::dict(tool)]))
+            .expect_err("two input-schema owners must be rejected");
+        assert!(error
+            .to_string()
+            .contains("either \"inputSchema\" or legacy \"parameters\""));
+    }
+
+    #[test]
     fn legacy_parameter_shorthand_rejects_shapes_it_cannot_interpret() {
         let bool_error = params_to_json_schema(Some(&VmValue::Bool(true)))
             .expect_err("a complete schema must use input_schema");
@@ -1084,6 +1122,16 @@ mod tests {
         assert!(shorthand_error
             .to_string()
             .contains("unknown shorthand type"));
+
+        for unconstrained in ["any", "unknown"] {
+            let parameters = VmValue::dict(DictMap::from_iter([(
+                arcstr::ArcStr::from("value"),
+                VmValue::String(unconstrained.into()),
+            )]));
+            let schema = params_to_json_schema(Some(&parameters))
+                .expect("explicit unconstrained shorthand is portable");
+            assert_eq!(schema["properties"]["value"], serde_json::json!({}));
+        }
     }
 
     #[test]

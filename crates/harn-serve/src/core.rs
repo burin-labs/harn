@@ -84,9 +84,22 @@ fn install_dispatch_vm_runtime(
 /// * `ErrorCategory::Cancelled` — caller-initiated cancel (HTTP 499).
 /// * `ErrorCategory::BudgetExceeded` — a `@budget(...)` ceiling fired
 ///   (HTTP 429, `code = "budget_exceeded"`).
+/// * the owned missing-tenant auth diagnostic retains its actionable text;
+///   every other auth error remains value-free at this boundary.
 /// * everything else → `Execution` (HTTP 500).
 fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
     let category = harn_vm::error_to_category(&error);
+    if matches!(category, harn_vm::ErrorCategory::Auth)
+        && matches!(
+            &error,
+            harn_vm::VmError::CategorizedError { message, .. }
+                if message == harn_vm::harness_tenant::MISSING_TENANT_MESSAGE
+        )
+    {
+        return DispatchError::Execution(
+            harn_vm::harness_tenant::MISSING_TENANT_MESSAGE.to_string(),
+        );
+    }
     let message = harn_vm::tool_registry::tool_runtime_error_summary(&error);
     match category {
         harn_vm::ErrorCategory::Cancelled => DispatchError::Cancelled(message),

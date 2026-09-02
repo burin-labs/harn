@@ -7,6 +7,8 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use crate::vm::Vm;
 
+mod registry;
+
 thread_local! {
     /// Execution-scoped registry read by agent loops, `tool_bind`, `tool_ref`, and `tool_def`.
     static CURRENT_TOOL_REGISTRY: RefCell<Option<VmValue>> = const { RefCell::new(None) };
@@ -212,37 +214,6 @@ fn plan_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let input = args.first().cloned().unwrap_or(VmValue::Nil);
     let json = crate::llm::vm_value_to_json(&input);
     Ok(json_to_vm_value(&crate::llm::plan::plan_entries(&json)))
-}
-
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "tool_registry(info?: {name: string, version?: string, description?: string}?, components?: {schemas: dict}?, cli?: {commands: list}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}, components?: {schemas: dict}, cli?: {commands: list}}",
-    category = "tools"
-)]
-fn tool_registry_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let mut registry = crate::value::DictMap::new();
-    registry.put_str("_type", "tool_registry");
-    registry.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
-    if let Some(info) = args.first().filter(|value| !matches!(value, VmValue::Nil)) {
-        registry.insert(crate::value::intern_key("info"), info.clone());
-    }
-    if let Some(components) = args.get(1).filter(|value| !matches!(value, VmValue::Nil)) {
-        registry.insert(crate::value::intern_key("components"), components.clone());
-    }
-    if let Some(cli) = args.get(2).filter(|value| !matches!(value, VmValue::Nil)) {
-        registry.insert(crate::value::intern_key("cli"), cli.clone());
-    }
-    let registry = VmValue::dict(registry);
-    crate::tool_registry::tool_registry_catalog(&registry).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "tool_registry: {error}"
-        ))))
-    })?;
-    Ok(registry)
 }
 
 #[harn_builtin(
@@ -747,9 +718,6 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "tool_define: use either 'parameters' or 'input_schema', not both".to_string(),
         ));
     }
-    let parameters = parameters
-        .cloned()
-        .unwrap_or(VmValue::dict(crate::value::DictMap::new()));
     let output_schema = config
         .get("returns")
         .or_else(|| config.get("output_schema"))
@@ -761,11 +729,17 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert(crate::value::intern_key("handler"), handler);
-    tool_entry.insert(crate::value::intern_key("parameters"), parameters);
     if let Some(input_schema) = input_schema {
         tool_entry.insert(
             crate::value::intern_key("inputSchema"),
             input_schema.clone(),
+        );
+    } else {
+        tool_entry.insert(
+            crate::value::intern_key("parameters"),
+            parameters
+                .cloned()
+                .unwrap_or_else(|| VmValue::dict(crate::value::DictMap::new())),
         );
     }
     // Store the canonical executor as a plain string; wire

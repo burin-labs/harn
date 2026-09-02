@@ -111,11 +111,48 @@ fn non_object_output_schema_and_result_preserve_the_canonical_value() {
     let projected = catalog.mcp_tool(entry).expect("MCP projection");
     let structured =
         tool_result_to_mcp_structured_content(entry, json!("ok")).expect("declared output");
-    assert_eq!(projected["outputSchema"], json!({"type": "string"}));
-    assert_eq!(structured, json!("ok"));
+    assert_eq!(
+        projected["outputSchema"],
+        json!({
+            "type": "object",
+            "properties": {"result": {"type": "string"}},
+            "required": ["result"],
+            "additionalProperties": false
+        })
+    );
+    assert_eq!(structured, json!({"result": "ok"}));
     let validator = jsonschema::draft202012::new(&projected["outputSchema"])
         .expect("valid standalone output schema");
     assert!(validator.is_valid(&structured));
+}
+
+#[test]
+fn mcp_object_output_detection_follows_refs_and_composition_without_guessing() {
+    let referenced_object = json!({
+        "$ref": "#/$defs/Result",
+        "$defs": {"Result": {"type": "object", "properties": {"ok": {"type": "boolean"}}}}
+    });
+    assert_eq!(mcp_output_schema(&referenced_object), referenced_object);
+
+    let all_of_object = json!({
+        "allOf": [
+            {"type": "object"},
+            {"properties": {"ok": {"type": "boolean"}}}
+        ]
+    });
+    assert_eq!(mcp_output_schema(&all_of_object), all_of_object);
+
+    let mixed_union = json!({"anyOf": [{"type": "object"}, {"type": "string"}]});
+    assert_eq!(
+        mcp_output_schema(&mixed_union)["properties"]["result"],
+        mixed_union
+    );
+
+    let properties_only = json!({"properties": {"ok": {"type": "boolean"}}});
+    assert_eq!(
+        mcp_output_schema(&properties_only)["properties"]["result"],
+        properties_only
+    );
 }
 
 #[test]

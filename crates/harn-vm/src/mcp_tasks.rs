@@ -250,7 +250,8 @@ impl McpTaskStore {
     /// where reconstructing a bare value from the blocks would not. `isError`
     /// belongs to the completed tool-call result; only failure to produce a
     /// result transitions the task itself to `failed`.
-    pub fn complete_with_tool_result(&self, task_id: &str, result: JsonValue) {
+    pub fn complete_with_tool_result(&self, task_id: &str, mut result: JsonValue) {
+        mcp_protocol::apply_result_envelope(&mut result, None);
         let Some(wake) = ({
             let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
             let Some(record) = tasks.get_mut(task_id) else {

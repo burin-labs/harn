@@ -940,6 +940,14 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                 .uri("/mcp")
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
+                .header(
+                    mcp_protocol::MCP_HEADER_PROTOCOL_VERSION,
+                    mcp_protocol::PROTOCOL_VERSION,
+                )
+                .header(
+                    mcp_protocol::MCP_HEADER_METHOD,
+                    mcp_protocol::METHOD_SERVER_DISCOVER,
+                )
                 .header(AUTHORIZATION, "Bearer valid-token")
                 .body(discover_body)
                 .unwrap(),
@@ -957,6 +965,14 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                     .uri("/mcp")
                     .header("accept", "application/json")
                     .header("content-type", "application/json")
+                    .header(
+                        mcp_protocol::MCP_HEADER_PROTOCOL_VERSION,
+                        mcp_protocol::PROTOCOL_VERSION,
+                    )
+                    .header(
+                        mcp_protocol::MCP_HEADER_METHOD,
+                        mcp_protocol::METHOD_SERVER_DISCOVER,
+                    )
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::from(
                         stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({}))
@@ -982,6 +998,14 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                 .uri("/mcp")
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
+                .header(
+                    mcp_protocol::MCP_HEADER_PROTOCOL_VERSION,
+                    mcp_protocol::PROTOCOL_VERSION,
+                )
+                .header(
+                    mcp_protocol::MCP_HEADER_METHOD,
+                    mcp_protocol::METHOD_SERVER_DISCOVER,
+                )
                 .header(AUTHORIZATION, "Bearer missing-scope")
                 .body(Body::from(
                     stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({})).to_string(),
