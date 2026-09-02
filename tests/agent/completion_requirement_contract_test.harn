@@ -850,3 +850,131 @@ pipeline test_itemized_report_that_omits_a_row_is_still_an_actor_gap(
   assert(feedback.contains("still pending"))
   assert(!feedback.contains("completion judge returned no assessment"))
 }
+
+// -------------------------------------------------------------------------------------------------
+// harn#7830 / bc#7759. An EMPTY acceptance set is satisfied by construction.
+//
+// The founder ruling is that a row exists only when there is something real to
+// verify. A conversational task therefore reaches the judge with NO ledger at
+// all, and must cost exactly one judge call: no `requirement_report` property
+// on the schema, no itemization re-ask, no `continue` override of `done`, and
+// so no thrash. These pin that a ledger-free run is cheap AND that a declared
+// ledger still binds exactly as harn#7555/#7557/#7824 left it.
+// -------------------------------------------------------------------------------------------------
+
+fn ledger_free_judge_opts(session: string, cap: int) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: cap,
+    verify_completion_judge: {provider: "mock", max_invocations: 1},
+  }
+}
+
+fn judge_invocations(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_judge_evidence_projection.v1"
+    },
+  )
+    .to_list()
+}
+
+fn itemization_retries(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_judge_itemization_retry.v1"
+    },
+  )
+    .to_list()
+}
+
+// An explicitly empty acceptance set is a readable declaration that nothing is
+// checkable, not an unreadable contract. Today it throws, which is strictly
+// worse than the thrash it was meant to prevent: the run cannot start at all.
+pipeline test_an_empty_acceptance_set_is_a_satisfied_ledger_not_an_error(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(completion_requirement_contract({requirements: []}), nil)
+  // And it reaches the judge seam as no ledger, so the schema never demands a
+  // report the ledger could not have rows for.
+  const schema = __judge_completion_verdict_schema({requirements: []})
+  assert(!contains(schema.properties.keys(), "requirement_report"))
+}
+
+// The bc#7759 `Say hello.` shape, run through the loop with no ledger. A bare
+// scalar `done` must terminate the run on the FIRST judge call.
+pipeline test_a_ledger_free_task_completes_on_one_judge_call(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+    ],
+    { ->
+      const session = "ledger-free-one-call-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, ledger_free_judge_opts(session, 2)) },
+      )
+      assert_eq(captured.result.status, "done")
+      // Exactly one judge call, and no itemization round on top of it.
+      assert_eq(len(judge_invocations(captured.events)), 1)
+      assert_eq(len(itemization_retries(captured.events)), 0)
+      // The scalar verdict was accepted rather than overridden into `continue`.
+      const receipts = completion_receipts(captured.events)
+      const last = receipts[len(receipts) - 1]
+      assert_eq(last.action, "accept")
+      assert_eq(last?.requirements ?? nil, nil)
+    },
+  )
+}
+
+// Negative control for the two above. A DECLARED ledger keeps every binding:
+// the judge is still handed the report property, an omitted report is still
+// re-asked exactly once, and the completion still falls closed. Without this a
+// widened empty-set rule would read as green while having disabled the gate.
+pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
+  harness: Harness,
+  task: unknown,
+) {
+  const schema = __judge_completion_verdict_schema(no_write_contract())
+  assert_eq(schema.properties.requirement_report.type, "array")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      llm_done(),
+    ],
+    { ->
+      const session = "declared-ledger-control-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
+      )
+      // One re-ask happened, and the omitted report still vetoed.
+      assert_eq(len(itemization_retries(captured.events)), 1)
+      const receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.requirements != nil },
+      )
+        .to_list()
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].action, "continue")
+      assert_eq(receipts[0].reason, "completion_judge_report_omitted")
+    },
+  )
+}
