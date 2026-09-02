@@ -876,12 +876,12 @@ pub(super) struct MatchedCapabilityRule {
 /// fields the accumulated chain left unset, and only while every absorbed
 /// rule so far opted into `extends` fall-through.
 #[derive(Default)]
-struct RuleResolution {
+pub(super) struct RuleResolution {
     /// Provider layer of the first matched rule.
-    provider: Option<String>,
-    merged: Option<ProviderRule>,
+    pub(super) provider: Option<String>,
+    pub(super) merged: Option<ProviderRule>,
     /// `model_match` provenance of every absorbed rule, in precedence order.
-    matched_patterns: Vec<String>,
+    pub(super) matched_patterns: Vec<String>,
 }
 
 impl RuleResolution {
@@ -913,7 +913,7 @@ impl RuleResolution {
 /// built-in rules), absorbing every matching rule into `resolution` until a
 /// terminating (non-`extends`) match. Returns `true` when resolution
 /// terminated within this layer.
-fn absorb_layer_matches(
+pub(super) fn absorb_layer_matches(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     layer_provider: &str,
@@ -939,7 +939,7 @@ fn absorb_layer_matches(
 /// never consults defaults from layers past N — the pre-`extends` behavior.
 /// An unterminated `extends` chain keeps walking so later layers can fill
 /// its gaps.
-fn resolve_rule_chain(
+pub(super) fn resolve_rule_chain(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     provider: &str,
@@ -971,45 +971,7 @@ fn resolve_rule_chain(
     (resolution, effective_defaults)
 }
 
-/// The rule lists `mock` borrows, in order, when it has no rule of its own for
-/// the model. `mock` spoofs whichever shape the model id names, which is a
-/// name-shape fan-out rather than the single-parent `provider_family` edge the
-/// normal chain walks, so it needs its own layer sequence.
-const MOCK_SPOOF_LAYERS: [&str; 3] = ["anthropic", "openai", "gemini"];
-
-/// The one route-resolution seam. Every consumer of capability facts — the
-/// `Capabilities` lookup and the portable-option admission gate alike — goes
-/// through here, so a route cannot resolve one way for "does this model
-/// support native tools" and another way for "does this model support prompt
-/// caching" (harn#7693).
-///
-/// Returns the resolution, its effective defaults, and the layer whose rule
-/// matched, so a caller can apply a layer-specific pin.
-fn resolve_route(
-    user: Option<&CapabilitiesFile>,
-    builtin: &CapabilitiesFile,
-    provider: &str,
-    model: &str,
-) -> (RuleResolution, ProviderDefaults, Option<&'static str>) {
-    if provider == "mock" {
-        // `mock`'s own rows first, so the double can declare the surface a
-        // capable route declares (and so a `[[provider.mock]]` override in
-        // `harn.toml` is reachable at all). Then the spoof layers, Anthropic
-        // first, so `mock` + `claude-opus-4-7` keeps resolving to the
-        // Anthropic capability row.
-        for layer in std::iter::once("mock").chain(MOCK_SPOOF_LAYERS) {
-            let defaults = merged_provider_defaults(user, builtin, layer);
-            let mut resolution = RuleResolution::default();
-            absorb_layer_matches(user, builtin, layer, model, &mut resolution);
-            if resolution.merged.is_some() {
-                return (resolution, defaults, Some(layer));
-            }
-        }
-        return (RuleResolution::default(), ProviderDefaults::default(), None);
-    }
-    let (resolution, defaults) = resolve_rule_chain(user, builtin, provider, model);
-    (resolution, defaults, None)
-}
+pub(super) use super::route::resolve_route;
 
 pub(super) fn resolved_rule_and_defaults(
     user: Option<&CapabilitiesFile>,
@@ -1071,7 +1033,7 @@ pub(super) fn lookup_with(
     Capabilities::default()
 }
 
-fn merged_provider_defaults(
+pub(super) fn merged_provider_defaults(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     provider: &str,

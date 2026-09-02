@@ -75,9 +75,7 @@ pipeline test_capable_mock_completes_a_production_shaped_turn(harness: Harness, 
     const captured = agent_capture_events(
       harness.agent,
       session,
-      fn() {
-        return agent_loop(harness, "Add 2 and 3 using the tool, then report the sum.", nil, opts)
-      },
+      fn() { return agent_loop(harness, "Add 2 and 3 using the tool, then report the sum.", nil, opts) },
     )
     const result = captured.result
     assert(
@@ -102,7 +100,10 @@ pipeline test_capable_mock_completes_a_production_shaped_turn(harness: Harness, 
  * same row: prompt caching is declared there, and refusing it means the two
  * resolution paths disagree about one route.
  */
-pipeline test_mock_spoofed_route_admits_the_capabilities_it_spoofs(harness: Harness, task: unknown) {
+pipeline test_mock_spoofed_route_admits_the_capabilities_it_spoofs(
+  harness: Harness,
+  task: unknown,
+) {
   const result = agent_loop(
     harness,
     "Add 2 and 3 using the tool, then report the sum.",
@@ -115,7 +116,10 @@ pipeline test_mock_spoofed_route_admits_the_capabilities_it_spoofs(harness: Harn
     "a Claude-shaped mock id must admit the prompt caching its spoofed row declares, got: "
       + message,
   )
-  assert(result.status != "exception", "spoofed mock route must not end in an exception: " + message)
+  assert(
+    result.status != "exception",
+    "spoofed mock route must not end in an exception: " + message,
+  )
 }
 
 /**
@@ -143,7 +147,6 @@ pipeline test_restricted_mock_still_refuses_unsupported_options(harness: Harness
     contains(tools_message, "mock:mock-minimal") && contains(tools_message, "text tool calling"),
     "the native-tool refusal must name the restricted route, got: " + tools_message,
   )
-
   // Prompt caching: refused by the typed capability-admission error, the same
   // seam and the same wording the issue's table records.
   const cache_result = agent_loop(
