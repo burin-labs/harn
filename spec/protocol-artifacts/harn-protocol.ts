@@ -178,6 +178,55 @@ export const AGENT_TERMINAL_OWNERS = [
 ] as const
 export type AgentTerminalOwner = (typeof AGENT_TERMINAL_OWNERS)[number]
 
+export const LLM_ERROR_CATEGORIES = [
+  "timeout",
+  "auth",
+  "invalid_request",
+  "rate_limit",
+  "overloaded",
+  "server_error",
+  "transient_network",
+  "resource_busy",
+  "schema_incompatible",
+  "schema_validation",
+  "schema_stream_aborted",
+  "tool_error",
+  "tool_rejected",
+  "egress_blocked",
+  "cancelled",
+  "channel_closed",
+  "not_found",
+  "circuit_open",
+  "budget_exceeded",
+  "internal",
+  "environment",
+  "generic",
+] as const
+export type LlmErrorCategory = (typeof LLM_ERROR_CATEGORIES)[number]
+
+export const LLM_ERROR_KINDS = [
+  "transient",
+  "terminal",
+] as const
+export type LlmErrorKind = (typeof LLM_ERROR_KINDS)[number]
+
+export const LLM_ERROR_REASONS = [
+  "rate_limit",
+  "server_error",
+  "network_error",
+  "timeout",
+  "auth_failure",
+  "context_overflow",
+  "content_policy",
+  "invalid_request",
+  "invalid_response",
+  "model_unavailable",
+  "empty_generation",
+  "output_budget_exhausted",
+  "unknown",
+] as const
+export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
+
 export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
   "terminal",
 ] as const

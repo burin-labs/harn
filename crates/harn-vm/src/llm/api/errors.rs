@@ -17,21 +17,30 @@ const INVALID_RESPONSE_FINGERPRINTS: &[&[&str]] = &[
 ];
 
 /// Coarse retry semantics for provider failures.
+///
+/// This is the closed vocabulary carried in the `kind` field of the structured
+/// error dict `llm_call` throws, and therefore in `kind` on the
+/// `harn.acp.prompt_error.v1` envelope. It is exported through the protocol
+/// artifacts so hosts branch on the owner's vocabulary instead of inventing
+/// sibling strings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LlmErrorKind {
+pub enum LlmErrorKind {
     Transient,
     Terminal,
 }
 
 impl LlmErrorKind {
-    pub(crate) fn as_str(self) -> &'static str {
+    /// Every kind, in wire order. Consumed by the protocol-artifact generator.
+    pub const ALL: &'static [Self] = &[Self::Transient, Self::Terminal];
+
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Transient => "transient",
             Self::Terminal => "terminal",
         }
     }
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "transient" => Some(Self::Transient),
             "terminal" => Some(Self::Terminal),
@@ -41,8 +50,14 @@ impl LlmErrorKind {
 }
 
 /// Canonical reason within the LLM error taxonomy.
+///
+/// This is the closed vocabulary carried in the `reason` field of the
+/// structured error dict `llm_call` throws, and therefore in `reason` on the
+/// `harn.acp.prompt_error.v1` envelope. It is exported through the protocol
+/// artifacts. `code`, by contrast, is a provider passthrough with no closed
+/// set: hosts must treat it as opaque diagnostic text and never branch on it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LlmErrorReason {
+pub enum LlmErrorReason {
     RateLimit,
     ServerError,
     NetworkError,
@@ -63,7 +78,25 @@ pub(crate) enum LlmErrorReason {
 }
 
 impl LlmErrorReason {
-    pub(crate) fn as_str(self) -> &'static str {
+    /// Every reason, in wire order. Consumed by the protocol-artifact
+    /// generator so a new reason cannot land without a regenerated binding.
+    pub const ALL: &'static [Self] = &[
+        Self::RateLimit,
+        Self::ServerError,
+        Self::NetworkError,
+        Self::Timeout,
+        Self::AuthFailure,
+        Self::ContextOverflow,
+        Self::ContentPolicy,
+        Self::InvalidRequest,
+        Self::InvalidResponse,
+        Self::ModelUnavailable,
+        Self::EmptyGeneration,
+        Self::OutputBudgetExhausted,
+        Self::Unknown,
+    ];
+
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::RateLimit => "rate_limit",
             Self::ServerError => "server_error",
@@ -81,7 +114,7 @@ impl LlmErrorReason {
         }
     }
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "rate_limit" | "rate_limited" => Some(Self::RateLimit),
             "server_error" | "http_error" => Some(Self::ServerError),
@@ -884,6 +917,75 @@ mod tests {
         ProviderTokenQuotaSnapshot,
     };
     use crate::value::{ErrorCategory, VmError, VmValue};
+
+    /// Exhaustive-match falsifier for the exported vocabularies.
+    ///
+    /// Adding a variant without extending `ALL` breaks this match at compile
+    /// time, and the length assertions fail if `ALL` and the match disagree.
+    /// The protocol-artifact generator reads `ALL`, so a silent omission here
+    /// would ship a binding that is missing a value Harn actually emits.
+    #[test]
+    fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
+        const fn kind_ordinal(kind: LlmErrorKind) -> usize {
+            match kind {
+                LlmErrorKind::Transient => 0,
+                LlmErrorKind::Terminal => 1,
+            }
+        }
+        const fn reason_ordinal(reason: LlmErrorReason) -> usize {
+            match reason {
+                LlmErrorReason::RateLimit => 0,
+                LlmErrorReason::ServerError => 1,
+                LlmErrorReason::NetworkError => 2,
+                LlmErrorReason::Timeout => 3,
+                LlmErrorReason::AuthFailure => 4,
+                LlmErrorReason::ContextOverflow => 5,
+                LlmErrorReason::ContentPolicy => 6,
+                LlmErrorReason::InvalidRequest => 7,
+                LlmErrorReason::InvalidResponse => 8,
+                LlmErrorReason::ModelUnavailable => 9,
+                LlmErrorReason::EmptyGeneration => 10,
+                LlmErrorReason::OutputBudgetExhausted => 11,
+                LlmErrorReason::Unknown => 12,
+            }
+        }
+
+        assert_eq!(LlmErrorKind::ALL.len(), 2);
+        for (index, kind) in LlmErrorKind::ALL.iter().enumerate() {
+            assert_eq!(kind_ordinal(*kind), index);
+            assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
+        }
+
+        assert_eq!(LlmErrorReason::ALL.len(), 13);
+        for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
+            assert_eq!(reason_ordinal(*reason), index);
+            assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));
+        }
+    }
+
+    /// Reach proof: the real classifier's connection-failure outcome is a
+    /// member of the vocabulary the protocol artifacts export.
+    ///
+    /// The falsifier is a producer that classifies into a string outside
+    /// `ALL`. That would ship a `reason` no generated binding declares, which
+    /// is exactly the condition that made hosts invent sibling values.
+    #[test]
+    fn network_failure_classifies_into_the_exported_vocabulary() {
+        let classified = classify_llm_error(
+            ErrorCategory::TransientNetwork,
+            "error sending request: connection reset by peer",
+        );
+        assert_eq!(classified.reason.as_str(), "network_error");
+        assert_eq!(classified.kind.as_str(), "transient");
+        assert!(LlmErrorReason::ALL.contains(&classified.reason));
+        assert!(LlmErrorKind::ALL.contains(&classified.kind));
+
+        // Negative control: a value no producer emits is not in the
+        // vocabulary, so `parse` refuses it rather than folding it into a
+        // neighbour.
+        assert_eq!(LlmErrorReason::parse("provider_connection_failed"), None);
+        assert_eq!(LlmErrorKind::parse("provider_degraded"), None);
+    }
 
     fn thrown_field(error: &VmError, key: &str) -> Option<String> {
         let VmError::Thrown(VmValue::Dict(fields)) = error else {

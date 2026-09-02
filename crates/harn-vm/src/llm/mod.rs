@@ -287,6 +287,7 @@ pub use api::{
 /// Catalog-backed per-call pricing, `None` when the (provider, model) pair has
 /// no rate. Exported so a CLI surface reports cost through the one owner of
 /// what a call costs instead of embedding its own rate table.
+pub use api::{LlmErrorKind, LlmErrorReason};
 pub use cost::pricing_aware_call_cost;
 pub use fake::{
     fake_llm_captured_calls, install_fake_llm_script, FakeLlmCall, FakeLlmError, FakeLlmEvent,
