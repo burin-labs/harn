@@ -1,0 +1,170 @@
+// Run: harn test tests/agent/empty_response_run_bound_test.harn
+//
+// A provider that answers every attempt with a zero-token empty completion must
+// cost the run a bounded number of provider calls. The caller retries the empty
+// response inside one logical turn; exhausting those attempts is a terminal
+// outcome for the run, not a turn the loop advances past into further empty
+// turns.
+//
+// Deterministic: mock LLM script, no sleeps, no API calls.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { with_retry } from "std/llm/handlers"
+import { llm_call_count, with_llm_script } from "std/testing"
+
+const EMPTY_ATTEMPTS = 3
+
+fn empty_generation_response() -> dict {
+  return {text: "", usage: {completion_tokens: 0}}
+}
+
+fn toolset() -> ToolRegistry {
+  let tools: ToolRegistry = tool_registry()
+  return tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+/**
+ * A caller that classifies a zero-token completion as a transient provider
+ * failure, the way an embedding host's caller does, and retries it up to
+ * `EMPTY_ATTEMPTS` times before surfacing the exhausted failure envelope.
+ */
+fn empty_classifying_caller(harness: Harness) {
+  const base = { call ->
+    const result = try {
+      harness.llm.call(call.prompt, call.system, call.opts)
+    }
+    if is_err(result) {
+      return {ok: false, status: "exception", error: unwrap_err(result)}
+    }
+    const value = unwrap(result)
+    const tool_calls = value?.tool_calls ?? []
+    if trim(to_string(value?.text ?? "")) == "" && len(tool_calls) == 0 {
+      return {
+        ok: false,
+        status: "stream_interrupt",
+        error: {
+          kind: "transient",
+          category: "timeout",
+          reason: "empty_generation",
+          message: "Provider returned an empty zero-token response.",
+          retryable: true,
+        },
+      }
+    }
+    return {ok: true, value: value}
+  }
+  return with_retry(harness, base, {max_attempts: EMPTY_ATTEMPTS, base_ms: 0, max_ms: 0})
+}
+
+/**
+ * bc#7799 falsifier. Every attempt comes back empty. The three-attempt caller
+ * must be the whole cost of the run: exhausting it ends the run instead of
+ * starting further single-call empty turns.
+ */
+pipeline test_exhausted_empty_attempts_end_the_run(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      // Only reachable if exhausting the attempts did not end the run.
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+    ],
+    { ->
+      const session = "empty-response-bound-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: "mock-model",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        llm_caller: empty_classifying_caller(harness),
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the target file.", nil, opts) },
+      )
+      const result = captured.result
+      assert(
+        result.status != "done",
+        "an empty provider cannot author completion: ${json_stringify(result)}",
+      )
+      assert_eq(
+        llm_call_count(harness.llm),
+        EMPTY_ATTEMPTS,
+        "exhausting the empty-response attempts must end the run, not start another empty turn",
+      )
+    },
+  )
+}
+
+/**
+ * Negative control. A non-empty response must still advance the loop through
+ * the same caller, so the bound above cannot be satisfied by a caller that
+ * refuses every response.
+ */
+pipeline test_non_empty_response_still_advances(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      empty_generation_response(),
+      {text: "", tool_calls: [{id: "l1", name: "look", arguments: {path: "src/calc.py"}}]},
+      {text: "Read the file. ##DONE##", usage: {completion_tokens: 6}},
+    ],
+    { ->
+      const session = "empty-response-recovers-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: "mock-model",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+        llm_caller: empty_classifying_caller(harness),
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the target file.", nil, opts) },
+      )
+      assert_eq(
+        captured.result.status,
+        "done",
+        "one empty attempt must recover inside the turn: ${json_stringify(captured.result)}",
+      )
+      assert_eq(
+        llm_call_count(harness.llm),
+        3,
+        "the recovered turn plus the completing turn must cost three provider calls",
+      )
+    },
+  )
+}
