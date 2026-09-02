@@ -206,6 +206,21 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
         "AgentTerminalOwners",
         &agent_terminal_owner_values(),
     ));
+    out.push_str(&go_typed_array_owned(
+        "LlmErrorCategory",
+        "LlmErrorCategories",
+        &llm_error_category_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "LlmErrorKind",
+        "LlmErrorKinds",
+        &llm_error_kind_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "LlmErrorReason",
+        "LlmErrorReasons",
+        &llm_error_reason_values(),
+    ));
     out.push_str(&go_typed_array(
         "ToolCallReceiptStatus",
         "ToolCallReceiptStatuses",
