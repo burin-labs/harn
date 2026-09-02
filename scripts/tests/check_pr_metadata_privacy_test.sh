@@ -16,6 +16,12 @@ printf '%s' "$denied_token" | shasum -a 256 | awk '{print $1}' \
 git -C "$repo" init -q -b main
 git -C "$repo" config user.name 'Metadata Test'
 git -C "$repo" config user.email 'metadata@example.invalid'
+# The fixture commits are scaffolding, never artifacts. Signing them would make
+# this test depend on a reachable signing agent, which a detached CI runner or
+# an ssh session does not have, so a contributor's global commit.gpgsign turns
+# an unrelated environment fact into a failure of this gate.
+git -C "$repo" config commit.gpgSign false
+git -C "$repo" config tag.gpgSign false
 git -C "$repo" add scripts
 git -C "$repo" commit -q -m 'Base metadata scanner'
 base_sha="$(git -C "$repo" rev-parse HEAD)"
