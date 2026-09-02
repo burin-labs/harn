@@ -648,6 +648,7 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/harn_bin_recovery_batch_test.sh
 	./scripts/tests/package_verify_bootstrap_test.sh
+	./scripts/tests/verify_crate_dependency_resolution_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh
