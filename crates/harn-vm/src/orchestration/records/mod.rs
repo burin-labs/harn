@@ -7,6 +7,7 @@ mod action_graph;
 mod diff;
 mod eval_pack;
 mod execution_evidence;
+mod execution_persistence;
 mod from_session;
 mod json;
 mod persistence;
@@ -33,6 +34,11 @@ pub use eval_pack::{
 pub use execution_evidence::{
     validate_execution_evidence, validate_execution_id, ExecutionEvidenceValidationError,
     EXECUTION_EVIDENCE_SCHEMA_VERSION,
+};
+pub use execution_persistence::{
+    persist_execution_record, ExecutionRecordPersistError, ExecutionRecordPersistStage,
+    ExecutionRecordRequest, ExecutionRecordStatus, FlightRecordingStorage,
+    PersistedExecutionRecord,
 };
 pub use from_session::{
     default_projection_path, list_session_runs, materialize_session_run_record,
