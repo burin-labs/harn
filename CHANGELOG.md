@@ -9,6 +9,129 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.127
+
+### Added
+
+- `std/agent/workspace_guidance` resolves a workspace's own instruction files —
+  `AGENTS.md`, `CLAUDE.md`, per-directory copies, local overrides, and root
+  editor rule packs — into one ordered, deduped, budgeted set. Precedence runs
+  broadest to most specific, matching the two agents whose files repositories
+  already carry: user scope, then ancestors, then the workspace root down to the
+  working directory, then the subtree, then editor packs. `@path` imports expand
+  up to four hops with cycle refusal and code-fence awareness, block HTML
+  comments are stripped, and a body repeated across files loads once, so the
+  common `ln -s AGENTS.md CLAUDE.md` convention is not paid for twice.
+  `guidance_prompt_fragments` projects each source as its own prompt fragment,
+  so the `harn.llm.context_manifest.v1` receipt shows which guidance file
+  reached the model rather than one collapsed blob, and every source that was
+  discovered but dropped is named with its reason. This gives embedding hosts a
+  single owner for the discovery rules instead of one restatement per surface.
+- Claude Fable 5.1 (`claude-fable-5-1`) is in the Anthropic catalog, reachable
+  as `fable` or `fable51`; `fable5` still addresses the previous generation.
+  It is Mythos-class, above Opus, so the `opus` alias keeps tracking the Opus
+  generation. Cache reads are billed at their own rate rather than the uniform
+  ratio every other Anthropic row follows.
+- A route that refuses forced tool choice no longer breaks
+  `output_format: json_object`. That request used to pin `tool_choice` to a
+  synthetic tool, which Claude Fable 5.1 rejects outright; where the route
+  speaks native structured output it now takes that path instead. Routes that
+  still accept a forced tool choice are unchanged.
+- The LLM outcome vocabularies are now part of the protocol contract.
+  `category`, `kind`, and `reason` on the `harn.acp.prompt_error.v1` envelope
+  have a named owner in every generated binding: `HarnLlmErrorCategory`,
+  `HarnLlmErrorKind`, and `HarnLlmErrorReason` in Rust and Swift,
+  `LLM_ERROR_CATEGORIES` / `LLM_ERROR_KINDS` / `LLM_ERROR_REASONS` in
+  TypeScript, and the matching enums in Python and Go. A host no longer has to
+  guess which failure strings Harn actually emits.
+- `code` on the same envelope is documented as a provider passthrough with no
+  closed set. It is opaque diagnostic text; branch on `reason` instead.
+- The Rust binding gains open enums for those vocabularies and for the agent
+  terminal class, kind, and owner. Each carries an `Unrecognized(String)`
+  escape, so a host pinned to an older Harn round-trips a newer value verbatim
+  instead of folding it into a neighbouring variant. The existing
+  `AGENT_TERMINAL_*` string constants remain for one release.
+
+### Changed
+
+- Binary-size growth no longer blocks a release. The distribution fuse remains
+  fail-closed and is now the only size level that can refuse a build; a growth
+  crossing is reported as a warning wherever it is measured. A stale baseline
+  therefore costs a reader's attention rather than a release, which is what a
+  baseline that had not been refreshed since 0.10.118 cost the v0.10.126 cut.
+- Every Rust pull request now gets a binary-size comment: the debug `harn`
+  binary CI already builds, compared against main's last measurement of the
+  same, alongside main's most recent release-profile measurement and its
+  remaining headroom under the distribution fuse. The check adds no build and
+  can never fail a pull request. A missing measurement is reported as missing
+  rather than rendered as no growth.
+- The release binary-size report is now published as a source-qualified
+  artifact with a machine-readable `binary-size.json` beside it, so the release
+  orchestrator can tell whether an exact commit has already been measured
+  instead of rebuilding it.
+
+### Fixed
+
+- Reject invalid automatic execution evidence before creating or rotating run-record files.
+- Local Cargo gates now refuse to run when a `rustc` earlier on `PATH` shadows the
+  version pinned in `rust-toolchain.toml`, naming both versions and the PATH
+  correction, so a local result stays comparable to CI. Set
+  `HARN_ALLOW_TOOLCHAIN_MISMATCH=1` to run anyway.
+- `runtime.store_set` no longer accepts a struct and then discards it. A struct
+  now persists as its field map and `store_get` reads it back as a dict, the way
+  a record with the same fields always did. Previously the write reported
+  success and the read answered nil, so a dropped write and a key that was never
+  written were indistinguishable to the caller.
+- The `mock` provider now declares its own capability rows instead of borrowing
+  another provider's by model name-shape. A `mock*` model id supports native
+  tools, prompt caching, structured output, and vision, so a production-shaped
+  `agent_loop` turn runs offline instead of throwing
+  ``option `tools` is not supported`` before emitting a single session event.
+  `mock-minimal` is the deliberately restricted id that still refuses those
+  options with the same typed capability error.
+- A tool declaring `compact: true` is now actually served a shortened
+  description. The flag was collected into the tool catalog but read by no
+  renderer, so declaring it changed nothing. Compact tools now ship their
+  leading sentences on the native wire and a one-line entry under "Other
+  tools" in the text catalog, while the registry, the transcript sidecar, and
+  `tool_schema` keep the full text.
+- The `native_tool_schemas` token segment now counts only the tools resident in
+  the model's context; deferred tools are reported separately as
+  `deferred_tool_schemas`. Previously a `defer_loading` change measured as
+  zero, which is indistinguishable from a measurement that never fired. A
+  `resident_tool_count` sits beside `native_tool_count` so the two are legible
+  together. Totals and every budget decision taken from them are unchanged.
+- The completion judge's evidence packet now carries the turn's read-only calls
+  as a bounded `research_summary` instead of dropping them. A turn that proved no
+  work was warranted previously reached the judge as a single mutation with every
+  supporting read discarded, so a compliant stop read as an unexplained gap. Each
+  record keeps the tool name, what it looked at, and a one-line result digest; the
+  budget degrades to a count of unrecorded reads rather than to silence.
+- Conformance runs now fail and name every executable file under `tests/` or
+  `errors/` that has no `.expected`, `.error`, or `.lint` oracle, even when
+  other cases pass. Function-only modules and non-test helpers remain inert,
+  while unreadable or unparseable test sources fail closed instead of
+  disappearing from the run summary.
+- A completion judge that approved a stop without itemizing the acceptance
+  ledger is now named as the party that failed to assess, instead of the run
+  charging that omission to the agent. The agent does not write assessments, so
+  the old feedback could not change on the next turn and the loop could only
+  repeat it until it hard-stopped as thrash.
+- The judge is now re-asked exactly once, with an explicit instruction to return
+  one row per requirement. The instruction rides on the user turn, so the cached
+  stable system prefix stays byte-identical and the re-ask still reads from
+  cache. The agent is not re-prompted.
+- Completion still fails closed when that re-ask also returns no assessment, and
+  a judge that itemizes and leaves a row out is unchanged. A bare scalar `done`
+  never closes a ledger.
+- Fix published `harn-vm` dependency metadata and release auditing so downstream
+  Cargo resolution cannot select an incompatible `rmcp` API.
+
+### Security
+
+- Public pull request checks now scan every commit message in the proposed range
+  for private product and infrastructure names, including merge-queue checks.
+
 ## v0.10.126
 
 ### Added
