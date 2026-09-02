@@ -29,6 +29,55 @@ async fn create_session(app: &Router) -> String {
     session["id"].as_str().expect("session id").to_string()
 }
 
+async fn assert_advertised_task_controls(app: &Router) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/capabilities")
+                .body(Body::empty())
+                .expect("capabilities request"),
+        )
+        .await
+        .expect("capabilities response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("capabilities body");
+    let summary: Value = serde_json::from_slice(&body).expect("capabilities json");
+    assert!(
+        summary["capabilities"]
+            .as_array()
+            .expect("capability list")
+            .iter()
+            .any(|entry| entry["id"] == "tasks"),
+        "the advertised API surface must include task submission and cancellation: {summary}"
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/tools")
+                .body(Body::empty())
+                .expect("tools request"),
+        )
+        .await
+        .expect("tools response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("tools body");
+    let tools: Value = serde_json::from_slice(&body).expect("tools json");
+    let advertised = tools["data"].as_array().expect("tool list");
+    for tool_id in ["harn.session.prompt", "harn.session.cancel"] {
+        assert!(
+            advertised.iter().any(|entry| entry["id"] == tool_id),
+            "advertised task control {tool_id} is missing: {tools}"
+        );
+    }
+}
+
 async fn submit_and_wait(
     app: &Router,
     events: &mut broadcast::Receiver<ApiEvent>,
@@ -103,6 +152,8 @@ pipeline main(harness: Harness) {
     let state = server.state;
     let mut events = state.events_tx.subscribe();
     let app = api_router(state);
+
+    assert_advertised_task_controls(&app).await;
 
     let admitted_session = create_session(&app).await;
     let admitted = submit_and_wait(&app, &mut events, &admitted_session, "runtime-control").await;
