@@ -72,8 +72,8 @@ pub(crate) struct SpawnOutcome {
     pub(crate) ended_at: Option<String>,
     pub(crate) exit_code: i32,
     pub(crate) signal: Option<String>,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
+    pub(crate) stdout: InlineStream,
+    pub(crate) stderr: InlineStream,
     pub(crate) output_path: PathBuf,
     pub(crate) stdout_path: PathBuf,
     pub(crate) stderr_path: PathBuf,
@@ -555,8 +555,8 @@ pub(crate) fn build_response(
         .int("exit_code", outcome.exit_code as i64)
         .opt_str("signal", outcome.signal)
         .bool("timed_out", outcome.timed_out)
-        .str("stdout", outcome.stdout)
-        .str("stderr", outcome.stderr)
+        .str("stdout", outcome.stdout.text.clone())
+        .str("stderr", outcome.stderr.text.clone())
         .str("output_path", to_agent_path(&outcome.output_path))
         .str("stdout_path", to_agent_path(&outcome.stdout_path))
         .str("stderr_path", to_agent_path(&outcome.stderr_path))
@@ -565,6 +565,7 @@ pub(crate) fn build_response(
         .str("output_sha256", outcome.output_sha256)
         .str("started_at", outcome.started_at)
         .str("audit_id", format!("audit_{}", outcome.command_id));
+    builder = with_stream_facts(builder, &outcome.stdout, &outcome.stderr);
     builder = match outcome.ended_at {
         Some(ended_at) => builder.str("ended_at", ended_at),
         None => builder.nil("ended_at"),
@@ -730,6 +731,10 @@ pub(crate) fn running_response(
         .bool("timed_out", false)
         .str("stdout", "")
         .str("stderr", "")
+        .bool("stdout_truncated", false)
+        .bool("stderr_truncated", false)
+        .int("stdout_bytes", 0)
+        .int("stderr_bytes", 0)
         .str("output_path", to_agent_path(&artifacts.output_path))
         .str("stdout_path", to_agent_path(&artifacts.stdout_path))
         .str("stderr_path", to_agent_path(&artifacts.stderr_path))
@@ -763,11 +768,55 @@ pub(crate) fn now_rfc3339() -> String {
     harn_vm::clock::system_now_rfc3339()
 }
 
+/// One captured stream projected inline, carrying whether the projection is
+/// complete.
+///
+/// The inline text is capped at `max_inline_bytes`, so a consumer that reads
+/// only `text` cannot tell a short command from a capped one. `truncated`
+/// reports that directly instead of leaving it to be inferred, and
+/// `total_bytes` is the stream's true size in bytes (the existing combined
+/// `byte_count` is stdout plus stderr, and comparing it against a character
+/// length misreports for multibyte output). See harn#7675.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InlineStream {
+    pub(crate) text: String,
+    pub(crate) truncated: bool,
+    pub(crate) total_bytes: u64,
+}
+
+impl InlineStream {
+    /// A stream that produced nothing, so nothing was dropped.
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Project `bytes` inline under `max_inline_bytes`, recording whatever the
+    /// cap dropped.
+    fn capped(bytes: &[u8], max_inline_bytes: usize) -> Self {
+        let (text, truncated) = lossy_prefix(bytes, max_inline_bytes);
+        Self {
+            text,
+            truncated,
+            total_bytes: bytes.len() as u64,
+        }
+    }
+
+    /// A stream the caller asked not to capture. The bytes still existed, so an
+    /// empty `text` here is a dropped stream, not a silent one.
+    fn suppressed(bytes: &[u8]) -> Self {
+        Self {
+            text: String::new(),
+            truncated: !bytes.is_empty(),
+            total_bytes: bytes.len() as u64,
+        }
+    }
+}
+
 pub(crate) fn inline_output(
     stdout: &[u8],
     stderr: &[u8],
     capture: CaptureConfig,
-) -> (String, String) {
+) -> (InlineStream, InlineStream) {
     if capture.merge_stderr {
         let mut merged = Vec::with_capacity(stdout.len() + stderr.len() + 1);
         merged.extend_from_slice(stdout);
@@ -777,36 +826,148 @@ pub(crate) fn inline_output(
         merged.extend_from_slice(stderr);
         return (
             if capture.stdout {
-                lossy_prefix(&merged, capture.max_inline_bytes)
+                InlineStream::capped(&merged, capture.max_inline_bytes)
             } else {
-                String::new()
+                InlineStream::suppressed(&merged)
             },
-            String::new(),
+            // stderr was folded into stdout, not dropped.
+            InlineStream::empty(),
         );
     }
     (
         if capture.stdout {
-            lossy_prefix(stdout, capture.max_inline_bytes)
+            InlineStream::capped(stdout, capture.max_inline_bytes)
         } else {
-            String::new()
+            InlineStream::suppressed(stdout)
         },
         if capture.stderr {
-            lossy_prefix(stderr, capture.max_inline_bytes)
+            InlineStream::capped(stderr, capture.max_inline_bytes)
         } else {
-            String::new()
+            InlineStream::suppressed(stderr)
         },
     )
 }
 
-fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
-    let cap = bytes.len().min(max_inline_bytes);
-    match std::str::from_utf8(&bytes[..cap]) {
-        Ok(text) => text.to_string(),
-        Err(error) if error.error_len().is_none() => {
-            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
+/// One sentence naming every stream whose inline projection is short, or
+/// `None` when both streams are whole.
+///
+/// This is the plain-language projection of the same fact the booleans carry;
+/// agent tool results are rendered to the model as JSON, so the notice is what
+/// a reader sees without having to compare two numbers.
+pub(crate) fn truncation_notice(stdout: &InlineStream, stderr: &InlineStream) -> Option<String> {
+    let mut parts = Vec::new();
+    for (name, stream) in [("stdout", stdout), ("stderr", stderr)] {
+        if !stream.truncated {
+            continue;
         }
-        Err(_) => String::from_utf8_lossy(&bytes[..cap]).into_owned(),
+        let kept = stream.text.len() as u64;
+        let omitted = stream.total_bytes.saturating_sub(kept);
+        parts.push(format!(
+            "{name} kept {kept} of {} bytes ({omitted} omitted)",
+            stream.total_bytes
+        ));
     }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Inline output is truncated: {}. This result is a prefix, not the whole output; \
+read the rest with read_command_output (by command_id) or from the *_path artifacts.",
+        parts.join("; ")
+    ))
+}
+
+/// Stamp the per-stream truncation facts onto a response under construction.
+///
+/// Every projection of a process result goes through one of these three so the
+/// booleans, the true per-stream byte totals, and the plain-language notice
+/// stay defined in one place instead of being re-derived per surface.
+pub(crate) fn with_stream_facts(
+    builder: ResponseBuilder,
+    stdout: &InlineStream,
+    stderr: &InlineStream,
+) -> ResponseBuilder {
+    let builder = builder
+        .bool("stdout_truncated", stdout.truncated)
+        .bool("stderr_truncated", stderr.truncated)
+        .int("stdout_bytes", stdout.total_bytes as i64)
+        .int("stderr_bytes", stderr.total_bytes as i64);
+    match truncation_notice(stdout, stderr) {
+        Some(notice) => builder.str("truncation_notice", notice),
+        None => builder,
+    }
+}
+
+/// [`with_stream_facts`] for a response assembled as a `DictMap`.
+pub(crate) fn put_stream_facts(
+    response: &mut harn_vm::value::DictMap,
+    stdout: &InlineStream,
+    stderr: &InlineStream,
+) {
+    response.insert(
+        harn_vm::value::intern_key("stdout_truncated"),
+        VmValue::Bool(stdout.truncated),
+    );
+    response.insert(
+        harn_vm::value::intern_key("stderr_truncated"),
+        VmValue::Bool(stderr.truncated),
+    );
+    response.insert(
+        harn_vm::value::intern_key("stdout_bytes"),
+        VmValue::Int(stdout.total_bytes as i64),
+    );
+    response.insert(
+        harn_vm::value::intern_key("stderr_bytes"),
+        VmValue::Int(stderr.total_bytes as i64),
+    );
+    if let Some(notice) = truncation_notice(stdout, stderr) {
+        response.put_str("truncation_notice", notice);
+    }
+}
+
+/// [`with_stream_facts`] for a response assembled as a JSON object.
+pub(crate) fn insert_stream_facts_json(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    stdout: &InlineStream,
+    stderr: &InlineStream,
+) {
+    payload.insert(
+        "stdout_truncated".into(),
+        serde_json::Value::Bool(stdout.truncated),
+    );
+    payload.insert(
+        "stderr_truncated".into(),
+        serde_json::Value::Bool(stderr.truncated),
+    );
+    payload.insert(
+        "stdout_bytes".into(),
+        serde_json::Value::Number(stdout.total_bytes.into()),
+    );
+    payload.insert(
+        "stderr_bytes".into(),
+        serde_json::Value::Number(stderr.total_bytes.into()),
+    );
+    if let Some(notice) = truncation_notice(stdout, stderr) {
+        payload.insert("truncation_notice".into(), serde_json::Value::String(notice));
+    }
+}
+
+/// Decode up to `max_inline_bytes` of `bytes` as text, reporting whether any
+/// input byte went unrepresented.
+///
+/// The flag is `true` exactly when the returned text does not cover every input
+/// byte, so an output of exactly `max_inline_bytes` reads as whole.
+fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> (String, bool) {
+    let cap = bytes.len().min(max_inline_bytes);
+    let (text, consumed) = match std::str::from_utf8(&bytes[..cap]) {
+        Ok(text) => (text.to_string(), cap),
+        Err(error) if error.error_len().is_none() => (
+            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned(),
+            error.valid_up_to(),
+        ),
+        Err(_) => (String::from_utf8_lossy(&bytes[..cap]).into_owned(), cap),
+    };
+    (text, consumed < bytes.len())
 }
 
 pub(crate) fn sandbox_kind() -> &'static str {
@@ -946,8 +1107,11 @@ mod tests {
             },
         );
 
-        assert_eq!(stdout, "alpha ");
-        assert_eq!(stderr, "");
+        assert_eq!(stdout.text, "alpha ");
+        assert!(stdout.truncated);
+        assert_eq!(stdout.total_bytes, "alpha 🚀 beta".len() as u64);
+        assert_eq!(stderr.text, "");
+        assert!(!stderr.truncated);
     }
 
     #[test]
@@ -961,8 +1125,10 @@ mod tests {
             },
         );
 
-        assert_eq!(stdout, "a\u{fffd}b");
-        assert_eq!(stderr, "");
+        assert_eq!(stdout.text, "a\u{fffd}b");
+        assert!(!stdout.truncated);
+        assert_eq!(stdout.total_bytes, 3);
+        assert_eq!(stderr.text, "");
     }
 
     #[test]

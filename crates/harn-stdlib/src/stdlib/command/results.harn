@@ -7,6 +7,10 @@ pub type CommandResult = {
   cwd: string,
   stdout: string,
   stderr: string,
+  // True when the inline stdout/stderr string is a prefix of the real stream.
+  // A capped capture is otherwise indistinguishable from a genuinely short one.
+  stdout_truncated: bool,
+  stderr_truncated: bool,
   ...rest,
 }
 
@@ -27,6 +31,8 @@ pub fn command_result_ok(stdout: string = "", extra: dict? = nil) -> CommandResu
       cwd: base?.cwd ?? "",
       stdout: stdout,
       stderr: "",
+      stdout_truncated: base?.stdout_truncated ?? false,
+      stderr_truncated: base?.stderr_truncated ?? false,
     }
 }
 
@@ -51,5 +57,7 @@ pub fn command_result_fail(
       cwd: base?.cwd ?? "",
       stdout: base?.stdout ?? "",
       stderr: stderr,
+      stdout_truncated: base?.stdout_truncated ?? false,
+      stderr_truncated: base?.stderr_truncated ?? false,
     }
 }

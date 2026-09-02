@@ -340,6 +340,18 @@ fn running_result(
     result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
     result.put_str("stderr", String::from_utf8_lossy(&state.stderr));
     result.put_str("combined", String::from_utf8_lossy(&state.combined));
+    // This snapshot is uncapped, so state the completeness rather than leaving
+    // the flags absent and ambiguous (harn#7675).
+    result.insert("stdout_truncated".into(), VmValue::Bool(false));
+    result.insert("stderr_truncated".into(), VmValue::Bool(false));
+    result.insert(
+        "stdout_bytes".into(),
+        VmValue::Int(state.stdout.len() as i64),
+    );
+    result.insert(
+        "stderr_bytes".into(),
+        VmValue::Int(state.stderr.len() as i64),
+    );
     result.insert(
         "byte_count".into(),
         VmValue::Int(state.combined.len() as i64),

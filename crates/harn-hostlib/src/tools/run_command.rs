@@ -89,6 +89,10 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .bool("timed_out", false)
         .str("stdout", "")
         .str("stderr", message.clone())
+        .bool("stdout_truncated", false)
+        .bool("stderr_truncated", false)
+        .int("stdout_bytes", 0)
+        .int("stderr_bytes", message.len() as i64)
         .str("output_path", "")
         .str("stdout_path", "")
         .str("stderr_path", "")
@@ -325,8 +329,9 @@ fn initial_background_snapshot(
         harn_vm::value::intern_key("duration_ms"),
         VmValue::Int(wait_ms as i64),
     );
-    response.put_str("stdout", inline_stdout);
-    response.put_str("stderr", inline_stderr);
+    response.put_str("stdout", inline_stdout.text.clone());
+    response.put_str("stderr", inline_stderr.text.clone());
+    super::proc::put_stream_facts(&mut response, &inline_stdout, &inline_stderr);
     response.insert(
         harn_vm::value::intern_key("byte_count"),
         VmValue::Int(byte_count as i64),

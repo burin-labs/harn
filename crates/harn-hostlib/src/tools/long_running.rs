@@ -738,8 +738,15 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         serde_json::Value::Number(exit_code.into()),
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
-    payload.insert("stdout".into(), serde_json::Value::String(inline_stdout));
-    payload.insert("stderr".into(), serde_json::Value::String(inline_stderr));
+    payload.insert(
+        "stdout".into(),
+        serde_json::Value::String(inline_stdout.text.clone()),
+    );
+    payload.insert(
+        "stderr".into(),
+        serde_json::Value::String(inline_stderr.text.clone()),
+    );
+    proc::insert_stream_facts_json(&mut payload, &inline_stdout, &inline_stderr);
     payload.insert(
         "output_path".into(),
         serde_json::Value::String(to_agent_path(&artifacts.output_path)),
@@ -917,8 +924,8 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "duration_ms": context.started.elapsed().as_millis() as i64,
                 "exit_code": null,
                 "signal": null,
-                "stdout": inline_stdout,
-                "stderr": inline_stderr,
+                "stdout": inline_stdout.text.clone(),
+                "stderr": inline_stderr.text.clone(),
                 "output_path": to_agent_path(&context.output_path),
                 "stdout_path": to_agent_path(&context.stdout_path),
                 "stderr_path": to_agent_path(&context.stderr_path),
@@ -935,6 +942,9 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,
             });
+            if let Some(object) = payload.as_object_mut() {
+                proc::insert_stream_facts_json(object, &inline_stdout, &inline_stderr);
+            }
             if let (Some(object), Some(snapshot_binding)) =
                 (payload.as_object_mut(), context.snapshot_binding.as_ref())
             {

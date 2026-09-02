@@ -151,6 +151,13 @@ pub fn __command_normalize_result(result: dict?) -> CommandResult {
       handle_id: raw?.handle_id,
       stdout: raw?.stdout ?? "",
       stderr: raw?.stderr ?? "",
+      // harn#7675: carry the capture-cap facts, so a caller reading `stdout`
+      // can tell a whole stream from a prefix without comparing byte counts.
+      stdout_truncated: raw?.stdout_truncated ?? false,
+      stderr_truncated: raw?.stderr_truncated ?? false,
+      stdout_bytes: raw?.stdout_bytes,
+      stderr_bytes: raw?.stderr_bytes,
+      truncation_notice: raw?.truncation_notice,
       combined: command_combined(raw),
       output_path: raw?.output_path,
       stdout_path: raw?.stdout_path,

@@ -110,8 +110,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     })?;
 
     let artifacts = RawArtifacts {
-        stdout: outcome.stdout.clone(),
-        stderr: outcome.stderr.clone(),
+        stdout: outcome.stdout.text.clone(),
+        stderr: outcome.stderr.text.clone(),
         exit_code: outcome.exit_code,
         junit_path: junit_tmp,
         ecosystem: plan.ecosystem_name(),
@@ -121,12 +121,16 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let summary = artifacts.compute_summary();
     let handle = store_run(artifacts, summary);
 
-    let mut builder = ResponseBuilder::new()
-        .int("exit_code", outcome.exit_code as i64)
-        .str("stdout", outcome.stdout)
-        .str("stderr", outcome.stderr)
-        .int("duration_ms", outcome.duration.as_millis() as i64)
-        .str("result_handle", handle);
+    let mut builder = super::proc::with_stream_facts(
+        ResponseBuilder::new()
+            .int("exit_code", outcome.exit_code as i64)
+            .str("stdout", outcome.stdout.text.clone())
+            .str("stderr", outcome.stderr.text.clone())
+            .int("duration_ms", outcome.duration.as_millis() as i64)
+            .str("result_handle", handle),
+        &outcome.stdout,
+        &outcome.stderr,
+    );
 
     if let Some(summary) = summary {
         builder = builder.dict("summary", summary_to_dict(summary));

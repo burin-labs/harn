@@ -641,6 +641,11 @@ fn __command_step_from_result(
     timed_out: normalized.timed_out,
     stdout: normalized.stdout,
     stderr: normalized.stderr,
+    stdout_truncated: normalized.stdout_truncated,
+    stderr_truncated: normalized.stderr_truncated,
+    stdout_bytes: normalized?.stdout_bytes,
+    stderr_bytes: normalized?.stderr_bytes,
+    truncation_notice: normalized?.truncation_notice,
     combined: normalized.combined,
     command_id: normalized.command_id,
     handle_id: normalized.handle_id,
@@ -946,6 +951,11 @@ pub fn command_failure_text(agent: HarnessAgent, result: dict?, options: dict? =
   if len(lines) == 1 && trim(command_output_text(result)) != "" {
     lines = lines
       + ["output:", prompt_cap(agent, command_output_text(result), max_stdout, "output")]
+  }
+  // Say plainly that the block above is a prefix; otherwise the excerpt reads
+  // as the whole failure (harn#7675).
+  if trim(result?.truncation_notice ?? "") != "" {
+    lines = lines + [result.truncation_notice]
   }
   return join(lines, "\n")
 }

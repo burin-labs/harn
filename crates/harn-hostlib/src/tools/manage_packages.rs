@@ -124,15 +124,19 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let lockfile_after = lockfile.as_deref().and_then(snapshot_mtime);
     let lockfile_changed = lockfile_before != lockfile_after;
 
-    Ok(ResponseBuilder::new()
-        .str("operation", operation_str)
-        .str("ecosystem", ecosystem.name())
-        .int("exit_code", outcome.exit_code as i64)
-        .str("stdout", outcome.stdout)
-        .str("stderr", outcome.stderr)
-        .int("duration_ms", outcome.duration.as_millis() as i64)
-        .bool("lockfile_changed", lockfile_changed)
-        .build())
+    Ok(super::proc::with_stream_facts(
+        ResponseBuilder::new()
+            .str("operation", operation_str)
+            .str("ecosystem", ecosystem.name())
+            .int("exit_code", outcome.exit_code as i64)
+            .str("stdout", outcome.stdout.text.clone())
+            .str("stderr", outcome.stderr.text.clone())
+            .int("duration_ms", outcome.duration.as_millis() as i64)
+            .bool("lockfile_changed", lockfile_changed),
+        &outcome.stdout,
+        &outcome.stderr,
+    )
+    .build())
 }
 
 fn lockfile_for(eco: Ecosystem) -> Option<&'static str> {

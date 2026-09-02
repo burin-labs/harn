@@ -7,13 +7,44 @@
     "exit_code": { "type": "integer" },
     "stdout": { "type": "string" },
     "stderr": { "type": "string" },
+    "stdout_truncated": {
+      "type": "boolean",
+      "description": "True when the inline `stdout` string is a prefix: the capture cap dropped bytes, or the stream was not captured at all. Read the rest with `read_command_output` or from `stdout_path`."
+    },
+    "stderr_truncated": {
+      "type": "boolean",
+      "description": "True when the inline `stderr` string is a prefix. See `stdout_truncated`."
+    },
+    "stdout_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "True size of the command's stdout in bytes, whatever the inline cap kept. `byte_count` is stdout plus stderr combined, so it cannot be compared against one stream."
+    },
+    "stderr_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "True size of the command's stderr in bytes, whatever the inline cap kept."
+    },
+    "truncation_notice": {
+      "type": "string",
+      "description": "One sentence naming each truncated stream with its kept and omitted byte counts. Present only when a stream was truncated."
+    },
     "duration_ms": { "type": "integer", "minimum": 0 },
     "diagnostics": {
       "type": "array",
       "items": { "$ref": "#/$defs/Diagnostic" }
     }
   },
-  "required": ["exit_code", "stdout", "stderr", "duration_ms"],
+  "required": [
+    "exit_code",
+    "stdout",
+    "stderr",
+    "stdout_truncated",
+    "stderr_truncated",
+    "stdout_bytes",
+    "stderr_bytes",
+    "duration_ms"
+  ],
   "additionalProperties": false,
   "$defs": {
     "Diagnostic": {

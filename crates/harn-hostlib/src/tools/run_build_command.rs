@@ -94,7 +94,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         capture: CaptureConfig::default(),
     })?;
 
-    let diagnostics = parse_diagnostics(source, &outcome.stdout, &outcome.stderr);
+    let diagnostics = parse_diagnostics(source, &outcome.stdout.text, &outcome.stderr.text);
     let diagnostic_values: Vec<VmValue> = diagnostics
         .into_iter()
         .map(|d| {
@@ -119,13 +119,17 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         })
         .collect();
 
-    Ok(ResponseBuilder::new()
-        .int("exit_code", outcome.exit_code as i64)
-        .str("stdout", outcome.stdout)
-        .str("stderr", outcome.stderr)
-        .int("duration_ms", outcome.duration.as_millis() as i64)
-        .list("diagnostics", diagnostic_values)
-        .build())
+    Ok(super::proc::with_stream_facts(
+        ResponseBuilder::new()
+            .int("exit_code", outcome.exit_code as i64)
+            .str("stdout", outcome.stdout.text.clone())
+            .str("stderr", outcome.stderr.text.clone())
+            .int("duration_ms", outcome.duration.as_millis() as i64)
+            .list("diagnostics", diagnostic_values),
+        &outcome.stdout,
+        &outcome.stderr,
+    )
+    .build())
 }
 
 fn build_default_argv(

@@ -208,7 +208,7 @@ fn run_probe(probe: Probe) -> VmValue {
 }
 
 fn response_from_outcome(probe: &Probe, outcome: SpawnOutcome) -> VmValue {
-    let raw_version = combined_output(&outcome.stdout, &outcome.stderr);
+    let raw_version = combined_output(&outcome.stdout.text, &outcome.stderr.text);
     let (status, version) = if outcome.timed_out {
         ("timed_out", None)
     } else if outcome.exit_code != 0 {

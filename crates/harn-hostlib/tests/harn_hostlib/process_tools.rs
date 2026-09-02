@@ -674,6 +674,50 @@ fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
     assert!(require_bool(&read_resp, "eof"));
 }
 
+/// Falsifier for harn#7675: a capped capture must say it was capped.
+///
+/// Over the cap the result carries `stdout_truncated: true` with the true
+/// per-stream byte total; exactly at the cap and under it the flag stays
+/// clear, so an off-by-one cannot make every capture read truncated.
+#[test]
+fn run_command_reports_stdout_truncation_over_cap_and_not_at_exact_cap() {
+    fn run(payload_len: usize, max_inline_bytes: i64) -> harn_vm::value::DictMap {
+        let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::with_stdout(
+            0,
+            vec![b'x'; payload_len],
+        ));
+        let mut capture: harn_vm::value::DictMap = Default::default();
+        capture.insert("max_inline_bytes".into(), VmValue::Int(max_inline_bytes));
+        let mut req = dict();
+        req.insert("argv".into(), vlist_str(&["bash", "-c", "printf x"]));
+        req.insert("capture".into(), VmValue::dict(capture));
+        require_dict(call("hostlib_tools_run_command", req).unwrap())
+    }
+
+    let over = run(2000, 8);
+    assert_eq!(require_str(&over, "stdout").len(), 8);
+    assert!(
+        require_bool(&over, "stdout_truncated"),
+        "a 2000-byte stdout capped at 8 bytes must report stdout_truncated"
+    );
+    assert_eq!(require_int(&over, "stdout_bytes"), 2000);
+    assert!(!require_bool(&over, "stderr_truncated"));
+    assert_eq!(require_int(&over, "stderr_bytes"), 0);
+
+    // Negative control: exactly at the cap nothing was dropped.
+    let exact = run(8, 8);
+    assert_eq!(require_str(&exact, "stdout").len(), 8);
+    assert!(
+        !require_bool(&exact, "stdout_truncated"),
+        "an output of exactly max_inline_bytes must not read as truncated"
+    );
+    assert_eq!(require_int(&exact, "stdout_bytes"), 8);
+
+    let under = run(7, 8);
+    assert!(!require_bool(&under, "stdout_truncated"));
+    assert_eq!(require_int(&under, "stdout_bytes"), 7);
+}
+
 #[test]
 fn read_command_output_rejects_arbitrary_path_reads() {
     let mut req = dict();
