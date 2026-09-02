@@ -10,9 +10,10 @@
 
 use crate::value::{VmError, VmValue};
 
-/// Serialize `val` to JSON for persistence: scalars/list/dict are preserved,
-/// `Decimal` becomes a precision-preserving string (read back via
-/// `decimal(...)`), and any non-data value kind becomes `null`.
+/// Serialize `val` to JSON for persistence: scalars, list, dict, and struct are
+/// preserved (a struct as its field map), `Decimal` becomes a
+/// precision-preserving string (read back via `decimal(...)`), and any non-data
+/// value kind becomes `null`.
 pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmError> {
     Ok(match val {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
@@ -41,6 +42,26 @@ pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmE
                 "{} is runtime authority and cannot be persisted as domain state",
                 handle.type_name()
             )));
+        }
+        // A struct is the idiomatic way to express a typed fact and the store
+        // is the idiomatic place to keep one, so the two composed into a value
+        // that was accepted and then dropped without a word. Persist it the
+        // way a record is persisted, field names to values, so it reads back
+        // as a dict instead of as nil. A Harness nested inside a struct still
+        // fails closed, because this recurses through the same conversion.
+        VmValue::StructInstance(_) => {
+            // `struct_fields_map` answers `Some` for every `StructInstance`, so
+            // this cannot fire. It panics rather than defaulting because an
+            // empty map here would persist `{}` and put us back where we
+            // started: a dropped write that reads back as a plausible value.
+            let fields = val
+                .struct_fields_map()
+                .expect("a StructInstance always yields a field map");
+            let obj = fields
+                .iter()
+                .map(|(k, v)| Ok((k.to_string(), vm_to_storage_json(v)?)))
+                .collect::<Result<serde_json::Map<String, serde_json::Value>, VmError>>()?;
+            serde_json::Value::Object(obj)
         }
         _ => serde_json::Value::Null,
     })
@@ -85,6 +106,44 @@ mod tests {
             bundle_error.contains("runtime authority")
                 && bundle_error.contains("cannot be persisted as domain state"),
             "{bundle_error}"
+        );
+    }
+
+    #[test]
+    fn a_struct_round_trips_as_its_field_map_rather_than_being_dropped() {
+        let record = VmValue::dict([("schema", VmValue::string("x")), ("n", VmValue::Int(1))]);
+        let typed = VmValue::struct_instance(
+            "Foo",
+            crate::value::DictMap::new()
+                .update("schema".into(), VmValue::string("x"))
+                .update("n".into(), VmValue::Int(1)),
+        );
+
+        let stored_record = vm_to_storage_json(&record).expect("a dict persists");
+        let stored_struct = vm_to_storage_json(&typed).expect("a struct persists");
+
+        // The equivalence the caller assumed all along: the same fields, whether
+        // they were written as a record or as a typed value.
+        assert_eq!(
+            stored_struct, stored_record,
+            "struct did not match the dict"
+        );
+        assert!(
+            !stored_struct.is_null(),
+            "a struct must not persist as null, which reads back as nil"
+        );
+
+        // Authority must not become domain state just because it was wrapped
+        // in a struct.
+        let harness = crate::harness::Harness::null().into_vm_value();
+        let smuggled = VmValue::struct_instance(
+            "Holder",
+            crate::value::DictMap::new().update("h".into(), harness),
+        );
+        let error = vm_to_storage_json(&smuggled).unwrap_err().to_string();
+        assert!(
+            error.contains("cannot be persisted as domain state"),
+            "{error}"
         );
     }
 }

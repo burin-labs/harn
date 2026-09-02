@@ -165,7 +165,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.127-dev"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.127"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -645,6 +645,52 @@ class AgentTerminalOwner(str, Enum):
     POLICY = "policy"
     PROVIDER = "provider"
     HARNESS = "harness"
+    UNKNOWN = "unknown"
+
+
+class LlmErrorCategory(str, Enum):
+    TIMEOUT = "timeout"
+    AUTH = "auth"
+    INVALID_REQUEST = "invalid_request"
+    RATE_LIMIT = "rate_limit"
+    OVERLOADED = "overloaded"
+    SERVER_ERROR = "server_error"
+    TRANSIENT_NETWORK = "transient_network"
+    RESOURCE_BUSY = "resource_busy"
+    SCHEMA_INCOMPATIBLE = "schema_incompatible"
+    SCHEMA_VALIDATION = "schema_validation"
+    SCHEMA_STREAM_ABORTED = "schema_stream_aborted"
+    TOOL_ERROR = "tool_error"
+    TOOL_REJECTED = "tool_rejected"
+    EGRESS_BLOCKED = "egress_blocked"
+    CANCELLED = "cancelled"
+    CHANNEL_CLOSED = "channel_closed"
+    NOT_FOUND = "not_found"
+    CIRCUIT_OPEN = "circuit_open"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    INTERNAL = "internal"
+    ENVIRONMENT = "environment"
+    GENERIC = "generic"
+
+
+class LlmErrorKind(str, Enum):
+    TRANSIENT = "transient"
+    TERMINAL = "terminal"
+
+
+class LlmErrorReason(str, Enum):
+    RATE_LIMIT = "rate_limit"
+    SERVER_ERROR = "server_error"
+    NETWORK_ERROR = "network_error"
+    TIMEOUT = "timeout"
+    AUTH_FAILURE = "auth_failure"
+    CONTEXT_OVERFLOW = "context_overflow"
+    CONTENT_POLICY = "content_policy"
+    INVALID_REQUEST = "invalid_request"
+    INVALID_RESPONSE = "invalid_response"
+    MODEL_UNAVAILABLE = "model_unavailable"
+    EMPTY_GENERATION = "empty_generation"
+    OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
 
 

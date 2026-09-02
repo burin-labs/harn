@@ -4,6 +4,12 @@
 //! projects before it is sent. [`super::cost`] owns "what does it cost" and
 //! prices these counts; keeping the two apart means a pricing change cannot
 //! silently redefine what a segment counts.
+//!
+//! Because the projection is request-side, it measures what Harn puts on the
+//! wire, not what the model ends up reading. Provider-side deferral is where
+//! that distinction bites: a deferred tool is sent but not resident, so it
+//! gets its own segment and its own count instead of being folded into the
+//! resident total, where it would make a real saving read as zero (#7768).
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(crate) struct LlmContextTokenBreakdown {
@@ -13,7 +19,14 @@ pub(crate) struct LlmContextTokenBreakdown {
     pub output_budget_tokens: i64,
     pub context_tokens: i64,
     pub message_count: usize,
+    /// Every tool in the request array, deferred ones included. This is what
+    /// Harn sends.
     pub native_tool_count: usize,
+    /// The subset whose schema is resident in the model's context on this
+    /// call. Without it a reader has the deferred token split but no count to
+    /// pair it with, and `native_tool_count` alone reads as "nothing was
+    /// deferred" (#7768).
+    pub resident_tool_count: usize,
     pub provider_tool_count: usize,
 }
 
@@ -74,21 +87,36 @@ pub(crate) fn project_llm_call_context_breakdown(
             _ => other_message_tokens += tokens,
         }
     }
-    let tool_tokens: i64 = opts
+    // Deferred tools ship in the same array as resident ones but stay out of
+    // the model's context until a tool-search call surfaces them, so a single
+    // total cannot tell "this tool costs nothing yet" from "this measurement
+    // did not fire". Splitting the two makes a `defer_loading` change visible
+    // instead of reading as zero (#7768). The two partition the array, so
+    // every total below — and every budget decision taken from it — is
+    // byte-identical to a single combined segment.
+    let tool_token_estimate = |tool: &serde_json::Value| {
+        estimate_text_tokens_for_model(
+            &serde_json::to_string(tool).unwrap_or_default(),
+            &opts.model,
+        )
+    };
+    let (resident_tools, deferred_tools): (Vec<_>, Vec<_>) = opts
         .native_tools
-        .as_ref()
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| {
-                    estimate_text_tokens_for_model(
-                        &serde_json::to_string(tool).unwrap_or_default(),
-                        &opts.model,
-                    )
-                })
-                .sum()
-        })
-        .unwrap_or(0);
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .partition(|tool| !crate::llm::tools::native_tool_is_deferred(tool));
+    let resident_tool_tokens: i64 = resident_tools
+        .iter()
+        .copied()
+        .map(tool_token_estimate)
+        .sum();
+    let deferred_tool_tokens: i64 = deferred_tools
+        .iter()
+        .copied()
+        .map(tool_token_estimate)
+        .sum();
+    let tool_tokens = resident_tool_tokens.saturating_add(deferred_tool_tokens);
     let provider_tool_tokens: i64 = opts
         .provider_tools
         .iter()
@@ -136,7 +164,12 @@ pub(crate) fn project_llm_call_context_breakdown(
         LlmContextTokenSegment {
             id: "native_tool_schemas",
             label: "Native tool schemas",
-            tokens: tool_tokens,
+            tokens: resident_tool_tokens,
+        },
+        LlmContextTokenSegment {
+            id: "deferred_tool_schemas",
+            label: "Deferred tool schemas",
+            tokens: deferred_tool_tokens,
         },
         LlmContextTokenSegment {
             id: "provider_tools",
@@ -156,6 +189,7 @@ pub(crate) fn project_llm_call_context_breakdown(
         output_budget_tokens: projected_output_tokens,
         context_tokens: projected_input_tokens.saturating_add(projected_output_tokens),
         message_count: opts.messages.len(),
+        resident_tool_count: resident_tools.len(),
         native_tool_count: opts
             .native_tools
             .as_ref()

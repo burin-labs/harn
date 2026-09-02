@@ -178,6 +178,14 @@ pub(super) fn generate_manifest_for_version(
             "toolMutationStatuses": tool_mutation_status_values(),
             "promptErrorDataSchema": ACP_PROMPT_ERROR_DATA_SCHEMA,
             "promptErrorTerminalClasses": agent_terminal_class_values(),
+            "promptErrorCategories": llm_error_category_values(),
+            "promptErrorKinds": llm_error_kind_values(),
+            "promptErrorReasons": llm_error_reason_values(),
+            // `code` on the prompt-error envelope is a provider passthrough.
+            // It has no Harn-owned vocabulary and no closed set, so it is
+            // declared here as open rather than enumerated. Hosts branch on
+            // `promptErrorReasons`.
+            "promptErrorCodeIsProviderPassthrough": true,
             "toolExecutorSimpleValues": ACP_TOOL_EXECUTOR_SIMPLE_VALUES,
             "workerStatuses": worker_status_values(),
             "agentLifecycleStates": agent_lifecycle_state_values(),

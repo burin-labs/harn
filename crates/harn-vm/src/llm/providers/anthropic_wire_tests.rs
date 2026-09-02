@@ -396,3 +396,49 @@ fn unsupported_fable_route_folds_system_message_on_exact_wire() {
         ])
     );
 }
+
+/// `output_format: json_object` used to pin `tool_choice` to the synthetic
+/// `json_response` tool on every Anthropic route. Claude Fable 5.1 removed
+/// forced tool choice, so that body is a hard 400 there and the plain
+/// json-object request could never succeed. Verified live on 2026-09-01:
+/// the forced shape returns `tool_choice: type "tool" and "any" are not
+/// supported for this model`, while `output_config.format` with a closed
+/// `additionalProperties` is accepted and answers.
+///
+/// The Fable 5 control is what stops this from passing vacuously: it still
+/// takes the forced-tool path, so a rule that matched too broadly, or a
+/// predicate that always returned false, would fail here.
+#[test]
+fn json_object_output_avoids_forced_tool_choice_only_where_it_is_refused() {
+    let mut fable51 = base_payload();
+    fable51.model = "claude-fable-5-1".to_string();
+    fable51.output_format = crate::llm::api::OutputFormat::JsonObject;
+    let body = AnthropicProvider::build_request_body(&fable51);
+
+    assert!(
+        body.get("tool_choice").is_none(),
+        "Fable 5.1 must not receive a forced tool_choice: {body}"
+    );
+    assert_eq!(
+        body["output_config"]["format"]["type"],
+        serde_json::json!("json_schema"),
+        "the json-object request must lower to native structured output: {body}"
+    );
+    assert_eq!(
+        body["output_config"]["format"]["schema"]["additionalProperties"],
+        serde_json::json!(false),
+        "Anthropic rejects additionalProperties: true on a structured-output schema"
+    );
+
+    // Control: Fable 5 still accepts a forced tool choice, so it keeps the
+    // existing synthetic-tool behaviour untouched.
+    let mut fable5 = base_payload();
+    fable5.model = "claude-fable-5".to_string();
+    fable5.output_format = crate::llm::api::OutputFormat::JsonObject;
+    let control = AnthropicProvider::build_request_body(&fable5);
+    assert_eq!(
+        control["tool_choice"],
+        serde_json::json!({"type": "tool", "name": "json_response"}),
+        "Fable 5 must keep the forced-tool path: {control}"
+    );
+}

@@ -12,7 +12,9 @@ mod write_root;
 pub(super) use parallel::run_parallel_conformance_tests;
 use sharding::select_conformance_shard;
 
-use empty_run::{empty_run_message, expectation_sibling, report_empty_run};
+use empty_run::{
+    empty_run_message, expectation_sibling, report_empty_run, requires_expectation_sibling,
+};
 use lint::{format_conformance_lint_diagnostics, lint_expectation_error};
 use selection::{conformance_filter_matches, resolve_conformance_selection};
 
@@ -1172,10 +1174,13 @@ pub(crate) async fn run_conformance_tests(
             }
         }
 
-        if expectation_sibling(harn_file).is_none() {
-            // Not a defect on its own: the suite also holds library modules
-            // that real tests import. It is only notable when it leaves the
-            // run with nothing to do, which the caller checks for.
+        if expectation_sibling(harn_file).is_none()
+            && !requires_expectation_sibling(harn_file, rel_path)
+        {
+            // Function-only modules are imported by executable cases and do
+            // not need their own oracle. Any pipeline is independently
+            // executable under the compiler's default-or-first entry rule,
+            // so it continues into evaluation and becomes a named failure.
             continue;
         }
 

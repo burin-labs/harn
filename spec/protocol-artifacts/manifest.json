@@ -407,7 +407,51 @@
       "transcript_projected",
       "worker_update"
     ],
+    "promptErrorCategories": [
+      "timeout",
+      "auth",
+      "invalid_request",
+      "rate_limit",
+      "overloaded",
+      "server_error",
+      "transient_network",
+      "resource_busy",
+      "schema_incompatible",
+      "schema_validation",
+      "schema_stream_aborted",
+      "tool_error",
+      "tool_rejected",
+      "egress_blocked",
+      "cancelled",
+      "channel_closed",
+      "not_found",
+      "circuit_open",
+      "budget_exceeded",
+      "internal",
+      "environment",
+      "generic"
+    ],
+    "promptErrorCodeIsProviderPassthrough": true,
     "promptErrorDataSchema": "harn.acp.prompt_error.v1",
+    "promptErrorKinds": [
+      "transient",
+      "terminal"
+    ],
+    "promptErrorReasons": [
+      "rate_limit",
+      "server_error",
+      "network_error",
+      "timeout",
+      "auth_failure",
+      "context_overflow",
+      "content_policy",
+      "invalid_request",
+      "invalid_response",
+      "model_unavailable",
+      "empty_generation",
+      "output_budget_exhausted",
+      "unknown"
+    ],
     "promptErrorTerminalClasses": [
       "context_overflow",
       "provider_misconfigured",
@@ -573,7 +617,7 @@
       "unavailable"
     ]
   },
-  "artifactVersion": "0.10.127-dev",
+  "artifactVersion": "0.10.127",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",
