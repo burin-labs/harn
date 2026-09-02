@@ -412,7 +412,7 @@ pub fn __verification_warm_state_first_fact(tools: HarnessTools, row: any, opts:
   return len(facts) == 0 ? nil : facts[0]
 }
 
-pub fn __verification_warm_state_receipt_handle(value: dict) {
+pub fn __verification_warm_state_receipt_handle(value: dict?) {
   if value == nil {
     return nil
   }
