@@ -227,6 +227,46 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 ));
             }
         }
+        let mut reasoning_mode_ids = BTreeSet::new();
+        for mode in &model.reasoning_modes {
+            if !reasoning_mode_ids.insert(mode.id.as_str()) {
+                result.errors.push(format!(
+                    "model {} declares duplicate reasoning_modes id {:?}",
+                    model.id, mode.id
+                ));
+            }
+            // `standard` is the implicit default; declaring it would create a
+            // second way to say "no mode" that the runtime already discards.
+            if mode.id == crate::llm::reasoning_modes::STANDARD_MODE_ID {
+                result.errors.push(format!(
+                    "model {} declares the implicit default reasoning mode {:?}; \
+                     omit it instead",
+                    model.id, mode.id
+                ));
+            }
+            if let Some(status) = mode.status.as_deref() {
+                if !matches!(status, "ga" | "beta" | "research_preview" | "deprecated") {
+                    result.warnings.push(format!(
+                        "model {} reasoning_modes[{}].status {:?} is not one of ga|beta|research_preview|deprecated",
+                        model.id, mode.id, status
+                    ));
+                }
+            }
+            // A mode with no knob is unreachable: the runtime cannot express it
+            // on the wire, so a caller asking for it would silently get the
+            // default while believing it opted into premium work.
+            match &mode.request {
+                None => result.errors.push(format!(
+                    "model {} reasoning mode {:?} must declare a request knob",
+                    model.id, mode.id
+                )),
+                Some(request) if request.param_path.is_empty() => result.errors.push(format!(
+                    "model {} reasoning mode {:?} declares an empty param_path",
+                    model.id, mode.id
+                )),
+                Some(_) => {}
+            }
+        }
         let has_batch_tag = model.capability_tags.iter().any(|tag| tag == "batch");
         match (&model.batch, has_batch_tag) {
             (Some(batch), true) => validate_batch_support(model, batch, &mut result),

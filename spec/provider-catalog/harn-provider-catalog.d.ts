@@ -207,6 +207,7 @@ export interface HarnCatalogModel {
   strengths?: string[]
   benchmarks?: Record<string, number>
   serving_tiers?: HarnModelServingTier[]
+  reasoning_modes?: HarnModelReasoningMode[]
   released?: string
   row_kind?: "snapshot" | "selector"
   current_snapshot?: string
@@ -328,6 +329,25 @@ export interface HarnCompletionReview {
   scrutiny: "standard" | "light"
   max_judge_calls?: number
   evidence: string
+}
+
+export interface HarnModelReasoningModeRequest {
+  param_path: string[]
+  value: string
+  response_values?: string[]
+}
+
+export interface HarnModelReasoningMode {
+  id: string
+  label?: string
+  economics: "discounted" | "standard" | "premium"
+  request?: HarnModelReasoningModeRequest
+  token_multiplier?: number
+  status?: string
+  latency?: string
+  suitable_workloads?: string[]
+  unsuitable_workloads?: string[]
+  note?: string
 }
 
 export interface HarnModelServingTierRequest {

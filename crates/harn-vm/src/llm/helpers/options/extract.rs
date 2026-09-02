@@ -895,6 +895,16 @@ pub(crate) fn extract_llm_options(
         }
     }
 
+    // `reasoning_mode` is the execution-path intent: "standard" (default) or a
+    // catalog-declared mode such as "pro". Resolution and the catalog gate live
+    // in the owning module, not here.
+    let reasoning_mode = crate::llm::reasoning_modes::resolve_requested(
+        opt_str(&options, "reasoning_mode").as_deref(),
+        &model,
+        &provider,
+        enforce_capability_gates,
+    )?;
+
     let mut opts = LlmCallOptions {
         provider,
         model,
@@ -945,6 +955,7 @@ pub(crate) fn extract_llm_options(
         portable_option_intent,
         provider_contract_probe: crate::llm::provider_contract_probe::current_portable_option(),
         fast,
+        reasoning_mode,
         output_format,
         output_schema,
         output_validation,

@@ -511,6 +511,7 @@ fn catalog_model(
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),
         serving_tiers: model.serving_tiers.clone(),
+        reasoning_modes: model.reasoning_modes.clone(),
         released: model.released.clone(),
         row_kind: model.row_kind,
         current_snapshot: model.current_snapshot.clone(),

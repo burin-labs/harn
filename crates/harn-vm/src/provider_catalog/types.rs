@@ -320,6 +320,11 @@ pub struct CatalogModel {
     /// Non-default synchronous serving tiers such as fast, priority, or flex.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serving_tiers: Vec<llm_config::ServingTierDef>,
+    /// Non-default reasoning execution modes such as OpenAI pro mode. Sibling
+    /// of `serving_tiers`: a tier changes the per-token rate, a mode changes
+    /// how many tokens the model spends at unchanged rates.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_modes: Vec<llm_config::ReasoningModeDef>,
     /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released: Option<String>,
