@@ -2169,7 +2169,8 @@ Compaction entrypoints accept a typed host/user instruction lane through
 import {compact_preserving_test_failures} from "std/agent/autocompact"
 
 // Returns { messages, archived, summary, receipt
-// }. `receipt` is nil when archived is 0. Use `archived` (the engine's true
+// }. `receipt` is nil when archived is 0.
+// Use `archived` (the engine's true
 // archived-message count) to tell whether
 // compaction happened -- never infer
 // it from a length delta, since archiving one message and inserting one
