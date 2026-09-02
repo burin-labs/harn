@@ -159,7 +159,7 @@ fn anthropic_fable_51_forbids_forced_tool_choice() {
     assert!(!caps.temperature_supported);
     assert!(caps.native_tools);
     assert!(caps.prompt_caching);
-    assert_eq!(caps.prompt_cache_min_prefix_tokens, 512);
+    assert_eq!(caps.prompt_cache_min_prefix_tokens, Some(512));
 
     // Control: Fable 5 must stay unrestricted, or the 5.1 row is matching
     // more than it should.

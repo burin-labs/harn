@@ -689,6 +689,48 @@ prompt_cache_min_prefix_tokens = 2048
 # every fable/mythos id is Mythos-class. Without these rows the ids would
 # fall through to the permissive `claude-*` catch-all at the bottom of this
 # file, which wrongly grants `thinking_modes = ["enabled"]` and prefill.
+# Claude Fable 5.1 (2026-09-01) shares the Fable/Mythos surface below with one
+# wire-visible narrowing: forced tool choice is removed. `tool_choice` `any`
+# and `tool` return a 400 on this model — on count_tokens and Batches too — so
+# only `auto` and `none` may reach the wire. That is not expressible by the
+# `claude-fable-*` catch-all, which leaves `allowed_tool_choice_modes` empty
+# (unrestricted), so 5.1 needs its own row ahead of it. Everything else is
+# restated verbatim from the catch-all because rules do not merge unless the
+# row sets `extends`.
+[[provider.anthropic]]
+model_match = "claude-fable-5-1*"
+prompt_cache_min_prefix_tokens = 512
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "native"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+temperature_supported = false
+top_p_supported = false
+top_k_supported = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+allowed_tool_choice_modes = ["auto", "none"]
+
 [[provider.anthropic]]
 model_match = "claude-fable-*"
 prompt_cache_min_prefix_tokens = 512
