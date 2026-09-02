@@ -1,6 +1,6 @@
 //! HTTP and SSE transport routing for MCP.
 use super::auth::{
-    attach_http_headers, should_stream_post_response, validate_origin, validate_protocol_header,
+    attach_http_headers, should_stream_post_response, validate_origin,
     validate_standard_routing_headers,
 };
 use super::schema::parse_error_response;
@@ -15,10 +15,6 @@ pub(super) async fn http_post_request(
     if let Err(response) = validate_origin(&headers) {
         return *response;
     }
-    if let Err(response) = validate_protocol_header(&headers) {
-        return *response;
-    }
-
     let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {

@@ -1313,8 +1313,8 @@ async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
             .expect("advertised output schema");
     assert!(output_validator.is_valid(&read["result"]["result"]["structuredContent"]));
 
-    // Cancelling something already terminal has to be refused rather than
-    // quietly accepted, or a client cannot tell whether it beat the work.
+    // Cancelling something already terminal is idempotent. The terminal read
+    // above remains the authority for whether cancellation beat the work.
     let cancel = server
         .handle_json_rpc(
             crate::jsonrpc::request(
@@ -1326,10 +1326,10 @@ async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
         )
         .await
         .expect("response");
-    assert!(cancel["error"]["message"]
-        .as_str()
-        .expect("a refused cancel explains itself")
-        .contains("already in terminal status 'completed'"));
+    assert_eq!(
+        cancel["result"]["resultType"],
+        serde_json::json!("complete")
+    );
 }
 
 /// Opting in is per tool, so adding the extension cannot change how a tool that

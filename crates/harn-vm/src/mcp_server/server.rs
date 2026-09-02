@@ -546,7 +546,7 @@ impl McpServer {
                         ),
                         Err(error) => {
                             self.tasks
-                                .complete(&task.task_id, Err(error), uses_result_envelope)
+                                .complete(&task.task_id, Err(error), uses_result_envelope);
                         }
                     }
                 }
