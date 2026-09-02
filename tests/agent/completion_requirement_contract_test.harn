@@ -982,3 +982,66 @@ pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
     },
   )
 }
+
+// A row whose ONLY accepted evidence kind is deterministic verification, with a
+// passing receipt in the packet, is met whether or not the judge itemized it.
+// Requiring the judge to assert a fact the runtime already recorded is the same
+// ceremony bc#7759 removed: the deterministic gate ran, it passed, and a model's
+// silence cannot un-run it. Judgment rows are untouched, because any row that
+// admits `assistant_output` still needs the judge.
+pipeline test_an_unreported_verification_row_is_met_by_its_passing_receipt(
+  harness: Harness,
+  task: unknown,
+) {
+  const verification_only: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "verify",
+        name: "Run the exact scoped verification command `pytest`.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  // The judge answered with a bare scalar and itemized nothing.
+  const report = completion_requirement_report(verification_only, nil, trial_shaped_packet("passed"))
+  assert_eq(report.rows[0].status, "met")
+  assert(report.complete)
+}
+
+// Negative controls. The receipt closes ONLY a verification-only row, and only
+// on a passing reading.
+pipeline test_a_receipt_never_closes_a_judgment_row_or_a_failing_run(
+  harness: Harness,
+  task: unknown,
+) {
+  // Default roles admit assistant_output, so this is the judge's to assess.
+  const judgment_row: CompletionRequirementContract = {
+    requirements: [{requirement_id: "say-hello", name: "Say hello."}],
+  }
+  const judged = completion_requirement_report(judgment_row, nil, trial_shaped_packet("passed"))
+  assert_eq(judged.rows[0].status, "missing")
+  assert(!judged.complete)
+  // A verification-only row with a failing reading stays unassessed.
+  const verification_only: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "verify",
+        name: "Run the exact scoped verification command `pytest`.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  const failing = completion_requirement_report(
+    verification_only,
+    nil,
+    trial_shaped_packet("failed"),
+  )
+  assert_eq(failing.rows[0].status, "missing")
+  // An explicit `not met` from the judge is still the judge's answer.
+  const refused = completion_requirement_report(
+    verification_only,
+    [{requirement_id: "verify", met: false, evidence_refs: []}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(refused.rows[0].status, "unmet")
+}
