@@ -8,9 +8,12 @@ import {
   CompletionEvidenceRole,
   CompletionEvidenceSelection,
   CompletionEvidenceSnapshot,
+  CompletionReadOnlyEvidence,
   CompletionToolSemantics,
   completion_evidence_id,
+  completion_read_only_evidence,
   completion_requirement_evidence_packet,
+  completion_research_summary,
 } from "std/agent/completion_evidence"
 import {
   CompletionRequirementEvidencePacket,
@@ -471,8 +474,9 @@ fn __judge_issue_evidence(issue: AgentTranscriptIssue) -> CompletionEvidenceIssu
 /**
  * Build the bounded evidence packet sent to the completion-judge LLM. The raw
  * transcript remains on the canonical payload for deterministic gates, replay,
- * and audit. Selection is structural: explicitly read-only calls are omitted;
- * explicit mutation and verification roles are retained. Canonical edit and
+ * and audit. Selection is structural: explicit mutation and verification roles
+ * are retained as actions, and read-only calls are reduced to the bounded
+ * `research_summary` instead of being dropped. Canonical edit and
  * workspace-write annotations imply mutation; execute tools must declare a
  * completion evidence role instead of being guessed from provider prose or
  * process capability.
@@ -488,7 +492,7 @@ fn __judge_evidence_projection_from_lifecycle(
   raw_transcript_digest: any = nil,
 ) -> CompletionEvidenceProjection {
   let relevant_call_count = 0
-  let omitted_read_only_call_count = 0
+  let read_only_evidence: list<CompletionReadOnlyEvidence> = []
   let latest_mutation = nil
   let latest_verification = nil
   let latest_problem = nil
@@ -496,7 +500,7 @@ fn __judge_evidence_projection_from_lifecycle(
   for call in lifecycle.calls {
     const action = __judge_lifecycle_action(call, opts)
     if action.semantics.read_only {
-      omitted_read_only_call_count = omitted_read_only_call_count + 1
+      read_only_evidence = read_only_evidence + [completion_read_only_evidence(call, action)]
       latest_observation = __judge_latest(latest_observation, action)
       continue
     }
@@ -532,16 +536,18 @@ fn __judge_evidence_projection_from_lifecycle(
   }
   const raw_digest = raw_transcript_digest
     ?? ("sha256:" + sha256(json_stringify(messages)))
+  const research_summary = completion_research_summary(read_only_evidence)
   const packet = {
     schema: "harn.completion_judge_evidence.v2",
     raw_message_count: len(messages),
     raw_transcript_digest: raw_digest,
     relevant_action_count: relevant_call_count,
-    omitted_read_only_call_count: omitted_read_only_call_count,
+    omitted_read_only_call_count: research_summary.omitted_count,
     omitted_older_action_count: max(relevant_call_count - len(selected), 0),
     lifecycle_issue_count: lifecycle.invalid_count,
     lifecycle_issues: latest_issues,
     actions: selected,
+    research_summary: research_summary,
     fallback_observations: observation_fallback,
     requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
   }
@@ -566,7 +572,8 @@ fn __judge_evidence_projection_from_lifecycle(
       relevant_call_count: relevant_call_count,
       included_action_count: len(selected),
       included_fallback_observation_count: len(observation_fallback),
-      omitted_read_only_call_count: omitted_read_only_call_count,
+      included_read_only_call_count: research_summary.included_count,
+      omitted_read_only_call_count: research_summary.omitted_count,
       omitted_older_action_count: max(relevant_call_count - len(selected), 0),
       lifecycle_issue_count: lifecycle.invalid_count,
       serialized_chars: len(serialized),

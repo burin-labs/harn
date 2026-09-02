@@ -2,9 +2,14 @@
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
 import { CompletionVerificationState } from "std/agent/judge_internals"
 import { CompletionObligations } from "std/agent/obligations"
-import { AgentTranscriptToolLifecycleStatus } from "std/agent/transcript"
+import {
+  AgentTranscriptToolLifecycle,
+  AgentTranscriptToolLifecycleStatus,
+} from "std/agent/transcript"
 
 const COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT = 4500
+
+const COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT = 160
 
 const COMPLETION_FINAL_OUTPUT_EVIDENCE_INDEX = -1
 
@@ -33,6 +38,41 @@ pub type CompletionEvidenceAction = {
   has_error_result: bool,
 }
 
+/**
+ * One read-only call, reduced to what a completion authority needs to weigh it.
+ *
+ * A goal that resolves to "there is nothing to build here" can only be
+ * supported by read-only evidence, so the packet must be able to represent it.
+ * These records are deliberately narrow: a name, what was looked at, and a
+ * one-line digest of what came back. The full result body stays out of the
+ * packet and remains on the raw transcript for deterministic gates and replay.
+ */
+pub type CompletionReadOnlyEvidence = {
+  ordinal: int,
+  evidence_index: int,
+  name: string,
+  target: string,
+  result_digest: string,
+  has_error_result: bool,
+}
+
+/**
+ * The bounded read-only record set, with its own budget accounting.
+ *
+ * `read_only_call_count` is every read-only call in the turn. `included_count`
+ * is how many carry a record here, `omitted_count` the remainder. The budget
+ * degrades to counts, never to silence: a summary that could not carry a single
+ * record still reports how many reads happened, so a judge is never shown a
+ * window narrower than it believes.
+ */
+pub type CompletionResearchSummary = {
+  schema: "harn.completion_judge_research_summary.v1",
+  read_only_call_count: int,
+  included_count: int,
+  omitted_count: int,
+  reads: list<CompletionReadOnlyEvidence>,
+}
+
 pub type CompletionEvidenceIssue = {
   code: string,
   record_index: int,
@@ -45,11 +85,14 @@ pub type CompletionEvidencePacket = {
   raw_message_count: int,
   raw_transcript_digest: string,
   relevant_action_count: int,
+  // Read-only calls that carry no record in `research_summary`. Reads that do
+  // carry one are represented, not omitted, and are not counted here.
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
   lifecycle_issue_count: int,
   lifecycle_issues: list<CompletionEvidenceIssue>,
   actions: list<CompletionEvidenceAction>,
+  research_summary: CompletionResearchSummary,
   fallback_observations: list<CompletionEvidenceAction>,
   requirement_evidence: list<CompletionRequirementEvidenceRecord>,
 }
@@ -66,6 +109,7 @@ pub type CompletionEvidenceProjectionStats = {
   relevant_call_count: int,
   included_action_count: int,
   included_fallback_observation_count: int,
+  included_read_only_call_count: int,
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
   lifecycle_issue_count: int,
@@ -112,18 +156,138 @@ pub type CompletionEvidenceSnapshot = {
   obligations?: CompletionObligations?,
 }
 
-fn completion_evidence_clip(value: string) -> string {
-  if len(value) <= COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT {
-    return value
+fn completion_evidence_clip_to(value: any, limit: int) -> string {
+  const text = if type_of(value) == "string" {
+    value
+  } else {
+    json_stringify(value ?? "")
   }
-  const tail_chars = COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT / 3
-  const head_chars = COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT - tail_chars
-  const omitted = len(value) - COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT
-  return substring(value, 0, head_chars)
+  if len(text) <= limit {
+    return text
+  }
+  const tail_chars = limit / 3
+  const head_chars = limit - tail_chars
+  const omitted = len(text) - limit
+  return substring(text, 0, head_chars)
     + "\n…["
     + to_string(omitted)
     + " chars elided — middle of evidence]…\n"
-    + substring(value, len(value) - tail_chars, len(value))
+    + substring(text, len(text) - tail_chars, len(text))
+}
+
+fn completion_evidence_clip(value: string) -> string {
+  return completion_evidence_clip_to(value, COMPLETION_EVIDENCE_FIELD_CHAR_LIMIT)
+}
+
+// The most recent read-only calls carried into the packet. Six records at the
+// label and digest limits below stay under ~3k characters, which is the same
+// order as one retained action.
+const COMPLETION_RESEARCH_SUMMARY_LIMIT = 6
+
+const COMPLETION_READ_DIGEST_CHAR_LIMIT = 200
+
+const COMPLETION_READ_TARGET_KEYS = [
+  "path",
+  "file_path",
+  "file",
+  "paths",
+  "pattern",
+  "query",
+  "glob",
+  "directory",
+  "dir",
+  "url",
+  "command",
+  "cmd",
+  "target",
+]
+
+/**
+ * What a read-only call looked at.
+ *
+ * Prefer a canonical locator key when the arguments carry one, because that is
+ * what a judge weighing "was this stop justified?" needs to see. Fall back to
+ * the bounded arguments themselves so an unrecognized shape degrades to less
+ * detail rather than to nothing.
+ */
+fn completion_read_target(args: dict) -> string {
+  for key in COMPLETION_READ_TARGET_KEYS {
+    const value = args[key] ?? nil
+    if value != nil {
+      const rendered = trim(completion_evidence_clip_to(value, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT))
+      if rendered != "" && rendered != "\"\"" {
+        return rendered
+      }
+    }
+  }
+  return completion_evidence_clip_to(args, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT)
+}
+
+/** The first non-empty line of what a read returned, bounded to one line. */
+fn completion_read_digest(action: CompletionEvidenceAction) -> string {
+  for line in action.observation.split("\n") ?? [] {
+    const candidate = trim(line)
+    if candidate != "" {
+      return completion_evidence_clip_to(candidate, COMPLETION_READ_DIGEST_CHAR_LIMIT)
+    }
+  }
+  const facts = trim(action.result_facts)
+  if facts != "" && facts != "{}" {
+    return completion_evidence_clip_to(facts, COMPLETION_READ_DIGEST_CHAR_LIMIT)
+  }
+  return ""
+}
+
+/**
+ * Reduce one read-only lifecycle call to its bounded evidence record.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_read_only_evidence(
+  lifecycle: AgentTranscriptToolLifecycle,
+  action: CompletionEvidenceAction,
+) -> CompletionReadOnlyEvidence {
+  return {
+    ordinal: action.ordinal,
+    evidence_index: action.evidence_index,
+    name: action.name,
+    target: completion_read_target(lifecycle.args),
+    result_digest: completion_read_digest(action),
+    has_error_result: action.has_error_result,
+  }
+}
+
+/**
+ * Reduce read-only calls to a bounded research summary.
+ *
+ * The last `COMPLETION_RESEARCH_SUMMARY_LIMIT` reads keep a record; older ones
+ * survive as `omitted_count`. Nothing about the turn's research becomes
+ * unreportable, which is the property that matters: a completion goal can
+ * resolve to "there is nothing to build here", and read-only calls are then
+ * the only evidence that exists.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_research_summary(
+  reads: list<CompletionReadOnlyEvidence>,
+) -> CompletionResearchSummary {
+  const total = len(reads)
+  const included = if total < COMPLETION_RESEARCH_SUMMARY_LIMIT {
+    reads
+  } else {
+    reads.slice(total - COMPLETION_RESEARCH_SUMMARY_LIMIT, total)
+  }
+  return {
+    schema: "harn.completion_judge_research_summary.v1",
+    read_only_call_count: total,
+    included_count: len(included),
+    omitted_count: max(total - len(included), 0),
+    reads: included,
+  }
 }
 
 fn completion_requirement_evidence_without(
@@ -199,6 +363,10 @@ pub fn completion_evidence_id(
     trigger: stop_reason,
     candidate_text: text,
     actions: packet.actions,
+    // A turn that only researched changes no action, so without this key two
+    // decisions taken on different research share an identity and the second
+    // judge call dedupes onto the first.
+    research_summary: packet.research_summary,
     fallback_observations: packet.fallback_observations,
     requirement_evidence: packet.requirement_evidence,
     lifecycle_issues: packet.lifecycle_issues,
