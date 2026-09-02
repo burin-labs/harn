@@ -372,23 +372,23 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   assert_eq(policy.targets.count, 1)
   const target = unwrap(policy.targets[0])
   assert_eq(target.distribution_fuse_bytes, 285212672)
-  assert_eq(target.baseline.version, "0.10.125")
-  assert_eq(target.baseline.source_sha, "57e7862b6c6374393bde724962107d3b765c0967")
-  assert_eq(target.baseline.bytes, 249726232)
-  assert_eq(target.baseline.observed_at, "2026-09-01T02:16:39Z")
-  // The fuse is a fuse, not a ratchet: ~14.2% of headroom above the released
+  assert_eq(target.baseline.version, "0.10.127")
+  assert_eq(target.baseline.source_sha, "cd682579d07b1fbd3eacd8decb83c6ef8c04c76b")
+  assert_eq(target.baseline.bytes, 248725912)
+  assert_eq(target.baseline.observed_at, "2026-09-02T16:12:17Z")
+  // The fuse is a fuse, not a ratchet: ~14.7% of headroom above the released
   // baseline, inside the validator's 10-15% band. The schema-1 policy this
   // replaced allowed at most 4 MiB (1.8%) and turned every real change into a
   // release-day cliff; the stale 0.10.118 baseline plus a one-off allowance did
   // the same to the v0.10.126 cut.
-  assert_eq(target.distribution_fuse_bytes - target.baseline.bytes, 35486440)
+  assert_eq(target.distribution_fuse_bytes - target.baseline.bytes, 36486760)
   assert_eq(target.growth.warn_bytes, 4194304)
   assert_eq(target.growth.warn_percent_hundredths, 200)
   assert_eq(target.baseline.build_identity.codegen_units, 8)
   assert_eq(target.baseline.build_identity.rustc, "1.95.0")
   // No standing allowance: growth is measured against the released baseline.
   assert_eq(target.accepted_growth.count, 0)
-  const baseline = evaluate_release_binary_size(target, measurement(249726232))
+  const baseline = evaluate_release_binary_size(target, measurement(248725912))
   assert_eq(baseline.growth, "ok")
   assert_eq(baseline.failures, [])
   // The exact candidate the stale policy refused (v0.10.126 cut, +662,400 bytes).
@@ -405,15 +405,15 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   assert(beyond_thresholds.warnings[0]?.starts_with("growth signal:"))
   assert_eq(beyond_thresholds.fuse, "ok")
   // The boundary against the released baseline, exactly. The percent axis binds
-  // first here: 2.00% of 249,726,232 is 4,994,525 bytes, well above the 4 MiB
-  // floor, so 254,720,757 is the first measurement that crosses both and
-  // 254,720,756 is the last that crosses neither.
-  const at_boundary = evaluate_release_binary_size(target, measurement(254720757))
+  // first here: 2.00% of 248,725,912 is 4,974,519 bytes, well above the 4 MiB
+  // floor, so 253,700,431 is the first measurement that crosses both and
+  // 253,700,430 is the last that crosses neither.
+  const at_boundary = evaluate_release_binary_size(target, measurement(253700431))
   assert_eq(at_boundary.delta_percent_hundredths, 200)
   assert_eq(at_boundary.growth, "warn")
   assert_eq(at_boundary.failures, [])
   assert_eq(at_boundary.warnings.count, 1)
-  const below_boundary = evaluate_release_binary_size(target, measurement(254720756))
+  const below_boundary = evaluate_release_binary_size(target, measurement(253700430))
   assert_eq(below_boundary.delta_percent_hundredths, 199)
   assert_eq(below_boundary.growth, "ok")
   assert_eq(below_boundary.failures, [])
