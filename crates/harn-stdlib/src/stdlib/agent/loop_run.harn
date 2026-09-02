@@ -411,130 +411,37 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         const had_full_parse_rejection = parse_feedback.had_full_parse_rejection
         const await_call = __agent_await_resumption_call(tool_calls)
         if await_call != nil {
-          const await_parsed = try {
-            __agent_await_resumption_args(harness.agent, await_call)
-          }
-          if !is_err(await_parsed) {
-            __agent_loop_record_await_tool_results(
-              harness.agent,
-              session,
-              await_call,
-              tool_calls,
-              unwrap(await_parsed).reason,
-            )
-          }
-          // The await helper snapshots the session before it returns a
-          // suspended result. Record the provider turn first so the portable
-          // checkpoint carries its usage and outcome facts with the messages.
-          const await_totals = agent_session_record_usage(
-            harness.agent,
-            session.session_id,
-            llm_result,
-            turn_llm_opts,
-            iteration_index + 1,
-          )
-          const await_result = if is_err(await_parsed) {
-            await_parsed
-          } else {
-            try {
-              __agent_loop_await_resumption(
-                harness.agent,
-                harness.runtime,
-                session,
-                iteration,
-                await_call,
-                unwrap(await_parsed),
-                opts,
-              )
-            }
-          }
-          if is_err(await_result) {
-            const await_error = unwrap_err(await_result)
-            if is_err(await_parsed) {
-              agent_session_record_undispatched_tool_results(
-                harness.agent,
-                session.session_id,
-                tool_calls,
-                "skipped",
-                "not dispatched: the agent_await_resumption call in this turn was invalid",
-              )
-            }
-            __inject_feedback_with_tool_repair(
-              harness.agent,
-              session.session_id,
-              "agent_await_resumption",
-              __agent_loop_invalid_await_resumption_feedback(await_error),
-            )
-            agent_emit_event(
-              harness.agent,
-              session.session_id,
-              "iteration_end",
-              {
-                iteration: iteration_index + 1,
-                iteration_info: __agent_loop_iteration_info(
-                  harness.agent,
-                  harness.clock,
-                  session.session_id,
-                  llm_result,
-                  len(tool_calls),
-                  visible_text,
-                  await_totals,
-                  loop_start_ms,
-                )
-                  + {dispatch_skipped: true, skip_reason: "invalid_agent_await_resumption"},
-              },
-            )
-            const await_exhaustion = __agent_loop_budget_exhaustion(
-              harness.agent,
-              harness.clock,
-              session.session_id,
-              budget,
-              iteration,
-              await_totals,
-              loop_start_ms,
-              current_max,
-            )
-            if await_exhaustion.exhausted {
-              __agent_loop_emit_budget_exhausted(
-                harness.agent,
-                session.session_id,
-                await_exhaustion,
-              )
-              budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(
-                budget_decisions,
-                iteration,
-                current_max,
-                await_exhaustion.kind,
-              )
-              final_status = "budget_exhausted"
-              stop_reason = await_exhaustion.kind
-              break
-            }
-            continue
-          }
-          suspend_result = unwrap(await_result)
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "iteration_end",
+          const await_outcome = __agent_loop_await_turn(
+            harness,
+            session,
             {
-              iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
-                harness.agent,
-                harness.clock,
-                session.session_id,
-                llm_result,
-                len(tool_calls),
-                visible_text,
-                await_totals,
-                loop_start_ms,
-              ),
+              await_call: await_call,
+              budget: budget,
+              budget_decisions: budget_decisions,
+              budget_exhausted_emitted: budget_exhausted_emitted,
+              current_max: current_max,
+              final_status: final_status,
+              iteration: iteration,
+              iteration_index: iteration_index,
+              llm_result: llm_result,
+              loop_start_ms: loop_start_ms,
+              opts: opts,
+              stop_reason: stop_reason,
+              suspend_result: suspend_result,
+              tool_calls: tool_calls,
+              turn_llm_opts: turn_llm_opts,
+              visible_text: visible_text,
             },
           )
-          final_status = "suspended"
-          stop_reason = "suspended"
-          break
+          budget_decisions = await_outcome.budget_decisions
+          budget_exhausted_emitted = await_outcome.budget_exhausted_emitted
+          final_status = await_outcome.final_status
+          stop_reason = await_outcome.stop_reason
+          suspend_result = await_outcome.suspend_result
+          if await_outcome.action == "break" {
+            break
+          }
+          continue
         }
         const stall_judge_due = agent_stall_turn_end_judge_due(
           turn_opts,
