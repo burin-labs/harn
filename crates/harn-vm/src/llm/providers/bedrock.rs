@@ -239,6 +239,7 @@ fn strip_anthropic_sampling_params(body: &mut serde_json::Value, request: &LlmRe
         body,
         &request.model,
         &request.thinking,
+        request.provider_contract_probe,
     );
 }
 
@@ -728,6 +729,37 @@ mod tests {
     use chrono::TimeZone;
     use serde_json::json;
 
+    #[cfg(feature = "cloud-aws")]
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(feature = "cloud-aws")]
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    #[cfg(feature = "cloud-aws")]
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn converse_body_maps_messages_system_inference_and_tools() {
         let body = BedrockProvider::build_request_body(&base_request());
@@ -1057,6 +1089,52 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "cloud-aws")]
+    #[test]
+    fn default_credential_chain_resolves_environment_without_network() {
+        let _guard = crate::llm::env_guard();
+        assert!(
+            implicit_discovery_allowed(),
+            "the test must reach DefaultCredentialsChain, not the session-grant fast path"
+        );
+
+        let empty_aws_home = tempfile::tempdir().expect("empty AWS config directory");
+        let config_path = empty_aws_home.path().join("config");
+        let credentials_path = empty_aws_home.path().join("credentials");
+        let _access_key = ScopedEnvVar::set("AWS_ACCESS_KEY_ID", "fake-access-key");
+        let _secret_key = ScopedEnvVar::set("AWS_SECRET_ACCESS_KEY", "fake-secret-key");
+        let _session_token = ScopedEnvVar::set("AWS_SESSION_TOKEN", "fake-session-token");
+        let _legacy_session_token = ScopedEnvVar::remove("AWS_SECURITY_TOKEN");
+        let _credential_expiration = ScopedEnvVar::remove("AWS_CREDENTIAL_EXPIRATION");
+        let _profile = ScopedEnvVar::remove("AWS_PROFILE");
+        let _config = ScopedEnvVar::set("AWS_CONFIG_FILE", config_path.as_os_str());
+        let _credentials =
+            ScopedEnvVar::set("AWS_SHARED_CREDENTIALS_FILE", credentials_path.as_os_str());
+        let _web_identity_token = ScopedEnvVar::remove("AWS_WEB_IDENTITY_TOKEN_FILE");
+        let _role_arn = ScopedEnvVar::remove("AWS_ROLE_ARN");
+        let _role_session_name = ScopedEnvVar::remove("AWS_ROLE_SESSION_NAME");
+        let _container_relative = ScopedEnvVar::remove("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI");
+        let _container_full = ScopedEnvVar::remove("AWS_CONTAINER_CREDENTIALS_FULL_URI");
+        let _container_token = ScopedEnvVar::remove("AWS_CONTAINER_AUTHORIZATION_TOKEN");
+        let _container_token_file = ScopedEnvVar::remove("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE");
+        let _metadata_disabled = ScopedEnvVar::set("AWS_EC2_METADATA_DISABLED", "true");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("current-thread Tokio runtime");
+        let credentials: AwsCredentials = runtime
+            .block_on(resolve_aws_credentials("us-east-1"))
+            .expect("environment credentials should resolve without another provider");
+
+        assert_eq!(credentials.access_key_id, "fake-access-key");
+        assert_eq!(credentials.secret_access_key, "fake-secret-key");
+        assert_eq!(
+            credentials.session_token.as_deref(),
+            Some("fake-session-token")
+        );
+    }
+
     #[test]
     fn parse_converse_response_extracts_text_tools_and_usage() {
         let json = json!({
@@ -1190,6 +1268,7 @@ aws_secret_access_key = dev-secret
             frequency_penalty: None,
             presence_penalty: None,
             parallel_tool_calls: None,
+            provider_contract_probe: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
             output_schema: None,

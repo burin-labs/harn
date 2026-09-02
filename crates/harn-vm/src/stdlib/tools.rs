@@ -1410,7 +1410,7 @@ fn synthesized_tool_hash(spec: &SynthesizedToolSpec) -> String {
         "side_effect_level": spec.side_effect_level,
         "executor": synthesized_executor_hash_value(&spec.executor),
     });
-    let hash = blake3::hash(json.to_string().as_bytes());
+    let hash = blake3::hash(&crate::canonical_json::to_vec(&json));
     format!("tool_synth_{}", &hash.to_hex()[..16])
 }
 

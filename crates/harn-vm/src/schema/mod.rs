@@ -196,10 +196,10 @@ fn schema_i64(schema: &crate::value::DictMap, key: &str) -> Option<i64> {
     }
 }
 
-fn schema_number(schema: &crate::value::DictMap, key: &str) -> Option<f64> {
+fn schema_number(schema: &crate::value::DictMap, key: &str) -> Option<serde_json::Number> {
     match schema.get(key) {
-        Some(VmValue::Int(value)) => Some(*value as f64),
-        Some(VmValue::Float(value)) => Some(*value),
+        Some(VmValue::Int(value)) => Some(serde_json::Number::from(*value)),
+        Some(VmValue::Float(value)) => serde_json::Number::from_f64(*value),
         _ => None,
     }
 }

@@ -246,6 +246,40 @@ pub fn llm_has_explicit_routing_owner(options: any = nil) -> bool {
 }
 
 /**
+ * Whether the request's equivalent-route failover policy is active.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn llm_equivalent_failover_enabled(options: any = nil) -> bool {
+  const base = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  const value = base?.equivalent_failover
+  if value == nil {
+    return false
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  if type_of(value) == "dict" {
+    const enabled = value?.enabled
+    if enabled == nil {
+      return true
+    }
+    if type_of(enabled) == "bool" {
+      return enabled
+    }
+  }
+  // Invalid non-nil shapes are rejected by the runtime parser. Suppress
+  // prefill here so malformed routing data cannot become a permissive read.
+  return true
+}
+
+/**
  * Add the agent loop's default equivalent-route failover unless a caller or an
  * outer routing owner already decided the topology. `suppressed` covers
  * lifecycle-sensitive requests that must remain on one physical route.

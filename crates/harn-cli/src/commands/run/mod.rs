@@ -1267,7 +1267,7 @@ async fn execute_run_inner_scoped(
             );
         }
     };
-    if let Some(recording) = persisted_evidence.flight_recording.as_ref() {
+    if let Some(recording) = persisted_evidence.as_ref() {
         if let Some(path) = recording.path.as_deref() {
             stderr.push_str(&format!("[harn] flight recording: {path}\n"));
         }

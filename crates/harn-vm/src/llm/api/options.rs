@@ -386,6 +386,10 @@ pub(crate) struct LlmCallOptions {
     // --- Routing ---
     pub provider: String,
     pub model: String,
+    /// Typed origin-to-route decision. Script-facing extraction always sets
+    /// this before credential lookup; hand-built internal options may leave it
+    /// absent and receive a route-local projection at the transport boundary.
+    pub model_resolution: Option<crate::llm_config::ModelResolution>,
     pub api_key: String,
     pub api_mode: LlmApiMode,
     pub route_policy: LlmRoutePolicy,
@@ -496,6 +500,10 @@ pub(crate) struct LlmCallOptions {
     /// wire field. Runtime admission checks this set for every resolved route.
     pub(crate) portable_option_intent:
         std::collections::BTreeSet<crate::llm::capabilities::PortableOption>,
+    /// Internal empirical-probe contract captured at option extraction. This
+    /// travels with spawned transport work so async task boundaries cannot
+    /// silently restore catalog shaping or bounded retries.
+    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 
     // --- Serving tier ---
     /// Opt into the model's accelerated-serving ("fast mode") tier. Maps to
@@ -610,6 +618,7 @@ impl Default for LlmCallOptions {
         Self {
             provider: String::new(),
             model: String::new(),
+            model_resolution: None,
             api_key: String::new(),
             api_mode: LlmApiMode::default(),
             route_policy: LlmRoutePolicy::default(),
@@ -651,6 +660,7 @@ impl Default for LlmCallOptions {
             presence_penalty: None,
             parallel_tool_calls: None,
             portable_option_intent: std::collections::BTreeSet::new(),
+            provider_contract_probe: None,
             fast: false,
             output_format: OutputFormat::default(),
             output_schema: None,
@@ -847,6 +857,9 @@ pub(crate) struct LlmRequestPayload {
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
     pub parallel_tool_calls: Option<bool>,
+    /// See [`LlmCallOptions::provider_contract_probe`].
+    #[serde(skip_serializing)]
+    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
     /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
@@ -1018,6 +1031,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
             parallel_tool_calls: opts.parallel_tool_calls,
+            provider_contract_probe: opts.provider_contract_probe,
             fast: opts.fast,
             output_format,
             output_schema,

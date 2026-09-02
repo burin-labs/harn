@@ -1939,7 +1939,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.runtime.introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `harness.llm.call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `harness.obs.llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `harness.llm.resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
-| `harness.llm.execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
+| `harness.llm.execution_contract(selector)` | selector: string | dict | Resolve a model selector or throw before dispatch, then return secret-free route facts for durable receipts: `{schema, requested_model, alias_chain, resolved_provider, resolved_model, catalog_version, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
 | `harness.llm.model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `harness.llm.model_ladder(name)` | name: string | dict/nil | Return one named catalog `[model_ladders.<name>]` row with its label and ordered route steps; unknown names return `nil` |
 | `harness.llm.pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
@@ -2922,7 +2922,7 @@ These builtins expose Harn's typed orchestration runtime.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `workflow_execute(task, graph, artifacts?, options?)` | task, graph, artifacts, options | dict | Execute a workflow and persist a run record |
-| `harness.obs.run_record(payload)` | payload: dict | run record | Construct or normalize a run record; newly constructed records inherit the active VM execution identity |
+| `harness.obs.run_record(payload)` | payload: dict | run record | Construct or normalize a run record. Harn replaces any input execution identity with the active VM owner and rejects invalid evidence or a missing owner. |
 | `harness.fs.run_record_save(run, path?)` | run, path | dict | Persist a run record |
 | `harness.fs.run_record_load(path)` | path: string | run record | Load a run record from disk |
 | `harness.fs.load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |

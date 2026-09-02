@@ -522,6 +522,12 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(exit);
                 }
             }
+            ProviderCommand::OptionProbe(option_probe) => {
+                let exit = commands::provider_option_probe::run(option_probe).await;
+                if exit != 0 {
+                    process::exit(exit);
+                }
+            }
             ProviderCommand::CacheProbe(cache_probe) => {
                 commands::provider::run_provider_cache_probe(cache_probe).await;
             }

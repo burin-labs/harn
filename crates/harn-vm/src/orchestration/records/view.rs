@@ -19,7 +19,7 @@ mod usage;
 mod visible_transcript;
 
 use evidence::project_evidence;
-pub use evidence::ArtifactPathVisibility;
+pub use evidence::{project_execution_evidence, ArtifactPathVisibility};
 pub use usage::RunViewUsage;
 use visible_transcript::public_assistant_transcript_text;
 
@@ -1226,7 +1226,7 @@ fn projection_hash<T: Serialize>(schema: &str, value: &T) -> Option<String> {
         projection.remove("projection_id");
         projection.remove("projection_hash");
     }
-    let bytes = serde_json::to_vec(&value).ok()?;
+    let bytes = crate::canonical_json::to_vec(&value);
     let mut hasher = Sha256::new();
     hasher.update(schema.as_bytes());
     hasher.update([0]);
@@ -1313,8 +1313,10 @@ mod tests {
 
     #[test]
     fn build_run_view_projects_stable_public_fields() {
+        const EXECUTION_ID: &str = "hxe-019c13e0-8080-7000-8000-000000000001";
         let mut run = sample_run();
-        run.evidence.execution_id = Some("hxe-view".to_string());
+        run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence.execution_id = Some(EXECUTION_ID.to_string());
         let view = build_run_view_with_path(&run, Some("runs/run_1.json"));
         assert_eq!(view.schema, RUN_VIEW_SCHEMA);
         assert_eq!(view.schema_version, RUN_VIEW_SCHEMA_VERSION);
@@ -1322,7 +1324,7 @@ mod tests {
         assert_eq!(view.run.session_id.as_deref(), Some("session_1"));
         assert_eq!(view.run.run_path.as_deref(), Some("runs/run_1.json"));
         assert_eq!(view.run.duration_ms, Some(2000));
-        assert_eq!(view.evidence.execution_id.as_deref(), Some("hxe-view"));
+        assert_eq!(view.evidence.execution_id.as_deref(), Some(EXECUTION_ID));
         assert_eq!(
             view.evidence.trace_spans[0].metadata["api_key"],
             json!(crate::redact::REDACTED_PLACEHOLDER)

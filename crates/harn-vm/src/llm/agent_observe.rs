@@ -410,6 +410,15 @@ pub(crate) async fn observed_llm_call(
     streaming_detector: Option<StreamingDetectorContext>,
     delta_sink: Option<DeltaSender>,
 ) -> Result<super::api::LlmResult, VmError> {
+    if let Some(resolution) = opts.model_resolution.as_ref() {
+        resolution
+            .assert_resolved_route(&opts.provider, &opts.model)
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                    "model resolution invariant failed before provider call: {error}"
+                ))))
+            })?;
+    }
     if !super::mock::cli_llm_mock_replay_active() && !super::mock::builtin_llm_mock_active() {
         super::helpers::validate_options(opts)?;
     }
@@ -665,6 +674,9 @@ pub(crate) async fn observed_llm_call(
                 // than a dead serving route.
                 if is_retryable_unproductive_completion(&result)
                     && attempt < empty_completion_retry_budget(&opts.provider)
+                    && !super::provider_contract_probe::requires_single_request(
+                        opts.provider_contract_probe,
+                    )
                 {
                     let retry_usage = result.usage();
                     completed_retry_usage.push(retry_usage.clone());
@@ -1044,10 +1056,12 @@ pub(crate) async fn observed_llm_call(
                 // in-call budget. Only the bounded provider-hiccup recoveries
                 // (empty completion, one-shot cap escalation, one-shot
                 // channel/transport degrades) loop.
-                let can_retry = empty_completion_retry
+                let can_retry = !super::provider_contract_probe::requires_single_request(
+                    opts.provider_contract_probe,
+                ) && (empty_completion_retry
                     || budget_escalation.is_some()
                     || native_tool_channel_degrade
-                    || stream_transport_degrade;
+                    || stream_transport_degrade);
                 let status = if can_retry {
                     "retrying"
                 } else if empty_completion_error {

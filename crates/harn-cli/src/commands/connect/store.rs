@@ -309,11 +309,7 @@ pub(super) async fn load_connect_index(
 }
 
 pub(super) fn secret_error_is_not_found(error: &harn_vm::secrets::SecretError) -> bool {
-    match error {
-        harn_vm::secrets::SecretError::NotFound { .. } => true,
-        harn_vm::secrets::SecretError::All(errors) => errors.iter().all(secret_error_is_not_found),
-        _ => false,
-    }
+    error.is_not_found()
 }
 
 pub(super) async fn save_connect_index(

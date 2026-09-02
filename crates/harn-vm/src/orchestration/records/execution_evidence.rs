@@ -1,6 +1,6 @@
 use super::ExecutionEvidenceRecord;
 use crate::flight_recorder::{FLIGHT_RECORDING_FORMAT, FLIGHT_RECORDING_SCHEMA_VERSION};
-use crate::observability::execution_scope::EXECUTION_ID_PREFIX;
+use crate::observability::execution_scope::ExecutionId;
 
 pub const EXECUTION_EVIDENCE_SCHEMA_VERSION: u32 = 1;
 
@@ -13,6 +13,8 @@ pub enum ExecutionEvidenceValidationError {
     MissingExecutionId,
     #[error("execution evidence has an invalid Harn execution identity")]
     InvalidExecutionId,
+    #[error("execution evidence span cost must be finite and non-negative")]
+    InvalidSpanCost,
     #[error("flight recording must use schema version {FLIGHT_RECORDING_SCHEMA_VERSION}")]
     UnsupportedFlightRecordingSchema,
     #[error("flight recording identity does not match its execution evidence")]
@@ -35,6 +37,9 @@ pub fn validate_execution_evidence(
         return Err(ExecutionEvidenceValidationError::MissingExecutionId);
     };
     validate_execution_id(execution_id)?;
+    if evidence.trace_spans.iter().any(span_cost_is_invalid) {
+        return Err(ExecutionEvidenceValidationError::InvalidSpanCost);
+    }
     let Some(recording) = evidence.flight_recording.as_ref() else {
         return Ok(());
     };
@@ -53,20 +58,29 @@ pub fn validate_execution_evidence(
     Ok(())
 }
 
+pub(super) fn span_cost_is_invalid(span: &super::RunTraceSpanRecord) -> bool {
+    match span.cost_usd {
+        Some(cost) => cost_is_invalid(cost),
+        None => span
+            .metadata
+            .get(crate::tracing::meta::COST_USD)
+            .is_some_and(legacy_span_cost_is_invalid),
+    }
+}
+
+pub(super) fn cost_is_invalid(cost: f64) -> bool {
+    !cost.is_finite() || cost < 0.0
+}
+
+pub(super) fn legacy_span_cost_is_invalid(value: &serde_json::Value) -> bool {
+    value.as_f64().is_none_or(cost_is_invalid)
+}
+
 /// Validate one claimed Harn-owned execution identity.
 pub fn validate_execution_id(candidate: &str) -> Result<(), ExecutionEvidenceValidationError> {
-    let valid = candidate
-        .strip_prefix(EXECUTION_ID_PREFIX)
-        .is_some_and(|raw| {
-            uuid::Uuid::parse_str(raw).is_ok_and(|value| {
-                raw == value.hyphenated().to_string()
-                    && value.get_version_num() == 7
-                    && value.get_variant() == uuid::Variant::RFC4122
-            })
-        });
-    valid
-        .then_some(())
-        .ok_or(ExecutionEvidenceValidationError::InvalidExecutionId)
+    ExecutionId::parse(candidate)
+        .map(|_| ())
+        .map_err(|_| ExecutionEvidenceValidationError::InvalidExecutionId)
 }
 
 fn is_blake3_hash(candidate: &str) -> bool {
@@ -178,5 +192,55 @@ mod tests {
             evidence.flight_recording = Some(artifact);
             assert_eq!(validate_execution_evidence(&evidence), Err(expected));
         }
+    }
+
+    #[test]
+    fn rejects_non_finite_or_negative_span_costs() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.01] {
+            let mut evidence = evidence();
+            evidence.trace_spans.push(super::super::RunTraceSpanRecord {
+                cost_usd: Some(invalid),
+                ..super::super::RunTraceSpanRecord::default()
+            });
+            assert_eq!(
+                validate_execution_evidence(&evidence),
+                Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+            );
+        }
+
+        let mut evidence = evidence();
+        evidence.trace_spans.push(super::super::RunTraceSpanRecord {
+            metadata: std::collections::BTreeMap::from([(
+                crate::tracing::meta::COST_USD.to_string(),
+                serde_json::json!(-0.01),
+            )]),
+            ..super::super::RunTraceSpanRecord::default()
+        });
+        assert_eq!(
+            validate_execution_evidence(&evidence),
+            Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+        );
+
+        evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!("not-a-cost"),
+        );
+        assert_eq!(
+            validate_execution_evidence(&evidence),
+            Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+        );
+
+        evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!(0.25),
+        );
+        assert_eq!(validate_execution_evidence(&evidence), Ok(()));
+
+        evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!("not-a-cost"),
+        );
+        evidence.trace_spans[0].cost_usd = Some(0.25);
+        assert_eq!(validate_execution_evidence(&evidence), Ok(()));
     }
 }

@@ -1,8 +1,13 @@
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use crate::redact::RedactionPolicy;
 
 use super::{redact_bounded, RunRecord, PREVIEW_LIMIT};
+use crate::orchestration::{
+    ExecutionEvidenceRecord, ExecutionEvidenceValidationError, RunEvidenceGapRecord,
+};
 
 /// Whether a run projection may expose host-local artifact locators.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -12,18 +17,65 @@ pub enum ArtifactPathVisibility {
     Local,
 }
 
+/// Produce a redacted, defensively validated copy of execution evidence.
+///
+/// This is the owning boundary for evidence exposed outside the Harn runtime or
+/// persisted by a host. The source record is never mutated. Host-local flight
+/// recording paths are included only when `artifact_paths` permits them.
+pub fn project_execution_evidence(
+    evidence: &ExecutionEvidenceRecord,
+    artifact_paths: ArtifactPathVisibility,
+) -> Result<ExecutionEvidenceRecord, ExecutionEvidenceValidationError> {
+    crate::orchestration::validate_execution_evidence(evidence)?;
+    Ok(redact_execution_evidence_with_policy(
+        evidence.clone(),
+        &crate::redact::current_policy(),
+        artifact_paths,
+    ))
+}
+
 pub(super) fn project_evidence(
     run: &RunRecord,
     policy: &RedactionPolicy,
     artifact_paths: ArtifactPathVisibility,
-) -> super::super::ExecutionEvidenceRecord {
+) -> ExecutionEvidenceRecord {
     let mut evidence = run.evidence.clone();
+    sanitize_untrusted_evidence(&mut evidence);
+    redact_execution_evidence_with_policy(evidence, policy, artifact_paths)
+}
+
+fn redact_execution_evidence_with_policy(
+    mut evidence: ExecutionEvidenceRecord,
+    policy: &RedactionPolicy,
+    artifact_paths: ArtifactPathVisibility,
+) -> ExecutionEvidenceRecord {
+    let execution_id = evidence.execution_id.clone();
     for span in &mut evidence.trace_spans {
+        span.metadata.remove(crate::tracing::meta::EXECUTION_ID);
+        if let Some(execution_id) = execution_id.as_ref() {
+            span.metadata.insert(
+                crate::tracing::meta::EXECUTION_ID.to_string(),
+                serde_json::json!(execution_id),
+            );
+        }
+        if let Some(cost_usd) = span.cost_usd {
+            span.metadata.insert(
+                crate::tracing::meta::COST_USD.to_string(),
+                serde_json::json!(cost_usd),
+            );
+        }
+        span.trace_id = redact_bounded(&span.trace_id, policy, PREVIEW_LIMIT);
+        span.kind = redact_bounded(&span.kind, policy, PREVIEW_LIMIT);
         span.name = redact_bounded(&span.name, policy, PREVIEW_LIMIT);
-        let mut metadata = Value::Object(std::mem::take(&mut span.metadata).into_iter().collect());
-        policy.redact_json_in_place(&mut metadata);
-        if let Value::Object(metadata) = metadata {
-            span.metadata = metadata.into_iter().collect();
+        redact_json_map(&mut span.metadata, policy);
+        for link in &mut span.links {
+            link.trace_id = redact_bounded(&link.trace_id, policy, PREVIEW_LIMIT);
+            link.span_id = redact_bounded(&link.span_id, policy, PREVIEW_LIMIT);
+            redact_string_map(&mut link.attributes, policy);
+        }
+        for event in &mut span.events {
+            event.name = redact_bounded(&event.name, policy, PREVIEW_LIMIT);
+            redact_json_map(&mut event.attributes, policy);
         }
     }
     if let Some(recording) = &mut evidence.flight_recording {
@@ -34,9 +86,127 @@ pub(super) fn project_evidence(
         }
     }
     for gap in &mut evidence.gaps {
+        gap.component = redact_bounded(&gap.component, policy, PREVIEW_LIMIT);
+        gap.code = redact_bounded(&gap.code, policy, PREVIEW_LIMIT);
         gap.message = redact_bounded(&gap.message, policy, PREVIEW_LIMIT);
     }
     evidence
+}
+
+fn redact_json_map(values: &mut BTreeMap<String, Value>, policy: &RedactionPolicy) {
+    let mut object = Value::Object(std::mem::take(values).into_iter().collect());
+    policy.redact_json_in_place(&mut object);
+    if let Value::Object(redacted) = object {
+        *values = redacted.into_iter().collect();
+    }
+}
+
+fn redact_string_map(values: &mut BTreeMap<String, String>, policy: &RedactionPolicy) {
+    let mut object = serde_json::to_value(std::mem::take(values)).unwrap_or(Value::Null);
+    policy.redact_json_in_place(&mut object);
+    *values = serde_json::from_value(object).unwrap_or_default();
+}
+
+fn sanitize_untrusted_evidence(evidence: &mut ExecutionEvidenceRecord) {
+    use ExecutionEvidenceValidationError as ValidationError;
+
+    if evidence.schema_version == 0
+        && evidence.execution_id.is_none()
+        && evidence.flight_recording.is_none()
+        && evidence.trace_spans.is_empty()
+        && evidence.gaps.is_empty()
+    {
+        return;
+    }
+
+    let mut invalid_span_cost = false;
+    for span in &mut evidence.trace_spans {
+        if span
+            .cost_usd
+            .is_some_and(super::super::execution_evidence::cost_is_invalid)
+        {
+            span.cost_usd = None;
+            invalid_span_cost = true;
+        }
+        if span.cost_usd.is_none() {
+            let legacy_cost_is_invalid = span
+                .metadata
+                .get(crate::tracing::meta::COST_USD)
+                .is_some_and(super::super::execution_evidence::legacy_span_cost_is_invalid);
+            if legacy_cost_is_invalid {
+                span.metadata.remove(crate::tracing::meta::COST_USD);
+                invalid_span_cost = true;
+            }
+        }
+    }
+    if invalid_span_cost {
+        push_gap_once(
+            evidence,
+            "trace_spans",
+            "projection_invalid",
+            "The persisted run contained an invalid span cost.",
+        );
+    }
+
+    match crate::orchestration::validate_execution_evidence(evidence) {
+        Ok(()) => (),
+        Err(ValidationError::MissingExecutionId) => {
+            evidence.flight_recording = None;
+            push_gap_once(
+                evidence,
+                "execution_identity",
+                "projection_invalid",
+                "The persisted run contained evidence without a Harn execution identity.",
+            );
+        }
+        Err(ValidationError::UnsupportedSchema | ValidationError::InvalidExecutionId) => {
+            evidence.execution_id = None;
+            evidence.flight_recording = None;
+            push_gap_once(
+                evidence,
+                "execution_identity",
+                "projection_invalid",
+                "The persisted run contained invalid Harn execution evidence.",
+            );
+        }
+        // Costs are repaired before envelope validation so a record with more
+        // than one invalid field cannot leave a non-finite float behind.
+        Err(ValidationError::InvalidSpanCost) => {}
+        Err(
+            ValidationError::UnsupportedFlightRecordingSchema
+            | ValidationError::FlightRecordingIdentityMismatch
+            | ValidationError::UnsupportedFlightRecordingFormat
+            | ValidationError::InvalidFlightRecordingHash,
+        ) => {
+            evidence.flight_recording = None;
+            push_gap_once(
+                evidence,
+                "flight_recording",
+                "projection_invalid",
+                "The persisted run contained invalid flight recording metadata.",
+            );
+        }
+    }
+}
+
+fn push_gap_once(
+    evidence: &mut ExecutionEvidenceRecord,
+    component: &str,
+    code: &str,
+    message: &str,
+) {
+    if evidence
+        .gaps
+        .iter()
+        .any(|gap| gap.component == component && gap.code == code)
+    {
+        return;
+    }
+    evidence.gaps.push(RunEvidenceGapRecord {
+        component: component.to_string(),
+        code: code.to_string(),
+        message: message.to_string(),
+    });
 }
 
 #[cfg(test)]
@@ -101,5 +271,200 @@ mod tests {
                 .and_then(|recording| recording.path.as_deref()),
             Some("/private/workspace/.harn/flight.json")
         );
+    }
+
+    #[test]
+    fn public_projection_redacts_every_nested_span_and_gap_text_field() {
+        const SECRET: &str = "projection-secret";
+        let secret_url = format!("https://api.example.com/v1?api_key={SECRET}");
+        let mut run = run_with_local_recording();
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                trace_id: secret_url.clone(),
+                kind: secret_url.clone(),
+                name: secret_url.clone(),
+                metadata: BTreeMap::from([
+                    ("api_key".to_string(), serde_json::json!(SECRET)),
+                    (
+                        crate::tracing::meta::COST_USD.to_string(),
+                        serde_json::json!("stale-cost"),
+                    ),
+                ]),
+                links: vec![crate::tracing::SpanLink {
+                    trace_id: secret_url.clone(),
+                    span_id: secret_url.clone(),
+                    attributes: BTreeMap::from([("api_key".to_string(), SECRET.to_string())]),
+                }],
+                events: vec![crate::tracing::SpanEvent {
+                    name: secret_url.clone(),
+                    attributes: BTreeMap::from([(
+                        "api_key".to_string(),
+                        serde_json::json!(SECRET),
+                    )]),
+                    ..crate::tracing::SpanEvent::default()
+                }],
+                cost_usd: Some(0.25),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+        run.evidence
+            .gaps
+            .push(crate::orchestration::RunEvidenceGapRecord {
+                component: secret_url.clone(),
+                code: secret_url.clone(),
+                message: secret_url,
+            });
+
+        let projected = crate::orchestration::project_execution_evidence(
+            &run.evidence,
+            crate::orchestration::ArtifactPathVisibility::Hidden,
+        )
+        .unwrap();
+        let rendered = serde_json::to_string(&projected).unwrap();
+
+        assert!(!rendered.contains(SECRET), "projected evidence: {rendered}");
+        assert_eq!(projected.trace_spans[0].events.len(), 1);
+        assert_eq!(
+            projected.trace_spans[0].metadata[crate::tracing::meta::COST_USD],
+            serde_json::json!(0.25)
+        );
+        assert_eq!(run.evidence.trace_spans[0].metadata["api_key"], SECRET);
+        assert_eq!(
+            run.evidence.trace_spans[0].metadata[crate::tracing::meta::COST_USD],
+            serde_json::json!("stale-cost")
+        );
+        crate::orchestration::validate_execution_evidence(&projected).unwrap();
+    }
+
+    #[test]
+    fn standalone_projection_rejects_invalid_evidence() {
+        let mut run = run_with_local_recording();
+        run.evidence.execution_id = Some("host-run-id".to_string());
+
+        assert_eq!(
+            project_execution_evidence(&run.evidence, ArtifactPathVisibility::Hidden),
+            Err(ExecutionEvidenceValidationError::InvalidExecutionId)
+        );
+    }
+
+    #[test]
+    fn public_view_drops_invalid_span_cost_and_records_gap() {
+        let mut run = run_with_local_recording();
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                cost_usd: Some(f64::NAN),
+                metadata: BTreeMap::from([(
+                    crate::tracing::meta::COST_USD.to_string(),
+                    serde_json::json!(-0.01),
+                )]),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+
+        assert_eq!(
+            project_execution_evidence(&run.evidence, ArtifactPathVisibility::Hidden),
+            Err(ExecutionEvidenceValidationError::InvalidSpanCost)
+        );
+
+        run.evidence.trace_spans[0].metadata.insert(
+            crate::tracing::meta::COST_USD.to_string(),
+            serde_json::json!("invalid"),
+        );
+
+        let mut historical = RunRecord::default();
+        historical.evidence.trace_spans = run.evidence.trace_spans;
+        let projected = project_evidence(
+            &historical,
+            &current_policy(),
+            ArtifactPathVisibility::Hidden,
+        );
+        assert_eq!(projected.trace_spans[0].cost_usd, None);
+        assert!(!projected.trace_spans[0]
+            .metadata
+            .contains_key(crate::tracing::meta::COST_USD));
+        assert!(projected
+            .gaps
+            .iter()
+            .any(|gap| gap.component == "trace_spans" && gap.code == "projection_invalid"));
+        assert!(projected.gaps.iter().any(|gap| {
+            gap.component == "execution_identity" && gap.code == "projection_invalid"
+        }));
+    }
+
+    #[test]
+    fn public_projection_does_not_trust_an_invalid_execution_identity() {
+        let mut run = run_with_local_recording();
+        run.evidence.execution_id = Some("host-run-id".to_string());
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                metadata: std::collections::BTreeMap::from([(
+                    crate::tracing::meta::EXECUTION_ID.to_string(),
+                    serde_json::json!("host-run-id"),
+                )]),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+
+        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+
+        assert_eq!(projected.execution_id, None);
+        assert_eq!(projected.flight_recording, None);
+        assert!(!projected.trace_spans[0]
+            .metadata
+            .contains_key(crate::tracing::meta::EXECUTION_ID));
+        assert!(projected.gaps.iter().any(|gap| {
+            gap.component == "execution_identity" && gap.code == "projection_invalid"
+        }));
+    }
+
+    #[test]
+    fn public_projection_marks_unexplained_missing_execution_identity() {
+        let mut run = RunRecord::default();
+        run.evidence.schema_version = crate::orchestration::EXECUTION_EVIDENCE_SCHEMA_VERSION;
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                metadata: std::collections::BTreeMap::from([(
+                    crate::tracing::meta::EXECUTION_ID.to_string(),
+                    serde_json::json!("host-run-id"),
+                )]),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+
+        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+
+        assert!(!projected.trace_spans[0]
+            .metadata
+            .contains_key(crate::tracing::meta::EXECUTION_ID));
+        assert!(projected.gaps.iter().any(|gap| {
+            gap.component == "execution_identity" && gap.code == "projection_invalid"
+        }));
+    }
+
+    #[test]
+    fn public_projection_keeps_valid_identity_when_recording_metadata_is_invalid() {
+        let mut run = run_with_local_recording();
+        run.evidence.flight_recording.as_mut().unwrap().content_hash = "blake3:invalid".to_string();
+        run.evidence
+            .trace_spans
+            .push(crate::orchestration::RunTraceSpanRecord {
+                metadata: std::collections::BTreeMap::from([(
+                    crate::tracing::meta::EXECUTION_ID.to_string(),
+                    serde_json::json!("hxe-019c13e0-8080-7000-8000-000000000099"),
+                )]),
+                ..crate::orchestration::RunTraceSpanRecord::default()
+            });
+
+        let projected = project_evidence(&run, &current_policy(), ArtifactPathVisibility::Hidden);
+
+        assert_eq!(projected.execution_id, run.evidence.execution_id);
+        assert_eq!(projected.flight_recording, None);
+        assert_eq!(
+            projected.trace_spans[0].metadata[crate::tracing::meta::EXECUTION_ID],
+            serde_json::json!(run.evidence.execution_id.as_deref().unwrap())
+        );
+        assert!(projected.gaps.iter().any(|gap| {
+            gap.component == "flight_recording" && gap.code == "projection_invalid"
+        }));
     }
 }
