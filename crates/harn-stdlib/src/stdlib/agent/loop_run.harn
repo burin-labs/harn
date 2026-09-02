@@ -309,6 +309,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           session.session_id,
           iteration_index,
         )
+        call = agent_loop_demote_empty_turn(call, turn_llm_opts)
         if !call.ok && __agent_loop_is_context_overflow(call?.error) {
           call = __agent_loop_recover_context_overflow(
             harness,
