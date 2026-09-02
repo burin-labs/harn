@@ -14,11 +14,88 @@ fn blacksmith_tier_expression() -> string {
     + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${paid_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
 }
 
+/**
+ * The hosted producer's budget is owned by its workload, not by a round number.
+ *
+ * Each heavy step carries its own ceiling and the job ceiling is exactly the sum
+ * of those ceilings, plus fixed setup overhead, plus a reserve the main-branch
+ * cache save can spend without competing with the tests. The save is a post
+ * step, so it runs inside whatever margin the earlier steps happen to leave: on
+ * a contended runner a full-generation save then cancels a job whose tests all
+ * passed. Reserving the save's time here is what makes the passed job stay
+ * green (#7845), and bounding each step is what keeps an overrun from eating
+ * that reserve.
+ *
+ * Sized from the five most recent green main runs of `rust-check-inputs` plus
+ * the two slowest in that window, with a full-generation save measured at
+ * 8m35s. Observed step maxima: portable CLI 7m01s, security archive 8m56s,
+ * workspace tests 20m03s, setup and cache restore together 3m33s.
+ */
+const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int}> = [
+  {name: "Build portable Harn CLI", minutes: 9},
+  {name: "Build security test archive", minutes: 12},
+  {name: "Run Rust workspace tests", minutes: 26},
+]
+
+/** Checkout, disk reclaim, mold, toolchain, cache restore, nextest, uploads. */
+const PRODUCER_SETUP_OVERHEAD_MINUTES = 6
+
+/** A full cache generation save, not a near-hit. Measured at 8m35s. */
+const PRODUCER_CACHE_SAVE_RESERVE_MINUTES = 12
+
+/** Paid Blacksmith capacity keeps its hard cost fuse; it never saves a cache. */
+const PRODUCER_PAID_FUSE_MINUTES = 20
+
+/** The reserve a full cache generation save may spend without cancelling. */
+pub fn producer_cache_save_reserve_minutes() -> int {
+  return PRODUCER_CACHE_SAVE_RESERVE_MINUTES
+}
+
+pub fn producer_hosted_ceiling_minutes() -> int {
+  let total = PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_CACHE_SAVE_RESERVE_MINUTES
+  for budget in PRODUCER_STEP_BUDGETS {
+    total = total + budget.minutes
+  }
+  return total
+}
+
 fn blacksmith_timeout_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 20 || 40 }}"
+    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && ${PRODUCER_PAID_FUSE_MINUTES} || ${producer_hosted_ceiling_minutes()} }}"
+}
+
+fn step_named(job: dict, name: string) {
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.name ?? "")) == name {
+      return step
+    }
+  }
+  return nil
+}
+
+/**
+ * Every budgeted step must carry its own ceiling. Without this the job ceiling
+ * is the only bound, one slow step can spend the cache save's reserve, and the
+ * reserve becomes a comment rather than a guarantee.
+ */
+fn producer_step_budget_errors(job: dict, job_name: string) -> list<string> {
+  let errors: list<string> = []
+  for budget in PRODUCER_STEP_BUDGETS {
+    const name = budget.name
+    const expected = budget.minutes
+    const step = step_named(job, name)
+    if step == nil {
+      errors = errors + ["ci.yml:${job_name} must keep the budgeted step '${name}'"]
+    } else if trim(to_string(step?.["timeout-minutes"] ?? "")) != to_string(expected) {
+      errors = errors
+        + [
+        "ci.yml:${job_name} step '${name}' must carry its own ${expected}-minute budget so the cache save reserve stays reserved",
+      ]
+    }
+  }
+  return errors
 }
 
 /** Keep the action's effective cache ceiling aligned with its caller contract. */
@@ -34,8 +111,8 @@ pub fn sccache_action_cache_size_errors(action: dict) -> list<string> {
   if trim(to_string(cache_size_input?.default ?? "")) != "" {
     errors = errors
       + [
-        "${SCCACHE_ACTION_PATH} cache-size must default empty so the caller's SCCACHE_CACHE_SIZE is not overwritten",
-      ]
+      "${SCCACHE_ACTION_PATH} cache-size must default empty so the caller's SCCACHE_CACHE_SIZE is not overwritten",
+    ]
   }
   const configure_steps = (action?.runs?.steps ?? []).filter(
     { step -> contains(to_string(step?.run ?? ""), "configure-env.sh") },
@@ -44,24 +121,28 @@ pub fn sccache_action_cache_size_errors(action: dict) -> list<string> {
   if len(configure_steps) != 1 {
     return errors
       + [
-        "${SCCACHE_ACTION_PATH} must invoke configure-env.sh exactly once as the sole environment owner",
-      ]
+      "${SCCACHE_ACTION_PATH} must invoke configure-env.sh exactly once as the sole environment owner",
+    ]
   }
   const step = configure_steps[0]
   if trim(to_string(step?.run ?? "")) != SCCACHE_CONFIGURE_ENV_COMMAND {
     errors = errors
       + [
-        "${SCCACHE_ACTION_PATH} must invoke configure-env.sh exactly once as the sole environment owner",
-      ]
+      "${SCCACHE_ACTION_PATH} must invoke configure-env.sh exactly once as the sole environment owner",
+    ]
   }
   if trim(to_string(step?.env?.HARN_SCCACHE_CACHE_SIZE_INPUT ?? ""))
     != SCCACHE_CACHE_SIZE_INPUT_EXPRESSION {
     errors = errors
-      + ["${SCCACHE_ACTION_PATH} must pass the explicit cache-size input to configure-env.sh"]
+      + [
+      "${SCCACHE_ACTION_PATH} must pass the explicit cache-size input to configure-env.sh",
+    ]
   }
   if contains((step?.env ?? {}).keys(), "SCCACHE_CACHE_SIZE") {
     errors = errors
-      + ["${SCCACHE_ACTION_PATH} must inherit SCCACHE_CACHE_SIZE instead of shadowing the caller"]
+      + [
+      "${SCCACHE_ACTION_PATH} must inherit SCCACHE_CACHE_SIZE instead of shadowing the caller",
+    ]
   }
   return errors
 }
@@ -85,8 +166,10 @@ fn hosted_compile_lane_errors(
       + ["ci.yml:${job_name} must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}"]
   }
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != ""
-    || len(matching_steps(job, PERSISTENT_SCCACHE_ACTION))
-      > 0 {
+    || len(
+    matching_steps(job, PERSISTENT_SCCACHE_ACTION),
+  )
+    > 0 {
     errors = errors + ["ci.yml:${job_name} must not spend persistent compiler-cache capacity"]
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
@@ -95,14 +178,16 @@ fn hosted_compile_lane_errors(
   } else if trim(caches[0]?.if ?? "") != "" {
     errors = errors + ["ci.yml:${job_name} must restore its hosted rust-cache unconditionally"]
   } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
-    || trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""))
-      != "true" {
+    || trim(
+    to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""),
+  )
+    != "true" {
     errors = errors
       + ["ci.yml:${job_name} must keep complete hosted cache ${rust_cache_key}"]
   }
   if CI_CACHE_WRITE_JOBS.contains(job_name)
     && trim(job?.permissions?.actions ?? "")
-      != "write" {
+    != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
   }
   return errors
@@ -124,8 +209,8 @@ fn persistent_compile_lane_errors(
   if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(runner) {
     errors = errors
       + [
-        "ci.yml:${job_name} must route only merge_group and same-repository pull_request to ${runner} with a hosted fallback",
-      ]
+      "ci.yml:${job_name} must route only merge_group and same-repository pull_request to ${runner} with a hosted fallback",
+    ]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != blacksmith_tier_expression() {
     errors = errors
@@ -137,9 +222,10 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.["timeout-minutes"] ?? "")) != blacksmith_timeout_expression() {
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the 20-minute paid-runner fuse and 40-minute hosted recovery ceiling",
-      ]
+      "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse and ${producer_hosted_ceiling_minutes()}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+    ]
   }
+  errors = errors + producer_step_budget_errors(job, job_name)
   const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
   if len(persistent) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure persistent sccache exactly once"]
@@ -148,8 +234,10 @@ fn persistent_compile_lane_errors(
       errors = errors + ["ci.yml:${job_name} must mount persistent sccache only on Blacksmith"]
     }
     if trim(to_string(persistent[0]?.with?.["cache-key"] ?? "")) != sccache_key
-      || trim(to_string(persistent[0]?.with?.sticky ?? ""))
-        != "true" {
+      || trim(
+      to_string(persistent[0]?.with?.sticky ?? ""),
+    )
+      != "true" {
       errors = errors + ["ci.yml:${job_name} must mount sticky sccache key ${sccache_key}"]
     }
   }
@@ -161,21 +249,23 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must use rust-cache only on the GitHub-hosted fallback"]
   } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
-    || trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""))
-      != "true" {
+    || trim(
+    to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""),
+  )
+    != "true" {
     errors = errors
       + ["ci.yml:${job_name} must keep complete hosted fallback cache ${rust_cache_key}"]
   }
   if CI_CACHE_WRITE_JOBS.contains(job_name)
     && trim(job?.permissions?.actions ?? "")
-      != "write" {
+    != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
   }
   const finalize = step_by_name(job?.steps ?? [], "Summarize and stop sccache")
   if trim(finalize?.if ?? "")
     != "always() && env.${RUNNER_TIER_ENV} == '${BLACKSMITH_RUNNER_TIER}'"
     || trim(finalize?.run ?? "")
-      != "./scripts/ci/finalize_sccache.sh" {
+    != "./scripts/ci/finalize_sccache.sh" {
     errors = errors + ["ci.yml:${job_name} must finalize its job-owned sccache daemon"]
   }
   return errors
@@ -193,7 +283,9 @@ fn hosted_refresh_lane_errors(workflow: dict) -> list<string> {
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}"]
+      + [
+      "ci.yml:rust-cache-refresh must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}",
+    ]
   }
   if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
     errors = errors + ["ci.yml:rust-cache-refresh must not mount persistent sccache"]
@@ -214,8 +306,8 @@ pub fn rust_cache_refresh_concurrency_errors(job: dict) -> list<string> {
   if lowercase(trim(to_string(job?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
     errors = errors
       + [
-        "ci.yml:rust-cache-refresh must finish the active cache save before the newest pending one",
-      ]
+      "ci.yml:rust-cache-refresh must finish the active cache save before the newest pending one",
+    ]
   }
   return errors
 }
@@ -242,7 +334,9 @@ pub fn rust_cache_refresh_miss_only_errors(job: dict) -> list<string> {
     }
     if !contains(trim(step?.if ?? ""), CACHE_MISS_GUARD) {
       errors = errors
-        + ["ci.yml:rust-cache-refresh must skip ${name} when the exact cache key already restored"]
+        + [
+        "ci.yml:rust-cache-refresh must skip ${name} when the exact cache key already restored",
+      ]
     }
   }
   return errors
@@ -258,7 +352,9 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
   errors = errors + rust_cache_refresh_concurrency_errors(job)
   if trim(job?.if ?? "") != "needs.changes.outputs.rust_cache_refresh == 'true'" {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must run only when changes.outputs.rust_cache_refresh is true"]
+      + [
+      "ci.yml:rust-cache-refresh must run only when changes.outputs.rust_cache_refresh is true",
+    ]
   }
   // Matrix legs write each Linux merge-gate key with that lane's env fingerprint.
   let matrix_keys: list<string> = []
@@ -274,12 +370,16 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
     }
     if trim(to_string(entry?.save_headroom_bytes ?? "")) != expected_headroom {
       errors = errors
-        + ["ci.yml:rust-cache-refresh matrix legs must reserve their measured save envelope"]
+        + [
+        "ci.yml:rust-cache-refresh matrix legs must reserve their measured save envelope",
+      ]
     }
   }
   if !matrix_keys.contains("workspace-tests") || !matrix_keys.contains("package-audit") {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must matrix-write workspace-tests and package-audit cache keys"]
+      + [
+      "ci.yml:rust-cache-refresh must matrix-write workspace-tests and package-audit cache keys",
+    ]
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
   if len(caches) != 1 || !save_requested(caches[0]) {
@@ -290,22 +390,29 @@ fn rust_cache_refresh_errors(workflow: dict) -> list<string> {
       + ["ci.yml:rust-cache-refresh must bind rust-cache shared-key to matrix.cache_key"]
   } else if trim(caches[0]?.id ?? "") != "rust-cache" {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must expose the rust-cache hit result as steps.rust-cache"]
+      + [
+      "ci.yml:rust-cache-refresh must expose the rust-cache hit result as steps.rust-cache",
+    ]
   }
   if contains(to_string(job?.env ?? {}), "CARGO_BUILD_JOBS") {
     errors = errors
       + [
-        "ci.yml:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
-      ]
+      "ci.yml:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
+    ]
   }
   errors = errors + rust_cache_refresh_miss_only_errors(job)
   const headroom_run = trim(
     step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")?.run ?? "",
   )
   if !contains(headroom_run, "prune_ci_cache_generations.sh --clear-family-prefix")
-    || !contains(headroom_run, "prune_ci_cache_generations.sh --ensure-headroom") {
+    || !contains(
+    headroom_run,
+    "prune_ci_cache_generations.sh --ensure-headroom",
+  ) {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must replace stale generations with bounded save headroom"]
+      + [
+      "ci.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+    ]
   }
   const warm = step_by_name(job?.steps ?? [], "Warm Cargo graph")
   if !contains(trim(warm?.run ?? ""), "matrix.warm_script") {
@@ -339,19 +446,24 @@ fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> 
   if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the execution-only ${EXECUTION_ONLY_TIMEOUT_MINUTES}-minute timeout",
-      ]
+      "ci.yml:${job_name} must keep the execution-only ${EXECUTION_ONLY_TIMEOUT_MINUTES}-minute timeout",
+    ]
   }
   if len(matching_steps(consumer, PERSISTENT_SCCACHE_ACTION)) > 0
-    || len(matching_steps(consumer, RUST_CACHE_ACTION))
-      > 0
+    || len(
+    matching_steps(consumer, RUST_CACHE_ACTION),
+  )
+    > 0
     || len(matching_steps(consumer, "./.github/actions/free-disk-space"))
-      > 0 {
+    > 0 {
     errors = errors + ["ci.yml:${job_name} must not restore compiler caches or build-disk setup"]
   }
   const restore_step = step_by_name(consumer?.steps ?? [], "Verify workspace test archive")
   if trim(restore_step?.env?.HARN_VERIFY_RUST_RUNTIME ?? "") != "1"
-    || !contains(trim(restore_step?.run ?? ""), "rust_artifact.sh restore-tests") {
+    || !contains(
+    trim(restore_step?.run ?? ""),
+    "rust_artifact.sh restore-tests",
+  ) {
     errors = errors + ["ci.yml:${job_name} must verify the archived Rust runtime contract"]
   }
   const test_step = step_by_name(consumer?.steps ?? [], "Run Rust workspace tests")
@@ -359,9 +471,12 @@ fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> 
   if !contains(test_command, "--archive-file")
     || !contains(test_command, "harn-tests.tar.zst")
     || !contains(test_command, "--workspace-remap")
-    || !contains(test_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
+    || !contains(
+    test_command,
+    NEUTRAL_RUST_TEST_FILTER_FLAG,
+  )
     || regex_match("(^|[ ])--workspace(harness, [ ]|$)", test_command)
-      != nil {
+    != nil {
     errors = errors + ["ci.yml:${job_name} must execute only the remapped nextest archive"]
   }
   if trim(test_step?.env?.CARGO_BUILD_JOBS ?? "") != "" {
@@ -390,7 +505,10 @@ fn producer_artifact_order_errors(workflow: dict) -> list<string> {
     || security_build_index >= security_upload_index
     || cli_upload_index >= colocated_index
     || security_upload_index >= colocated_index
-    || !contains(trim(cli_build_step?.run ?? ""), "rust_artifact.sh build-cli")
+    || !contains(
+    trim(cli_build_step?.run ?? ""),
+    "rust_artifact.sh build-cli",
+  )
     || !contains(trim(security_build_step?.run ?? ""), "rust_artifact.sh build-security") {
     return [
       "ci.yml:rust-check-inputs must publish the CLI before building security inputs, then publish security before co-located tests",
@@ -407,20 +525,27 @@ fn artifact_ready_barrier_errors(workflow: dict) -> list<string> {
   if trim(workflow?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
     != ARTIFACT_WAIT_MAX_ATTEMPTS
     || trim(workflow?.env?.HARN_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
-      != ARTIFACT_WAIT_INTERVAL_SECONDS
+    != ARTIFACT_WAIT_INTERVAL_SECONDS
     || trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
-    || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
-      != ARTIFACT_READY_TIMEOUT_MINUTES
+    || trim(
+    to_string(ready_job?.["timeout-minutes"] ?? ""),
+  )
+    != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "")
-      != "read"
+    != "read"
     || trim(ready_job?.permissions?.contents ?? "")
-      != "read"
+    != "read"
     || !contains(ready_command, "./scripts/ci/wait_for_run_artifacts.sh")
-    || !contains(ready_command, "harn-cli.tar.zst")
+    || !contains(
+    ready_command,
+    "harn-cli.tar.zst",
+  )
     || contains(ready_command, "harn-security.tar.zst")
-    || len(matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION))
-      > 0
+    || len(
+    matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION),
+  )
+    > 0
     || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
     return [
       "ci.yml:rust-artifacts-ready must be the bounded free-hosted immutable artifact barrier",
@@ -435,17 +560,26 @@ fn security_ready_barrier_errors(workflow: dict) -> list<string> {
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for Linux security tests")
   const ready_command = trim(ready_step?.run ?? "")
   if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
-    || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
-      != ARTIFACT_READY_TIMEOUT_MINUTES
+    || trim(
+    to_string(ready_job?.["timeout-minutes"] ?? ""),
+  )
+    != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "") != "read"
-    || trim(ready_job?.permissions?.contents ?? "")
-      != "read"
+    || trim(
+    ready_job?.permissions?.contents ?? "",
+  )
+    != "read"
     || !contains(ready_command, "./scripts/ci/wait_for_run_artifacts.sh")
-    || !contains(ready_command, "harn-security.tar.zst")
+    || !contains(
+    ready_command,
+    "harn-security.tar.zst",
+  )
     || contains(ready_command, "harn-cli.tar.zst")
-    || len(matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION))
-      > 0
+    || len(
+    matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION),
+  )
+    > 0
     || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
     return ["ci.yml:security-tests-ready must be the bounded free-hosted security artifact barrier"]
   }
@@ -465,9 +599,9 @@ fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
   const audit_command = trim(step_by_name(steps, "Run $" + "{{ matrix.step_name }}")?.run ?? "")
   if (audit?.needs ?? []) != ["changes"]
     || trim(audit?.if ?? "")
-      != "needs.changes.outputs.rust == 'true'"
+    != "needs.changes.outputs.rust == 'true'"
     || trim(to_string(audit?.["timeout-minutes"] ?? ""))
-      != HARN_AUDIT_TIMEOUT_MINUTES
+    != HARN_AUDIT_TIMEOUT_MINUTES
     || wait_index < 0
     || download_index < 0
     || verify_index < 0
@@ -477,9 +611,15 @@ fn harn_audit_overlap_errors(workflow: dict) -> list<string> {
     || parser_index >= wait_index
     || wait_index >= download_index
     || download_index >= verify_index
-    || !contains(wait_command, "wait_for_run_artifacts.sh harn-cli.tar.zst")
+    || !contains(
+    wait_command,
+    "wait_for_run_artifacts.sh harn-cli.tar.zst",
+  )
     || parser_command != "make check-tree-sitter-parser"
-    || !contains(audit_command, "--tree-sitter-parser-preflighted") {
+    || !contains(
+    audit_command,
+    "--tree-sitter-parser-preflighted",
+  ) {
     return [
       "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
     ]
@@ -493,12 +633,14 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   const rust_security_needs = rust_security?.needs ?? []
   const rust_security_if = trim(rust_security?.if ?? "")
   if !rust_security_needs.contains(SECURITY_READY_JOB)
-    || rust_security_needs.contains("rust-check-inputs")
+    || rust_security_needs.contains(
+    "rust-check-inputs",
+  )
     || !contains(rust_security_if, "needs.security-tests-ready.result == 'success'") {
     errors = errors
       + [
-        "ci.yml:rust-security must consume the live exact-commit security archive without waiting for producer completion",
-      ]
+      "ci.yml:rust-security must consume the live exact-commit security archive without waiting for producer completion",
+    ]
   }
   for consumer_name in LIVE_ARTIFACT_CONSUMERS {
     const consumer = workflow?.jobs?.[consumer_name]
@@ -506,11 +648,14 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
     const consumer_if = trim(consumer?.if ?? "")
     if !consumer_needs.contains(ARTIFACT_READY_JOB)
       || consumer_needs.contains("rust-check-inputs")
-      || !contains(consumer_if, "needs.rust-artifacts-ready.result == 'success'") {
+      || !contains(
+      consumer_if,
+      "needs.rust-artifacts-ready.result == 'success'",
+    ) {
       errors = errors
         + [
-          "ci.yml:${consumer_name} must consume live artifacts through rust-artifacts-ready, not producer completion",
-        ]
+        "ci.yml:${consumer_name} must consume live artifacts through rust-artifacts-ready, not producer completion",
+      ]
     }
   }
   const status_step = step_by_name(
@@ -521,9 +666,15 @@ fn artifact_consumer_handoff_errors(workflow: dict) -> list<string> {
   const status_needs = workflow?.jobs?.["ci-status"]?.needs ?? []
   if !status_needs.contains(ARTIFACT_READY_JOB)
     || !status_needs.contains(SECURITY_READY_JOB)
-    || !contains(status_command, "needs['rust-artifacts-ready'].result")
+    || !contains(
+    status_command,
+    "needs['rust-artifacts-ready'].result",
+  )
     || !contains(status_command, "needs['security-tests-ready'].result")
-    || !contains(status_command, "Rust artifact handoff failed or skipped") {
+    || !contains(
+    status_command,
+    "Rust artifact handoff failed or skipped",
+  ) {
     errors = errors + ["ci.yml:ci-status must fail closed on live artifact handoff"]
   }
   return errors
@@ -548,13 +699,16 @@ fn walltime_report_errors(workflow: dict) -> list<string> {
   if trim(report_step?.run ?? "")
     != "./scripts/ci/write_ci_walltime_report.sh \"$RUNNER_TEMP/ci-walltime-report.json\""
     || report_step?.["continue-on-error"]
-      != nil
+    != nil
     || upload_report_step?.["continue-on-error"]
-      != nil
+    != nil
     || trim(upload_report_step?.with?.["if-no-files-found"] ?? "")
-      != "error"
+    != "error"
     || !status_needs.contains("ci-walltime-report")
-    || !contains(status_command, "needs['ci-walltime-report'].result")
+    || !contains(
+    status_command,
+    "needs['ci-walltime-report'].result",
+  )
     || !contains(status_command, "CI timing report failed or skipped") {
     return [
       "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
@@ -569,35 +723,50 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
   const archive_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
   if trim(archive_step?.if ?? "")
     != "vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
-    || !contains(trim(archive_step?.run ?? ""), "rust_artifact.sh build-tests") {
+    || !contains(
+    trim(archive_step?.run ?? ""),
+    "rust_artifact.sh build-tests",
+  ) {
     errors = errors
       + [
-        "ci.yml:rust-check-inputs must build the workspace test archive only for the standalone fallback",
-      ]
+      "ci.yml:rust-check-inputs must build the workspace test archive only for the standalone fallback",
+    ]
   }
   const colocated_step = step_by_name(rust_job?.steps ?? [], "Run Rust workspace tests")
   const colocated_command = trim(colocated_step?.run ?? "")
   if trim(colocated_step?.id ?? "") != "release-audit-rust-test"
     || trim(colocated_step?.if ?? "")
-      != "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
-    || trim(colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "")
-      != "1"
+    != "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
+    || trim(
+    colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "",
+  )
+    != "1"
     || !contains(colocated_command, "cargo nextest run --locked --workspace --profile ci")
-    || !contains(colocated_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
+    || !contains(
+    colocated_command,
+    NEUTRAL_RUST_TEST_FILTER_FLAG,
+  )
     || contains(colocated_command, "--archive-file") {
     errors = errors
-      + ["ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof"]
+      + [
+      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+    ]
   }
   const security_job = workflow?.jobs?.["rust-security"]
   const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")
   const security_command = trim(security_step?.run ?? "")
   if trim(security_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(security_step?.id ?? "")
-      != "release-audit-rust-security"
+    != "release-audit-rust-security"
     || !contains(security_command, "--archive-file")
-    || !contains(security_command, HOST_BOUND_RUST_TEST_FILTER_FLAG) {
+    || !contains(
+    security_command,
+    HOST_BOUND_RUST_TEST_FILTER_FLAG,
+  ) {
     errors = errors
-      + ["ci.yml:rust-security must own every host-bound Linux sandbox proof on GitHub Ubuntu"]
+      + [
+      "ci.yml:rust-security must own every host-bound Linux sandbox proof on GitHub Ubuntu",
+    ]
   }
   const rust_test_if = trim(workflow?.jobs?.["rust-test"]?.if ?? "")
   if !contains(rust_test_if, COLOCATED_TESTS_DISABLE_VAR)
@@ -615,7 +784,10 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
     COLOCATED_TESTS_DISABLE_VAR,
   )
     || !contains(status_command, "$COLOCATED_TESTS_DISABLED")
-    || contains(status_command, "$BLACKSMITH_DISABLED") {
+    || contains(
+    status_command,
+    "$BLACKSMITH_DISABLED",
+  ) {
     errors = errors
       + ["ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"]
   }
@@ -626,7 +798,7 @@ fn strict_clippy_entrypoint_errors(rust_job: dict?) -> list<string> {
   const lint_step = step_by_name(rust_job?.steps ?? [], "Check Rust code with Clippy")
   if trim(lint_step?.if ?? "") == ""
     && trim(lint_step?.run ?? "")
-      == "./scripts/ci/run_rust_lint_lane.sh"
+    == "./scripts/ci/run_rust_lint_lane.sh"
     && rust_job?.env?.RUN_PROMPT_PROSE_RATCHET == nil
     && lint_step?.env?.RUN_PROMPT_PROSE_RATCHET == nil {
     return []
@@ -668,12 +840,16 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
   }
   let errors: list<string> = []
   if trim(prompt_step?.if ?? "") != "needs.changes.outputs.prompt_prose == 'true'"
-    || trim(prompt_step?.run ?? "")
-      != "make lint-no-rust-prompt-prose"
+    || trim(
+    prompt_step?.run ?? "",
+  )
+    != "make lint-no-rust-prompt-prose"
     || verify_index < 0
     || prompt_index != verify_index + 1 {
     errors = errors
-      + ["ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary"]
+      + [
+      "ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary",
+    ]
   }
   if test_pattern_command_count != 1 || test_pattern_name_count != 1 {
     errors = errors
@@ -689,8 +865,8 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
     || test_pattern_index >= post_warm_index {
     errors = errors
       + [
-        "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
-      ]
+      "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
+    ]
   }
   return errors
 }
@@ -698,14 +874,18 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
 /** Keep one persistent producer, one lint lane, and one package lane. */
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
-    + hosted_compile_lane_errors(workflow, "rust-checks", "workspace-tests")
+    + hosted_compile_lane_errors(
+    workflow,
+    "rust-checks",
+    "workspace-tests",
+  )
     + persistent_compile_lane_errors(
-      workflow,
-      "rust-check-inputs",
-      BLACKSMITH_8CPU_RUNNER,
-      "workspace-tests",
-      "workspace-tests",
-    )
+    workflow,
+    "rust-check-inputs",
+    BLACKSMITH_8CPU_RUNNER,
+    "workspace-tests",
+    "workspace-tests",
+  )
     + hosted_refresh_lane_errors(workflow)
   const rust_job = workflow?.jobs?.["rust-checks"]
   if rust_job?.strategy != nil {
@@ -718,10 +898,14 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   const build_step = step_by_name(producer?.steps ?? [], "Build portable workspace test archive")
   if trim(build_step?.if ?? "")
     != "vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
-    || trim(to_string(build_step?.env?.CARGO_BUILD_JOBS ?? ""))
-      != HOSTED_BUILD_JOBS {
+    || trim(
+    to_string(build_step?.env?.CARGO_BUILD_JOBS ?? ""),
+  )
+    != HOSTED_BUILD_JOBS {
     errors = errors
-      + ["ci.yml:rust-check-inputs workspace test archive must keep memory-bounded compile fan-out"]
+      + [
+      "ci.yml:rust-check-inputs workspace test archive must keep memory-bounded compile fan-out",
+    ]
   }
   errors = errors + archived_workspace_test_consumer_errors(workflow, "rust-test")
   errors = errors + colocated_rust_proof_errors(workflow)
@@ -731,7 +915,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
       && to_string(job_name)
-        != "rust-check-inputs" {
+      != "rust-check-inputs" {
       errors = errors + ["ci.yml:${job_name} is not an authorized persistent sccache lane"]
     }
   }
