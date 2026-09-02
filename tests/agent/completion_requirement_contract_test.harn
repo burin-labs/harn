@@ -856,6 +856,7 @@ pipeline test_itemized_report_that_omits_a_row_is_still_an_actor_gap(
 }
 
 // -------------------------------------------------------------------------------------------------
+
 // harn#7830 / bc#7759. An EMPTY acceptance set is satisfied by construction.
 //
 // The founder ruling is that a row exists only when there is something real to
@@ -864,6 +865,7 @@ pipeline test_itemized_report_that_omits_a_row_is_still_an_actor_gap(
 // on the schema, no itemization re-ask, no `continue` override of `done`, and
 // so no thrash. These pin that a ledger-free run is cheap AND that a declared
 // ledger still binds exactly as harn#7555/#7557/#7824 left it.
+
 // -------------------------------------------------------------------------------------------------
 
 fn ledger_free_judge_opts(session: string, cap: int) -> AgentSpec {
@@ -983,16 +985,17 @@ pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
   )
 }
 
-// A row whose ONLY accepted evidence kind is deterministic verification, with a
-// passing receipt in the packet, is met whether or not the judge itemized it.
-// Requiring the judge to assert a fact the runtime already recorded is the same
-// ceremony bc#7759 removed: the deterministic gate ran, it passed, and a model's
-// silence cannot un-run it. Judgment rows are untouched, because any row that
-// admits `assistant_output` still needs the judge.
-pipeline test_an_unreported_verification_row_is_met_by_its_passing_receipt(
-  harness: Harness,
-  task: unknown,
-) {
+// FINDING, not a fix (bc#7759 follow-up). Closing an UNREPORTED
+// verification-only row from its passing receipt was tried and reverted. It
+// reads as obviously right and is not: the receipt says one verifier passed,
+// while a row narrowed to `deterministic_verification` may be about something
+// that verifier never exercised. Turning the missing row met broke
+// `test_requirement_report_fails_closed_on_missing_duplicate_and_unsupported_rows`,
+// `test_pending_feedback_names_the_item_and_its_evidence_kind`, and
+// `test_requirement_schema_is_optional_for_legacy_judges`, which encode that
+// invariant deliberately. These pin the CURRENT behavior so the next reader
+// does not re-derive the same wrong idea.
+pipeline test_an_unreported_verification_row_stays_unassessed(harness: Harness, task: unknown) {
   const verification_only: CompletionRequirementContract = {
     requirements: [
       {
@@ -1002,42 +1005,23 @@ pipeline test_an_unreported_verification_row_is_met_by_its_passing_receipt(
       },
     ],
   }
-  // The judge answered with a bare scalar and itemized nothing.
-  const report = completion_requirement_report(verification_only, nil, trial_shaped_packet("passed"))
-  assert_eq(report.rows[0].status, "met")
-  assert(report.complete)
-}
-
-// Negative controls. The receipt closes ONLY a verification-only row, and only
-// on a passing reading.
-pipeline test_a_receipt_never_closes_a_judgment_row_or_a_failing_run(
-  harness: Harness,
-  task: unknown,
-) {
-  // Default roles admit assistant_output, so this is the judge's to assess.
-  const judgment_row: CompletionRequirementContract = {
-    requirements: [{requirement_id: "say-hello", name: "Say hello."}],
-  }
-  const judged = completion_requirement_report(judgment_row, nil, trial_shaped_packet("passed"))
-  assert_eq(judged.rows[0].status, "missing")
-  assert(!judged.complete)
-  // A verification-only row with a failing reading stays unassessed.
-  const verification_only: CompletionRequirementContract = {
-    requirements: [
-      {
-        requirement_id: "verify",
-        name: "Run the exact scoped verification command `pytest`.",
-        evidence_roles: ["deterministic_verification"],
-      },
-    ],
-  }
-  const failing = completion_requirement_report(
+  // A passing receipt does NOT close a row the judge never reported.
+  const report = completion_requirement_report(
     verification_only,
     nil,
-    trial_shaped_packet("failed"),
+    trial_shaped_packet("passed"),
   )
-  assert_eq(failing.rows[0].status, "missing")
-  // An explicit `not met` from the judge is still the judge's answer.
+  assert_eq(report.rows[0].status, "missing")
+  assert(!report.complete)
+  // Reported met but badly cited IS closed by the receipt. That is the
+  // narrow, existing affordance, and it still requires the judge to answer.
+  const cited = completion_requirement_report(
+    verification_only,
+    [{requirement_id: "verify", met: true, evidence_refs: [999]}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(cited.rows[0].status, "met")
+  // An explicit `not met` is still the judge's answer, receipt or no receipt.
   const refused = completion_requirement_report(
     verification_only,
     [{requirement_id: "verify", met: false, evidence_refs: []}],
