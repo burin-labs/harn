@@ -214,7 +214,9 @@ fn completion_read_target(args: dict) -> string {
   for key in COMPLETION_READ_TARGET_KEYS {
     const value = args[key] ?? nil
     if value != nil {
-      const rendered = trim(completion_evidence_clip_to(value, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT))
+      const rendered = trim(
+        completion_evidence_clip_to(value, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT),
+      )
       if rendered != "" && rendered != "\"\"" {
         return rendered
       }
