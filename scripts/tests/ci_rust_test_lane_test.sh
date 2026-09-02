@@ -47,6 +47,16 @@ grep -q 'rust_test_execution_seconds=' "$log"
 RUST_MIN_STACK=4194304 "$script" \
   bash -c 'test "$RUST_MIN_STACK" = 4194304' >/dev/null 2>&1
 
+# Structured reporters need a pure stdout stream. The wrapper keeps its own
+# resource receipt on the terminal while routing only the child stream to the
+# caller-owned path.
+child_stdout="$tmpdir/child-stdout.jsonl"
+RUST_TEST_STDOUT_PATH="$child_stdout" "$script" \
+  bash -c 'printf "%s\n" "{\"type\":\"test\",\"event\":\"ok\"}"' \
+  >"$tmpdir/wrapper-output.log" 2>&1
+grep -qx '{"type":"test","event":"ok"}' "$child_stdout"
+grep -q 'Rust test resources before' "$tmpdir/wrapper-output.log"
+
 custom_summary="$tmpdir/custom-summary.md"
 custom_log="$tmpdir/custom-output.log"
 GITHUB_STEP_SUMMARY="$custom_summary" "$script" true >"$custom_log" 2>&1

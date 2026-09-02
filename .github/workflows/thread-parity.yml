@@ -57,8 +57,4 @@ jobs:
       # aborts VM-driving tests with SIGABRT regardless of thread count and
       # reports a stack-size difference as a thread-count parity failure.
       - name: Run full suite at ${{ matrix.threads }} threads
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --locked --workspace --test-threads=${{ matrix.threads }}
-        env:
-          NEXTEST_PROFILE: ci
+        run: scripts/ci/run_thread_parity.sh ${{ matrix.threads }}

@@ -630,6 +630,7 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_registry_harn_bin_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
+	./scripts/tests/thread_parity_receipt_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/sccache_action_cache_size_test.sh
