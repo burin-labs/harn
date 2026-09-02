@@ -5,6 +5,7 @@ import {
   completion_requirement_contract,
   completion_requirement_pending_feedback,
   completion_requirement_report,
+  completion_requirement_unassessed_feedback,
 } from "std/agent/completion_requirements"
 import { agent_capture_events } from "std/agent/events"
 import {
@@ -777,10 +778,22 @@ pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
       assert_eq(len(receipts), 1)
       assert_eq(receipts[0].action, "continue")
       assert_eq(receipts[0].reason, "completion_judge_report_omitted")
-      assert(
-        to_string(receipts[0]?.feedback ?? "").contains("completion judge returned no assessment"),
+      // The judge was re-asked exactly once and still did not itemize.
+      const reasks = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+              == "harn.completion_judge_itemization_retry.v1"
+        },
       )
-      assert(to_string(receipts[0]?.feedback ?? "").contains("`say-hello`"))
+        .map({ event -> event.checkpoint })
+        .to_list()
+      assert_eq(len(reasks), 1)
+      assert_eq(reasks[0].itemized_after_reask, false)
+      // The actor-facing text names the judge, not the actor's work.
+      const feedback = completion_requirement_unassessed_feedback(receipts[0].requirements)
+      assert(feedback.contains("completion judge returned no assessment"))
+      assert(feedback.contains("`say-hello`"))
     },
   )
 }
