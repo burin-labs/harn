@@ -254,3 +254,22 @@ pub fn agent_loop_provider_failure(
     },
   )
 }
+
+/**
+ * True when a served turn committed nothing the loop can act on.
+ *
+ * Reads the VM's typed `outcome.kind`, which already accounts for both native
+ * and text-protocol tool calls, rather than re-deriving emptiness from text
+ * length or a stop-reason vocabulary. The resolved tool-call count is a second,
+ * independent guard so a turn that produced a dispatchable call can never be
+ * read as empty even if the outcome field is absent.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_loop_turn_committed_nothing(llm_result: any, tool_call_count: int) -> bool {
+  if tool_call_count > 0 {
+    return false
+  }
+  return to_string(llm_result?.outcome?.kind ?? "") == "empty"
+}

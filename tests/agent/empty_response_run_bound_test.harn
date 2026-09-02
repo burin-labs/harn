@@ -15,6 +15,25 @@ import { llm_call_count, with_llm_script } from "std/testing"
 
 const EMPTY_ATTEMPTS = 3
 
+const DONE_SENTINEL = "##DONE##"
+
+/**
+ * Completion claims the assistant authored: assistant messages carrying the
+ * done sentinel. Counted from the session snapshot rather than from the run's
+ * final status, because the point of the assertion is that a turn producing no
+ * output cannot author a claim even when the status is already terminal.
+ */
+fn completion_claims(agent: HarnessAgent, session_id: string) -> int {
+  return len(
+    agent.snapshot(session_id).messages.filter(
+      { message ->
+        message?.role == "assistant"
+          && to_string(message?.content ?? "").contains(DONE_SENTINEL)
+      },
+    ),
+  )
+}
+
 fn empty_generation_response() -> dict {
   return {text: "", usage: {completion_tokens: 0}}
 }
@@ -98,7 +117,7 @@ pipeline test_exhausted_empty_attempts_end_the_run(harness: Harness, _task: unkn
         tools: toolset(),
         tool_format: "native",
         loop_until_done: true,
-        done_sentinel: "##DONE##",
+        done_sentinel: DONE_SENTINEL,
         max_iterations: 6,
         final_wrapup: false,
         session_id: session,
@@ -118,6 +137,11 @@ pipeline test_exhausted_empty_attempts_end_the_run(harness: Harness, _task: unkn
         llm_call_count(harness.llm),
         EMPTY_ATTEMPTS,
         "exhausting the empty-response attempts must end the run, not start another empty turn",
+      )
+      assert_eq(
+        completion_claims(harness.agent, session),
+        0,
+        "a turn that produced no output must not author a completion claim",
       )
     },
   )
@@ -144,7 +168,7 @@ pipeline test_non_empty_response_still_advances(harness: Harness, _task: unknown
         tools: toolset(),
         tool_format: "native",
         loop_until_done: true,
-        done_sentinel: "##DONE##",
+        done_sentinel: DONE_SENTINEL,
         max_iterations: 6,
         final_wrapup: false,
         session_id: session,
@@ -164,6 +188,67 @@ pipeline test_non_empty_response_still_advances(harness: Harness, _task: unknown
         llm_call_count(harness.llm),
         3,
         "the recovered turn plus the completing turn must cost three provider calls",
+      )
+      // Non-null read for the counter the two bound tests assert is zero. A
+      // claim counter that can only ever answer zero would satisfy them
+      // without measuring anything.
+      assert_eq(
+        completion_claims(harness.agent, session),
+        1,
+        "the completing turn must be counted as a claim, so a zero elsewhere is a measurement",
+      )
+    },
+  )
+}
+
+/**
+ * The same bound with no caller wrapper at all. A turn that commits nothing is
+ * the end of the run, so the run costs exactly one provider call. Before the
+ * fix this ran until `max_iterations` and cost one call per iteration.
+ */
+pipeline test_a_turn_that_commits_nothing_ends_the_run(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      empty_generation_response(),
+      // Only reachable if a turn that committed nothing did not end the run.
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+      empty_generation_response(),
+    ],
+    { ->
+      const session = "empty-turn-terminal-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: "mock-model",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: DONE_SENTINEL,
+        max_iterations: 6,
+        final_wrapup: false,
+        session_id: session,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Inspect the target file.", nil, opts) },
+      )
+      assert_eq(
+        llm_call_count(harness.llm),
+        1,
+        "a turn that committed nothing must end the run on that turn",
+      )
+      assert_eq(captured.result.status, "provider_error")
+      assert_eq(captured.result.stop_reason, "empty_generation")
+      assert_eq(
+        completion_claims(harness.agent, session),
+        0,
+        "a turn that produced no output must not author a completion claim",
       )
     },
   )
