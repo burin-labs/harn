@@ -739,9 +739,10 @@ pub(crate) fn contract_effect_allowed_by_ceiling(
     if !effect_capability_allowed_by_ceiling(effect, ceiling, explicitly_authorized) {
         return false;
     }
-    // The side-effect ladder ranks how invasive a *model-facing tool* is. The
-    // agent runtime's own bookkeeping is not a tool the model ran, so a
-    // contract that says so is not ranked on it.
+    // The side-effect ladder ranks mutations of the user's workspace and
+    // external systems. A declared runtime-control-plane operation mutates
+    // Harn-owned session state instead, so that orthogonal ladder does not
+    // rank it.
     //
     // Without this, `harness.agent.open` — `state:mutate (agent-sessions)`,
     // which the ladder classifies `workspace_write` — was rejected under the
@@ -751,9 +752,9 @@ pub(crate) fn contract_effect_allowed_by_ceiling(
     //
     // The capability gate above still applies in full: a ceiling that
     // restricts `state`/`write` still denies these, and the effects stay in
-    // the record for receipts and lineage. This says who performed the write,
-    // not that there wasn't one.
-    if contract.runtime_infrastructure {
+    // the record for receipts and lineage. The marker classifies the target
+    // domain and does not establish caller identity.
+    if contract.is_runtime_control_plane() {
         return true;
     }
     effect_within_side_effect_ceiling(effect, ceiling)

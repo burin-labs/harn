@@ -993,6 +993,7 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
     mod live_controls;
+    mod served_agent_turn;
     mod session_model_policy;
     mod task_cancellation;
 

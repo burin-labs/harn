@@ -485,26 +485,26 @@ pub struct BuiltinContract {
     pub exposure: BuiltinExposure,
     pub effects: &'static [EffectSpec],
     pub effects_authorized_by: Option<EffectAuthorization>,
-    /// This operation is the agent runtime's own bookkeeping, not an action a
-    /// model chose to take.
+    /// This operation mutates Harn's runtime control plane rather than the
+    /// user's workspace or an external system.
     ///
     /// It changes exactly one thing: the coarse side-effect ladder
     /// (`read_only` < `workspace_write` < `process_exec` < `network`) does not
     /// rank these effects. That ladder answers "how much of the user's world
-    /// may a *tool* touch", and the runtime opening the session a model call
-    /// is recorded in is not a tool the model ran — but `state:mutate` ranked
+    /// may an operation touch", while opening the session a model call is
+    /// recorded in changes Harn-owned control state. `state:mutate` ranked
     /// `workspace_write` all the same, so a `read_only` ceiling rejected the
     /// agent loop's own session lifecycle and killed the turn before its
     /// first model call.
     ///
     /// Everything else still applies. A ceiling that restricts capabilities
     /// governs these effects exactly as before, they stay in receipts and
-    /// lineage, and they stay in the effect record. This is not a way to make
-    /// a write invisible; it is a statement about *who* performed it.
+    /// lineage, and they stay in the effect record. This classifies the
+    /// operation's target domain; it does not prove or change caller identity.
     ///
     /// Distinct from [`EffectAuthorization`], which delegates an effect to
     /// another capability grant and is deliberately limited to reads.
-    pub runtime_infrastructure: bool,
+    runtime_control_plane: bool,
 }
 
 impl BuiltinContract {
@@ -512,28 +512,28 @@ impl BuiltinContract {
         exposure: BuiltinExposure::Undeclared,
         effects: &[],
         effects_authorized_by: None,
-        runtime_infrastructure: false,
+        runtime_control_plane: false,
     };
 
     pub const PURE: Self = Self {
         exposure: BuiltinExposure::PureGlobal,
         effects: &[],
         effects_authorized_by: None,
-        runtime_infrastructure: false,
+        runtime_control_plane: false,
     };
 
     pub const RUNTIME_INTERNAL: Self = Self {
         exposure: BuiltinExposure::RuntimeInternal,
         effects: &[],
         effects_authorized_by: None,
-        runtime_infrastructure: false,
+        runtime_control_plane: false,
     };
 
     pub const STDLIB_INTERNAL: Self = Self {
         exposure: BuiltinExposure::StdlibInternal,
         effects: &[],
         effects_authorized_by: None,
-        runtime_infrastructure: false,
+        runtime_control_plane: false,
     };
 
     pub const fn harness(
@@ -545,7 +545,7 @@ impl BuiltinContract {
             exposure: BuiltinExposure::HarnessMethod { capability, method },
             effects,
             effects_authorized_by: None,
-            runtime_infrastructure: false,
+            runtime_control_plane: false,
         }
     }
 
@@ -571,30 +571,57 @@ impl BuiltinContract {
             exposure: BuiltinExposure::HarnessMethod { capability, method },
             effects,
             effects_authorized_by: Some(effects_authorized_by),
-            runtime_infrastructure: false,
+            runtime_control_plane: false,
         }
     }
 
-    /// A Harness method the agent runtime performs on its own behalf. See
-    /// [`BuiltinContract::runtime_infrastructure`] for exactly what this
+    /// A Harness method that mutates Harn-owned runtime control-plane state. See
+    /// [`BuiltinContract::is_runtime_control_plane`] for exactly what this
     /// relaxes and what it does not.
-    pub const fn harness_runtime_infrastructure(
+    pub const fn harness_runtime_control_plane(
         capability: CapabilityId,
         method: &'static str,
         effects: &'static [EffectSpec],
     ) -> Self {
         assert!(
             !effects.is_empty(),
-            "runtime infrastructure requires declared effects: the marker exempts \
-             effects from the side-effect ladder, so a contract with none is \
-             decorative and would read as audited while asserting nothing"
+            "runtime control plane requires declared effects: the marker classifies \
+             effects outside the user-world side-effect ladder, so a contract with \
+             none is decorative and would read as audited while asserting nothing"
+        );
+        let mut index = 0;
+        let mut mutates_state = false;
+        while index < effects.len() {
+            assert!(
+                matches!(effects[index].kind, EffectKind::State),
+                "runtime control plane effects must target state"
+            );
+            if matches!(
+                effects[index].access,
+                EffectAccess::Write | EffectAccess::Mutate
+            ) {
+                mutates_state = true;
+            }
+            index += 1;
+        }
+        assert!(
+            mutates_state,
+            "runtime control plane requires at least one state write or mutation"
         );
         Self {
             exposure: BuiltinExposure::HarnessMethod { capability, method },
             effects,
             effects_authorized_by: None,
-            runtime_infrastructure: true,
+            runtime_control_plane: true,
         }
+    }
+
+    /// Whether this contract targets Harn-owned runtime control-plane state.
+    ///
+    /// The marker is private so callers cannot bypass the structural checks in
+    /// [`BuiltinContract::harness_runtime_control_plane`].
+    pub const fn is_runtime_control_plane(self) -> bool {
+        self.runtime_control_plane
     }
 
     pub const fn capability_function(
@@ -605,7 +632,7 @@ impl BuiltinContract {
             exposure: BuiltinExposure::CapabilityFunction { authority_argument },
             effects,
             effects_authorized_by: None,
-            runtime_infrastructure: false,
+            runtime_control_plane: false,
         }
     }
 
@@ -614,7 +641,7 @@ impl BuiltinContract {
             exposure: BuiltinExposure::PrivilegedWire,
             effects,
             effects_authorized_by: None,
-            runtime_infrastructure: false,
+            runtime_control_plane: false,
         }
     }
 
@@ -645,6 +672,36 @@ mod tests {
             "test_write",
             WRITE_EFFECTS,
             EffectAuthorization::new(CapabilityId::Llm, "call"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "runtime control plane effects must target state")]
+    fn runtime_control_plane_rejects_non_state_effects() {
+        static EFFECTS: &[EffectSpec] = &[EffectSpec::new(
+            EffectKind::Fs,
+            EffectAccess::Write,
+            &[ResourceSelector::Dynamic],
+        )];
+        let _ = BuiltinContract::harness_runtime_control_plane(
+            CapabilityId::Agent,
+            "unsafe_write",
+            EFFECTS,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "requires at least one state write or mutation")]
+    fn runtime_control_plane_rejects_read_only_state_effects() {
+        static EFFECTS: &[EffectSpec] = &[EffectSpec::new(
+            EffectKind::State,
+            EffectAccess::Read,
+            &[ResourceSelector::Dynamic],
+        )];
+        let _ = BuiltinContract::harness_runtime_control_plane(
+            CapabilityId::Agent,
+            "state_read",
+            EFFECTS,
         );
     }
 }

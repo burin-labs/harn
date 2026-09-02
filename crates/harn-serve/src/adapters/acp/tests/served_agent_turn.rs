@@ -15,28 +15,26 @@
 //!
 //! `harn run` never saw it — it installs no ceiling at all, so the run path
 //! granted what the served path withheld. The fix is one typed declaration on
-//! the contract — `runtime_infrastructure`, meaning the agent runtime
-//! performed the operation on its own behalf, which exempts its effects from
-//! the tool-invasiveness ladder and nothing else — not a served-only
-//! exception. See `crates/harn-vm/src/orchestration/tests/side_effect_ceiling.rs`
-//! for the registry-wide guard and the in-process negative controls.
+//! the contract: `runtime_control_plane` classifies operations that mutate
+//! Harn-owned session state rather than the user's workspace or an external
+//! system. It exempts only the orthogonal user-world side-effect ladder; the
+//! capability gate, effect receipts, and lineage still apply. See
+//! `crates/harn-vm/src/orchestration/tests/side_effect_ceiling.rs` for the
+//! registry-wide guard and the in-process negative controls.
 //!
-//! ## Why this drives no model call
-//!
-//! The obvious end-to-end shape — arm the LLM fixture, then call the model —
-//! cannot be written in this mode. `harness.llm.mock_clear` and
-//! `mock_enqueue` declare `state:mutate/write (llm-fixture)`, which the same
-//! ladder also ranks `workspace_write`, so the fixture is itself above the
-//! `ask` ceiling. Every other mock-LLM ACP test arms it from **code** mode
-//! (`start_acp_code_session_with_config`) for exactly this reason.
-//!
-//! Marking the fixture `runtime_infrastructure` would be false — a test
-//! fixture is not the agent runtime acting on its own behalf — so this file
-//! proves the control plane instead, and a served turn that reaches a real
-//! model call in the default mode stays uncovered. That gap is a property of
-//! the fixture, not of the fix.
+//! This test arms the mock provider outside the governed Harn source, then
+//! drives `agent_loop` through the real default-mode ACP path. The task itself
+//! asserts that one model call was consumed before the terminal response.
 
 use super::*;
+
+struct MockModeGuard;
+
+impl Drop for MockModeGuard {
+    fn drop(&mut self) {
+        harn_vm::llm::clear_cli_llm_mock_mode();
+    }
+}
 
 fn answer_host_capabilities(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
@@ -99,30 +97,61 @@ async fn prompt(
 ///     looked fine because it had no ceiling to violate.
 ///   * The refuse half alone would pass if everything were rejected.
 ///
-/// Disarm by deleting `runtime_infrastructure` from `harness.agent.open` in
+/// Disarm by deleting `runtime_control_plane` from `harness.agent.open` in
 /// `crates/harn-capability-contracts/src/ai.rs`: the admit half then fails
 /// with the ceiling rejection quoted in the module docs, while the refuse half
 /// keeps passing.
 #[tokio::test(flavor = "current_thread")]
-async fn default_mode_admits_the_session_control_plane_and_still_refuses_an_unmarked_write() {
+async fn default_mode_reaches_a_model_turn_and_still_refuses_a_workspace_write() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
+            let mock = harn_vm::llm::parse_llm_mock_value(&serde_json::json!({
+                "text": "all done",
+                "model": "served-proof",
+                "provider": "mock",
+            }))
+            .expect("mock fixture");
+            harn_vm::llm::install_cli_llm_mocks(vec![mock]);
+            let _mock_mode = MockModeGuard;
+
+            let dir = tempfile::tempdir().expect("tempdir");
+            let pipeline = dir.path().join("served-agent-turn.harn");
+            std::fs::write(
+                &pipeline,
+                r#"import { agent_loop } from "std/agent/loop"
+pipeline default(harness: Harness) {
+  if prompt == "runtime-control" {
+    agent_loop(harness, prompt, nil, {provider: "mock", model: "served-proof"})
+    assert(
+      len(harness.llm.mock_calls()) == 1,
+      "the default served task must consume exactly one model call",
+    )
+    harness.stdio.println("control-plane-ok")
+  } else {
+    harness.fs.write_text("ceiling-probe.txt", "must-not-write")
+  }
+}
+"#,
+            )
+            .expect("write served pipeline");
+
             // No session/set_mode: this is the `ask` default a client gets.
             let (request_tx, mut response_rx, _server, session_id) =
-                start_acp_channel_session().await;
+                start_acp_channel_session_with_config(
+                    AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
+                    serde_json::json!(dir.path()),
+                )
+                .await;
 
-            // Three of the 27 marked control-plane methods, in the order the
-            // agent loop itself uses them. Each declares a `state` write that
-            // the ladder ranks above `read_only`.
-            let control_plane = concat!(
-                "const s = harness.agent.open()\n",
-                "harness.agent.set_scratchpad(s, {probe: \"reached\"})\n",
-                "harness.agent.close(s)\n",
-                "harness.stdio.println(\"control-plane-ok\")\n",
-            );
-            let admitted =
-                prompt(&request_tx, &mut response_rx, &session_id, 2, control_plane).await;
+            let admitted = prompt(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                2,
+                "runtime-control",
+            )
+            .await;
             assert!(
                 admitted["error"].is_null(),
                 "the agent loop's own session control plane must survive the ceiling \
@@ -140,20 +169,12 @@ async fn default_mode_admits_the_session_control_plane_and_still_refuses_an_unma
             // ceiling has stopped meaning anything and the turn above proves
             // nothing.
             //
-            // `harness.fs.write_text` rather than the sharper same-kind
-            // sibling `harness.agent.state_write`, because the latter's first
-            // parameter is a `resource` handle: passing a string literal to it
-            // over the wire risks failing the type check before enforcement is
-            // reached, which would leave this control asserting a rejection it
-            // never actually measured. The same-kind sibling is covered
-            // in-process, against the enforcement function directly, by
-            // `the_marker_does_not_open_durable_agent_state`.
             let durable = prompt(
                 &request_tx,
                 &mut response_rx,
                 &session_id,
                 3,
-                "harness.fs.write_text(\"ceiling-probe.txt\", \"nope\")\n",
+                "workspace-write",
             )
             .await;
             let rejection = format!(

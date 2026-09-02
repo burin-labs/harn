@@ -1095,7 +1095,7 @@ capability_method!(
     ["state.mutate@const=agent-sessions"],
     "__cap_agent_open(id?: string, opts?: dict) -> string",
     "Open or create an agent session.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_workspace_anchor,
@@ -1110,7 +1110,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_set_workspace_anchor(id: string, anchor: any) -> bool",
     "Set a session workspace anchor.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_workspace_policy,
@@ -1125,7 +1125,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_set_workspace_policy(id: string, policy: dict) -> bool",
     "Set a session workspace policy.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_add_root,
@@ -1133,7 +1133,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_add_root(id: string, root: string, opts?: dict) -> dict",
     "Add a session workspace root.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_remove_root,
@@ -1141,7 +1141,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_remove_root(id: string, root: string) -> dict",
     "Remove a session workspace root.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_list_roots,
@@ -1192,7 +1192,7 @@ capability_method!(
     ["state.write@arg1"],
     "__cap_agent_record_changed_path(path: string, session_id?: string) -> bool",
     "Record a changed path for a session.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_actor_chain,
@@ -1228,7 +1228,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_set_scratchpad(id: string, scratchpad: dict, opts?: dict) -> dict",
     "Set the session scratchpad.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_clear_scratchpad,
@@ -1236,7 +1236,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_clear_scratchpad(id: string, opts?: dict) -> dict",
     "Clear the session scratchpad.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_claim_tool_format,
@@ -1244,7 +1244,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_claim_tool_format(id: string, tool_format: string) -> nil",
     "Claim a session tool format.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_reset,
@@ -1252,7 +1252,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_reset(id: string) -> nil",
     "Reset a session.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_fork,
@@ -1260,7 +1260,7 @@ capability_method!(
     ["state.read@arg0", "state.write@arg1"],
     "__cap_agent_fork(src: string, dst?: string) -> string",
     "Fork a session.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_fork_at,
@@ -1268,7 +1268,7 @@ capability_method!(
     ["state.read@arg0", "state.write@arg2"],
     "__cap_agent_fork_at(src: string, keep_first: int, dst?: string) -> string",
     "Fork a session at a transcript position.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_rollback,
@@ -1276,7 +1276,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_rollback(id: string) -> dict",
     "Roll back the last session mutation.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_redo,
@@ -1284,7 +1284,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_redo(id: string) -> dict",
     "Redo a rolled-back session mutation.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_close,
@@ -1292,7 +1292,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_close(id: string, status?: any) -> nil",
     "Close a session.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_trim,
@@ -1300,7 +1300,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_trim(id: string, keep_last: int) -> nil",
     "Trim a session transcript.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_attach,
@@ -1308,7 +1308,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_attach(id: string, client_id: string, opts?: dict) -> dict",
     "Attach a live client.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_takeover,
@@ -1316,7 +1316,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_takeover(id: string, client_id: string, opts?: dict) -> dict",
     "Transfer session ownership to a client.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_detach,
@@ -1324,7 +1324,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_detach(id: string, client_id: string, opts?: dict) -> dict",
     "Detach a live client.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_heartbeat,
@@ -1332,7 +1332,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_heartbeat(id: string, client_id: string, opts?: dict) -> dict",
     "Record a client heartbeat.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_live_clients,
@@ -1342,10 +1342,10 @@ capability_method!(
     "List live session clients."
 );
 capability_method!(agent_client_inject_prompt, "harness.agent.client_inject_prompt", ["state.write@arg0"], "__cap_agent_client_inject_prompt(id: string, client_id: string, content: any, opts?: dict) -> nil", "Inject a client prompt.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(agent_route_permission, "harness.agent.route_permission", ["state.mutate@arg0"], "__cap_agent_route_permission(id: string, client_id: string, request: any, opts?: dict) -> dict", "Route a permission request.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_inject,
@@ -1353,7 +1353,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_inject(id: string, message: any) -> nil",
     "Inject a session message.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_post_event,
@@ -1361,7 +1361,7 @@ capability_method!(
     ["state.write@arg0"],
     "__cap_agent_post_event(id: string, kind: string, content: any, source?: any) -> nil",
     "Post a durable session event.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_drain_inbox,
@@ -1369,7 +1369,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_drain_inbox(id: string) -> list",
     "Drain a session inbox.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_seed_from_jsonl,
@@ -1384,7 +1384,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_reanchor(id: string, new_anchor: any, opts?: dict) -> dict",
     "Reanchor a session workspace.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_compact,
@@ -1392,7 +1392,7 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_compact(id: string, opts?: dict) -> dict",
     "Compact a session transcript.",
-    runtime_infrastructure
+    runtime_control_plane
 );
 capability_method!(
     agent_self_review,

@@ -1813,6 +1813,7 @@ const CANCEL_TOOL_CALL_DEFAULT_TIMEOUT_MS: i64 = 5_000;
 #[harn_builtin(
     exposure = "harness.agent.cancel_in_flight_tool_call",
     effects = ["state.mutate@arg0"],
+    runtime_control_plane = true,
     sig = "cancel_in_flight_tool_call(session_id: string, call_id: string, opts?: dict) -> dict",
     kind = "async",
     category = "agent.session",

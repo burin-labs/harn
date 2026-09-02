@@ -339,10 +339,10 @@ fn trusted_bridge_depth_exempts_harness_state_reads_like_bridged_builtins() {
     );
 }
 
-/// The agent-session control plane: the transcript bookkeeping the agent loop
-/// performs on its own behalf — opening the session a model call is recorded
-/// in, anchoring its workspace, forking it, closing it. Every entry takes a
-/// session id and declares only `state.*` effects.
+/// The agent-session control plane: Harn-owned transcript and session state,
+/// including opening the session a model call is recorded in, anchoring its
+/// workspace, forking it, and closing it. Every entry declares only `state.*`
+/// effects.
 ///
 /// Only the `write` / `mutate` half is enumerated, because only that half is
 /// ranked above `read_only` on the side-effect ladder. A read-only sibling
@@ -369,9 +369,9 @@ fn agent_session_control_plane_writes() -> Vec<&'static str> {
         "state_handoff",
     ];
     // `all_builtin_manifest()` and not `all_builtin_defs()`. The latter holds
-    // only the `#[harn_builtin]`-emitted VM defs, which is 17 of these 27 —
-    // the contract-only `capability_method!` declarations are absent from it,
-    // so a census built on it silently cannot see ten of the methods it exists
+    // only the `#[harn_builtin]`-emitted VM defs, which is 17 of these 44. The
+    // contract-only `capability_method!` declarations are absent from it, so
+    // a census built on it silently cannot see most of the methods it exists
     // to police. The manifest is the union the enforcement index is built
     // from, so this censuses exactly what `contract_effect_allowed_by_ceiling`
     // will later consult. Aliases repeat a primary's contract under a second
@@ -414,7 +414,7 @@ fn agent_session_control_plane_writes() -> Vec<&'static str> {
 /// `harness.agent.open` was rejected before the first model call and every
 /// served turn died. `harn run` never saw it: it installs no ceiling at all.
 ///
-/// Disarm by deleting `runtime_infrastructure` from `harness.agent.open` in
+/// Disarm by deleting `runtime_control_plane` from `harness.agent.open` in
 /// `crates/harn-capability-contracts/src/ai.rs`; this fails, and the negative
 /// control below pins the exact message it fails with.
 #[test]
@@ -447,7 +447,7 @@ fn agent_session_control_plane_survives_a_read_only_ceiling() {
     pop_execution_policy();
 
     assert!(
-        results.len() >= 27,
+        results.len() >= 40,
         "the control-plane census collapsed to {} entries; a census that measured \
          nothing would pass this test vacuously",
         results.len()
@@ -480,10 +480,11 @@ fn agent_open_without_the_marker_is_rejected_by_the_ladder() {
     )
     .expect("declared agent.open contract")
     .contract;
-    let disarmed = harn_builtin_meta::BuiltinContract {
-        runtime_infrastructure: false,
-        ..contract
-    };
+    let disarmed = harn_builtin_meta::BuiltinContract::harness(
+        harn_builtin_meta::CapabilityId::Agent,
+        "open",
+        contract.effects,
+    );
     let effect = runtime_effects_from_contract(contract.effects, &[])
         .into_iter()
         .next()
@@ -568,7 +569,7 @@ fn the_marker_does_not_open_durable_agent_state() {
         .collect();
     assert!(
         leaked.is_empty(),
-        "`runtime_infrastructure` must not become a durable-state write grant; \
+        "`runtime_control_plane` must not become a durable-state write grant; \
          these were admitted under a read_only ceiling: {leaked:#?}"
     );
 }
@@ -593,13 +594,13 @@ fn the_marker_does_not_bypass_a_restricted_capability_ceiling() {
 
 /// Structural guard, not a spot check: a new agent-session control-plane
 /// method added without the marker is a new served-path outage, and it would
-/// look exactly like the 27 that carry it. Fail at the registry instead of at
+/// look exactly like the existing methods that carry it. Fail at the registry instead of at
 /// a customer's first turn.
 #[test]
 fn every_agent_session_control_plane_write_declares_the_marker() {
     let census = agent_session_control_plane_writes();
     assert!(
-        census.len() >= 27,
+        census.len() >= 40,
         "the control-plane census collapsed to {} entries; it must not read empty \
          and pass vacuously",
         census.len()
@@ -613,14 +614,14 @@ fn every_agent_session_control_plane_write_declares_the_marker() {
             )
             .expect("declared agent capability method")
             .contract
-            .runtime_infrastructure
+            .is_runtime_control_plane()
         })
         .copied()
         .collect();
     assert!(
         missing.is_empty(),
         "these agent-session control-plane methods write session state but do not \
-         declare `runtime_infrastructure`, so a served turn under any non-`code` \
+         declare `runtime_control_plane`, so a served turn under any non-`code` \
          session mode will reject them:\n  {missing:#?}"
     );
 }
