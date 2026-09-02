@@ -1,0 +1,31 @@
+/**
+ * A struct handed to `store_set` used to be accepted and then discarded, so
+ * `store_get` answered nil and a dropped write was indistinguishable from a key
+ * that was never written. It now persists as its field map, which is what a
+ * record with the same fields already did.
+ */
+pub struct Foo {
+  schema: string
+  n: int
+}
+
+pipeline default(harness: Harness) {
+  harness.runtime.store_clear()
+  harness.runtime.store_set("probe.dict", {schema: "x", n: 1})
+  harness.runtime.store_set("probe.foo", Foo {schema: "y", n: 2})
+  const d = harness.runtime.store_get("probe.dict")
+  const s = harness.runtime.store_get("probe.foo")
+  // The falsifier: before the fix this printed `dict nil`.
+  harness.stdio.println(type_of(d))
+  harness.stdio.println(type_of(s))
+  // The fields survive, not merely the key.
+  harness.stdio.println(s.schema)
+  harness.stdio.println(s.n)
+  // A struct nested inside a record persists through the same conversion.
+  harness.runtime.store_set("probe.nested", {inner: Foo {schema: "z", n: 3}})
+  const nested = harness.runtime.store_get("probe.nested")
+  harness.stdio.println(nested.inner.schema)
+  harness.stdio.println(nested.inner.n)
+  harness.runtime.store_clear()
+  harness.stdio.println(len(harness.runtime.store_list()))
+}
