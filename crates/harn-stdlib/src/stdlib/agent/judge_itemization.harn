@@ -1,9 +1,9 @@
 import {
-  CompletionRequirementContract,
   completion_requirement_itemization_retry_prompt,
   completion_requirement_report_omitted,
 } from "std/agent/completion_requirements"
 import { JudgeCheckpointRequest, __judge_run_checkpoint } from "std/agent/judge_internals"
+import { CompletionRequirementContract } from "std/agent/options_types"
 import { agent_emit_event } from "std/agent/state"
 
 /** Judge response after at most one itemization re-ask. */
