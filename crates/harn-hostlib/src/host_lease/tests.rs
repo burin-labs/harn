@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier, OnceLock};
+use std::sync::{mpsc, Arc, Barrier, OnceLock};
 use std::thread;
 
 use rusqlite::Connection;
@@ -67,6 +67,77 @@ fn waiter(waiter_id: &str, requested_at_ms: i64) -> WaiterIdentity {
         requested_at_ms,
         recoverable: false,
     }
+}
+
+#[test]
+fn wait_progress_schedule_reports_immediately_then_bounds_silence() {
+    let mut schedule = WaitProgressSchedule::new();
+
+    assert!(schedule.should_report(Duration::ZERO));
+    assert_eq!(
+        schedule.until_next(Duration::from_secs(29)),
+        Duration::from_secs(1)
+    );
+    assert!(!schedule.should_report(Duration::from_secs(29)));
+    assert!(schedule.should_report(Duration::from_secs(30)));
+    assert!(!schedule.should_report(Duration::from_secs(59)));
+    assert!(schedule.should_report(Duration::from_mins(1)));
+}
+
+#[test]
+fn supervised_wait_projects_typed_progress_before_event_driven_handoff() {
+    let temp = TempDir::new().unwrap();
+    let store = Arc::new(store(&temp));
+    let holder = store.try_acquire(request("compile-lane")).unwrap();
+    let handle = holder.handle.unwrap();
+    let run = store
+        .begin_run(
+            "waiting-lane",
+            HostLeasePriorityClass::Measurement,
+            HostLeaseResourceKey {
+                machine: handle.host.clone(),
+                resource_class: handle.resource_class,
+                domain: handle.domain.clone(),
+            },
+            HostLeaseExecutionContext::cargo(
+                Path::new("/workspace/project"),
+                Path::new("/tmp/target"),
+                None,
+            ),
+            5_000,
+        )
+        .unwrap();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let waiter = {
+        let store = Arc::clone(&store);
+        let run_id = run.run_id;
+        thread::spawn(move || {
+            let mut report = |receipt: &HostLeaseAcquireReceipt| {
+                progress_tx.send(receipt.clone()).unwrap();
+            };
+            store
+                .acquire_wait_for_run_with_progress(&run_id, std::process::id(), &mut report)
+                .unwrap()
+        })
+    };
+
+    let progress = progress_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(progress.status, HostLeaseAcquireStatus::Deferred);
+    assert_eq!(
+        progress.defer.unwrap().active.unwrap().owner,
+        "compile-lane"
+    );
+    assert_eq!(progress.queue.unwrap().position, 1);
+    assert!(
+        store
+            .release(&handle.host, &handle.lease_id)
+            .unwrap()
+            .released
+    );
+    assert_eq!(
+        waiter.join().unwrap().status,
+        HostLeaseAcquireStatus::Acquired
+    );
 }
 
 #[test]

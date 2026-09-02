@@ -14,7 +14,9 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Canonical tool-kind vocabulary. Matches the ACP `ToolKind` enum so
 /// harn-cli's ACP server can forward the value unchanged in
@@ -24,7 +26,9 @@ use serde::{Deserialize, Serialize};
 /// for concurrent-dispatch purposes. `Other` is intentionally NOT
 /// treated as read-only — unannotated tools should not slip through
 /// as auto-approved by default (fail-safe).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {
     /// Reads file/workspace content without mutation.
@@ -84,7 +88,9 @@ impl ToolKind {
 }
 
 /// Rough side-effect taxonomy for the capability-ceiling check.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SideEffectLevel {
     /// No side effect declared (conservative default; permission logic

@@ -9,8 +9,10 @@ trap 'rm -rf "$tmp_root"' EXIT
 fake_bin="$tmp_root/bin"
 record="$tmp_root/make-record.txt"
 conformance_start_fifo_dir="$tmp_root/conformance-started"
+runtime_tmp="$tmp_root/runtime-tmp"
 mkdir -p "$fake_bin"
 mkdir -p "$conformance_start_fifo_dir"
+mkdir -p "$runtime_tmp"
 mkfifo "$conformance_start_fifo_dir/runner"
 
 fake_harn="$fake_bin/harn"
@@ -68,8 +70,15 @@ if [[ "${1-}" == "--help" ]]; then
   exit 0
 fi
 
-printf 'invocation\t%s\tHARN_BIN=%s\tHARN_TEST_JOBS=%s\n' \
-  "$*" "${HARN_BIN-__unset__}" "${HARN_TEST_JOBS-__unset__}" >> "$FAKE_AUDIT_RECORD"
+if [[ -z "${PYTHONPYCACHEPREFIX-}" ]]; then
+  echo "audit gate did not export PYTHONPYCACHEPREFIX" >&2
+  exit 50
+fi
+mkdir -p "$PYTHONPYCACHEPREFIX"
+printf 'positive-fire\n' > "$PYTHONPYCACHEPREFIX/fake-check.pyc"
+printf 'invocation\t%s\tHARN_BIN=%s\tHARN_TEST_JOBS=%s\tPYTHONPYCACHEPREFIX=%s\n' \
+  "$*" "${HARN_BIN-__unset__}" "${HARN_TEST_JOBS-__unset__}" \
+  "$PYTHONPYCACHEPREFIX" >> "$FAKE_AUDIT_RECORD"
 
 case "$*" in
   test-harn-scripts)
@@ -132,8 +141,23 @@ AUDIT_GATES_CONCURRENCY=4 \
   FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-record.txt" \
   FAKE_AUDIT_ROOT="$tmp_root" \
   FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  TMPDIR="$runtime_tmp" \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit.out"
+
+pycache_root="$(awk -F '\t' 'NR == 1 { sub(/^PYTHONPYCACHEPREFIX=/, "", $5); print $5 }' "$record")"
+case "$pycache_root" in
+  "$runtime_tmp"/harn-audit-gates.*/python-pyc) ;;
+  *)
+    echo "audit gate did not place Python bytecode under its exact runtime temp root: $pycache_root" >&2
+    exit 1
+    ;;
+esac
+gate_runtime_root="${pycache_root%/python-pyc}"
+if [[ -e "$gate_runtime_root" ]]; then
+  echo "audit gate leaked its positive-fire runtime root: $gate_runtime_root" >&2
+  exit 1
+fi
 
 if ! grep -Fxq "ok: harn-bin ($fake_harn)" "$tmp_root/audit.out"; then
   echo "audit_gates did not reuse the explicit HARN_BIN" >&2
@@ -331,6 +355,16 @@ if AUDIT_GATES_CONCURRENCY=3 \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit-fail.out" 2>&1; then
   echo "audit_gates masked a failing audit fanout" >&2
   cat "$tmp_root/audit-fail.out" >&2
+  exit 1
+fi
+failed_pycache_root="$(awk -F '\t' 'NR == 1 { sub(/^PYTHONPYCACHEPREFIX=/, "", $5); print $5 }' "$record")"
+if [[ -z "$failed_pycache_root" ]]; then
+  echo "failing audit gate did not exercise the Python bytecode path" >&2
+  exit 1
+fi
+failed_gate_runtime_root="${failed_pycache_root%/python-pyc}"
+if [[ -e "$failed_gate_runtime_root" ]]; then
+  echo "failing audit gate leaked its runtime root: $failed_gate_runtime_root" >&2
   exit 1
 fi
 

@@ -278,3 +278,48 @@ async fn flight_persist_failure_leaves_a_durable_evidence_gap() {
     assert_eq!(run.evidence.gaps[0].code, "persist_failed");
     harn_vm::reset_thread_local_state();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn run_record_failure_reports_the_surviving_flight_artifact() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("main.harn");
+    let flight_path = temp.path().join("flight.json");
+    std::fs::write(&script, "fn main(harness: Harness) { return 0 }").unwrap();
+    let run_root = harn_vm::runtime_paths::run_root(temp.path());
+    std::fs::create_dir_all(run_root.parent().unwrap()).unwrap();
+    std::fs::write(run_root, "not a directory").unwrap();
+
+    let outcome = execute_run_with_options(
+        script.to_str().unwrap(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunExecutionOptions {
+            project_runtime: ProjectRuntimeMode::Standalone,
+            flight_recorder: FlightRecorderOptions {
+                enabled: true,
+                out: Some(flight_path.clone()),
+                max_events: 32,
+                retain_files: 1,
+            },
+            ..RunExecutionOptions::default()
+        },
+    )
+    .await;
+
+    assert_ne!(outcome.exit_code, 0);
+    assert!(
+        outcome.stderr.contains("failed to persist run record"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    assert!(outcome.stderr.contains(flight_path.to_str().unwrap()));
+    assert!(flight_path.is_file());
+    harn_vm::reset_thread_local_state();
+}

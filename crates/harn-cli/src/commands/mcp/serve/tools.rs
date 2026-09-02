@@ -224,6 +224,7 @@ impl McpOrchestratorService {
         id: JsonValue,
         session: &ConnectionState,
         params: &JsonValue,
+        uses_result_envelope: bool,
     ) -> JsonValue {
         if !session.authenticated {
             return harn_vm::jsonrpc::error_response(id, -32001, "unauthorized");
@@ -242,6 +243,7 @@ impl McpOrchestratorService {
                 name.to_string(),
                 params.clone(),
                 Some(DEFAULT_TASK_TTL_MS),
+                uses_result_envelope,
             );
         }
         let arguments = params
@@ -337,9 +339,16 @@ impl McpOrchestratorService {
         name: String,
         params: JsonValue,
         ttl: Option<u64>,
+        uses_result_envelope: bool,
     ) -> JsonValue {
-        let task = self.tasks.create(session.mcp.client_identity(), ttl);
-        let task_id = task.task_id.clone();
+        let lease = match self
+            .tasks
+            .begin(harn_vm::mcp_tasks::McpTaskAccess::unscoped(), ttl)
+        {
+            Ok(lease) => lease,
+            Err(error) => return harn_vm::jsonrpc::error_response(id, -32000, &error.to_string()),
+        };
+        let task = lease.task().clone();
         let service = self.clone();
         let task_session = session.clone();
         // The task runs a Harn tool on this thread, so it drives the VM.
@@ -353,7 +362,7 @@ impl McpOrchestratorService {
                     .expect("build MCP task runtime");
                 runtime.block_on(async move {
                     service
-                        .run_tool_task(task_id, task_session, name, params)
+                        .run_tool_task(lease, task_session, name, params, uses_result_envelope)
                         .await;
                 });
             })
@@ -368,57 +377,59 @@ impl McpOrchestratorService {
 
     pub(super) async fn run_tool_task(
         &self,
-        task_id: String,
+        lease: harn_vm::mcp_tasks::McpTaskLease,
         session: ConnectionState,
         name: String,
         params: JsonValue,
+        uses_result_envelope: bool,
     ) {
         let arguments = params
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
         let trace_id = format!("mcp_{}", Uuid::now_v7().simple());
-        let result = self
-            .execute_tool_call(&name, &session, &trace_id, arguments)
-            .await;
+        let result = tokio::select! {
+            biased;
+            result = self.execute_tool_call(&name, &session, &trace_id, arguments) => result,
+            () = lease.cancelled() => {
+                lease.cancel();
+                return;
+            }
+        };
         let _ = self
             .record_tool_call(&name, &trace_id, session.mcp.client_identity(), &result)
             .await;
-        self.complete_task(&task_id, result);
-    }
-
-    pub(super) fn complete_task(&self, task_id: &str, result: Result<JsonValue, String>) {
-        self.tasks.complete(task_id, result);
+        lease.complete(result, uses_result_envelope);
     }
 
     pub(super) fn handle_tasks_get(
         &self,
         id: JsonValue,
-        session: &ConnectionState,
+        _session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
         self.tasks
-            .handle_get(id, session.mcp.client_identity(), params)
+            .handle_get(&harn_vm::mcp_tasks::McpTaskAccess::unscoped(), id, params)
     }
 
     pub(super) fn handle_tasks_update(
         &self,
         id: JsonValue,
-        session: &ConnectionState,
+        _session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
         self.tasks
-            .handle_update(id, session.mcp.client_identity(), params)
+            .handle_update(&harn_vm::mcp_tasks::McpTaskAccess::unscoped(), id, params)
     }
 
     pub(super) fn handle_tasks_cancel(
         &self,
         id: JsonValue,
-        session: &ConnectionState,
+        _session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
         self.tasks
-            .handle_cancel(id, session.mcp.client_identity(), params)
+            .handle_cancel(&harn_vm::mcp_tasks::McpTaskAccess::unscoped(), id, params)
     }
 
     pub(super) async fn tool_secret_scan(&self, arguments: JsonValue) -> Result<JsonValue, String> {

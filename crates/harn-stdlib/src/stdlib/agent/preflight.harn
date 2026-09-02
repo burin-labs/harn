@@ -312,36 +312,125 @@ fn __agent_schema_text(value: any) {
   return json_stringify(value)
 }
 
-fn __agent_tool_listing_prompt(registry: dict) {
+/**
+ * Render the tool catalog, split into the tools that get a full entry and the
+ * tools that declared `compact: true` and get a one-liner.
+ *
+ * Returns `{expanded, compact}`. Both are rendered in one pass so a tool
+ * cannot land in neither list or in both; `tool_contract_text` puts the
+ * compact list under its own heading, which is where the model is told it can
+ * call `tool_schema` for the rest.
+ */
+fn __agent_tool_listing_prompts(registry: dict) -> dict {
   const tools = registry?.tools ?? []
   if len(tools) == 0 {
-    return "No tools are available."
+    return {expanded: "No tools are available.", compact: ""}
   }
-  let out = ""
+  let expanded = ""
+  let compact = ""
   for entry in tools {
     const name = entry?.name ?? ""
     if name == "" {
       continue
     }
-    out = out + "### " + name + "\n"
     const description = trim(entry?.description ?? "")
+    if entry?.compact == true {
+      // Name plus the leading sentences, and deliberately no parameter schema:
+      // the schema is most of what a full entry costs, and the heading this
+      // list renders under is what tells the model to call `tool_schema` for
+      // it. Widening the line to carry parameters would spend the savings the
+      // flag exists for.
+      let line = "- `" + name + "`"
+      const summary = __agent_tool_summary(description)
+      if summary != "" {
+        line = line + " — " + summary
+      }
+      compact = compact + line + "\n"
+      continue
+    }
+    expanded = expanded + "### " + name + "\n"
     if description != "" {
-      out = out + description + "\n"
+      expanded = expanded + description + "\n"
     }
     const parameters = __agent_schema_text(entry?.parameters ?? entry?.inputSchema)
     if parameters != "" {
-      out = out + "Parameters: " + parameters + "\n"
+      expanded = expanded + "Parameters: " + parameters + "\n"
     }
     const returns = __agent_schema_text(entry?.outputSchema ?? entry?.returns)
     if returns != "" {
-      out = out + "Returns: " + returns + "\n"
+      expanded = expanded + "Returns: " + returns + "\n"
     }
-    out = out + "\n"
+    expanded = expanded + "\n"
   }
-  if trim(out) == "" {
-    return "No tools are available."
+  if trim(expanded) == "" && trim(compact) == "" {
+    return {expanded: "No tools are available.", compact: ""}
   }
-  return trim(out)
+  // Every tool being compact would leave the "Available tools" heading empty
+  // and the model reading an empty menu, so say so rather than render nothing.
+  const expanded_text = if trim(expanded) == "" {
+    "Every tool for this turn is listed below."
+  } else {
+    trim(expanded)
+  }
+  return {expanded: expanded_text, compact: trim(compact)}
+}
+
+/**
+ * The leading sentences of a compact tool's description, collapsed to one line.
+ *
+ * Mirrors the Rust `tool_summary` in `llm/tools/summary.rs`, which shortens
+ * the same field on the native wire: both take whole sentences up to an
+ * 80-character floor, because half a sentence reads as the whole contract.
+ *
+ * The duplication is deliberate but not free — one policy with two
+ * implementations, kept in parity by tests on each side rather than by a
+ * shared owner, because the stdlib has no builtin into the Rust module.
+ * Changing the rule here means changing it there.
+ */
+fn __agent_tool_summary(description: string) -> string {
+  const head = trim(split(description, "\n\n")[0] ?? "")
+  if head == "" {
+    return ""
+  }
+  const sentences = split(head, ". ")
+  let out = ""
+  for sentence in sentences {
+    out = if out == "" {
+      sentence
+    } else {
+      out + ". " + sentence
+    }
+    if len(out) >= 80 {
+      break
+    }
+  }
+  const collapsed = trim(regex_replace("\\s+", " ", out))
+  // `split` on ". " drops the separator, so every piece but the last lost its
+  // period. Restore it, and leave a `?`/`!` ending alone.
+  if collapsed != "" && !ends_with(collapsed, ".") && !ends_with(collapsed, "?")
+    && !ends_with(collapsed, "!") {
+    return collapsed + "."
+  }
+  return collapsed
+}
+
+/**
+ * The whole catalog as one block, for contracts with no separate compact slot.
+ *
+ * `tool_contract_json` renders a single listing, so the compact lines are
+ * appended under their own heading here. A compact tool must never be absent
+ * from the catalog it is dispatchable from — the model is told any unlisted
+ * name is rejected, so an omitted tool reads as a tool that does not exist.
+ */
+fn __agent_tool_listing_prompt(registry: dict) {
+  const listing = __agent_tool_listing_prompts(registry)
+  if listing.compact == "" {
+    return listing.expanded
+  }
+  return listing.expanded
+    + "\n\n### Other tools (call directly. Parameters are intuitive, or call "
+    + "tool_schema for details)\n\n"
+    + listing.compact
 }
 
 fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict) {
@@ -350,6 +439,7 @@ fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict)
   }
   const turn_policy = opts?.turn_policy ?? {}
   const done_sentinel = __agent_done_sentinel(opts)
+  const listing = __agent_tool_listing_prompts(opts.tools)
   return render_agent_prompt_id(
     fs,
     "agent.tool_contract_text",
@@ -362,8 +452,8 @@ fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict)
       include_task_ledger_help: opts?.task_ledger != nil,
       tool_examples: turn_policy?.tool_examples ?? opts?.tool_examples ?? "",
       shared_types: opts?.shared_types ?? "",
-      expanded_schemas: __agent_tool_listing_prompt(opts.tools),
-      compact_schemas: "",
+      expanded_schemas: listing.expanded,
+      compact_schemas: listing.compact,
       native_contract: render_agent_prompt_id(
         fs,
         "agent.tool_contract_native",

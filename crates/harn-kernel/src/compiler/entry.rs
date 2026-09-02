@@ -97,7 +97,7 @@ impl Compiler {
             chunk: Arc::new(compiler.chunk),
             is_generator,
             is_stream: false,
-            has_rest_param: false,
+            has_rest_param: params.last().is_some_and(|param| param.rest),
             has_runtime_type_checks,
         })
     }
