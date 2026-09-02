@@ -2,8 +2,6 @@ import { find_files } from "std/fs"
 
 const GENERATED_PARSER_SOURCES = ["grammar.js", "grammar/keywords.js"]
 
-const NATIVE_SOURCES = ["src/parser.c", "src/scanner.c"]
-
 const SCAN_ROOTS = ["conformance/tests", "examples", "tests/bridge"]
 
 pub fn usage_text() -> string {
@@ -59,30 +57,8 @@ fn host_system_name(process: HarnessProcess) -> string {
   return ""
 }
 
-fn native_lib_path(process: HarnessProcess, root: string) -> string {
-  return path_join(grammar_dir(root), native_lib_filename(host_system_name(process)))
-}
-
-fn lib_candidates(process: HarnessProcess, root: string) -> list<string> {
-  const dir = grammar_dir(root)
-  const native = native_lib_path(process, root)
-  const candidates = [native, path_join(dir, "harn.dylib"), path_join(dir, "harn.so")]
-  let out: list<string> = []
-  for candidate in candidates {
-    if !out.contains(candidate) {
-      out = out + [candidate]
-    }
-  }
-  return out
-}
-
-fn first_existing(fs: HarnessFs, paths: list<string>, fallback: string) -> string {
-  for path in paths {
-    if fs.exists(path) {
-      return path
-    }
-  }
-  return fallback
+fn native_lib_path(process: HarnessProcess, scratch_dir: string) -> string {
+  return path_join(scratch_dir, native_lib_filename(host_system_name(process)))
 }
 
 fn max_mtime(fs: HarnessFs, paths: list<string>) -> float {
@@ -125,10 +101,10 @@ fn emit_failure(stdio: HarnessStdio, label: string, result: dict) -> nil {
   return nil
 }
 
-fn ensure_compiled_library(harness: Harness, root: string) {
+fn ensure_compiled_library(harness: Harness, root: string, scratch_dir: string) {
   const dir = grammar_dir(root)
   const cli = path_join(dir, "scripts/tree-sitter-cli.sh")
-  const native = native_lib_path(harness.process, root)
+  const native = native_lib_path(harness.process, scratch_dir)
   if !harness.fs.exists(cli) {
     harness.stdio.eprintln("error: missing tree-sitter CLI wrapper at ${cli}")
     return {ok: false, code: 1, lib_path: native}
@@ -147,24 +123,12 @@ fn ensure_compiled_library(harness: Harness, root: string) {
       return {ok: false, code: generate.exit_code, lib_path: native}
     }
   }
-  const source_mtime = max_mtime(harness.fs, paths_under(dir, NATIVE_SOURCES))
-  const native_mtime = if harness.fs.exists(native) {
-    to_float(harness.fs.stat(native).modified) ?? 0.0
-  } else {
-    0.0
+  const build = harness.process.run({program: cli, args: ["build", "--output", native], cwd: dir})
+  if !build.success {
+    emit_failure(harness.stdio, "error: failed to rebuild tree-sitter shared library", build)
+    return {ok: false, code: build.exit_code, lib_path: native}
   }
-  if target_is_stale(harness.fs.exists(native), native_mtime, source_mtime) {
-    const build = harness.process.run({program: cli, args: ["build"], cwd: dir})
-    if !build.success {
-      emit_failure(harness.stdio, "error: failed to rebuild tree-sitter shared library", build)
-      return {ok: false, code: build.exit_code, lib_path: native}
-    }
-  }
-  return {
-    ok: true,
-    code: 0,
-    lib_path: first_existing(harness.fs, lib_candidates(harness.process, root), native),
-  }
+  return {ok: true, code: 0, lib_path: native}
 }
 
 pub fn with_error_suffix(path: string) -> string {
@@ -220,24 +184,18 @@ fn emit_parse_failure(stdio: HarnessStdio, strict: bool, result: dict) -> int {
   return 0
 }
 
-fn main(harness: Harness) -> int {
-  const parsed = parse_cli_args(argv)
-  if parsed.help {
-    harness.stdio.println(usage_text())
-    return 0
-  }
-  if !parsed.ok {
-    harness.stdio.eprintln(parsed.error)
-    harness.stdio.eprintln(usage_text())
-    return 2
-  }
-  const root = repo_root(harness.fs)
+pub fn verify_tree_sitter_parse(harness: Harness, root: string, strict: bool) -> int {
   const dir = grammar_dir(root)
   if !harness.fs.exists(dir) {
     harness.stdio.println("warning: tree-sitter-harn not present; skipping parse sweep")
     return 0
   }
-  const compiled = ensure_compiled_library(harness, root)
+  const scratch_dir = harness.fs.mkdtemp_in_workspace("harn-tree-sitter-parse-")
+  const paths_file = path_join(scratch_dir, "paths.txt")
+  defer {
+    harness.fs.delete(scratch_dir)
+  }
+  const compiled = ensure_compiled_library(harness, root, scratch_dir)
   if !compiled.ok {
     return compiled.code
   }
@@ -251,17 +209,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("error: no positive .harn files found for tree-sitter parse sweep")
     return 1
   }
-  const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-tree-sitter-paths.XXXXXX"]})
-  if !mk.success {
-    harness.stdio.eprintln("error: could not create tree-sitter path-list temp directory")
-    return 1
-  }
-  const scratch_dir = path_join(root, mk.stdout.trim())
-  const paths_file = path_join(scratch_dir, "paths.txt")
   harness.fs.write_text(paths_file, paths.join("\n") + "\n")
-  defer {
-    harness.process.run({program: "rm", args: ["-rf", scratch_dir]})
-  }
   const result = harness.process.run(
     {
       program: path_join(dir, "scripts/tree-sitter-cli.sh"),
@@ -279,10 +227,24 @@ fn main(harness: Harness) -> int {
     },
   )
   if !result.success {
-    return emit_parse_failure(harness.stdio, parsed.strict, result)
+    return emit_parse_failure(harness.stdio, strict, result)
   }
   harness.stdio.println(
     "verified tree-sitter parse coverage across ${paths.count} positive .harn files",
   )
   return 0
+}
+
+fn main(harness: Harness) -> int {
+  const parsed = parse_cli_args(argv)
+  if parsed.help {
+    harness.stdio.println(usage_text())
+    return 0
+  }
+  if !parsed.ok {
+    harness.stdio.eprintln(parsed.error)
+    harness.stdio.eprintln(usage_text())
+    return 2
+  }
+  return verify_tree_sitter_parse(harness, repo_root(harness.fs), parsed.strict)
 }
