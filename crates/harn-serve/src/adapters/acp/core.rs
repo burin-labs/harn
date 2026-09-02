@@ -274,6 +274,16 @@ impl AcpServer {
         });
     }
 
+    /// Record an accepted control word and publish its outcome. See
+    /// [`record_and_emit_control`], which owns both halves.
+    pub(super) fn record_and_emit_control(
+        &self,
+        session_id: &str,
+        control: harn_session_store::ControlEvent,
+    ) {
+        record_and_emit_control(session_id, control);
+    }
+
     /// Send a JSON-RPC notification (no id, no response expected).
     pub(super) fn send_notification(&self, method: &str, params: serde_json::Value) {
         let notification = harn_vm::jsonrpc::notification(method, params);
@@ -345,4 +355,44 @@ impl AcpServer {
             .insert(session_id.to_string(), cancellation.clone());
         cancellation
     }
+}
+
+/// Record an accepted control word and publish its outcome.
+///
+/// One function owns both halves so a stored row and the live
+/// `control_outcome` notification always carry the same `control_id`,
+/// and so no acceptance site can emit the wire event while forgetting
+/// the durable one. Every ACP path that accepts a stop or an injection
+/// routes through here: the dispatch handlers, and the transport-level
+/// preemption paths that answer a control while a prompt is in flight.
+/// Those preemption paths are the mid-turn case — the one the record
+/// exists for — so leaving them out would have made the record present
+/// exactly when nobody needed it.
+///
+/// The journal write can miss: a control aimed at a session this VM
+/// thread does not own has no event stream. That outcome rides on the
+/// notification's `metadata.recorded` rather than being swallowed,
+/// because "no control row in the store" must not read the same as "no
+/// control happened".
+pub(super) fn record_and_emit_control(session_id: &str, control: harn_session_store::ControlEvent) {
+    let outcome = harn_vm::agent_sessions::record_control_event(session_id, &control);
+    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+        session_id: session_id.to_string(),
+        control_id: control.control_id.clone(),
+        method: control.method.clone(),
+        outcome: "accepted".to_string(),
+        status: control.status.clone(),
+        actor: control.actor.clone(),
+        target: serde_json::json!({
+            "sessionId": session_id,
+            "messageId": control.message_id,
+        }),
+        reason: None,
+        metadata: serde_json::json!({
+            "action": control.action.as_str(),
+            "requestedMode": control.requested_mode,
+            "deliveryMode": control.delivery_mode,
+            "recorded": outcome.as_str(),
+        }),
+    });
 }
