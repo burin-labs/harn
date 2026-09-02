@@ -971,6 +971,46 @@ fn resolve_rule_chain(
     (resolution, effective_defaults)
 }
 
+/// The rule lists `mock` borrows, in order, when it has no rule of its own for
+/// the model. `mock` spoofs whichever shape the model id names, which is a
+/// name-shape fan-out rather than the single-parent `provider_family` edge the
+/// normal chain walks, so it needs its own layer sequence.
+const MOCK_SPOOF_LAYERS: [&str; 3] = ["anthropic", "openai", "gemini"];
+
+/// The one route-resolution seam. Every consumer of capability facts — the
+/// `Capabilities` lookup and the portable-option admission gate alike — goes
+/// through here, so a route cannot resolve one way for "does this model
+/// support native tools" and another way for "does this model support prompt
+/// caching" (harn#7693).
+///
+/// Returns the resolution, its effective defaults, and the layer whose rule
+/// matched, so a caller can apply a layer-specific pin.
+fn resolve_route(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
+    provider: &str,
+    model: &str,
+) -> (RuleResolution, ProviderDefaults, Option<&'static str>) {
+    if provider == "mock" {
+        // `mock`'s own rows first, so the double can declare the surface a
+        // capable route declares (and so a `[[provider.mock]]` override in
+        // `harn.toml` is reachable at all). Then the spoof layers, Anthropic
+        // first, so `mock` + `claude-opus-4-7` keeps resolving to the
+        // Anthropic capability row.
+        for layer in std::iter::once("mock").chain(MOCK_SPOOF_LAYERS) {
+            let defaults = merged_provider_defaults(user, builtin, layer);
+            let mut resolution = RuleResolution::default();
+            absorb_layer_matches(user, builtin, layer, model, &mut resolution);
+            if resolution.merged.is_some() {
+                return (resolution, defaults, Some(layer));
+            }
+        }
+        return (RuleResolution::default(), ProviderDefaults::default(), None);
+    }
+    let (resolution, defaults) = resolve_rule_chain(user, builtin, provider, model);
+    (resolution, defaults, None)
+}
+
 pub(super) fn resolved_rule_and_defaults(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
@@ -978,7 +1018,7 @@ pub(super) fn resolved_rule_and_defaults(
     model: &str,
 ) -> (Option<ProviderRule>, ProviderDefaults) {
     let model = crate::llm_config::capability_model_id(provider, model);
-    let (resolution, defaults) = resolve_rule_chain(user, builtin, provider, &model);
+    let (resolution, defaults, _) = resolve_route(user, builtin, provider, &model);
     (resolution.merged, defaults)
 }
 
@@ -988,7 +1028,7 @@ pub(super) fn first_matching_rule(
     provider: &str,
     model: &str,
 ) -> Option<MatchedCapabilityRule> {
-    resolve_rule_chain(user, builtin, provider, model)
+    resolve_route(user, builtin, provider, model)
         .0
         .into_matched()
 }
@@ -1003,37 +1043,26 @@ pub(super) fn lookup_with(
     builtin: &CapabilitiesFile,
     user: Option<&CapabilitiesFile>,
 ) -> Capabilities {
-    // Special case: mock spoofs either shape. Try anthropic first
-    // (Claude-shape model strings) so `mock` + `claude-opus-4-7`
-    // resolves to the Anthropic capability row — the same behaviour
-    // the hardcoded dispatch gave before this refactor. The native
-    // tool-definition wire shape is pinned to OpenAI so existing
-    // mock-based tests keep observing `t.function.name` regardless of
-    // which family's capability row matched; per-message wire format
-    // still tracks the matched family so Anthropic-specific request
-    // plumbing (beta headers, file-id passthrough) is exercised when
-    // a Claude model is mocked.
-    if provider == "mock" {
-        for family in ["anthropic", "openai", "gemini"] {
-            let defaults = merged_provider_defaults(user, builtin, family);
-            let mut resolution = RuleResolution::default();
-            absorb_layer_matches(user, builtin, family, model, &mut resolution);
-            if let Some(rule) = resolution.merged.as_ref() {
-                let mut caps = rule_to_caps(rule, &defaults);
-                if family == "anthropic" {
-                    caps.native_tool_wire_format = "openai".to_string();
-                }
-                return caps;
-            }
-        }
-        return Capabilities::default();
-    }
-
-    // Normal chain: walk provider → family(provider) → ... with a
-    // visited-guard to avoid cycles in malformed user overrides.
-    let (resolution, effective_defaults) = resolve_rule_chain(user, builtin, provider, model);
+    // The normal chain walks provider → family(provider) → … with a
+    // visited-guard to avoid cycles in malformed user overrides. `mock` walks
+    // its own rows and then the spoof layers instead; `resolve_route` owns
+    // both shapes so the admission gate resolves the same route this does.
+    let (resolution, effective_defaults, matched_layer) =
+        resolve_route(user, builtin, provider, model);
     if let Some(rule) = resolution.merged.as_ref() {
-        return rule_to_caps(rule, &effective_defaults);
+        let mut caps = rule_to_caps(rule, &effective_defaults);
+        // When a Claude-shaped id is mocked, the native tool-definition wire
+        // shape stays OpenAI so mock-based tests keep observing
+        // `t.function.name`; the per-message wire format still tracks the
+        // matched family, so Anthropic-specific request plumbing (beta
+        // headers, file-id passthrough) is exercised.
+        if provider == "mock" && matched_layer == Some("anthropic") {
+            caps.native_tool_wire_format = "openai".to_string();
+        }
+        return caps;
+    }
+    if provider == "mock" {
+        return Capabilities::default();
     }
     if effective_defaults.has_any_field() {
         return defaults_to_caps(&effective_defaults);

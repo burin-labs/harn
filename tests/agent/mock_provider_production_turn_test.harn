@@ -1,0 +1,170 @@
+// Run: harn test tests/agent/mock_provider_production_turn_test.harn
+//
+// Regression coverage for harn#7693: the `mock` provider must accept the
+// option set a real agent turn sends, so a full loop can be exercised offline.
+//
+// Before the fix `mock` had no capability rows of its own. `capabilities::lookup`
+// routed by model name-shape, and the portable-option admission gate did not,
+// so the two disagreed about the same route:
+//
+//   mock + `mock-model`      -> `option `tools` is not supported by `mock-model``
+//   mock + `claude-sonnet-5` -> `option `cache` is not supported by `claude-sonnet-5``
+//
+// Both ended the turn `status="exception"` having emitted zero session events,
+// so nothing downstream of the model call ran. A test that drove the real loop
+// against `mock` and then asserted some later mechanism did NOT fire could not
+// tell "correctly skipped" from "the turn threw before reaching it".
+//
+// NOTE ON WHY THERE IS NO `with_llm_script` HERE. An installed builtin mock
+// script sets `enforce_capability_gates = false` for the whole call, so a
+// scripted turn cannot observe this defect at all — a scripted version of this
+// test passes on the broken build. The turns below run against the built-in
+// mock responder with the gates on, which is the only shape that reaches the
+// admission seam.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { assert_throws } from "std/testing"
+
+fn production_turn_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "add",
+    "Add two integers",
+    {
+      handler: { args -> args.lhs + args.rhs },
+      parameters: {
+        lhs: {type: "number", description: "Left addend"},
+        rhs: {type: "number", description: "Right addend"},
+      },
+      returns: {type: "number"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn production_turn_options(model: string) -> dict {
+  return {
+    provider: "mock",
+    model: model,
+    tools: production_turn_tools(),
+    tool_format: "native",
+    cache: true,
+    loop_until_done: false,
+    max_iterations: 1,
+  }
+}
+
+/** The rendered error a turn carries when it ends `status="exception"`. */
+fn turn_error_message(result: any) -> string {
+  return to_string(result?.error?.message ?? "")
+}
+
+/**
+ * The falsifier. A production-shaped turn — native tool format, a real tool
+ * registry, prompt caching on — must reach the loop body on the mock double
+ * and leave session events behind. Zero events is the signal that the turn
+ * threw in option admission.
+ */
+pipeline test_capable_mock_completes_a_production_shaped_turn(harness: Harness, task: unknown) {
+  for model in ["mock", "mock-model"] {
+    const session = "mock-production-turn-" + harness.random.uuid()
+    const opts: AgentSpec = production_turn_options(model) + {session_id: session}
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      fn() {
+        return agent_loop(harness, "Add 2 and 3 using the tool, then report the sum.", nil, opts)
+      },
+    )
+    const result = captured.result
+    assert(
+      result.status != "exception",
+      "a production-shaped mock turn on `"
+        + model
+        + "` must not end in an exception, got: "
+        + turn_error_message(result),
+    )
+    assert(
+      len(captured.events) > 0,
+      "a production-shaped mock turn on `"
+        + model
+        + "` must emit session events; zero means the turn threw in option admission before reaching the loop body",
+    )
+  }
+}
+
+/**
+ * The Claude-shaped half of the issue's table. `mock` spoofs the Anthropic
+ * capability row for a Claude-shaped id, so the admission gate must read the
+ * same row: prompt caching is declared there, and refusing it means the two
+ * resolution paths disagree about one route.
+ */
+pipeline test_mock_spoofed_route_admits_the_capabilities_it_spoofs(harness: Harness, task: unknown) {
+  const result = agent_loop(
+    harness,
+    "Add 2 and 3 using the tool, then report the sum.",
+    nil,
+    production_turn_options("claude-sonnet-5"),
+  )
+  const message = turn_error_message(result)
+  assert(
+    !contains(message, "option `cache` is not supported"),
+    "a Claude-shaped mock id must admit the prompt caching its spoofed row declares, got: "
+      + message,
+  )
+  assert(result.status != "exception", "spoofed mock route must not end in an exception: " + message)
+}
+
+/**
+ * The control. A mock id declared without the capability must still be refused,
+ * with the same typed error, so the fix cannot be "stop enforcing capability
+ * gates". Both refusals from the issue's table are asserted by name.
+ */
+pipeline test_restricted_mock_still_refuses_unsupported_options(harness: Harness, task: unknown) {
+  // Native tools: refused before dispatch. `mock-minimal` declares no native
+  // tool channel, so the loop's tool-format resolution refuses the route by
+  // name rather than dispatching a call whose tool stream would be empty.
+  const tools_refusal = assert_throws(
+    { ->
+      return agent_loop(
+        harness,
+        "Add 2 and 3 using the tool.",
+        nil,
+        production_turn_options("mock-minimal"),
+      )
+    },
+    "a restricted mock id must still refuse a native tool-bearing turn",
+  )
+  const tools_message = to_string(tools_refusal)
+  assert(
+    contains(tools_message, "mock:mock-minimal") && contains(tools_message, "text tool calling"),
+    "the native-tool refusal must name the restricted route, got: " + tools_message,
+  )
+
+  // Prompt caching: refused by the typed capability-admission error, the same
+  // seam and the same wording the issue's table records.
+  const cache_result = agent_loop(
+    harness,
+    "Answer briefly.",
+    nil,
+    {
+      provider: "mock",
+      model: "mock-minimal",
+      cache: true,
+      loop_until_done: false,
+      max_iterations: 1,
+    },
+  )
+  assert_eq(cache_result.status, "exception")
+  assert(
+    contains(
+      turn_error_message(cache_result),
+      "option `cache` is not supported by `mock-minimal` (provider `mock`)",
+    ),
+    "a restricted mock id must still refuse prompt caching with the typed capability error, got: "
+      + turn_error_message(cache_result),
+  )
+}
