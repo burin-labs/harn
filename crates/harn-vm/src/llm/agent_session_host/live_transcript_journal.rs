@@ -88,18 +88,23 @@ pub(super) async fn initialize(
             None,
         )
         .map_err(VmError::Runtime)?;
-        crate::agent_sessions::restore_message_event_ids(
+        if let Err(error) = crate::agent_sessions::restore_message_event_ids(
             &seeded_session_id,
             &prepared.transcript.source_event_ids,
-        )
-        .map_err(VmError::Runtime)?;
+        ) {
+            crate::agent_sessions::close(&seeded_session_id);
+            return Err(VmError::Runtime(error));
+        }
         seeded_session_id
     } else {
         crate::agent_sessions::open_or_create(Some(session_id.to_string()))
     };
     let owns_session = !has_live_session;
-    let mut rollback = JournalInitializationRollback::new(session_id.clone(), owns_session);
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
+    // Installation is synchronous, so the ownership guard can begin here
+    // without a cancellation gap. Starting it before install would let an
+    // "already active" error clear a journal owned by the caller.
+    let mut rollback = JournalInitializationRollback::new(session_id.clone(), owns_session);
     stamp_run_started(&session_id).await?;
     rollback.disarm();
     Ok(InitializedSession {

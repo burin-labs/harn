@@ -370,6 +370,12 @@ pub(crate) struct CurrentSessionFrame {
     session_id: String,
 }
 
+impl CurrentSessionFrame {
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
+}
+
 pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
     Arc::new(AgentSessionRuntime::default())
 }
@@ -539,14 +545,18 @@ pub fn reset_session_store() {
     reset_default_transcript_budget_policy();
 }
 
-pub(crate) fn push_current_session(id: String) -> Option<CurrentSessionFrame> {
+pub(crate) fn new_current_session_frame(id: String) -> Option<CurrentSessionFrame> {
     if id.is_empty() {
         return None;
     }
-    let frame = CurrentSessionFrame {
+    Some(CurrentSessionFrame {
         frame_id: NEXT_CURRENT_SESSION_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         session_id: id,
-    };
+    })
+}
+
+pub(crate) fn push_current_session(id: String) -> Option<CurrentSessionFrame> {
+    let frame = new_current_session_frame(id)?;
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().push(frame.clone()));
     Some(frame)
 }

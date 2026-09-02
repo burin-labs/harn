@@ -26,6 +26,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(blocked.status)
       harness.stdio.println(blocked.stop_reason)
       harness.stdio.println(blocked.error.reason)
+      harness.stdio.println(
+        len(transcript_events_by_kind(blocked.transcript, "agent_run_terminal")) == 1,
+      )
     },
   )
   with_llm_script(

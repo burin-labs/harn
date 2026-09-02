@@ -84,6 +84,9 @@ pipeline main(harness: Harness) {
       harness.stdio.println(artifact?.stop_reason == "nested_execution_budget_exhausted")
       harness.stdio.println(artifact?.error?.category == "budget_exceeded")
       harness.stdio.println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
+      harness.stdio.println(
+        len(transcript_events_by_kind(artifact?.transcript, "agent_run_terminal")) == 1,
+      )
     },
   )
 }

@@ -159,6 +159,49 @@ mod tests {
     use crate::value::VmDictExt;
 
     #[tokio::test(flavor = "current_thread")]
+    async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session() {
+        crate::agent_sessions::reset_session_store();
+        let root = tempfile::tempdir().expect("temp root");
+        let session_id = "ordinary-init-failure";
+        let mut options = crate::value::DictMap::new();
+        options.put_str("root", root.path().to_string_lossy().as_ref());
+        let prepared = crate::agent_session_journal::prepare(
+            session_id,
+            &options,
+            "run-init-failure".to_string(),
+            "turn-init-failure".to_string(),
+        )
+        .await
+        .expect("prepare journal");
+        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        crate::agent_sessions::install_journal(session_id, prepared.state)
+            .expect("install journal");
+
+        let mut rollback = super::AgentSessionInitRollback::new(session_id.to_string(), true);
+        rollback.fail().await;
+
+        assert!(!crate::agent_sessions::exists(session_id));
+        assert!(!crate::agent_sessions::has_journal(session_id));
+        let store = crate::stdlib::session_store::open_canonical_agent_session(
+            &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
+            session_id,
+            None,
+            harn_session_store::SessionType::User,
+        )
+        .await
+        .expect("open canonical session");
+        let events = crate::stdlib::session_store::read_all_events(&store, session_id)
+            .await
+            .expect("read canonical events");
+        let terminals = events
+            .iter()
+            .filter(|event| event.payload.to_string().contains("agent_run_terminal"))
+            .count();
+        assert_eq!(terminals, 1, "ordinary failure needs one durable terminal");
+        crate::agent_sessions::reset_session_store();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn abandoned_finalize_flushes_once_and_fires_native_cleanup_once() {
         crate::agent_sessions::reset_session_store();
         let root = tempfile::tempdir().expect("temp root");
