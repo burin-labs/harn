@@ -205,6 +205,11 @@ if [[ $failure_status -ne 17 ]]; then
   echo "Cargo failure status was not preserved: $failure_status" >&2
   exit 1
 fi
+if ! grep -Fq 'cargo failed' "$tmp_root/failure.out"; then
+  echo "Cargo failure output was not replayed" >&2
+  cat "$tmp_root/failure.out" >&2
+  exit 1
+fi
 
 # A descendant holding the runner's stdout open must not own the exact-test
 # command's lifetime. Start the wrapper asynchronously so the control can fail

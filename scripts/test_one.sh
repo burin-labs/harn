@@ -201,7 +201,7 @@ fi
 
 echo "test_one: running $test_name in the $requested_target of package $package" >&2
 
-if ! : > "$receipt"; then
+if ! exec 3> "$receipt"; then
   echo "error: failed to initialize the exact-test receipt" >&2
   exit 1
 fi
@@ -214,9 +214,10 @@ fi
 # replay.
 set +e
 "$cargo_runner" test --package "$package" "${selector[@]}" "$test_name" -- \
-  --exact --format terse > "$receipt" 2>&1
+  --exact --format terse >&3 2>&1
 runner_status=$?
 set -e
+exec 3>&-
 
 if ! cat "$receipt"; then
   echo "error: failed to replay the exact-test receipt" >&2
