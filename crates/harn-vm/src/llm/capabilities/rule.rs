@@ -876,12 +876,12 @@ pub(super) struct MatchedCapabilityRule {
 /// fields the accumulated chain left unset, and only while every absorbed
 /// rule so far opted into `extends` fall-through.
 #[derive(Default)]
-struct RuleResolution {
+pub(super) struct RuleResolution {
     /// Provider layer of the first matched rule.
-    provider: Option<String>,
-    merged: Option<ProviderRule>,
+    pub(super) provider: Option<String>,
+    pub(super) merged: Option<ProviderRule>,
     /// `model_match` provenance of every absorbed rule, in precedence order.
-    matched_patterns: Vec<String>,
+    pub(super) matched_patterns: Vec<String>,
 }
 
 impl RuleResolution {
@@ -913,7 +913,7 @@ impl RuleResolution {
 /// built-in rules), absorbing every matching rule into `resolution` until a
 /// terminating (non-`extends`) match. Returns `true` when resolution
 /// terminated within this layer.
-fn absorb_layer_matches(
+pub(super) fn absorb_layer_matches(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     layer_provider: &str,
@@ -939,7 +939,7 @@ fn absorb_layer_matches(
 /// never consults defaults from layers past N — the pre-`extends` behavior.
 /// An unterminated `extends` chain keeps walking so later layers can fill
 /// its gaps.
-fn resolve_rule_chain(
+pub(super) fn resolve_rule_chain(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     provider: &str,
@@ -971,6 +971,8 @@ fn resolve_rule_chain(
     (resolution, effective_defaults)
 }
 
+pub(super) use super::route::resolve_route;
+
 pub(super) fn resolved_rule_and_defaults(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
@@ -978,7 +980,7 @@ pub(super) fn resolved_rule_and_defaults(
     model: &str,
 ) -> (Option<ProviderRule>, ProviderDefaults) {
     let model = crate::llm_config::capability_model_id(provider, model);
-    let (resolution, defaults) = resolve_rule_chain(user, builtin, provider, &model);
+    let (resolution, defaults, _) = resolve_route(user, builtin, provider, &model);
     (resolution.merged, defaults)
 }
 
@@ -988,7 +990,7 @@ pub(super) fn first_matching_rule(
     provider: &str,
     model: &str,
 ) -> Option<MatchedCapabilityRule> {
-    resolve_rule_chain(user, builtin, provider, model)
+    resolve_route(user, builtin, provider, model)
         .0
         .into_matched()
 }
@@ -1003,37 +1005,26 @@ pub(super) fn lookup_with(
     builtin: &CapabilitiesFile,
     user: Option<&CapabilitiesFile>,
 ) -> Capabilities {
-    // Special case: mock spoofs either shape. Try anthropic first
-    // (Claude-shape model strings) so `mock` + `claude-opus-4-7`
-    // resolves to the Anthropic capability row — the same behaviour
-    // the hardcoded dispatch gave before this refactor. The native
-    // tool-definition wire shape is pinned to OpenAI so existing
-    // mock-based tests keep observing `t.function.name` regardless of
-    // which family's capability row matched; per-message wire format
-    // still tracks the matched family so Anthropic-specific request
-    // plumbing (beta headers, file-id passthrough) is exercised when
-    // a Claude model is mocked.
-    if provider == "mock" {
-        for family in ["anthropic", "openai", "gemini"] {
-            let defaults = merged_provider_defaults(user, builtin, family);
-            let mut resolution = RuleResolution::default();
-            absorb_layer_matches(user, builtin, family, model, &mut resolution);
-            if let Some(rule) = resolution.merged.as_ref() {
-                let mut caps = rule_to_caps(rule, &defaults);
-                if family == "anthropic" {
-                    caps.native_tool_wire_format = "openai".to_string();
-                }
-                return caps;
-            }
-        }
-        return Capabilities::default();
-    }
-
-    // Normal chain: walk provider → family(provider) → ... with a
-    // visited-guard to avoid cycles in malformed user overrides.
-    let (resolution, effective_defaults) = resolve_rule_chain(user, builtin, provider, model);
+    // The normal chain walks provider → family(provider) → … with a
+    // visited-guard to avoid cycles in malformed user overrides. `mock` walks
+    // its own rows and then the spoof layers instead; `resolve_route` owns
+    // both shapes so the admission gate resolves the same route this does.
+    let (resolution, effective_defaults, matched_layer) =
+        resolve_route(user, builtin, provider, model);
     if let Some(rule) = resolution.merged.as_ref() {
-        return rule_to_caps(rule, &effective_defaults);
+        let mut caps = rule_to_caps(rule, &effective_defaults);
+        // When a Claude-shaped id is mocked, the native tool-definition wire
+        // shape stays OpenAI so mock-based tests keep observing
+        // `t.function.name`; the per-message wire format still tracks the
+        // matched family, so Anthropic-specific request plumbing (beta
+        // headers, file-id passthrough) is exercised.
+        if provider == "mock" && matched_layer == Some("anthropic") {
+            caps.native_tool_wire_format = "openai".to_string();
+        }
+        return caps;
+    }
+    if provider == "mock" {
+        return Capabilities::default();
     }
     if effective_defaults.has_any_field() {
         return defaults_to_caps(&effective_defaults);
@@ -1042,7 +1033,7 @@ pub(super) fn lookup_with(
     Capabilities::default()
 }
 
-fn merged_provider_defaults(
+pub(super) fn merged_provider_defaults(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,
     provider: &str,

@@ -646,6 +646,63 @@ mod tests {
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
     }
 
+    /// harn#7693: the double must declare the surface a real agent turn sends,
+    /// or no full loop can be exercised offline.
+    #[test]
+    fn mock_default_model_declares_a_capable_surface() {
+        reset();
+        for model in ["mock", "mock-model", "mock-heavy"] {
+            let caps = lookup("mock", model);
+            assert!(caps.native_tools, "{model} must accept native tools");
+            assert!(caps.prompt_caching, "{model} must accept prompt caching");
+            assert!(caps.vision_supported, "{model} must accept images");
+            assert_eq!(caps.native_tool_wire_format, "openai", "{model}");
+        }
+    }
+
+    /// The control: the capability gate is still a gate. A mock id declared
+    /// without a capability must still read as unsupported.
+    #[test]
+    fn restricted_mock_model_still_declares_no_capabilities() {
+        reset();
+        let caps = lookup("mock", "mock-minimal");
+        assert!(!caps.native_tools);
+        assert!(!caps.prompt_caching);
+        assert!(!caps.vision_supported);
+    }
+
+    /// The two resolution paths must agree. Before harn#7693 the name-shape
+    /// spoof lived only in `lookup_with`, so a Claude-shaped mock id read as
+    /// cache-capable here and as cache-incapable in the admission gate.
+    #[test]
+    fn mock_capability_lookup_and_portable_admission_resolve_the_same_route() {
+        reset();
+        for model in ["mock-model", "claude-sonnet-5", "claude-opus-4-7"] {
+            assert!(
+                lookup("mock", model).prompt_caching,
+                "{model} must resolve as cache-capable"
+            );
+            assert!(
+                super::super::admission::admit_portable_option(
+                    "mock",
+                    model,
+                    super::super::admission::PortableOption::Cache,
+                )
+                .is_ok(),
+                "{model} must admit `cache` through the same facts"
+            );
+        }
+        assert!(
+            super::super::admission::admit_portable_option(
+                "mock",
+                "mock-minimal",
+                super::super::admission::PortableOption::Cache,
+            )
+            .is_err(),
+            "a restricted mock id must still be refused"
+        );
+    }
+
     #[test]
     fn mock_with_gemini_model_routes_to_gemini() {
         reset();

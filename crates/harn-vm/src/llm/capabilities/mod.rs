@@ -60,6 +60,7 @@ mod lookup_tests_system_placement;
 mod model;
 mod overrides;
 mod pattern;
+mod route;
 mod rule;
 #[cfg(test)]
 mod rule_tests;

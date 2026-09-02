@@ -6094,10 +6094,89 @@ thinking_block_style = "none"
 # --- source: 20-providers/95-mock.toml ---
 # ---------- Mock --------------------------------------------------------------
 #
-# Mock spoofs either Anthropic or OpenAI shape depending on the model ID.
-# Handled specially in the loader (see `capabilities::lookup`): Claude-
-# shape model strings route to the `anthropic` rule list first, otherwise
-# fall through to the `openai` rule list.
+# `mock` is the in-process test double. It has two jobs, and they need two
+# different kinds of capability row.
+#
+# 1. Stand in for a CAPABLE route. A host that assembles a production-shaped
+#    agent turn sends native `tools`, prompt `cache`, structured `output`, and
+#    images. If the double refuses any of them the turn throws in option
+#    admission having emitted zero session events, and no full agent loop can
+#    be exercised offline at all (harn#7693). The `mock*` rows below declare
+#    that surface explicitly, so the double no longer has to borrow another
+#    provider's capabilities by model name-shape.
+#
+# 2. Stand in for a RESTRICTED route, so tests can prove the capability gate
+#    still refuses what a route does not declare. `mock-minimal*` is that id.
+#    It is matched first, because capability matching is first-match-wins.
+#
+# Name-shape spoofing still works and is still useful: `capabilities::lookup`
+# falls back to the `anthropic`, `openai`, then `gemini` rule lists when no
+# `[[provider.mock]]` row matches, so `mock` + `claude-opus-4-7` keeps
+# resolving to the Anthropic capability row (with the native tool-definition
+# wire shape pinned to OpenAI). The mock's own rows are simply consulted first,
+# which is also what makes a `[[provider.mock]]` override in `harn.toml`
+# reachable.
+
+# The deliberately restricted double. Declares no native tools, no prompt
+# caching, no structured output, and no vision, so a test can assert the typed
+# `option ... is not supported by ...` error still fires. Keep `tool_mode_parity`
+# unset: the tool-format steer reads that field, and a parity verdict here would
+# rewrite a requested `native` format to `text` before the capability gate could
+# refuse it.
+[[provider.mock]]
+model_match = "mock-minimal*"
+message_wire_format = "openai"
+native_tool_wire_format = "openai"
+native_tools = false
+preferred_tool_format = "text"
+text_tool_wire_format_supported = true
+prompt_caching = false
+structured_output = "none"
+structured_output_mode = "none"
+vision = false
+vision_supported = false
+audio_supported = false
+pdf_supported = false
+files_api_supported = false
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+thinking_block_style = "none"
+
+# The capable double. Mirrors the surface a current frontier route declares, so
+# a production-shaped turn admits offline.
+[[provider.mock]]
+model_match = ["mock", "mock-*"]
+message_wire_format = "openai"
+native_tool_wire_format = "openai"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+prompt_cache_min_prefix_tokens = 1024
+structured_output = "native"
+structured_output_mode = "native_json"
+vision = true
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = true
+interleaved_thinking_supported = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+thinking_block_style = "none"
 
 # ---------- provider_family aliases ------------------------------------------
 
