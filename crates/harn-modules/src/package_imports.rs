@@ -33,7 +33,8 @@ struct PackageManifest {
 pub(super) enum LocalResolution {
     /// Resolved without touching installed packages.
     Resolved(PathBuf),
-    /// Owned by the stdlib namespace but not a real module. Resolution ends.
+    /// Owned by the stdlib or relative namespace but not a real module.
+    /// Resolution ends instead of falling through to package resolution.
     Rejected,
     /// Not a stdlib or relative import; only packages can resolve it.
     NotPackage,
@@ -107,6 +108,10 @@ pub(super) fn resolve_local_import(current_file: &Path, import_path: &str) -> Lo
     }
     if file_path.exists() {
         return LocalResolution::Resolved(file_path);
+    }
+
+    if import_path.starts_with("./") || import_path.starts_with("../") {
+        return LocalResolution::Rejected;
     }
 
     LocalResolution::NotPackage

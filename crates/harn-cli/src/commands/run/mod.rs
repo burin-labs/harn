@@ -20,6 +20,7 @@ pub(crate) mod environment;
 mod eval_source;
 mod explain_cost;
 pub mod harnpack;
+mod import_failure;
 mod interrupts;
 pub mod json_events;
 mod lifecycle;
@@ -32,7 +33,7 @@ mod watch;
 
 use outcome::{
     finalize_harnpack_dry_run, finalize_harnpack_error, finalize_run_error,
-    render_return_value_error, JsonRunSession,
+    finalize_run_error_with_details, render_return_value_error, JsonRunSession,
 };
 pub(crate) mod sandbox;
 
@@ -426,13 +427,13 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
     };
 
     let mut had_type_error = false;
-    let type_diagnostics = match typecheck_with_imports(
+    let typecheck = match typecheck_with_imports(
         &program,
         Path::new(path),
         &source,
         ProjectContextMode::Project,
     ) {
-        Ok(diagnostics) => diagnostics,
+        Ok(typecheck) => typecheck,
         Err(error) => {
             stderr.push_str(&format!("error: {error}\n"));
             return RunOutcome {
@@ -442,12 +443,20 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
             };
         }
     };
-    for diag in &type_diagnostics {
+    for diag in &typecheck.diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
         }
         stderr.push_str(&rendered);
+    }
+    if let Some(failure) = typecheck.failure {
+        stderr.push_str(&failure.rendered);
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: crate::exit::PROGRAM_FAILURE,
+        };
     }
     if had_type_error {
         return RunOutcome {
@@ -929,7 +938,8 @@ async fn execute_run_inner_scoped(
         Ok(loaded) => loaded,
         Err(failure) => {
             let message = stderr.clone();
-            return finalize_run_error(
+            let details = failure.details();
+            return finalize_run_error_with_details(
                 stdout,
                 stderr,
                 json_session,
@@ -944,6 +954,7 @@ async fn execute_run_inner_scoped(
                 failure.classification(),
                 failure.diagnostic_code(),
                 message,
+                details,
             );
         }
     };

@@ -47,7 +47,17 @@ impl JsonRunSession {
         message: impl Into<String>,
         exit_code: i32,
     ) -> RunOutcome {
-        self.emitter.emit_error(code, message);
+        self.finalize_error_with_details(code, message, serde_json::Value::Null, exit_code)
+    }
+
+    pub(super) fn finalize_error_with_details(
+        self,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: serde_json::Value,
+        exit_code: i32,
+    ) -> RunOutcome {
+        self.emitter.emit_error_with_details(code, message, details);
         RunOutcome {
             stdout: String::new(),
             stderr: String::new(),
@@ -65,6 +75,42 @@ impl JsonRunSession {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_run_error(
     stdout: String,
+    stderr: String,
+    json_session: Option<JsonRunSession>,
+    summary: Option<&RunSummaryOptions>,
+    phase: Option<&RunPhaseOptions>,
+    rusage: Option<&RunRusageOptions>,
+    started: Instant,
+    profile: Option<&harn_vm::profile::RunProfile>,
+    timing: Option<&RunTiming>,
+    main_events: u64,
+    cpu_ms_total: Option<u64>,
+    failure: crate::exit::RunFailure,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> RunOutcome {
+    finalize_run_error_with_details(
+        stdout,
+        stderr,
+        json_session,
+        summary,
+        phase,
+        rusage,
+        started,
+        profile,
+        timing,
+        main_events,
+        cpu_ms_total,
+        failure,
+        code,
+        message,
+        serde_json::Value::Null,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn finalize_run_error_with_details(
+    stdout: String,
     mut stderr: String,
     json_session: Option<JsonRunSession>,
     summary: Option<&RunSummaryOptions>,
@@ -78,6 +124,7 @@ pub(super) fn finalize_run_error(
     failure: crate::exit::RunFailure,
     code: impl Into<String>,
     message: impl Into<String>,
+    details: serde_json::Value,
 ) -> RunOutcome {
     let aux_emission = emit_run_aux_for_exit(
         summary,
@@ -94,7 +141,8 @@ pub(super) fn finalize_run_error(
         &mut stderr,
     );
     if let Some(session) = json_session {
-        let mut outcome = session.finalize_error(code, message, aux_emission.exit_code);
+        let mut outcome =
+            session.finalize_error_with_details(code, message, details, aux_emission.exit_code);
         outcome.stderr = aux_emission.stderr;
         return outcome;
     }

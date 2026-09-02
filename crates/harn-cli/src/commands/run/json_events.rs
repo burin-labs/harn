@@ -184,12 +184,22 @@ impl NdjsonEmitter {
     /// Emit the terminal `Error` event for a fatal run failure (e.g.
     /// compile error before the VM started).
     pub fn emit_error(&self, code: impl Into<String>, message: impl Into<String>) {
+        self.emit_error_with_details(code, message, serde_json::Value::Null);
+    }
+
+    /// Emit a fatal run failure with launch-owned structured context.
+    pub fn emit_error_with_details(
+        &self,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) {
         let event = RunEventWire::Error {
             seq: self.next_seq(),
             error: JsonError {
                 code: code.into(),
                 message: message.into(),
-                details: serde_json::Value::Null,
+                details,
             },
         };
         Self::write_envelope(&self.inner, event);
