@@ -11,7 +11,7 @@ fn failed(detail: string) -> GitHubApiAttempt {
 
 pipeline test_github_api_retries_known_transport_failures(task: unknown) {
   let attempts = [
-    failed("tls: failed to verify certificate: x509: certificate is not valid"),
+    failed("gh: Server Error (HTTP 502)"),
     {success: true, stdout: "{\"ok\":true}", stderr: "", timed_out: false},
   ]
   let waits: list<int> = []
@@ -32,6 +32,12 @@ pipeline test_github_api_retries_known_transport_failures(task: unknown) {
   assert_eq(receipt.attempts, 2)
   assert_eq(receipt.value?.ok, true)
   assert_eq(waits, [25])
+  assert_eq(
+    github_api_failure_kind(
+      failed("tls: failed to verify certificate: x509: certificate is not valid"),
+    ),
+    "transient_transport",
+  )
 }
 
 pipeline test_github_api_fails_closed_after_bounded_transport_retries(task: unknown) {

@@ -30,7 +30,10 @@ pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKin
     || detail.contains("temporarily unavailable")
     || detail.contains("502 bad gateway")
     || detail.contains("503 service unavailable")
-    || detail.contains("504 gateway timeout") {
+    || detail.contains("504 gateway timeout")
+    || detail.contains("server error (http 502)")
+    || detail.contains("server error (http 503)")
+    || detail.contains("server error (http 504)") {
     return "transient_transport"
   }
   return "command"
