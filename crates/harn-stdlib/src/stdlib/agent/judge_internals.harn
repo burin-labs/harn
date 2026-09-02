@@ -926,7 +926,12 @@ pub fn __completion_gate_apply_budget(verdict: dict, vetoes_used: int, max_vetoe
 // terminates on. A judge that ran and could not be READ is different, and it is
 // the one this bound exists for: its reply may be malformed for a turn and
 // well-formed on the next attempt.
-const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 3
+//
+// One re-ask, not more. The sibling deadline path retries zero times, and a
+// judge whose reply does not parse is usually broken the same way every time,
+// so further attempts buy a recovery that rarely happens at the price of real
+// provider calls on every run that is already failing.
+const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
 
 /**
  * True when the judge never produced a reading because it could not run inside
