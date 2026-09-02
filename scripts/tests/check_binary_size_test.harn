@@ -393,11 +393,14 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   const measured_candidate = evaluate_release_binary_size(target, measurement(249726232))
   assert_eq(measured_candidate.growth, "accepted")
   assert_eq(measured_candidate.failures, [])
-  // The decision is bounded: one byte beyond its allowance still fails.
+  // The decision is bounded: one byte beyond its allowance still warns. It
+  // does not fail — growth never blocks, only the fuse does.
   const beyond_acceptance = evaluate_release_binary_size(target, measurement(250250521))
   assert_eq(beyond_acceptance.growth, "warn")
-  assert_eq(beyond_acceptance.failures.count, 1)
-  assert(beyond_acceptance.failures[0]?.starts_with("growth signal:"))
+  assert_eq(beyond_acceptance.failures, [])
+  assert_eq(beyond_acceptance.warnings.count, 1)
+  assert(beyond_acceptance.warnings[0]?.starts_with("growth signal:"))
+  assert_eq(beyond_acceptance.fuse, "ok")
   assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
 }
 
@@ -886,8 +889,13 @@ pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness
   // both are reported: the operator gets the ceiling breach and the delta that
   // produced it, not one standing in for the other.
   assert_eq(verdict.growth, "warn")
-  assert_eq(verdict.failures.count, 2)
+  // Both are reported, and they are reported in different places: the operator
+  // gets the ceiling breach as the blocking failure and the delta that
+  // produced it as a warning, not one standing in for the other.
+  assert_eq(verdict.failures.count, 1)
   assert(verdict.failures[0]?.starts_with("distribution fuse:"))
+  assert_eq(verdict.warnings.count, 1)
+  assert(verdict.warnings[0]?.starts_with("growth signal:"))
   // Not comparable, so no growth conclusion — and the fuse still fires.
   const incomparable = evaluate_release_binary_size(
     entry,
@@ -896,6 +904,7 @@ pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness
   assert_eq(incomparable.fuse, "breached")
   assert_eq(incomparable.growth, "not-comparable")
   assert_eq(incomparable.failures.count, 1)
+  assert_eq(incomparable.warnings, [])
   assert_eq(
     evaluate_release_binary_size(entry, measurement(entry.distribution_fuse_bytes)).fuse,
     "ok",
@@ -1148,4 +1157,73 @@ pipeline test_workflow_skips_the_growth_signal_for_pre_contract_sources(
   // it is a shim with no retirement condition. Matched as an assignment so the
   // workflow comment explaining that choice does not satisfy the check.
   assert(!run.contains("BINARY_SIZE_BUDGET_MB="), "no legacy budget-name alias")
+}
+
+// --- growth reports, the fuse refuses ---------------------------------------
+/**
+ * Falsifier (a). Growth past both thresholds, with the fuse intact, must not
+ * produce a blocking failure. If this ever fails again, a release is once more
+ * refusable by a stale baseline — which is exactly what cost the v0.10.126 cut
+ * two full Linux builds against an 0.10.118 baseline nobody had refreshed.
+ */
+@test
+pipeline test_growth_past_both_thresholds_warns_while_the_fuse_holds(
+  harness: Harness,
+  task: unknown,
+) {
+  const entry = valid_target_policy()
+  // Well past warn_bytes and warn_percent_hundredths, well under the fuse.
+  const grown = measurement(entry.baseline.bytes + 20971520)
+  const verdict = evaluate_release_binary_size(entry, grown)
+  assert_eq(verdict.fuse, "ok")
+  assert_eq(verdict.growth, "warn")
+  assert(verdict.bytes < entry.distribution_fuse_bytes)
+  assert_eq(verdict.failures, [])
+  assert_eq(verdict.warnings.count, 1)
+  const record = release_binary_size_report_record(verdict, entry, grown)
+  assert_eq(record.blocking, false)
+  assert_eq(record.schema, RELEASE_BINARY_SIZE_REPORT_SCHEMA)
+  assert_eq(record.bytes, grown.bytes)
+  assert_eq(record.growth, "warn")
+}
+
+/**
+ * Falsifier (b). The fuse is the one level that still refuses. Paired with the
+ * test above so a change that lifts growth cannot quietly lift this too.
+ */
+@test
+pipeline test_a_breached_fuse_still_refuses(harness: Harness, task: unknown) {
+  const entry = valid_target_policy()
+  const over = measurement(entry.distribution_fuse_bytes + 1)
+  const verdict = evaluate_release_binary_size(entry, over)
+  assert_eq(verdict.fuse, "breached")
+  assert_eq(verdict.failures.count, 1)
+  assert(verdict.failures[0]?.starts_with("distribution fuse:"))
+  const record = release_binary_size_report_record(verdict, entry, over)
+  assert_eq(record.blocking, true)
+  assert_eq(record.fuse, "breached")
+}
+
+/** The structured report carries what a cross-repo reader writes back. */
+@test
+pipeline test_the_structured_report_carries_the_baseline_refresh_fields(
+  harness: Harness,
+  task: unknown,
+) {
+  const entry = valid_target_policy()
+  const clean = measurement(entry.baseline.bytes + 1024)
+  const record = release_binary_size_report_record(
+    evaluate_release_binary_size(entry, clean),
+    entry,
+    clean,
+  )
+  assert_eq(record.target, "x86_64-unknown-linux-gnu")
+  assert_eq(record.source_sha, clean.source_sha)
+  assert_eq(record.bytes, clean.bytes)
+  assert_eq(record.fuse_bytes, entry.distribution_fuse_bytes)
+  assert_eq(record.baseline_version, entry.baseline.version)
+  assert_eq(record.baseline_source_sha, entry.baseline.source_sha)
+  assert_eq(record.comparability, "comparable")
+  assert_eq(record.build_identity, valid_build_identity())
+  assert_eq(record.blocking, false)
 }
