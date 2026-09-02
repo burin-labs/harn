@@ -22,6 +22,7 @@
 //
 // Usage:
 //   harn run scripts/pr_binary_size_signal.harn -- [options]
+import { read_json_typed_result } from "std/fs"
 import "./release_binary_size_policy.harn"
 
 /** One debug-profile `harn` binary, measured. */
@@ -238,23 +239,44 @@ fn read_measurement(fs: HarnessFs, path: string) -> DebugBinaryMeasurement? {
   if path == "" || !fs.exists(path) {
     return nil
   }
-  const parsed = json_parse(fs.read_text(path))
-  const bytes = to_int(parsed?.bytes ?? 0) ?? 0
-  if bytes <= 0 {
+  // A recorded measurement that does not parse is an absent one, and the
+  // caller renders absence honestly. Reading a partial record as a number
+  // would be the failure mode this whole comment exists to avoid.
+  const parsed = read_json_typed_result<DebugBinaryMeasurement>(
+    fs,
+    path,
+    schema_of(DebugBinaryMeasurement),
+  )
+  if !is_ok(parsed) {
     return nil
   }
-  return {revision: to_string(parsed?.revision ?? ""), bytes: bytes}
+  const measurement = unwrap(parsed)
+  if measurement.bytes <= 0 {
+    return nil
+  }
+  return measurement
 }
 
 fn read_release_report(fs: HarnessFs, path: string) -> ReleaseBinarySizeReport? {
   if path == "" || !fs.exists(path) {
     return nil
   }
-  const parsed = json_parse(fs.read_text(path))
-  if to_string(parsed?.schema ?? "") != RELEASE_BINARY_SIZE_REPORT_SCHEMA {
+  const parsed = read_json_typed_result<ReleaseBinarySizeReport>(
+    fs,
+    path,
+    schema_of(ReleaseBinarySizeReport),
+  )
+  if !is_ok(parsed) {
     return nil
   }
-  return parsed
+  const report = unwrap(parsed)
+  // An older artifact may predate this schema. Reporting no measurement is
+  // correct there; reporting its numbers under a contract it never signed
+  // is not.
+  if report.schema != RELEASE_BINARY_SIZE_REPORT_SCHEMA {
+    return nil
+  }
+  return report
 }
 
 pipeline main(harness: Harness) {

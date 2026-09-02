@@ -54,19 +54,16 @@ pipeline test_a_seeded_delta_moves_the_signal(harness: Harness, task: unknown) {
   assert_eq(unchanged.status, "unchanged")
   assert_eq(unchanged.delta_bytes, 0)
   assert_eq(unchanged.crosses_threshold, false)
-
   // +5% on the same baseline: past the 2% policy ratio.
   const grown = evaluate_pr_binary_size(head(420000000), base(400000000), 200)
   assert_eq(grown.status, "grew")
   assert_eq(grown.delta_bytes, 20000000)
   assert_eq(grown.delta_percent_hundredths, 500)
   assert_eq(grown.crosses_threshold, true)
-
   const shrank = evaluate_pr_binary_size(head(380000000), base(400000000), 200)
   assert_eq(shrank.status, "shrank")
   assert_eq(shrank.delta_bytes, -20000000)
   assert_eq(shrank.crosses_threshold, false)
-
   // The rendered comments must differ, or the check reports nothing.
   assert(pr_binary_size_comment(grown, nil) != pr_binary_size_comment(unchanged, nil))
   assert(pr_binary_size_comment(grown, nil).contains("+20000000 bytes"))
