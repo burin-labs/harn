@@ -15,7 +15,7 @@ import {
 } from "std/agent/loop_post_turn"
 import {
   agent_loop_provider_failure,
-  agent_loop_turn_committed_nothing,
+  agent_loop_demote_empty_turn,
 } from "std/agent/loop_provider_failure"
 import "std/agent/loop_purpose_labels"
 import "std/agent/loop_resource_dispatch"
@@ -311,6 +311,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           session.session_id,
           iteration_index,
         )
+        call = agent_loop_demote_empty_turn(call, turn_llm_opts)
         if !call.ok && __agent_loop_is_context_overflow(call?.error) {
           call = __agent_loop_recover_context_overflow(
             harness,
@@ -537,58 +538,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           )
           final_status = "suspended"
           stop_reason = "suspended"
-          break
-        }
-        // A turn that committed nothing is the end of the run, not a turn to
-        // advance past. Every recovery for this condition has already fired by the
-        // time the result reaches here: the VM's built-in empty-completion
-        // retries, and the caller's own retry budget, which re-dispatches a
-        // billed-empty response and hands back the last one when it is spent.
-        // Advancing would start another turn on a provider that has stopped
-        // producing value, which is the one path where extra round trips buy
-        // nothing.
-        if agent_loop_turn_committed_nothing(llm_result, len(tool_calls)) {
-          const empty_totals = agent_session_record_usage(
-            harness.agent,
-            session.session_id,
-            llm_result,
-            turn_llm_opts,
-            iteration_index + 1,
-          )
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "iteration_end",
-            {
-              iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
-                harness.agent,
-                harness.clock,
-                session.session_id,
-                llm_result,
-                0,
-                visible_text,
-                empty_totals,
-                loop_start_ms,
-              )
-                + {dispatch_skipped: true, skip_reason: "empty_generation"},
-            },
-          )
-          final_status = "provider_error"
-          stop_reason = "empty_generation"
-          // Same field shape the VM's own empty-generation error carries, so
-          // both terminals classify identically downstream: `server_error`
-          // resolves the closed terminal class, and `empty_generation` is the
-          // existing code/reason for this condition. No new vocabulary.
-          terminal_error = {
-            category: "server_error",
-            code: "empty_generation",
-            reason: "empty_generation",
-            completion_kind: "empty_generation",
-            message: "The provider committed no content, tool call, or thinking on this turn.",
-            provider: to_string(turn_llm_opts?.provider ?? ""),
-            model: to_string(turn_llm_opts?.model ?? ""),
-          }
           break
         }
         const stall_judge_due = agent_stall_turn_end_judge_due(
