@@ -543,6 +543,9 @@ pub const DEFAULT_EXECUTION_RUN_RETENTION: usize = 128;
 /// Save and retain one automatic execution record as a cross-process
 /// transaction. Workflow records in the same directory are never selected.
 pub fn save_execution_run_record(run: &RunRecord, path: &Path) -> Result<String, VmError> {
+    super::validate_execution_evidence(&run.evidence).map_err(|error| {
+        VmError::Runtime(format!("invalid automatic execution evidence: {error}"))
+    })?;
     let parent = execution_record_parent(path)?;
     crate::bounded_files::with_retention_transaction(parent, || {
         let persisted = save_run_record(run, Some(&path.to_string_lossy()))
@@ -679,6 +682,52 @@ pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8
 #[cfg(test)]
 mod execution_retention_tests {
     use super::*;
+
+    #[test]
+    fn automatic_execution_persistence_validates_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hxe-invalid.json");
+        let run = RunRecord {
+            evidence: super::super::ExecutionEvidenceRecord {
+                schema_version: super::super::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+                ..super::super::ExecutionEvidenceRecord::default()
+            },
+            ..RunRecord::default()
+        };
+
+        let error = save_execution_run_record(&run, &path).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("execution evidence is missing its Harn execution identity"));
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+
+        let execution_id = "hxe-019c13e0-8080-7000-8000-000000000001";
+        let path = dir.path().join(format!("{execution_id}.json"));
+        let run = RunRecord {
+            id: execution_id.to_string(),
+            evidence: super::super::ExecutionEvidenceRecord {
+                schema_version: super::super::EXECUTION_EVIDENCE_SCHEMA_VERSION,
+                execution_id: Some(execution_id.to_string()),
+                ..super::super::ExecutionEvidenceRecord::default()
+            },
+            ..RunRecord::default()
+        };
+
+        assert_eq!(
+            save_execution_run_record(&run, &path).unwrap(),
+            path.to_string_lossy()
+        );
+        assert_eq!(
+            load_run_record(&path)
+                .unwrap()
+                .evidence
+                .execution_id
+                .as_deref(),
+            Some(execution_id)
+        );
+    }
 
     #[test]
     fn automatic_execution_retention_never_selects_workflow_records() {
