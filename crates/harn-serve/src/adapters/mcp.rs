@@ -744,7 +744,11 @@ impl McpServer {
         // of how the result comes back.
         if let Some(task_id) = job.task_id {
             match task_outcome(response) {
-                Ok(result) => self.tasks.complete_with_tool_result(&task_id, result),
+                Ok(result) => self.tasks.complete_with_tool_result(
+                    &task_id,
+                    result,
+                    job.request_profile.uses_result_envelope(),
+                ),
                 Err(error) => self.tasks.complete(&task_id, Err(error)),
             }
             return;

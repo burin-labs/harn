@@ -323,7 +323,10 @@ impl McpServer {
             "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
             "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
             "tools/list" => self.handle_tools_list(&id, &params),
-            "tools/call" => self.handle_tools_call(&id, &params, vm).await,
+            "tools/call" => {
+                self.handle_tools_call(&id, &params, vm, request_profile.uses_result_envelope())
+                    .await
+            }
             mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(id.clone(), &params),
             mcp_protocol::METHOD_TASKS_UPDATE => self.tasks.handle_update(id.clone(), &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.tasks.handle_cancel(id.clone(), &params),
@@ -451,6 +454,7 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
         vm: &mut Vm,
+        uses_result_envelope: bool,
     ) -> serde_json::Value {
         let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let tool = match self
@@ -535,7 +539,11 @@ impl McpServer {
             ) {
                 Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
                     match successful_tool_call_result(&self.tools, tool, &value, json) {
-                        Ok(result) => self.tasks.complete_with_tool_result(&task.task_id, result),
+                        Ok(result) => self.tasks.complete_with_tool_result(
+                            &task.task_id,
+                            result,
+                            uses_result_envelope,
+                        ),
                         Err(error) => self.tasks.complete(&task.task_id, Err(error)),
                     }
                 }
@@ -543,6 +551,7 @@ impl McpServer {
                     self.tasks.complete_with_tool_result(
                         &task.task_id,
                         crate::tool_registry::application_error_mcp_result(&error),
+                        uses_result_envelope,
                     );
                 }
                 Err(crate::tool_registry::ToolInvocationError::Runtime(
@@ -557,6 +566,7 @@ impl McpServer {
                         "content": [{"type": "text", "text": error.to_string()}],
                         "isError": true,
                     }),
+                    uses_result_envelope,
                 ),
             }
             return crate::mcp_tasks::task_created_response(

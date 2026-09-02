@@ -250,8 +250,15 @@ impl McpTaskStore {
     /// where reconstructing a bare value from the blocks would not. `isError`
     /// belongs to the completed tool-call result; only failure to produce a
     /// result transitions the task itself to `failed`.
-    pub fn complete_with_tool_result(&self, task_id: &str, mut result: JsonValue) {
-        mcp_protocol::apply_result_envelope(&mut result, None);
+    pub fn complete_with_tool_result(
+        &self,
+        task_id: &str,
+        mut result: JsonValue,
+        uses_result_envelope: bool,
+    ) {
+        if uses_result_envelope {
+            mcp_protocol::apply_result_envelope(&mut result, None);
+        }
         let Some(wake) = ({
             let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
             let Some(record) = tasks.get_mut(task_id) else {
@@ -468,11 +475,29 @@ mod tests {
                 },
             },
         });
-        store.complete_with_tool_result(&task.task_id, result.clone());
+        store.complete_with_tool_result(&task.task_id, result.clone(), false);
 
         let read = store.handle_get(json!(1), &params(&task.task_id));
         assert_eq!(read["result"]["status"], "completed");
         assert_eq!(read["result"]["result"], result);
+    }
+
+    #[test]
+    fn stable_completed_tool_result_gets_the_stable_envelope_only_when_requested() {
+        let store = McpTaskStore::new();
+        let stable_task = store.create(None);
+        let standard_task = store.create(None);
+        let result = json!({
+            "content": [{"type": "text", "text": "ok"}],
+            "isError": false,
+        });
+        store.complete_with_tool_result(&stable_task.task_id, result.clone(), true);
+        store.complete_with_tool_result(&standard_task.task_id, result, false);
+
+        let stable = store.handle_get(json!(1), &params(&stable_task.task_id));
+        let standard = store.handle_get(json!(2), &params(&standard_task.task_id));
+        assert_eq!(stable["result"]["result"]["resultType"], "complete");
+        assert!(standard["result"]["result"].get("resultType").is_none());
     }
 
     #[test]
