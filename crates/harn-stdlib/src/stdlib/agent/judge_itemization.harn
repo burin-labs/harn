@@ -1,0 +1,67 @@
+import {
+  CompletionRequirementContract,
+  completion_requirement_itemization_retry_prompt,
+  completion_requirement_report_omitted,
+} from "std/agent/completion_requirements"
+import { JudgeCheckpointRequest, __judge_run_checkpoint } from "std/agent/judge_internals"
+import { agent_emit_event } from "std/agent/state"
+
+/** Judge response after at most one itemization re-ask. */
+pub type JudgeItemizationResolution = {data: dict, omitted: bool, reasked: bool}
+
+/**
+ * Resolve a judge response that approved completion without itemizing the
+ * acceptance ledger.
+ *
+ * The ledger binds the judge, so an absent `requirement_report` is the judge's
+ * failure to answer, not the actor's failure to work. Re-ask the judge exactly
+ * once with an explicit itemization instruction. The instruction rides on the
+ * user turn, leaving the cached stable system prefix byte-identical.
+ *
+ * `approved` is the first response's verdict read by the caller, which owns the
+ * verdict vocabulary. Only an approval that skipped the ledger is re-asked: a
+ * judge already answering `continue` has assessed the stop and refused.
+ *
+ * `omitted` is true only when the judge still returned no report after the
+ * re-ask. The caller then falls closed, which preserves the binding that a bare
+ * scalar `done` never closes a ledger, while naming the judge as the party that
+ * did not assess.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_resolve_itemization(harness, request, contract, data, true)
+ */
+pub fn __judge_resolve_itemization(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  contract: CompletionRequirementContract?,
+  data: dict,
+  approved: bool,
+) -> JudgeItemizationResolution {
+  if !completion_requirement_report_omitted(contract, data?.requirement_report) || !approved {
+    return {data: data, omitted: false, reasked: false}
+  }
+  const reask = __judge_run_checkpoint(
+    harness,
+    request + {user: request.user + completion_requirement_itemization_retry_prompt(contract)},
+  )
+  const reask_data = reask.checkpoint?.data ?? {}
+  const itemized = (reask.checkpoint?.ok ?? false)
+    && !completion_requirement_report_omitted(contract, reask_data?.requirement_report)
+  agent_emit_event(
+    harness.agent,
+    request.payload?.session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.completion_judge_itemization_retry.v1",
+      required_count: len(contract?.requirements ?? []),
+      reask_status: to_string(reask.checkpoint?.status ?? "ok"),
+      itemized_after_reask: itemized,
+    },
+  )
+  if itemized {
+    return {data: reask_data, omitted: false, reasked: true}
+  }
+  return {data: data, omitted: true, reasked: true}
+}
