@@ -1,0 +1,105 @@
+# Harn issue and pull-request label taxonomy.
+#
+# This file documents the labels actually in use on burin-labs/harn. It is
+# reference, not automation: no workflow syncs from it today. When you add a
+# label with `gh label create`, add it here in the same change.
+#
+# The `status/*` and `effort/*` groups match the canonical org taxonomy in
+# burin-labs/.github `.github/labels.yml` verbatim. Keep them identical so
+# cross-repository queries work.
+
+# Which subsystem a change or report belongs to. Finer-grained than the
+# `[Area]` pull-request title tags; CONTRIBUTING.md maps one to the other.
+area:
+  - {name: area/parser, color: "0366d6", description: "Lexer, parser, AST"}
+  - {name: area/typechecker, color: "0366d6", description: "Type checker, inference, narrowing"}
+  - {name: area/vm, color: "0366d6", description: "VM, value types, runtime evaluator"}
+  - {name: area/stdlib, color: "0366d6", description: "Stdlib builtins and host surface"}
+  - {name: area/cli, color: "0366d6", description: "harn CLI, check/lint/fmt, manifest"}
+  - {name: area/modules, color: "1d76db", description: "Module system, imports, package management"}
+  - {name: area/orchestrator, color: "1d76db", description: "harn orchestrator serve runtime"}
+  - {name: area/triggers, color: "1d76db", description: "Event-driven triggers subsystem"}
+  - {name: area/connectors, color: "1d76db", description: "External event-source connectors (GitHub/Slack/Linear/Notion/webhook/cron)"}
+  - {name: area/flow-control, color: "1d76db", description: "Concurrency / throttle / rate-limit / waitpoints"}
+  - {name: area/flow, color: "8957e5", description: "Agent-native shipping substrate (atoms, slices, shipping roles)"}
+  - {name: area/personas, color: "8957e5", description: "Durable agent persona manifests, typed handoffs, and continuous role runtime"}
+  - {name: area/supervision, color: "8957e5", description: "HITL / approvals / trust graph / autonomy tiers"}
+  - {name: area/learning, color: "1f883d", description: "Workflow crystallization, friction learning, and context-pack primitives"}
+  - {name: area/acp-a2a, color: "d876e3", description: "ACP/A2A protocol surface and bridge integration"}
+  - {name: area/interop, color: "d876e3", description: "MCP server / forge adapters / open specs"}
+  - {name: area/sandbox, color: "d93f0b", description: "Handler sandboxing (WASM / seccomp / landlock / pledge)"}
+  - {name: area/evals, color: "0e8a16", description: "Evals harness / determinism leaderboard / Langfuse ingestion"}
+  - {name: area/observability, color: "0052cc", description: "Tracing / metrics / analytics / cost dashboards"}
+  - {name: area/performance, color: "ededed", description: "Latency, throughput, binary size, and build-time budgets"}
+  - {name: area/compliance, color: "b60205", description: "Regulated-industry posture (SBOM/FIPS/residency/PII)"}
+
+# How much this matters relative to the current milestone.
+priority:
+  - {name: priority/p0, color: "b60205", description: "Must have for MVP"}
+  - {name: priority/p1, color: "d93f0b", description: "High priority"}
+  - {name: priority/p2, color: "fbca04", description: "Medium priority"}
+  - {name: priority/p3, color: "0e8a16", description: "Lower priority"}
+
+# Where the work stands right now. Applies to open issues only.
+status:
+  - {name: status/blocked, color: "d93f0b", description: "Cannot proceed until a named dependency clears"}
+  - {name: status/in-progress, color: "0e8a16", description: "An agent or engineer is actively working this"}
+  - {name: status/needs-decision, color: "fbca04", description: "Needs a founder or code-owner ruling before work continues"}
+  - {name: status/ready, color: "0e8a16", description: "Scoped and unblocked, ready to pick up"}
+
+# Rough size, for planning and batching.
+effort:
+  - {name: effort/small, color: "c2e0c6", description: "Hours"}
+  - {name: effort/medium, color: "fbca04", description: "A day or two"}
+  - {name: effort/large, color: "d93f0b", description: "Multi-day or multi-PR"}
+
+# Kind of work. These stay unprefixed because GitHub creates them by default
+# and outside tooling recognizes them.
+kind:
+  - {name: bug, color: "d73a4a", description: "Something isn't working"}
+  - {name: enhancement, color: "a2eeef", description: "New feature or request"}
+  - {name: documentation, color: "0075ca", description: "Improvements or additions to documentation"}
+  - {name: question, color: "d876e3", description: "Further information is requested"}
+  - {name: epic, color: "5319e7", description: "Large multi-ticket workstream"}
+  - {name: production-readiness, color: "0e8a16", description: "Production readiness gate"}
+
+# Scope of a milestone or workstream.
+scope:
+  - {name: mvp, color: "0e8a16", description: "Minimum viable scope"}
+  - {name: stretch, color: "fbca04", description: "Ambitious stretch scope"}
+  - {name: "tier/exploration", color: "cfd3d7", description: "Design-doc-first / exploratory / future extension"}
+  - {name: "milestone:m1", color: "5319e7", description: "Persona platform milestone 1: foundations"}
+  - {name: "milestone:m2", color: "0e8a16", description: "Persona platform milestone 2: production-ready cross-surface"}
+
+# Named workstreams that cut across areas.
+workstream:
+  - {name: tool-vault, color: "1f6feb", description: "Progressive tool disclosure: defer_loading, tool-search, provider capability negotiation"}
+  - {name: skills, color: "8957e5", description: "Native skills: skill { } language form, SKILL.md loader, lifecycle"}
+  - {name: package-management, color: "1f883d", description: "Harn package manager and version pinning"}
+  - {name: placement-control-plane, color: "5319e7", description: "Supervised agent-execution placement control plane"}
+  - {name: verification-intelligence, color: "1f6feb", description: "Verification profiles, HUD, ladder, stale-diagnostic contracts"}
+
+# Labels that change what CI does. Adding one has an effect; do not apply
+# speculatively.
+control:
+  - {name: e2e, color: "1d76db", description: "Run the slow subprocess E2E suite on this pull request"}
+  - {name: no-demo-needed, color: "ededed", description: "Demo gate opt-out: PR is hygiene/refactor and doesn't add a new public primitive"}
+  - {name: no-changelog-needed, color: "ededed", description: "PR is exempt from the changelog-fragment gate (CI/infra/test-only)"}
+  - {name: bypass-ci, color: "B60205", description: "Privileged merge/CI override (org admin only)"}
+  - {name: bypass-merge-queue, color: "B60205", description: "Privileged merge/CI override (org admin only)"}
+  - {name: force-merge, color: "B60205", description: "Privileged merge/CI override (org admin only)"}
+
+# Applied by Dependabot and GitHub itself.
+automation:
+  - {name: dependencies, color: "0366d6", description: "Pull requests that update a dependency file"}
+  - {name: rust, color: "000000", description: "Pull requests that update rust code"}
+  - {name: javascript, color: "168700", description: "Pull requests that update javascript code"}
+  - {name: github_actions, color: "000000", description: "Pull requests that update GitHub Actions code"}
+
+# GitHub defaults kept for triage of outside reports.
+triage:
+  - {name: duplicate, color: "cfd3d7", description: "This issue or pull request already exists"}
+  - {name: good first issue, color: "7057ff", description: "Good for newcomers"}
+  - {name: help wanted, color: "008672", description: "Extra attention is needed"}
+  - {name: invalid, color: "e4e669", description: "This doesn't seem right"}
+  - {name: wontfix, color: "ffffff", description: "This will not be worked on"}

@@ -1,0 +1,89 @@
+import { guidance_prompt_fragments, resolve_workspace_guidance } from "std/agent/workspace_guidance"
+
+/**
+ * A fixture workspace covering every tier the resolver claims to own, plus one
+ * file that must NOT be loaded. The negative control is the load-bearing half:
+ * a resolver that globs too widely passes every positive assertion below and
+ * still ships the wrong context, so "outside/AGENTS.md is absent" is the
+ * assertion that can actually fail.
+ */
+pipeline test(harness: Harness) {
+  const base = harness.fs.mkdtemp_in_workspace("harn-guidance-")
+  const home = path_join(base, "home")
+  const root = path_join(base, "repo")
+  const scoped = path_join(root, "packages/api")
+  const outside = path_join(base, "outside")
+  harness.fs.mkdir(path_join(home, ".claude"))
+  harness.fs.mkdir(scoped)
+  harness.fs.mkdir(outside)
+  harness.fs.write_text(path_join(home, ".claude/CLAUDE.md"), "User scope rule.")
+  harness.fs.write_text(
+    path_join(root, "AGENTS.md"),
+    "Root rule.\n\n<!-- maintainer note, must not reach the model -->\n@shared/style.md\n",
+  )
+  // The symlink convention, spelled as a copy. The body must be byte-identical
+  // to AGENTS.md or there is nothing to dedupe and both files legitimately load.
+  harness.fs.write_text(
+    path_join(root, "CLAUDE.md"),
+    "Root rule.\n\n<!-- maintainer note, must not reach the model -->\n@shared/style.md\n",
+  )
+  harness.fs.mkdir(path_join(root, "shared"))
+  harness.fs.write_text(path_join(root, "shared/style.md"), "Imported style rule.")
+  harness.fs.write_text(path_join(scoped, "AGENTS.md"), "Scoped api rule.")
+  harness.fs.write_text(path_join(outside, "AGENTS.md"), "Out-of-chain rule.")
+  const resolved = resolve_workspace_guidance(
+    harness.fs,
+    {workspace_root: root, home_dir: home, include_ancestors: false},
+  )
+  const paths = resolved.sources.map({ entry -> return entry.path }).to_list()
+  const bodies = join(resolved.sources.map({ entry -> return entry.body }).to_list(), "\n")
+  // Negative control first: nothing outside the chain may load, and the
+  // ancestor tier stays off when the caller says so.
+  assert(
+    !bodies.contains("Out-of-chain rule"),
+    "a guidance file outside the resolution chain must not load",
+  )
+  // Order is broadest to most specific, so the most specific text is read last.
+  assert(resolved.sources.count() == 3, "user, root, and scoped sources load")
+  assert(resolved.sources[0]?.scope == "user", "user scope comes first")
+  assert(
+    resolved.sources[0]?.path == path_join(home, ".claude/CLAUDE.md"),
+    "the user scope file is ~/.claude/CLAUDE.md",
+  )
+  assert(resolved.sources[1]?.scope == "workspace", "the workspace root comes second")
+  assert(resolved.sources[1]?.path == path_join(root, "AGENTS.md"), "AGENTS.md wins its directory")
+  assert(resolved.sources[2]?.scope == "scoped", "the subtree file comes last")
+  assert(
+    resolved.sources[2]?.path == path_join(scoped, "AGENTS.md"),
+    "the scoped package file loads",
+  )
+  // The symlink convention is not paid for twice, and the drop is recorded
+  // rather than silent.
+  assert(!paths.contains(path_join(root, "CLAUDE.md")), "an identical CLAUDE.md body is deduped")
+  assert(
+    resolved.omitted.map({ entry -> return entry.reason }).to_list().contains("duplicate_body"),
+    "the deduped file is named in the omission list",
+  )
+  // Imports are expanded; maintainer comments are stripped.
+  assert(bodies.contains("Imported style rule"), "@path imports expand into the body")
+  assert(!bodies.contains("maintainer note"), "block HTML comments are stripped")
+  // Every source becomes its own fragment, so the context manifest can show
+  // which file reached the model rather than one collapsed blob.
+  const fragments = guidance_prompt_fragments(resolved)
+  assert(fragments.count() == 3, "one prompt fragment per resolved source")
+  assert(
+    fragments[0]?.id == "guidance:" + path_join(home, ".claude/CLAUDE.md"),
+    "a fragment id carries its source path",
+  )
+  // A budget that fits only the first source drops the rest by name.
+  const tight = resolve_workspace_guidance(
+    harness.fs,
+    {workspace_root: root, home_dir: home, include_ancestors: false, max_bytes: 1},
+  )
+  assert(tight.sources.count() == 1, "a tight budget keeps at least the first source")
+  assert(
+    tight.omitted.map({ entry -> return entry.reason }).to_list().contains("budget_exhausted"),
+    "budget drops are recorded with a reason",
+  )
+  harness.stdio.log("workspace_guidance_resolution passed")
+}
