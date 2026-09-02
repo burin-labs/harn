@@ -461,9 +461,13 @@ pipeline test_unreadable_contract_cannot_switch_the_completion_gate_off(
     { -> completion_requirement_contract({requirements: [{requirement_id: "", name: ""}]}) },
     "non-empty `requirement_id` and `name`",
   )
+  // An empty list is READABLE: it says there is nothing to itemize, and is
+  // satisfied by construction rather than rejected. See
+  // `test_an_empty_acceptance_set_is_a_satisfied_ledger_not_an_error`.
+  assert_eq(completion_requirement_contract({requirements: []}), nil)
   assert_error_contains(
-    { -> completion_requirement_contract({requirements: []}) },
-    "must be a non-empty list",
+    { -> completion_requirement_contract({requirements: "artifact"}) },
+    "must be a list",
   )
   assert_error_contains(
     { -> completion_requirement_contract({requirements: ["artifact"]}) },

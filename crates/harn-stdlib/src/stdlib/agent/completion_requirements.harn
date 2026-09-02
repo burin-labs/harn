@@ -100,6 +100,21 @@ fn completion_requirement_evidence_roles(raw: unknown) -> list<CompletionRequire
  * here, so a malformed ledger fails closed with one vocabulary instead of
  * silently shrinking the set of requirements the completion gate enforces.
  *
+ * An EXPLICITLY EMPTY `requirements` list is not malformed and is not an
+ * absent ledger the gate must guess about. It is a host stating that this task
+ * has nothing checkable to itemize, which is the only honest answer for a
+ * conversational turn that declares no verifier, promises no write, and names
+ * no test. It normalizes to nil, so the empty set is satisfied by construction
+ * everywhere downstream: no `requirement_report` property on the judge schema,
+ * no itemization re-ask, no `continue` override of a `done` verdict, and so no
+ * thrash. Rejecting it instead used to abort the run outright, which is
+ * strictly worse than the veto loop the rejection was meant to prevent.
+ *
+ * The fail-closed direction is unchanged for everything else. A non-list, a
+ * non-dict row, a row missing `requirement_id` or `name`, a duplicate id, and a
+ * bad `evidence_roles` all still throw, and a NON-EMPTY ledger keeps every
+ * binding from harn#7555, harn#7557, and harn#7824.
+ *
  * `label` names the option the raw value arrived under, so a caller-facing
  * message points at the field the author wrote.
  *
@@ -119,9 +134,12 @@ pub fn __completion_requirement_contract_checked(
       + type_of(value)
   }
   const raw_requirements = value?.requirements
-  if type_of(raw_requirements) != "list" || len(raw_requirements) == 0 {
+  if type_of(raw_requirements) != "list" {
     throw "agent_loop: `" + label
-      + ".requirement_contract.requirements` must be a non-empty list"
+      + ".requirement_contract.requirements` must be a list"
+  }
+  if len(raw_requirements) == 0 {
+    return nil
   }
   let requirements: list<CompletionRequirement> = []
   let seen: dict = {}
