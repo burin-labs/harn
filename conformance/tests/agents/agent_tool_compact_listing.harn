@@ -46,24 +46,33 @@ fn listing_tools() {
   )
 }
 
-fn system_echo_caller() {
+/**
+ * Capture the served system prompt by writing it down, not by echoing it.
+ *
+ * An earlier revision returned the prompt as the model's reply and read it
+ * back from `visible_text`. That cannot work here: under `tool_format: "text"`
+ * the reply is parsed as the tool-call protocol, so the echo never survives to
+ * `visible_text`, and this assertion saw the injected completion tool's
+ * description instead. The caller is invoked either way, so it writes what it
+ * was served to a file the test owns.
+ */
+fn capturing_caller(fs: HarnessFs, sink: string) {
   return { call ->
+    fs.write_text(sink, to_string(call.system ?? ""))
     return {
       ok: true,
-      value: {
-        input_tokens: 0,
-        model: "mock",
-        output_tokens: 0,
-        provider: "mock",
-        text: "SYS[" + to_string(call.system ?? "") + "]",
-      },
+      value: {input_tokens: 0, model: "mock", output_tokens: 0, provider: "mock", text: "done"},
     }
   }
 }
 
 pipeline default(harness: Harness) {
+  const sink = path_join(
+    harness.fs.workspace_temp_dir(),
+    "compact-listing-" + harness.random.uuid() + ".txt",
+  )
   const opts: AgentSpec = {
-    llm_caller: system_echo_caller(),
+    llm_caller: capturing_caller(harness.fs, sink),
     max_iterations: 1,
     provider: "mock",
     session_id: "compact-listing-conformance",
@@ -71,8 +80,12 @@ pipeline default(harness: Harness) {
     tools: listing_tools(),
     turn_end_condition: false,
   }
-  const result = agent_loop(harness, "Report the catalog.", nil, opts)
-  const system = result.visible_text
+  agent_loop(harness, "Report the catalog.", nil, opts)
+  // A run that never reached the provider would let every assertion below
+  // pass against an empty string.
+  require harness.fs.exists(sink), "the turn must have reached the llm caller"
+  const system = harness.fs.read_text(sink)
+  require system != "", "the captured system prompt must not be empty"
   // The compact tool is listed, under the heading that tells the model how to
   // recover the rest.
   require system.contains("## Other tools"),

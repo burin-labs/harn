@@ -185,16 +185,29 @@ preferred_tool_format = "native"
     "a run that deferred nothing must report zero deferred tokens"
   require deferred_resident < full_tool_tokens,
     "the resident segment must lose what the deferred segment gained"
-  // The totals are unchanged: this is a split of one number, not a new budget.
-  require deferred_resident + deferred_tokens == full_tool_tokens,
-    "resident plus deferred must equal what the single combined segment "
-    + "reported, or a budget decision silently changed meaning"
+  // Conservation belongs to the partition, not to two different requests.
+  // These are separate runs, and `defer_loading` travels on the wire, so the
+  // deferred run serializes to slightly more than the run that deferred
+  // nothing: 574 against 562 when this was written. Asserting those totals
+  // equal is unprovable, and the split it was meant to protect is already
+  // covered above by the resident segment shrinking and the deferred segment
+  // going non-zero against its own measured zero.
+  //
+  // What holds exactly is that every tool lands on one side of the split.
+  // Stated as a difference rather than as two literals, because the request
+  // also carries the injected completion tool, and pinning its presence here
+  // would make this case fail the day that injection changes for unrelated
+  // reasons.
   const deferred_breakdown = native_deferred.context_token_breakdown
-  require deferred_breakdown.native_tool_count == 3,
-    "every tool is still sent; deferral is a provider-side residency question"
-  require deferred_breakdown.resident_tool_count == 1,
-    "only the undeferred tool is resident, saw "
+  require deferred_breakdown.native_tool_count - deferred_breakdown.resident_tool_count == 2,
+    "exactly the two deferred tools must leave the resident set, saw "
+    + to_string(deferred_breakdown.native_tool_count)
+    + " sent and "
     + to_string(deferred_breakdown.resident_tool_count)
+    + " resident"
+  require deferred_breakdown.resident_tool_count > 0,
+    "a run with every tool deferred is rejected upstream, so some tool must "
+    + "stay resident"
   const full_breakdown = native_full.context_token_breakdown
   require full_breakdown.resident_tool_count == full_breakdown.native_tool_count,
     "with nothing deferred the two counts must agree"
