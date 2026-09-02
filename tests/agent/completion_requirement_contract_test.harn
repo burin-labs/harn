@@ -722,3 +722,118 @@ pipeline test_pending_feedback_names_the_item_and_its_evidence_kind(
   assert(feedback.contains("`behavior` is not assessed"))
   assert(feedback.contains("Accepted evidence kinds: deterministic_verification"))
 }
+
+// The whole-task catch-all for a task that writes nothing. One row, no declared
+// evidence roles, so it accepts assistant_output and deterministic_verification.
+fn no_write_contract() -> CompletionRequirementContract {
+  return {requirements: [{requirement_id: "say-hello", name: "Say hello."}]}
+}
+
+fn no_write_judge_opts(session: string, cap: int) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: cap,
+    verify_completion_judge: {
+      provider: "mock",
+      max_invocations: 1,
+      requirement_contract: no_write_contract(),
+    },
+  }
+}
+
+// harn#7823. A judge that answers `done` and never itemizes is the party that
+// failed to assess. Before the fix this vetoed as `completion_requirements_pending`
+// — feedback addressed to an actor who does not write assessments, identical on
+// every iteration, so the run could only thrash.
+pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      // Both the first judge call and its itemization retry answer with a bare
+      // scalar. Falling closed is still correct; naming the actor is not.
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      llm_done(),
+    ],
+    { ->
+      const session = "requirement-omitted-report-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
+      )
+      const receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.requirements != nil },
+      )
+        .to_list()
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].action, "continue")
+      assert_eq(receipts[0].reason, "completion_judge_report_omitted")
+      assert(
+        to_string(receipts[0]?.feedback ?? "").contains("completion judge returned no assessment"),
+      )
+      assert(to_string(receipts[0]?.feedback ?? "").contains("`say-hello`"))
+    },
+  )
+}
+
+// The retry is asked of the JUDGE, not the actor. One re-ask that itemizes
+// closes the ledger on evidence the runtime already recorded.
+pipeline test_itemization_retry_closes_the_no_write_row(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The greeting was returned.",
+            requirement_report: [{requirement_id: "say-hello", met: true, evidence_refs: [-1]}],
+          },
+        ),
+      },
+    ],
+    { ->
+      const session = "requirement-retry-itemizes-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
+      )
+      assert_eq(captured.result.status, "done")
+      const receipts = completion_receipts(captured.events)
+      const last = receipts[len(receipts) - 1]
+      assert_eq(last.action, "accept")
+      assert(last.requirements.complete)
+      assert_eq(last.requirements.rows[0].status, "met")
+    },
+  )
+}
+
+// Negative control for the retry. A judge that DID itemize and left the row out
+// is a real actor gap: no retry, and the existing pending vocabulary stands.
+pipeline test_itemized_report_that_omits_a_row_is_still_an_actor_gap(
+  harness: Harness,
+  task: unknown,
+) {
+  const report = completion_requirement_report(
+    no_write_contract(),
+    [{requirement_id: "unrelated", met: true, evidence_refs: [-1]}],
+    trial_shaped_packet("passed"),
+  )
+  assert(!report.complete)
+  assert_eq(report.rows[0].status, "missing")
+  const feedback = completion_requirement_pending_feedback(report)
+  assert(feedback.contains("still pending"))
+  assert(!feedback.contains("completion judge returned no assessment"))
+}

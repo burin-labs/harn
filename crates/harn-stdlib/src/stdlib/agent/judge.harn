@@ -13,14 +13,18 @@ import {
   completion_requirement_evidence_packet,
 } from "std/agent/completion_evidence"
 import {
+  CompletionRequirementContract,
   CompletionRequirementEvidencePacket,
   CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
   completion_requirement_assessments_schema,
   completion_requirement_contract,
   completion_requirement_contract_prompt,
+  completion_requirement_itemization_retry_prompt,
   completion_requirement_pending_feedback,
   completion_requirement_report,
+  completion_requirement_report_omitted,
+  completion_requirement_unassessed_feedback,
 } from "std/agent/completion_requirements"
 pub import {
   COMPLETION_JUDGE_DEFAULT_CAP,
@@ -35,6 +39,7 @@ import {
   CompletionJudgeAdmission,
   CompletionJudgeGapClass,
   CompletionVerificationState,
+  JudgeCheckpointRequest,
   __completion_arbitration_converts,
   __completion_judge_gap_class,
   __completion_verification_state_read,
@@ -891,6 +896,63 @@ fn __judge_invoke_closure(
   }
 }
 
+/** Judge response after at most one itemization re-ask. */
+type JudgeItemizationResolution = {data: dict, omitted: bool, reasked: bool}
+
+/**
+ * Resolve a judge response that approved completion without itemizing the
+ * acceptance ledger.
+ *
+ * The ledger binds the judge, so an absent `requirement_report` is the judge's
+ * failure to answer, not the actor's failure to work. Re-ask the judge exactly
+ * once with an explicit itemization instruction. The instruction rides on the
+ * user turn, leaving the cached stable system prefix byte-identical.
+ *
+ * `omitted` is true only when the judge still returned no report after that
+ * re-ask. The caller then falls closed, which preserves the binding from
+ * #7555/#7557 that a bare scalar `done` never closes a ledger, while naming
+ * the judge as the party that did not assess.
+ */
+fn __judge_resolve_itemization(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  contract: CompletionRequirementContract?,
+  data: dict,
+) -> JudgeItemizationResolution {
+  if !completion_requirement_report_omitted(contract, data?.requirement_report) {
+    return {data: data, omitted: false, reasked: false}
+  }
+  // A judge that is already refusing has assessed the stop and said no. Only an
+  // approval that skipped the ledger needs the ledger re-asked.
+  const first = __judge_completion_verdict_read(data)
+  if first.verdict != "done" {
+    return {data: data, omitted: false, reasked: false}
+  }
+  const reask = __judge_run_checkpoint(
+    harness,
+    request
+      + {user: request.user + completion_requirement_itemization_retry_prompt(contract)},
+  )
+  const reask_data = reask.checkpoint?.data ?? {}
+  const itemized = (reask.checkpoint?.ok ?? false)
+    && !completion_requirement_report_omitted(contract, reask_data?.requirement_report)
+  agent_emit_event(
+    harness.agent,
+    request.payload?.session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.completion_judge_itemization_retry.v1",
+      required_count: len(contract?.requirements ?? []),
+      reask_status: to_string(reask.checkpoint?.status ?? "ok"),
+      itemized_after_reask: itemized,
+    },
+  )
+  if itemized {
+    return {data: reask_data, omitted: false, reasked: true}
+  }
+  return {data: data, omitted: true, reasked: true}
+}
+
 fn __judge_invoke_structured(
   harness: Harness,
   judge_cfg: JudgeConfig,
@@ -970,15 +1032,34 @@ fn __judge_invoke_structured(
       typed_checkpoint: checkpoint,
     }
   }
-  const decoded = __judge_completion_verdict_read(
+  // A judge that answered `done` without itemizing has assessed nothing. Re-ask
+  // the JUDGE once, rather than sending the actor feedback it cannot act on.
+  const resolved = __judge_resolve_itemization(
+    harness,
+    {
+      judge_cfg: judge_cfg,
+      opts: opts,
+      payload: payload,
+      checkpoint_name: "agent.completion_judge",
+      system: stable_prefix,
+      user: user,
+      schema: schema,
+    },
+    contract,
     checkpoint.data,
+  )
+  const decoded = __judge_completion_verdict_read(
+    resolved.data,
     contract,
     payload.judge_evidence_packet,
   )
   const requirement_report = decoded.requirement_report
+  const unassessed = resolved.omitted && requirement_report != nil
   const requirements_pending = requirement_report != nil && !requirement_report.complete
   const verdict = requirements_pending ? "continue" : decoded.verdict
-  const detail = if requirements_pending {
+  const detail = if unassessed {
+    completion_requirement_unassessed_feedback(requirement_report)
+  } else if requirements_pending {
     completion_requirement_pending_feedback(requirement_report)
   } else {
     decoded.detail
@@ -993,7 +1074,13 @@ fn __judge_invoke_structured(
     vetoed: verdict == "continue",
     verdict: verdict,
     gap_class: decoded.gap_class,
-    reason: requirements_pending ? "completion_requirements_pending" : nil,
+    reason: if unassessed {
+      "completion_judge_report_omitted"
+    } else if requirements_pending {
+      "completion_requirements_pending"
+    } else {
+      nil
+    },
     feedback: if verdict == "continue" {
       feedback
     } else {
