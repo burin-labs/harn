@@ -36,6 +36,9 @@ fn widget_tools() -> ToolRegistry {
         openWorldHint: true,
       },
       execution_policy: {kind: "fetch", side_effect_level: "network"},
+      governance: {
+        audiences: ["cli", "mcp", "catalog", "dashboard", "agent"],
+      },
       cli: {command: ["widgets", "get"]},
       source: {
         kind: "openapi",
@@ -78,11 +81,16 @@ Every leaf also accepts:
 - `--harn-input @path.json` to read that object from a file
 - `--harn-input -` to read it from standard input
 - `--harn-output json|pretty|text` to select output encoding
+- `--json` as an explicit alias for compact JSON output when the tool does not
+  declare a `json` input property
 
 Individual flags override properties supplied through `--harn-input`. The
 merged object is validated against the registry's complete JSON Schema before
 the handler runs. Invalid required fields, enums, ranges, nested shapes, and
 additional properties fail at the CLI boundary.
+
+A tool with a `json` input keeps `--json` for that input. Use
+`--harn-output json` to select compact output in that case.
 
 `cli.command` must be a non-empty list of command names. A tool with no `cli`
 field defaults to `[namespace, name]` when `namespace` is present and `[name]`
@@ -95,12 +103,19 @@ invocation. Duplicate paths and leaf/parent path conflicts are errors.
 
 ```bash
 harn serve mcp server.harn
+harn serve mcp --surface script --watch server.harn
 ```
 
 MCP `tools/list` receives the same name, description, input schema, output
 schema, annotations, icons, execution metadata, and `_meta` values as the
 canonical catalog. MCP-only wire fields are projections; they are not a second
 declaration.
+
+With `--watch`, Harn validates a complete replacement registry and VM before
+swapping the live stdio server. Successful reloads keep the client connection
+open and emit the standard tool, resource, and prompt list-change
+notifications. Compilation, initialization, and registry-validation failures
+leave the previous handlers live.
 
 ## Static catalog
 
@@ -117,6 +132,7 @@ Each tool retains:
 - `name` plus optional `title` and `description`
 - `inputSchema` and optional `outputSchema`
 - MCP `annotations` and Harn execution `policy`
+- adapter `governance`
 - `cli`, `namespace`, and `deferLoading`
 - optional typed `source` coordinates
 - `icons`, `execution`, and namespaced `_meta`
@@ -129,6 +145,8 @@ and compatibility checks. Use the live registry for execution.
 `std/tools` exports these closed presentation records:
 
 - `ToolCliSpec`: `{command: list<string>, hidden?: bool}`
+- `ToolAudience`: `"cli" | "mcp" | "catalog" | "dashboard" | "agent"`
+- `ToolGovernance`: `{audiences: list<ToolAudience>}`
 - `ToolSource`: `{kind: string, id?: string, binding?: dict}`
 - `ToolPolicy`: canonical `kind` and `side_effect_level` literals
 - `ToolExecution`: `{taskSupport: "forbidden" | "optional" | "required"}`
@@ -143,11 +161,42 @@ mistaken for an execution classification.
 namespaced extension point for presentation protocols. Put behavior and policy
 in typed registry fields rather than `_meta`.
 
+## Adapter governance
+
+`governance.audiences` is the closed adapter exposure contract for one tool.
+Its allowed values are `cli`, `mcp`, `catalog`, `dashboard`, and `agent`.
+`agent` is the model-facing agent-loop projection. Each adapter filters
+discovery and invocation from the same normalized registry entry, so a tool
+omitted from MCP cannot be called by sending its name directly to `tools/call`,
+and a tool omitted from `agent` cannot be recovered by a forged model tool
+call. The generated CLI applies the same rule before building its command tree.
+
+The list must be non-empty and contains no duplicates. Unknown audiences and
+unknown governance fields fail registry registration. Harn sorts the list into
+canonical order in the static catalog, which lets generators and dashboards
+consume the policy without copying it. Registries that omit `governance`
+remain visible to all five adapters for compatibility.
+
+Use a narrow list for operator-only projections. For example,
+`{audiences: ["cli", "catalog"]}` keeps a command available to local operators
+and schema generators without advertising or accepting it over MCP.
+
+`tool_project(registry, audience)` returns the executable projection while
+preserving its handler closures and outer registry metadata. Adapter and agent
+infrastructure should project once at its input boundary, then pass only that
+value to discovery, prompt, search, narrowing, and invocation consumers. The
+agent lifecycle composer owns the closure-preserving `agent` projection before
+it derives model controls; `agent_loop` delegates to that seam. The direct
+`harness.llm.call(...)` option normalizer applies the same projection before
+model-facing prompt guidance or tool schemas are assembled.
+
 ## Validation boundaries
 
 Registry construction and adapter loading reject:
 
 - malformed `cli`, `source`, output schema, icon, and metadata shapes
+- empty, duplicate, or unknown `governance.audiences` values and unknown
+  governance fields
 - invalid JSON Schemas and runtime-only values in serializable fields
 - empty or invalid command parts
 - duplicate command paths

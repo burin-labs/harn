@@ -306,20 +306,28 @@ impl McpOrchestratorService {
         trace_id: &str,
         arguments: JsonValue,
     ) -> Result<JsonValue, String> {
-        match name {
-            "harn.secret_scan" | "harn::secret_scan" => self.tool_secret_scan(arguments).await,
-            "harn.trigger.fire" => self.tool_trigger_fire(session, trace_id, arguments).await,
-            "harn.trigger.list" => self.tool_trigger_list(arguments).await,
-            "harn.trigger.replay" => self.tool_trigger_replay(arguments).await,
-            "harn.orchestrator.queue" => self.tool_orchestrator_queue(arguments).await,
-            "harn.orchestrator.dlq.list" => self.tool_orchestrator_dlq_list(arguments).await,
-            "harn.orchestrator.dlq.retry" => self.tool_orchestrator_dlq_retry(arguments).await,
-            "harn.orchestrator.inspect" => self.tool_orchestrator_inspect(arguments).await,
-            "harn.run.report" => self.tool_run_report(arguments).await,
-            "harn.run.review" => self.tool_run_review(arguments).await,
-            "harn.trust.query" => self.tool_trust_query(arguments).await,
-            _ => Err(format!("unknown tool '{name}'")),
-        }
+        // Each arm is boxed rather than awaited inline. An inline `.await`
+        // embeds every arm's future in this one future, so the frame is the
+        // *sum* of all eleven — several hundred kilobytes that grows whenever
+        // any tool's call graph gains a field, with a stack overflow as the
+        // failure mode. Boxing makes the frame the size of a pointer per arm,
+        // at one allocation on a path that is already doing I/O.
+        let future: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> = match name
+        {
+            "harn.secret_scan" | "harn::secret_scan" => Box::pin(self.tool_secret_scan(arguments)),
+            "harn.trigger.fire" => Box::pin(self.tool_trigger_fire(session, trace_id, arguments)),
+            "harn.trigger.list" => Box::pin(self.tool_trigger_list(arguments)),
+            "harn.trigger.replay" => Box::pin(self.tool_trigger_replay(arguments)),
+            "harn.orchestrator.queue" => Box::pin(self.tool_orchestrator_queue(arguments)),
+            "harn.orchestrator.dlq.list" => Box::pin(self.tool_orchestrator_dlq_list(arguments)),
+            "harn.orchestrator.dlq.retry" => Box::pin(self.tool_orchestrator_dlq_retry(arguments)),
+            "harn.orchestrator.inspect" => Box::pin(self.tool_orchestrator_inspect(arguments)),
+            "harn.run.report" => Box::pin(self.tool_run_report(arguments)),
+            "harn.run.review" => Box::pin(self.tool_run_review(arguments)),
+            "harn.trust.query" => Box::pin(self.tool_trust_query(arguments)),
+            _ => return Err(format!("unknown tool '{name}'")),
+        };
+        future.await
     }
 
     pub(super) fn create_tool_task(

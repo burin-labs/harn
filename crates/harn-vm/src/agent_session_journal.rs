@@ -1257,6 +1257,23 @@ pipeline main(harness: Harness, task: unknown) {{
             projected.tool_recordings[0].duration_ms.is_some(),
             "the live terminal tool update must retain its measured duration"
         );
+        assert!(projected.evidence.execution_id.is_some());
+        assert!(projected
+            .evidence
+            .gaps
+            .iter()
+            .all(|gap| gap.component != "execution_identity"));
+        assert_eq!(
+            crate::orchestration::validate_execution_evidence(&projected.evidence),
+            Ok(())
+        );
+        let encoded = serde_json::to_vec(&projected).expect("encode projected run");
+        let decoded: crate::orchestration::RunRecord =
+            serde_json::from_slice(&encoded).expect("decode projected run");
+        assert_eq!(
+            crate::orchestration::validate_execution_evidence(&decoded.evidence),
+            Ok(())
+        );
 
         let hydrated = hydrate_events(events);
         assert!(hydrated.messages.iter().all(|message| {

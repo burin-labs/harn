@@ -394,6 +394,8 @@ fn every_config_section_is_auditable() {
         model_ladders,
         presentation,
         usage_accounting_audit,
+        data_controls_audit,
+        data_controls_policy,
     } = &populated;
     assert!(default_provider.is_some());
     assert!(!providers.is_empty());
@@ -412,6 +414,8 @@ fn every_config_section_is_auditable() {
     assert!(!presentation.variants.is_empty());
     assert!(!presentation.families.is_empty());
     assert!(usage_accounting_audit.is_some());
+    assert!(data_controls_audit.is_some());
+    assert_ne!(data_controls_policy, &super::DataControlsPolicy::default());
 
     let stripped = strip_all_auditable_entries(&populated);
     assert!(
@@ -423,6 +427,15 @@ fn every_config_section_is_auditable() {
 /// An overlay that exercises every section [`ProvidersConfig`] carries.
 const EVERY_SECTION: &str = r#"
 default_provider = "demo"
+
+[data_controls_policy]
+default_posture = "strictest_available"
+
+[data_controls_audit]
+reviewed_on = "2026-08-30"
+expires_on = "2026-11-30"
+tracking_issue = 7674
+unverified = ["demo"]
 
 [usage_accounting_audit]
 reviewed_on = "2026-08-25"

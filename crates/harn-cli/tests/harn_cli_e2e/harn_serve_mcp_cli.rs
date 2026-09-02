@@ -76,6 +76,66 @@ fn main(harness: Harness) {
     .unwrap();
 }
 
+fn write_governed_registry_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+import { tool_registry_from } from "std/tools"
+
+fn main(harness: Harness) {
+  const tools = tool_registry_from([
+    {
+      name: "operator_receipt",
+      description: "Read one operator receipt.",
+      parameters: {},
+      governance: {audiences: ["catalog", "cli"]},
+      handler: {_args -> {surface: "cli"}},
+    },
+    {
+      name: "remote_probe",
+      description: "Probe one remote integration.",
+      parameters: {},
+      governance: {audiences: ["catalog", "mcp"]},
+      handler: {_args -> {surface: "mcp"}},
+    },
+  ], {name: "governed-tools"})
+  harness.tools.mcp_tools(tools)
+}
+"#,
+    )
+    .unwrap();
+}
+
+fn write_reload_registry_fixture(temp: &TempDir, tool_name: &str, value: &str) {
+    fs::write(
+        temp.path().join("server.harn"),
+        format!(
+            r#"
+import {{ tool_registry_from }} from "std/tools"
+
+fn main(harness: Harness) {{
+  const tools = tool_registry_from([
+    {{
+      name: "{tool_name}",
+      description: "Return the active fixture value.",
+      parameters: {{}},
+      returns: {{
+        type: "object",
+        properties: {{value: {{type: "string"}}}},
+        required: ["value"],
+        additionalProperties: false,
+      }},
+      handler: {{_args -> {{value: "{value}"}}}},
+    }},
+  ], {{name: "reload-fixture"}})
+  harness.tools.mcp_tools(tools)
+}}
+"#
+        ),
+    )
+    .unwrap();
+}
+
 fn write_authority_export_fixture(temp: &TempDir) {
     fs::create_dir_all(temp.path().join("nested")).unwrap();
     fs::write(
@@ -170,7 +230,7 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
     )
 }
 
-#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[ignore = "binary surface: runs in the slow E2E/smoke job"]
 #[test]
 fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
     let temp = TempDir::new().unwrap();
@@ -203,6 +263,38 @@ fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
         called["result"]["structuredContent"]["message"],
         "Hello, Harn!"
     );
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface: runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_excludes_and_denies_tools_without_the_mcp_audience() {
+    let temp = TempDir::new().unwrap();
+    write_governed_registry_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("governed harn serve mcp", command);
+
+    let listed = client.request(stable_request(1, "tools/list", json!({})));
+    let names = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["remote_probe"]);
+
+    let denied = client.request(stable_request(
+        2,
+        "tools/call",
+        json!({"name": "operator_receipt", "arguments": {}}),
+    ));
+    assert_eq!(denied["error"]["code"], -32602);
+    assert_eq!(denied["error"]["message"], "Unknown tool: operator_receipt");
     client.shutdown_expect_success();
 }
 
@@ -381,6 +473,93 @@ fn serve_mcp_uses_registry_identity_when_transport_metadata_is_absent() {
     assert_eq!(initialized["result"]["serverInfo"]["name"], "widgets");
     assert_eq!(initialized["result"]["serverInfo"]["version"], "1.2.3");
     assert_eq!(initialized["result"]["instructions"], "Widget integration");
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_watch_keeps_one_client_across_valid_and_invalid_registry_edits() {
+    let temp = TempDir::new().unwrap();
+    write_reload_registry_fixture(&temp, "before_reload", "v1");
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("--surface")
+        .arg("script")
+        .arg("--watch")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp --watch", command);
+
+    let initialized = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "reload-client", "version": "1"}
+        }
+    }));
+    assert_eq!(
+        initialized["result"]["capabilities"]["tools"]["listChanged"],
+        true
+    );
+    client.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    }));
+
+    let before = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "before_reload", "arguments": {}}
+    }));
+    assert_eq!(before["result"]["structuredContent"]["value"], "v1");
+
+    fs::write(temp.path().join("server.harn"), "fn main(").unwrap();
+    client.wait_for_stderr("reload failed; keeping previous registry");
+    let after_rejected_reload = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "before_reload", "arguments": {}}
+    }));
+    assert_eq!(
+        after_rejected_reload["result"]["structuredContent"]["value"],
+        "v1"
+    );
+
+    write_reload_registry_fixture(&temp, "after_reload", "v2");
+    let notification = client.recv_until(
+        |_| {},
+        |message| message["method"] == "notifications/tools/list_changed",
+    );
+    assert_eq!(notification["params"], json!({}));
+    for method in [
+        "notifications/resources/list_changed",
+        "notifications/prompts/list_changed",
+    ] {
+        let notification = client.recv_until(|_| {}, |message| message["method"] == method);
+        assert_eq!(notification["params"], json!({}));
+    }
+
+    let tools = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/list",
+        "params": {}
+    }));
+    assert_eq!(tools["result"]["tools"][0]["name"], "after_reload");
+    let after = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {"name": "after_reload", "arguments": {}}
+    }));
+    assert_eq!(after["result"]["structuredContent"]["value"], "v2");
     client.shutdown_expect_success();
 }
 

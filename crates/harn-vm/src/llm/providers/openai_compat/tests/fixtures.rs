@@ -5,6 +5,7 @@ use serde_json::json;
 
 pub(super) fn base_request_payload() -> LlmRequestPayload {
     LlmRequestPayload {
+        data_controls: crate::llm_config::DataPosture::Default,
         provider: "openrouter".to_string(),
         model: "google/gemini-2.5-pro".to_string(),
         region: None,
@@ -29,6 +30,7 @@ pub(super) fn base_request_payload() -> LlmRequestPayload {
         frequency_penalty: None,
         presence_penalty: None,
         parallel_tool_calls: None,
+        provider_contract_probe: None,
         fast: false,
         output_format: crate::llm::api::OutputFormat::Text,
         output_schema: None,

@@ -955,9 +955,7 @@ fn compute_retry_delay_ms(
     hasher.update(b"\0");
     hasher.update(attempt.to_le_bytes());
     hasher.update(b"\0");
-    if let Ok(bytes) = serde_json::to_vec(input) {
-        hasher.update(bytes);
-    }
+    hasher.update(crate::canonical_json::to_vec(input));
     let digest = hasher.finalize();
     let jitter = u64::from_le_bytes(digest[..8].try_into().unwrap_or([0; 8])) % (jitter_span + 1);
     base.saturating_add(jitter).min(retry.max_delay_ms)

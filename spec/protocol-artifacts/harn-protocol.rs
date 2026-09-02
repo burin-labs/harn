@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.123-dev";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.126-dev";
 
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
@@ -1631,6 +1631,7 @@ pub enum HarnAgentEventKind {
     OrchestrationDecision,
     PackThinkingStripped,
     ProgressReported,
+    PurposeLabel,
     RepairOutputContractApplied,
     RequireSuccessfulToolsViolation,
     ReservedTerminalVerify,
@@ -1681,6 +1682,7 @@ impl HarnAgentEventKind {
             Self::OrchestrationDecision => "orchestration_decision",
             Self::PackThinkingStripped => "pack_thinking_stripped",
             Self::ProgressReported => "progress_reported",
+            Self::PurposeLabel => "purpose_label",
             Self::RepairOutputContractApplied => "repair_output_contract_applied",
             Self::RequireSuccessfulToolsViolation => "require_successful_tools_violation",
             Self::ReservedTerminalVerify => "reserved_terminal_verify",
@@ -1746,6 +1748,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "orchestration_decision" => Self::OrchestrationDecision,
             "pack_thinking_stripped" => Self::PackThinkingStripped,
             "progress_reported" => Self::ProgressReported,
+            "purpose_label" => Self::PurposeLabel,
             "repair_output_contract_applied" => Self::RepairOutputContractApplied,
             "require_successful_tools_violation" => Self::RequireSuccessfulToolsViolation,
             "reserved_terminal_verify" => Self::ReservedTerminalVerify,
@@ -2423,6 +2426,7 @@ pub const HARN_AGENT_EVENT_KIND_MODEL_JOB: &str = "model_job";
 pub const HARN_AGENT_EVENT_KIND_ORCHESTRATION_DECISION: &str = "orchestration_decision";
 pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
+pub const HARN_AGENT_EVENT_KIND_PURPOSE_LABEL: &str = "purpose_label";
 pub const HARN_AGENT_EVENT_KIND_REPAIR_OUTPUT_CONTRACT_APPLIED: &str =
     "repair_output_contract_applied";
 pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str =
@@ -2473,6 +2477,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
     "reserved_terminal_verify",

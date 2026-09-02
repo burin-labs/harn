@@ -1,3 +1,4 @@
+import { get_typed_value } from "std/schema"
 import "./support"
 import "./types"
 
@@ -142,6 +143,7 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       exit_code: exit_code,
       version: "",
       source_revision: nil,
+      runtime_content_fingerprint: nil,
       reason: if stderr != "" {
         stderr
       } else {
@@ -149,12 +151,10 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       },
     }
   }
-  const parsed = try {
+  const parsed_result = try {
     json_parse(to_string(child?.stdout ?? ""))
-  } catch (_) {
-    nil
   }
-  if type_of(parsed) != "dict" {
+  if !is_ok(parsed_result) {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
       command: command,
@@ -162,18 +162,34 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       exit_code: exit_code,
       version: "",
       source_revision: nil,
+      runtime_content_fingerprint: nil,
       reason: "target Harn runtime produced invalid version JSON",
     }
   }
-  const name = trim(to_string(parsed?.data?.name ?? ""))
-  const version = trim(to_string(parsed?.data?.version ?? ""))
-  const raw_revision = parsed?.data?.source_revision
+  const envelope_result = try {
+    get_typed_value(unwrap(parsed_result), schema_of(ProviderToolProbeVersionEnvelope))
+  }
+  if !is_ok(envelope_result) {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      source_revision: nil,
+      runtime_content_fingerprint: nil,
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    }
+  }
+  const envelope: ProviderToolProbeVersionEnvelope = unwrap(envelope_result)
+  const version = trim(envelope.data.version)
+  const raw_revision = envelope.data.source_revision
+  const fingerprint = envelope.data.runtime_content_fingerprint
   const revision_valid = raw_revision == nil
     || (type_of(raw_revision) == "string"
       && trim(raw_revision)
         != "")
-  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == ""
-    || !revision_valid {
+  if !envelope.ok || version == "" || !revision_valid {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
       command: command,
@@ -181,7 +197,30 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       exit_code: exit_code,
       version: "",
       source_revision: nil,
+      runtime_content_fingerprint: nil,
       reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    }
+  }
+  const source_revision: string? = if raw_revision == nil {
+    nil
+  } else {
+    trim(raw_revision)
+  }
+  const fingerprint_valid = regex_match("^[0-9a-f]{64}$", fingerprint.content_sha256) != nil
+    && regex_match("^[0-9a-f]{64}$", fingerprint.embedded_stdlib_sha256) != nil
+    && trim(fingerprint.compatibility.codegen_fingerprint) != ""
+    && fingerprint.harn_version == version
+    && fingerprint.source_revision == source_revision
+  if !fingerprint_valid {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      source_revision: nil,
+      runtime_content_fingerprint: nil,
+      reason: "target Harn runtime content fingerprint did not match the version contract",
     }
   }
   return {
@@ -190,11 +229,8 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
     status: "verified",
     exit_code: exit_code,
     version: version,
-    source_revision: if raw_revision == nil {
-      nil
-    } else {
-      trim(raw_revision)
-    },
+    source_revision: source_revision,
+    runtime_content_fingerprint: fingerprint,
     reason: "target Harn runtime identified",
   }
 }
@@ -220,7 +256,9 @@ pub fn provider_tool_probe_campaign_runtime_revision_requirement_error(
 pub fn provider_tool_probe_campaign_runtime_allows_live(
   runtime: ProviderToolProbeRuntimeReceipt,
 ) -> bool {
-  return runtime.status == "verified" && runtime.version != ""
+  return runtime.status == "verified"
+    && runtime.version != ""
+    && runtime.runtime_content_fingerprint != nil
 }
 
 pub fn __provider_tool_probe_campaign_runtime(
@@ -599,6 +637,24 @@ pub fn provider_tool_probe_campaign_catalog_routes(
   return __catalog_routes_from_models(catalog, include_expensive)
 }
 
+pub fn provider_tool_probe_campaign_filter_routes(
+  routes: list<ProviderToolProbeRoute>,
+  providers: list<string>,
+  exclude_local: bool,
+) -> list<ProviderToolProbeRoute> {
+  let selected: list<ProviderToolProbeRoute> = []
+  for route in routes {
+    if exclude_local && route.local {
+      continue
+    }
+    if len(providers) > 0 && !providers.contains(route.provider) {
+      continue
+    }
+    selected = selected + [route]
+  }
+  return selected
+}
+
 pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
   if mode == "both" {
     return ["non-streaming", "streaming"]
@@ -661,29 +717,69 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "stop_sequences",
       category: "options",
-      description:
-        "Stop sequence option is either accepted by the route or catalog-gated before dispatch.",
-      runner: "planned_llm_call",
+      description: "Stop sequence acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "stop",
       modes: ["non-streaming"],
       tool_formats: ["none"],
       cheap: true,
     },
     {
-      id: "presence_frequency_penalties",
+      id: "presence_penalty",
       category: "options",
-      description:
-        "Presence/frequency penalties are provider-gated so unsupported routes fail before live API 400s.",
-      runner: "planned_llm_call",
+      description: "Presence-penalty acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "presence_penalty",
       modes: ["non-streaming"],
       tool_formats: ["none"],
       cheap: true,
     },
     {
-      id: "temperature_top_p_policy",
+      id: "frequency_penalty",
       category: "options",
-      description:
-        "Route-specific temperature/top_p policy is catalog-owned, including Kimi-style constraints.",
-      runner: "planned_llm_call",
+      description: "Frequency-penalty acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "frequency_penalty",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "temperature",
+      category: "options",
+      description: "Temperature acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "temperature",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "top_p",
+      category: "options",
+      description: "Top-p acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "top_p",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "top_k",
+      category: "options",
+      description: "Top-k acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "top_k",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "seed",
+      category: "options",
+      description: "Seed acceptance is diffed against the endpoint's catalog claim.",
+      runner: "provider_option_probe",
+      probe_option: "seed",
       modes: ["non-streaming"],
       tool_formats: ["none"],
       cheap: true,

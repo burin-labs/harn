@@ -44,6 +44,12 @@ pub(crate) fn vm_tools_to_native(
     for tool in &tools_list {
         match tool {
             VmValue::Dict(entry) => {
+                if !crate::tool_registry::tool_entry_allows_audience(
+                    entry,
+                    crate::tool_registry::ToolAudience::Agent,
+                )? {
+                    continue;
+                }
                 let name = entry
                     .get("name")
                     .map(|value| value.display())

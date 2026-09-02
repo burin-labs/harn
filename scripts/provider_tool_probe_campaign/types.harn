@@ -1,3 +1,11 @@
+pub import {
+  ProviderOptionProbeReport,
+  ProviderPortableProbeOption,
+} from "../../crates/harn-stdlib/src/stdlib/cli/providers/contracts"
+import {
+  RuntimeContentFingerprint,
+} from "../../crates/harn-stdlib/src/stdlib/runtime/content_fingerprint"
+
 pub type ProviderToolProbeRoute = {
   id: string,
   provider: string,
@@ -8,18 +16,39 @@ pub type ProviderToolProbeRoute = {
   metadata: dict,
 }
 
+pub type ProviderToolProbeRunner = "planned_agent_loop" \
+  | "provider_tool_probe" \
+  | "provider_option_probe"
+
 pub type ProviderToolProbeBehavior = {
   id: string,
   category: string,
   description: string,
-  runner: string,
+  runner: ProviderToolProbeRunner,
   probe_case?: string,
+  probe_option?: ProviderPortableProbeOption,
   modes: list<string>,
   tool_formats: list<string>,
   cheap: bool,
 }
 
 pub type ProviderToolProbeRuntimeStatus = "verified" | "unavailable" | "invalid"
+
+pub type ProviderToolProbeVersionData = {
+  name: "harn-cli",
+  version: string,
+  description: string,
+  source_revision: string?,
+  runtime_content_fingerprint: RuntimeContentFingerprint,
+}
+
+pub type ProviderToolProbeVersionEnvelope = {
+  schemaVersion: 2,
+  ok: bool,
+  data: ProviderToolProbeVersionData,
+  error: nil,
+  warnings: list<unknown>,
+}
 
 pub type ProviderToolProbeRuntimeReceipt = {
   schema_version: "harn.provider_tool_probe_runtime.v1",
@@ -28,6 +57,7 @@ pub type ProviderToolProbeRuntimeReceipt = {
   exit_code: int,
   version: string,
   source_revision: string?,
+  runtime_content_fingerprint: RuntimeContentFingerprint?,
   reason: string,
 }
 
@@ -56,7 +86,7 @@ pub type ProviderToolProbeCell = {
   category: string,
   mode: string,
   tool_format: string,
-  runner: string,
+  runner: ProviderToolProbeRunner,
   status: string,
   reason: string,
   command?: list<string>,
@@ -65,8 +95,19 @@ pub type ProviderToolProbeCell = {
   catalog: dict,
 }
 
+pub type ProviderOptionClaimControlStatus = "not_selected" | "dry_run" | "complete" | "incomplete"
+
+pub type ProviderOptionClaimControls = {
+  status: ProviderOptionClaimControlStatus,
+  selected_count: int,
+  measured_supported_count: int,
+  measured_unsupported_count: int,
+  unmeasured_count: int,
+  requires_both_directions: bool,
+}
+
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v9",
+  schema_version: "harn.provider_tool_probe_campaign.v10",
   runtime: ProviderToolProbeRuntimeReceipt,
   catalog: ProviderToolProbeCatalogReceipt,
   live: bool,
@@ -77,6 +118,7 @@ pub type ProviderToolProbeCampaignReport = {
   summary: dict,
   runner_summary: dict,
   executable_gap: dict,
+  claim_controls: ProviderOptionClaimControls,
   auth_readiness: dict,
   spend: dict,
   campaign_slice: dict,

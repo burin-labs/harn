@@ -73,6 +73,7 @@ write_registry 0000000000000000000000000000000000000000
 git -C "$fixture_repo" init -q -b main
 git -C "$fixture_repo" config user.name "Harn Release Test"
 git -C "$fixture_repo" config user.email "release-test@example.invalid"
+git -C "$fixture_repo" config tag.gpgSign false
 git -C "$fixture_repo" add .
 git -C "$fixture_repo" -c commit.gpgsign=false commit -q -m "Release v0.10.50"
 git -C "$fixture_repo" checkout -q --orphan withdrawn-candidate

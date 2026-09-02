@@ -1,0 +1,50 @@
+/**
+ * Typed wire contract for the content linked into a Harn runtime.
+ *
+ * The native runtime owns how these values are computed. This module owns the
+ * Harn projection and rejects malformed values before consumers inspect them.
+ */
+import { get_typed_value } from "std/schema"
+
+pub type RuntimeBuildFeatures = {
+  default: bool,
+  full: bool,
+  llm_bench_internals: bool,
+  vm_bench_internals: bool,
+  content: bool,
+  compression: bool,
+  http_compression: bool,
+  cloud_aws: bool,
+  native_keyring: bool,
+  postgres: bool,
+  sqlite: bool,
+  otel: bool,
+  testbench_wasi: bool,
+}
+
+pub type RuntimeCompatibilityFingerprint = {
+  codegen_fingerprint: string,
+  bytecode_schema_version: int,
+  linked_program_schema_version: int,
+  linker_algorithm_version: int,
+  build_features: RuntimeBuildFeatures,
+}
+
+pub type RuntimeContentFingerprint = {
+  schema: "harn.runtime_content_fingerprint.v1",
+  content_sha256: string,
+  harn_version: string,
+  embedded_stdlib_sha256: string,
+  compatibility: RuntimeCompatibilityFingerprint,
+  source_revision: string?,
+}
+
+/**
+ * Validate an untrusted runtime receipt and return its closed typed value.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn runtime_content_fingerprint_value(value: unknown) -> RuntimeContentFingerprint {
+  return get_typed_value(value, schema_of(RuntimeContentFingerprint))
+}

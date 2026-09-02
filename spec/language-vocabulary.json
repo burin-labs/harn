@@ -881,6 +881,7 @@
     "tool_hooks_unregister",
     "tool_list",
     "tool_parse_call",
+    "tool_project",
     "tool_prompt",
     "tool_ref",
     "tool_registry",

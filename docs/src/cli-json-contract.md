@@ -103,8 +103,8 @@ versions.
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
 | `harn explain <CODE> --json`   | Per-diagnostic-code explanation                          |
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
-| `harn session export --json`   | Portable session bundle export                           |
-| `harn provider catalog show --json` | Resolved provider/model catalog snapshot                 |
+| `harn session export`          | Portable session bundle export. Prints JSON to stdout when `--out` is omitted; there is no `--json` flag |
+| `harn provider catalog show`   | Resolved provider/model catalog snapshot. Always prints JSON; there is no `--json` flag |
 | `harn models batch plan --json` | Provider Batch API candidates plus `batch.harn_live_adapter` support |
 | `harn models batch manifest --json` | Durable offline batch manifest summary and request groups |
 | `harn models batch prepare --json` | Provider-native batch request files, deterministic prepare receipt, and normalized `lifecycle` state |
@@ -123,7 +123,7 @@ versions.
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn connect <provider> --json` | Secret-free connector setup progress and terminal NDJSON events |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
-| `harn version --json`          | CLI build metadata (`name`, `version`, `description`, optional `source_revision`)    |
+| `harn version --json`          | CLI build metadata plus the VM-owned linked-runtime content fingerprint    |
 | `harn upgrade --json`          | Self-update probe (`--check`) or install summary         |
 
 ## Per-command notes
@@ -157,13 +157,41 @@ always has a higher `seq`.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ok": true,
   "data": {
     "name": "harn-cli",
     "version": "0.8.27",
     "description": "CLI for the Harn programming language — run, test, REPL, format, and lint",
-    "source_revision": "0123456789abcdef0123456789abcdef01234567"
+    "source_revision": "0123456789abcdef0123456789abcdef01234567",
+    "runtime_content_fingerprint": {
+      "schema": "harn.runtime_content_fingerprint.v1",
+      "content_sha256": "f27d...64 lowercase hexadecimal characters...",
+      "harn_version": "0.8.27",
+      "embedded_stdlib_sha256": "a61b...64 lowercase hexadecimal characters...",
+      "compatibility": {
+        "codegen_fingerprint": "02c9...",
+        "bytecode_schema_version": 14,
+        "linked_program_schema_version": 1,
+        "linker_algorithm_version": 1,
+        "build_features": {
+          "default": true,
+          "full": true,
+          "content": true,
+          "compression": true,
+          "http_compression": true,
+          "cloud_aws": true,
+          "native_keyring": true,
+          "postgres": true,
+          "sqlite": true,
+          "otel": false,
+          "testbench_wasi": false,
+          "llm_bench_internals": false,
+          "vm_bench_internals": false
+        }
+      },
+      "source_revision": "0123456789abcdef0123456789abcdef01234567"
+    }
   },
   "error": null,
   "warnings": []
@@ -176,6 +204,13 @@ that build carried no revision attestation. The command never guesses it from
 the caller's current directory or a runtime environment variable. Consumers
 that credit measurements to an exact revision should require a non-null exact
 match; version-only consumers may ignore the field.
+
+`runtime_content_fingerprint` is computed by the linked VM and cannot be
+overridden by the caller's runtime environment. Its `content_sha256` covers the
+Harn version, every embedded standard-library source, and the code-generation,
+bytecode, linker, and enabled Cargo-feature identities. `source_revision` is
+optional provenance and is deliberately excluded from `content_sha256`. This
+required fingerprint field changes the version command's schema from 1 to 2.
 
 ### `harn upgrade --json`
 

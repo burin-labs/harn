@@ -1995,8 +1995,8 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `action_graph_run(task, graph, config?, overrides?)` | Execute an action graph through the shared workflow runtime |
 | `task_run(task, flow, overrides?)` | Run an act/verify/repair workflow |
 | `workflow_result_text(result)` | Extract a visible text result from an LLM call, workflow wrapper, or ad hoc payload |
-| `workflow_result_run(task, workflow_name, result, artifacts?, options?)` | Normalize an ad hoc result into a reusable run record |
-| `workflow_result_persist(task, workflow_name, result, artifacts?, options?)` | Persist an ad hoc result as a run record without going through `workflow_execute` |
+| `workflow_result_run(obs, task, workflow_name, result, artifacts?, options?)` | Normalize an ad hoc result into a reusable run record with the active execution identity |
+| `workflow_result_persist(fs, obs, task, workflow_name, result, artifacts?, options?)` | Persist an ad hoc result as an execution-identified run record without going through `workflow_execute` |
 | `handoff_artifact(value)` | Wrap a typed handoff payload as a normal workflow artifact without transferring raw transcript history |
 | `workflow_session(prev)` | Normalize a task result or transcript into a reusable session object |
 | `workflow_session_new(metadata?)` | Create a new empty workflow session |
@@ -2048,12 +2048,13 @@ Typed results and producer-owned terminal outcomes for the agent plane:
 | Type | Description |
 |---|---|
 | `AgentResult` | Result of `agent_loop` and `HarnessAgent.session_finalize`, including LLM/tool summaries and the terminal outcome |
-| `AgentTerminalOutcome` | Stable `{kind, reason, owner}` terminal decision projected to hosts and protocols |
+| `AgentTerminalOutcome` | Stable terminal decision with the precise `kind` plus canonical `lifecycle_state` and `run_record_status` projections |
 | `AgentTerminalKind` | Closed natural, policy, cancellation, error, suspension, and unknown vocabulary; `policy_no_progress` identifies text-only nudge exhaustion and `policy_thrash` identifies a repeated-action stall hard stop |
 
 Consumers branch on `AgentResult.terminal.kind`. The transport `status`,
 `stop_reason`, and raw payload fields remain available for diagnostics but do
-not own completion classification.
+not own completion classification. Persistence adapters store
+`AgentResult.terminal.run_record_status` instead of interpreting `kind` again.
 
 ### std/agent/options (agent specification and model-option resolution)
 

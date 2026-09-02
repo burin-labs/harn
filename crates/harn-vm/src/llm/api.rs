@@ -7,6 +7,7 @@
 mod auth;
 mod completion;
 mod context_window;
+pub mod data_controls;
 mod dialect;
 mod errors;
 mod ollama;
@@ -32,6 +33,10 @@ use super::mock::{
 pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub use context_window::fetch_provider_max_context;
+pub use data_controls::{
+    declaration_for as provider_data_controls, AppliedDataControl, DataControlsOutcome,
+    DataControlsReceipt,
+};
 pub(crate) use dialect::{DialectContract, StreamProtocol};
 pub(crate) use errors::{
     classify_llm_error, classify_provider_stream_error, err_for_non_success,
@@ -59,6 +64,7 @@ pub(crate) use response::empty_generation_error;
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use response::{
     extract_cache_read_tokens, extract_cache_write_tokens, parse_openai_responses_response,
+    ProviderResponseEnvelope,
 };
 #[cfg(test)]
 pub(crate) use result::test_text_projection;
@@ -513,6 +519,8 @@ async fn vm_call_llm_full_inner_offthread(
     Ok(result)
 }
 
+#[cfg(test)]
+mod model_resolution_tests;
 #[cfg(test)]
 mod request_shaping_tests;
 #[cfg(test)]

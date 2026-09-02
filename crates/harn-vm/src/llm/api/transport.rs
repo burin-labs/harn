@@ -12,13 +12,14 @@ use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
+    parse_openai_tool_argument_json_values, parse_tool_arguments,
 };
 use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
-    extract_cache_write_tokens, is_billed_noncommittal_completion,
-    parse_openai_tool_argument_json_values, CompletionContractSignals,
+    extract_cache_write_tokens, is_billed_noncommittal_completion, CompletionContractSignals,
+    ProviderResponseEnvelope,
 };
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
@@ -29,6 +30,7 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
+mod response_envelope;
 mod sse;
 
 pub(crate) use liveness::premature_eof;
@@ -117,7 +119,7 @@ fn append_ollama_tool_calls(
         if name.is_empty() {
             continue;
         }
-        let arguments = super::response::parse_tool_arguments(function.get("arguments"));
+        let arguments = parse_tool_arguments(function.get("arguments"));
         let id = call
             .get("id")
             .and_then(|value| value.as_str())
@@ -337,8 +339,32 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // subtractable from `client_wall_ms` and so virtual-time tests can advance
     // it. Both therefore span the whole call including any retried attempts.
     let request_origin = tokio::time::Instant::now();
-    let mut result =
-        vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect, request_origin).await?;
+    // Provider data controls resolve once, here, so the body half, the header
+    // half, and the receipt describing them come from one plan and cannot
+    // disagree. Under the `default` posture the plan is empty and the request
+    // is untouched. The writes land inside, after every other body mutation.
+    let data_controls = crate::llm::api::data_controls::resolve(
+        &opts.provider,
+        crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
+        opts.data_controls,
+    );
+    let data_controls_receipt = data_controls.receipt.clone();
+    let mut result = vm_call_llm_api_with_body_inner(
+        opts,
+        delta_tx,
+        body,
+        dialect,
+        request_origin,
+        &data_controls,
+    )
+    .await;
+    // The receipt describes what Harn sent, so it must survive a provider
+    // error: "we asked for the strict posture and the call failed" is a
+    // different fact from "we never asked".
+    if let Ok(result) = result.as_mut() {
+        result.telemetry.data_controls = Some(Box::new(data_controls_receipt));
+    }
+    let mut result = result?;
     crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //
@@ -394,6 +420,7 @@ async fn vm_call_llm_api_with_body_inner(
     mut body: serde_json::Value,
     dialect: DialectContract,
     request_origin: tokio::time::Instant,
+    data_controls: &crate::llm::api::data_controls::DataControlsPlan,
 ) -> Result<LlmResult, VmError> {
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
@@ -440,7 +467,13 @@ async fn vm_call_llm_api_with_body_inner(
         );
     }
     if stream_protocol == StreamProtocol::AnthropicSse {
-        crate::llm::providers::anthropic::reconcile_request_body(&mut body, model, &opts.thinking);
+        crate::llm::providers::anthropic::reconcile_request_body(
+            &mut body,
+            provider,
+            model,
+            &opts.thinking,
+            opts.provider_contract_probe,
+        );
     }
     if provider == "openrouter"
         && (body.get("response_format").is_some() || body.get("top_k").is_some())
@@ -462,6 +495,11 @@ async fn vm_call_llm_api_with_body_inner(
         use_stream_transport,
     );
 
+    // Last write wins, deliberately. A declared retention/training control
+    // must survive the caller's `provider_overrides` escape hatch, or the
+    // receipt would claim a control the wire does not carry.
+    data_controls.write_body(&mut body);
+
     let client = if use_stream_transport {
         crate::llm::streaming_client_for_base_url(&resolved.base_url)
     } else {
@@ -474,6 +512,9 @@ async fn vm_call_llm_api_with_body_inner(
         .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
         .json(&body);
     let mut req = resolved.apply_headers(req, &opts.api_key);
+    for (name, value) in &data_controls.headers {
+        req = req.header(name.as_str(), value.as_str());
+    }
     if stream_protocol == StreamProtocol::AnthropicSse && !opts.anthropic_beta_features.is_empty() {
         req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
     }

@@ -318,6 +318,7 @@ catalog source data and pass only the stable ladder name from policy code.
 | `capabilities` | any | Explicit required capabilities. |
 | `prefill` | string | Assistant prefill where the route supports it. |
 | `previous_response_id` | string | OpenAI Responses conversation-state link. |
+| `data_controls` | string | Requested provider retention/training posture: `"default"` or `"strictest_available"`. See [Provider data controls](providers.md#provider-data-controls). |
 
 Each system fragment has `{content, title?, position?: "before"|"after",
 enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`

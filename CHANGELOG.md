@@ -9,6 +9,375 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.125
+
+### Breaking
+
+- Run-record construction is now an observability capability operation. Call
+  `harness.obs.run_record(payload)` instead of the former global
+  `run_record(payload)`. This makes the constructor's read of the active execution
+  identity explicit in Harn's effect contract.
+- Model selection now resolves the requested name and provider as one typed
+  decision. Built-in provider selectors cannot cross catalog namespaces, custom
+  adapters can deliberately proxy upstream model identities, alias near-misses
+  fail with catalog-versioned suggestions, provider-call receipts record the
+  complete requested-to-resolved route, and
+  `std/llm/catalog.execution_contract` returns the stricter
+  `harn.llm.execution-contract/v2` shape.
+
+  `local:<model>` is now an Ollama-qualified selector and conflicts with a
+  separate non-Ollama provider. Use `{provider: "local", model: "<model>"}` for
+  the generic local OpenAI-compatible adapter.
+
+### Added
+
+- `harn serve mcp --surface script --watch` now reloads a validated `ToolRegistry`
+  without disconnecting stdio clients, keeps the previous runtime after invalid
+  edits, and emits the standard tool, resource, and prompt list-change
+  notifications. Generated tool commands also accept `--json` as an explicit
+  compact-output flag.
+- The provider registry now carries a typed `data_controls` fact per provider:
+  what retention or training control the provider exposes per request, where it
+  rides on the wire, what happens when Harn sets nothing, and the documentation
+  behind each claim. Callers request a posture in provider-neutral terms with
+  `data_controls: "strictest_available"` on `llm_call`, and every request returns
+  a receipt under `telemetry.data_controls` distinguishing `applied`,
+  `no_control_available`, `provider_unresearched`, and `not_requested` — so a
+  host can tell "we asked and this provider offers nothing" from "we never
+  asked". The declarations are projected into the provider catalog, so
+  `harn provider catalog show --json` can generate an accurate per-provider table
+  instead of prose. The shipped default posture is unchanged (`default`); an
+  embedder flips `[data_controls_policy] default_posture` in config rather than
+  having the runtime choose a privacy-relevant default by omission.
+- Reference page for the remote session control vocabulary: which ACP method
+  carries start, status, stop, steer, queue, interrupt, and resume, the typed
+  receipt each one produces, and the directive authority ladder that decides
+  whether a steer survives a completion judge.
+- `AgentResult.terminal` now includes Harn's canonical `lifecycle_state` and
+  `run_record_status` projections so persistence and protocol adapters do not
+  have to reclassify terminal kinds.
+- Composition reports, crystallization traces, and capsule bundle source
+  references now preserve the Harn execution ID that produced them. Legacy
+  inputs remain explicitly unidentified instead of inheriting the reader's
+  execution.
+- Expose Harn's typed execution-evidence projection so hosts can persist the same
+  validated, redacted record used by public run views. Invalid span costs now fail
+  closed instead of degrading during JSON persistence.
+- Replay reports now carry the source run's canonical execution ID. Standalone traces and legacy runs
+  leave it absent instead of substituting a replay or session identifier.
+- **ToolRegistry adapter governance.** Tools can declare a closed
+  `governance.audiences` list for CLI, MCP, catalog, dashboard, and agent/model
+  projections.
+  Model prompt, schema, progressive-search, and direct-invocation paths now
+  share the same fail-closed audience projection, while omitted governance
+  preserves existing all-adapter behavior.
+- `harn runs export-training` now carries the source run's canonical execution ID in training
+  provenance. Legacy runs leave the field absent instead of inventing an identity.
+
+### Changed
+
+- **Runtime content fingerprints now have one strict Harn contract (#7658).**
+  CLI and campaign consumers validate the complete linked-feature receipt
+  before reading it.
+- Public run projections now omit host-local flight-recording paths by default.
+  Local CLI, portal, and embedding adapters can still opt in when they can open
+  the recording.
+- Harn now carries execution identities as a validated runtime type from VM
+  creation through flight recording, verdict issuance, and evidence snapshots.
+  Persisted run records retain the same JSON shape, while malformed host-provided
+  identities can no longer become trusted evidence receipts. Trace-span identity
+  is immutable runtime ownership rather than caller-editable metadata, so reused
+  VMs cannot mix evidence from separate executions. Public run views also replace
+  invalid persisted identities or flight metadata with explicit evidence gaps.
+
+### Fixed
+
+- Empty model-generation failures now retain the response identifier, stop reason,
+  content-block shape, and measured usage in the provider response record.
+- **A host post-turn verdict can now claim the sentinel terminal (#7606).** The
+  post-turn callback is consulted before any natural terminal is decided, and a
+  natural terminal honours an explicit `needs_verify` from that verdict instead
+  of always demanding a verification pass. Previously a turn that ended on the
+  completion sentinel returned before the callback was invoked, so a host that
+  had already proved the work could not say so and paid for a redundant
+  completion-judge call on its happy path.
+- Environment-configured and script-configured egress policy now compose under one
+  typed contract instead of the second configuration throwing `policy already
+  configured from environment`. An exported `HARN_EGRESS_*` setting no longer fails
+  unrelated connector and conformance suites before their own behavior runs.
+  Composition is tighten-only — allow and deny rules union, a `deny` default or a
+  private-address block declared by any contribution wins, and loopback access
+  survives only while every declaring contribution grants it — and the
+  `egress_policy` receipt now reports `sources` plus per-axis `axis_sources`
+  provenance so a script author can see which contribution decided each axis.
+- Persisted execution evidence now retains ordered span events and redacts every
+  nested span, link, event, and gap text field before public run-view projection.
+  Orchestrator inspection also exposes typed trace and run locators for those
+  public views.
+- Transcript compaction no longer reports success while discarding the context it
+  archived. The summarizers now read the block-array `content` shape real agent
+  transcripts carry, instead of only the string shape, so a tool-result window is
+  no longer summarized to a bare header. The compaction boundary also measures the
+  source window and the summary as typed fields — source message count, source
+  bytes, summary bytes, and how many of those summary bytes came from the source
+  rather than generated scaffold — and refuses a compaction that carried nothing
+  forward, restoring the source window untouched.
+- Loop recovery is now bounded and explainable, and a forced stop is terminal. A
+  thrash hard stop that the loop forces after its recovery bound has fired can no
+  longer be converted back into `continue` by a terminal callback. Repeated
+  recovery requires materially changed evidence — two hard stops carrying the same
+  signature are the same evidence seen twice — under a finite consecutive-recovery
+  ceiling, and the recovery receipt now reports the consecutive-recovery count, the
+  evidence revision the decision considered, and which bound refused it.
+- Fixed linked-runtime fingerprints so enabled VM features affect content identity,
+  and version JSON now reports schema 2 for its required fingerprint field.
+- Local Cargo gates now refuse to run when a `rustc` earlier on `PATH` shadows the
+  version pinned in `rust-toolchain.toml`, naming both versions and the PATH
+  correction, so a local result stays comparable to CI. Set
+  `HARN_ALLOW_TOOLCHAIN_MISMATCH=1` to run anyway.
+- Session-projected execution evidence now carries the run's typed execution identity and validates after
+  persistence round trips.
+- Prevent forged exact-response references, prompt-frame termination, and duplicate concurrent response-summary calls.
+- Prepare an MCP export script's complete module generation once, then run
+  explicitly read-only, idempotent calls concurrently in isolated VM state.
+- Preserve protocol-versioned and additive MCP response fields when using the stdio client.
+- New run records constructed inside a running Harn program now inherit that VM
+  execution's canonical evidence identity instead of reporting a false
+  legacy-identity gap.
+- Prevented caller-supplied, persisted-history, and agent-recovery prefills from reaching model routes and request modes
+  that reject trailing assistant messages.
+- Correct Claude 4.7-and-newer sampling capability claims. Add typed, endpoint-specific provider option probes with
+  budgeted campaign automation, explicit unmeasured outcomes, and positive/negative direction controls.
+  Publishable CLI bytecode now type-checks against the same resolved import graph as `harn check`.
+- Fix sandboxed process execution so Cargo verifier commands cannot start a shared compiler-cache daemon inside the sandbox.
+- Sandboxed host commands now disable inherited Cargo compiler wrappers before
+  running builds or tests, matching Harn's VM-native process path.
+- Execution evidence now fails closed at every remaining construction boundary.
+  Run-record inputs can't claim another execution, workflows can't mint an
+  orphan identity, and malformed session identities become explicit evidence
+  gaps. Host-invoked closures now enter the same VM-owned execution scope as
+  ordinary top-level programs.
+- Release finalization now uses the immutable candidate range to distinguish
+  candidate-owned changelog fragments from later fragments that belong to the
+  next release. A busy main branch no longer strands an already-tagged release,
+  while unresolved or candidate-owned fragments still fail closed.
+
+## v0.10.124
+
+### Changed
+
+- Harn now owns structural validation for execution evidence and Flight Recorder
+  artifacts, so hosts and services can reject forged or mismatched execution
+  identities without duplicating the runtime contract.
+
+## v0.10.123
+
+### Breaking
+
+- **`done_judge` is now `turn_end_condition`, and its LLM-backed check is the
+  turn-end judge (#7572).** The agent-loop option that decides whether a turn
+  may end was named after a sentinel, and "judge" meant both that product
+  control and the graders that measure how good an agent is. Direct cutover,
+  no aliases: the option key `done_judge` is `turn_end_condition`, the result
+  block `result.done_judge` is `result.turn_end_condition`, and every
+  invocation-shaped name carries `turn_end_judge` instead — including the stop
+  reasons `done_judge_cap_reached` (now `turn_end_judge_cap_reached`) and
+  `stalled_done_judge` (now `stalled_turn_end_judge`), the counters
+  `done_judge_invocations` / `done_judge_vetoes`, and the exports
+  `agent_has_done_judge`, `agent_done_judge_cap`, and
+  `agent_stall_done_judge_due`. Scripts, hosts, and stored transcripts that
+  read any old spelling must be updated in the same repin; the old names are
+  gone rather than deprecated.
+- **The product turn-end check owns one module, enforced structurally
+  (#7572).** `std/agent/turn_end` holds the whole policy: config resolution,
+  cadence, caps, and invocation accounting, moved out of `std/agent/judge`,
+  `std/agent/postturn`, `std/agent/completion_review`,
+  `std/agent/stall_verification`, and `std/agent/loop_turn_options`. Behavior
+  is unchanged. `make check-turn-end-boundary` fails if that module names
+  grading vocabulary, or if an eval or bench module reaches into turn-end
+  internals rather than reading the public `result.turn_end_condition` block.
+- **Run/session view spans now live at `evidence.trace_spans` (#7615).** The
+  execution-evidence envelope is the single persisted owner for execution
+  identity, span hierarchy, flight artifacts, and explicit collection gaps.
+  Consumers of the former top-level run-record `trace_spans` field must read
+  the nested field.
+
+### Added
+
+- **Prepared sessions now carry one authority decision from planning through
+  provider dispatch and terminal accounting (#6674, #6675).** Hosts can attach
+  a replay-safe, runtime- and workspace-bound session lease, reuse it across
+  turns, approve widening as one semantic delta batch, and supply Bedrock or
+  Vertex credentials through consumer-bound identity brokers without ambient
+  credential fallback inside the prepared path.
+- **`harn chat` starts an interactive chat session with the live model, reporting how fast it answers (#7171).**
+  Tokens stream as they arrive and each turn ends with a speed line: decode
+  rate, token counts, time to first token, and total wall time, sourced from
+  the provider's own timings when it reports them. `--verbose` gives the full
+  breakdown, `--no-stats` gives none. The session defaults to whatever local
+  model `harn local switch` selected, and `/help`, `/model`, `/system`,
+  `/stats`, `/clear`, and `/bye` steer it from the prompt. Plain completions
+  only: no tools and no system prompt unless you set one, so a speed reading
+  measures the model rather than scaffolding around it.
+- **`llm_stream_call`'s terminal chunk now carries `usage` (#7171).** Streaming
+  callers previously received deltas but no accounting, so they could render a
+  reply and still not report its token counts, cost, or `provider_telemetry`
+  timings. The terminal chunk now publishes the same `usage` value `llm_call`
+  returns.
+- **New `std/llm/chat_session` module (#7171).** `chat_session(harness, config)`
+  runs the interactive loop that backs `harn chat`, so any surface wanting the
+  same conversation gets it without reimplementing turn handling, and so the
+  loop can be driven directly by a test with mocked stdin and taped
+  completions.
+- **New `std/llm/speed` module (#7171).** `format_speed_line` and
+  `format_speed_report` turn a response's `usage` into a readable speed report,
+  preferring server-reported timings over wall-clock estimates and omitting
+  measurements the provider did not send instead of rendering them as zero.
+- **New `harn-control-events` skill and a control-events explanation page.**
+  Stop and steer are events a session must answer, not requests it may finish
+  its current plan before considering. `harn skill get harn-control-events
+  --full` covers the three guarantees a stop owes (the loop stops, what the
+  session started dies, the record names the control), why an accepted cancel
+  is the hard case for the third, the three things a mid-turn message can mean
+  and which of them is the host's rather than Harn's, and the negative controls
+  that keep a stop test from passing vacuously.
+- **`harn package check` warns on legacy bare-string `required_secrets` (#7587).**
+  A package that declares `required_secrets = ["provider/secret"]` instead of
+  `{ id, direction }` tables now gets a warning naming the provider and the
+  offending ids, with the typed spelling to copy. The bare form is still
+  accepted and still reads as `direction = "outbound"`, so already-published
+  packages keep working and the warning does not change the exit code.
+- Add an approval resolver so a permission `ask` on a non-interactive run has
+  someone to answer it. `ApprovalResolver` selects who answers — the host, an
+  automated reviewer, or an unconditional allow — and is orthogonal to the
+  per-rule `allow`/`ask`/`deny` verdict rather than a fourth rung on it. A run
+  that installs a resolver no longer collapses every `ask` to a denial before it
+  starts, and records which resolver it installed beside the one it was asked
+  for.
+
+  `agent_loop` accepts an `approval_reviewer` closure that is consulted when a
+  rule would refuse a call with nobody present to reconsider it; on approval the
+  call proceeds and the receipt keeps the action and reason it overrode.
+  `approval_reviewer_for` builds one that reads the refused action against the
+  session's stated goal, and `approval_allow_all_reviewer` is the unconditional
+  form. Reviewer policy — model, circuit breaker, denylist, and the
+  risk-by-authorization thresholds — is configuration in
+  `approval_review_policy.toml` rather than code.
+
+  The seam fails closed: a missing reviewer, an error, or a verdict that cannot be
+  read leaves the call refused exactly as it would have been. An unconditional
+  allow still cannot lift the catastrophic floor.
+
+  `scripts/run_approval_review_calibration.harn` measures a reviewer against a
+  corpus of paired cases and reports agreement, false-approve and false-deny rates
+  separately, and cost per verdict.
+
+  A host product can contribute its own reviewer wording through
+  `policy.host_guidance`, appended under an `OPERATOR INSTRUCTIONS` label. The
+  thresholds, the denylist, and the floor stay in the policy data, where they are
+  reviewable.
+- A confined child process can no longer read credential material. The sandbox
+  policy gains a read denylist that beats every grant, including the package-manager
+  preset that opens `~/.config` and `~/.netrc` wholesale, and it is seeded with
+  paths a host cannot remove (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.netrc`, cloud and
+  registry credentials).
+- **Every `harn run` now leaves one execution receipt, with an optional VM
+  flight recorder (#7615).** Completed and failed VM runs write a bounded
+  `.harn-runs/hxe-....json` record whose identity also appears on local and
+  OpenTelemetry spans and durable events. `--flight-recorder` adds an exact
+  source-path artifact that never stores runtime values, reports dropped
+  events, and records persistence gaps instead of presenting partial evidence
+  as complete. `std/execution` adds typed, idempotent `proceed`, `abstain`, and
+  `escalate` decisions over the same durable channel ledger.
+- `ToolRegistry` is now the shared executable contract for MCP and generated
+  CLIs. `harn tool run` projects nested commands and typed flags from a
+  script-published registry, while `harn tool schema` emits the same versioned
+  catalog for generators and documentation.
+- Add lossless typed response compaction with exact workspace retention,
+  cached catalog-routed summaries, and deterministic fallbacks.
+- Added a typed VM-owned fingerprint for the Harn runtime content linked into embedding hosts.
+
+### Changed
+
+- Replace low-value implementation-mirroring tests with behavioral assertions,
+  known-answer vectors, and representative boundary coverage while removing
+  redundant tests that did not prove user-visible behavior.
+- Session recap consumers can attach optional bounded presentation enrichment to
+  one exact projection. Missing, stale, malformed, or oversized enrichment leaves
+  the deterministic recap unchanged.
+
+### Fixed
+
+- **A `session/cancel` that names an unregistered session is no longer swallowed in silence (#7583).**
+  The frame was consumed on a miss, so "nothing was cancelled" and "everything
+  was cancelled" produced the same observable. A miss now warns and emits a
+  `ControlOutcome` with `status: "rejected"` naming the session it could not
+  find. A cancelled prompt also seals its terminal with a `UserCancelled`
+  outcome instead of returning `stopReason: "cancelled"` and a null terminal,
+  and an accepted cancel kills that session's backgrounded command handles —
+  only that session's — so a stopped agent does not leave its children running.
+- **A completion judge that says `done` is no longer overturned for citing the
+  packet's own actions (#7584).** The evidence packet carries two disjoint index
+  namespaces under one field name: `actions` count up from zero, and the typed
+  `requirement_evidence` records count down from -1. Citation support resolved
+  every reference against `requirement_evidence` alone, so a requirement row
+  that cited the passing verification the packet had just listed was rejected,
+  the row read unsupported, and the loop nudged the model onward until the judge
+  cap fired. Runs ended recorded as unverified with the declared verifier green
+  the whole time. A citation that resolves to a listed action is now
+  corroborating; one that resolves to nothing, or to a record whose role is
+  disallowed or whose reading contradicts completion, still fails the row.
+- An agent's commands now see the toolchain the user's own terminal sees. `HOME`
+  and `PYTHONUSERBASE` are no longer relocated into the workspace cache, so a
+  package installed with `pip install --user` is visible instead of reported
+  missing. Pure caches are still relocated, so a run does not pollute the user's
+  real ones.
+- The release workflow now opens the next development-version pull request before
+  validating its restamped grammar receipt. A five-minute monitor reports a
+  missing cutover on the main commit.
+- Reject tagged releases with unfolded changelog fragments before resolving release metadata or building the portal.
+- `HarnessProcess.run` now delivers an explicitly provided `stdin` string to the child process instead of silently
+  replacing it with an empty input stream.
+- Fixed response compaction so successful structured summaries are returned instead of discarded as fallbacks.
+- The lightweight `harn-serve/hostlib` feature compiles without AST dependencies.
+  Windows CI now compiles its ACP cancellation tests so Unix-only process fixtures cannot reach release certification.
+- Encode host paths embedded in generated Harn test programs with the canonical
+  string-literal encoder, preserving Windows path separators instead of treating
+  them as escape sequences.
+- Keep CLI bootstrap parsing on Harn's explicitly sized runtime thread so the
+  growing command surface does not overflow the default Windows process stack.
+- **Pre-call budget projection now prices the next call from the session's own calls.**
+  A cached session with short answers could be stopped by `total_budget_usd`
+  at roughly half its cap: the pre-call estimate priced every projected input
+  token at the uncached rate and assumed the whole output budget was spent, so
+  one small call was projected ~18x its real cost. From the second call of a
+  session on, the estimate uses the observed cache-hit ratio and the observed
+  mean output tokens per call (clamped to the output budget); the first call
+  keeps the conservative worst case. Token ceilings and rate-limit
+  reservations still use the full output budget.
+- **`budget_exceeded` errors and `budget_exhausted` events say which happened.**
+  New `projection_basis` (`observed` / `worst_case`), `headroom_usd`, and
+  `costed_output_tokens` fields, plus a message that names spend against the
+  cap, so "stopped by an estimate at $0.18 of $0.33" is distinguishable from
+  "spent the cap". `sessionCostUsd`, `projectionBasis`, and `headroomUsd`
+  project through ACP.
+- The adaptive iteration budget now decides extension from a window of recent
+  turns instead of the single turn the budget boundary lands on. A run that had
+  been editing and then spent its last turns reading files back to repair a
+  failed check was stopped at exactly its initial cap, because that one boundary
+  turn was suppressed by `no_net_advance` or `no_information_gain` while the
+  repair evidence was a few turns old.
+
+  The rule uses the same definition of progress as before — a turn counts only if
+  it satisfies `agent_loop_is_progressing` — and looks back `extend_by` turns by
+  default. `iteration_budget.progress_window` sets the width explicitly. A window
+  in which no turn satisfies the predicate still stops the loop, and
+  `iteration_budget.max` remains the outer bound. The recorded decision reason is
+  `progress within window` and appears under `adaptive_budget.decisions` when
+  `expose_decisions` is set.
+- Agent loops now refuse structurally empty model requests before dispatch.
+  Typed terminal outcomes preserve classified provider diagnostics.
+
 ## v0.10.122
 
 ### Added

@@ -6,6 +6,7 @@
 mod action_graph;
 mod diff;
 mod eval_pack;
+mod execution_evidence;
 mod from_session;
 mod json;
 mod persistence;
@@ -28,6 +29,10 @@ pub use eval_pack::{
     load_eval_suite_manifest, normalize_eval_pack_manifest_value, normalize_eval_suite_manifest,
     replay_fixture_from_run, validate_eval_pack_split, EvalPackLiveExecutor,
     EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
+};
+pub use execution_evidence::{
+    validate_execution_evidence, validate_execution_id, ExecutionEvidenceValidationError,
+    EXECUTION_EVIDENCE_SCHEMA_VERSION,
 };
 pub use from_session::{
     default_projection_path, list_session_runs, materialize_session_run_record,
@@ -79,16 +84,17 @@ pub use types::{
     ACTION_GRAPH_NODE_KIND_DISPATCH, ACTION_GRAPH_NODE_KIND_DLQ, ACTION_GRAPH_NODE_KIND_PREDICATE,
     ACTION_GRAPH_NODE_KIND_RETRY, ACTION_GRAPH_NODE_KIND_RUN, ACTION_GRAPH_NODE_KIND_STAGE,
     ACTION_GRAPH_NODE_KIND_TRIGGER, ACTION_GRAPH_NODE_KIND_TRIGGER_PREDICATE,
-    ACTION_GRAPH_NODE_KIND_WORKER, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE,
+    ACTION_GRAPH_NODE_KIND_WORKER, ACTION_GRAPH_NODE_KIND_WORKER_ENQUEUE, ACTION_GRAPH_TOPIC,
 };
 pub use view::{
     build_empty_session_view, build_run_view, build_run_view_with_event_log,
     build_run_view_with_options, build_run_view_with_path, build_session_view_from_run_records,
-    build_session_view_from_run_views, ProjectionInfo, RunView, RunViewApproval, RunViewArtifact,
-    RunViewAuth, RunViewCheckpoint, RunViewChild, RunViewError, RunViewFailure, RunViewMetadata,
-    RunViewOptions, RunViewPendingState, RunViewProvider, RunViewRun, RunViewStage, RunViewUsage,
-    SessionView, SessionViewHistoryItem, SessionViewMetadata, SessionViewOptions,
-    SessionViewSession, TranscriptSummary, ViewProducer, RUN_VIEW_SCHEMA, RUN_VIEW_SCHEMA_VERSION,
+    build_session_view_from_run_views, project_execution_evidence, ArtifactPathVisibility,
+    ProjectionInfo, RunView, RunViewApproval, RunViewArtifact, RunViewAuth, RunViewCheckpoint,
+    RunViewChild, RunViewError, RunViewFailure, RunViewMetadata, RunViewOptions,
+    RunViewPendingState, RunViewProvider, RunViewRun, RunViewStage, RunViewUsage, SessionView,
+    SessionViewHistoryItem, SessionViewMetadata, SessionViewOptions, SessionViewSession,
+    TranscriptSummary, ViewProducer, RUN_VIEW_SCHEMA, RUN_VIEW_SCHEMA_VERSION,
     SESSION_VIEW_QUERY_METHOD, SESSION_VIEW_SCHEMA, SESSION_VIEW_SCHEMA_VERSION,
 };
 

@@ -153,6 +153,12 @@ async fn drain_bridge_injections_for_checkpoint(
                         "role": "user",
                         "content": message.transcript_content,
                         "messageId": message.message_id,
+                        // The delivery mode is what separates a mid-run user
+                        // directive the model actually saw from an audit-only
+                        // note it never did. Completion obligations are derived
+                        // from this field, so it has to travel with the message
+                        // rather than be re-inferred from transcript position.
+                        "injectedMode": message.mode.as_str(),
                     })),
                 )
                 .map_err(VmError::Runtime)?;

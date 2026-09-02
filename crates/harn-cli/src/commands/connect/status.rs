@@ -227,8 +227,17 @@ pub(super) async fn connector_status(
     if status == "healthy" && !environment_covers_outbound_credentials {
         if let Some(entry) = entry {
             match parse_secret_id(&entry.secret_id) {
-                Some(id) => match provider.get(&id).await {
-                    Ok(_) => {}
+                // Presence, not value: this only asks whether the credential
+                // the index points at still exists.
+                Some(id) => match provider.contains(&id).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        status = "revoked_credentials".to_string();
+                        reason = format!(
+                            "credential index points at missing secret '{}'",
+                            entry.secret_id
+                        );
+                    }
                     Err(error) if secret_error_is_not_found(&error) => {
                         status = "revoked_credentials".to_string();
                         reason = format!(
@@ -267,13 +276,26 @@ pub(super) async fn connector_status(
                 continue;
             }
             match parse_secret_id(secret) {
-                Some(id) => match provider.get(&id).await {
-                    Ok(_) => health_checks.push(ConnectorHealthStatus {
+                // Presence, not value. `usable` only needs to know the
+                // credential exists, and reading each one to find out is what
+                // made a single status command raise a Keychain access dialog
+                // per stored secret (#7749).
+                Some(id) => match provider.contains(&id).await {
+                    Ok(true) => health_checks.push(ConnectorHealthStatus {
                         id: format!("secret:{secret}"),
                         kind: "secret".to_string(),
                         status: "pass".to_string(),
                         detail: String::new(),
                     }),
+                    Ok(false) => {
+                        missing_secrets.push(secret.clone());
+                        health_checks.push(ConnectorHealthStatus {
+                            id: format!("secret:{secret}"),
+                            kind: "secret".to_string(),
+                            status: "fail".to_string(),
+                            detail: "missing secret".to_string(),
+                        });
+                    }
                     Err(error) if secret_error_is_not_found(&error) => {
                         missing_secrets.push(secret.clone());
                         health_checks.push(ConnectorHealthStatus {

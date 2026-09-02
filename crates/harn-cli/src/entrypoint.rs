@@ -522,6 +522,12 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(exit);
                 }
             }
+            ProviderCommand::OptionProbe(option_probe) => {
+                let exit = commands::provider_option_probe::run(option_probe).await;
+                if exit != 0 {
+                    process::exit(exit);
+                }
+            }
             ProviderCommand::CacheProbe(cache_probe) => {
                 commands::provider::run_provider_cache_probe(cache_probe).await;
             }
@@ -1029,7 +1035,7 @@ pub(crate) fn serve_subcommand_names() -> Vec<String> {
 
 /// Schema version for `harn version --json`. Bump when the data shape
 /// changes; new optional fields can be added freely.
-pub(crate) const VERSION_SCHEMA_VERSION: u32 = 1;
+pub(crate) const VERSION_SCHEMA_VERSION: u32 = 2;
 
 /// Launch the Harn debug adapter (DAP) over stdio for `harn dap`.
 ///
@@ -1054,12 +1060,16 @@ pub(crate) fn run_dap_adapter() {
 }
 
 pub(crate) async fn run_version(args: cli::VersionArgs) -> i32 {
+    let runtime_content = serde_json::to_string(harn_vm::runtime_content_fingerprint())
+        .expect("runtime content fingerprint serializes");
     let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
     let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
     let _description =
         env_guard::ScopedEnvVar::set("HARN_BUILD_DESCRIPTION", env!("CARGO_PKG_DESCRIPTION"));
     let _revision =
         env_guard::ScopedEnvVar::set("HARN_BUILD_REVISION", env!("HARN_BUILD_REVISION"));
+    let _runtime_content =
+        env_guard::ScopedEnvVar::set("HARN_RUNTIME_CONTENT_FINGERPRINT", &runtime_content);
     let argv = if args.json {
         vec!["--json".to_string()]
     } else {

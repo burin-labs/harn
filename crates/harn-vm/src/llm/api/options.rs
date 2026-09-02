@@ -2,6 +2,7 @@
 //! `LlmRequestPayload`, plus the `tool_search` / `thinking` sub-configs.
 
 use crate::llm::providers::schema_compat::project_output_schema_for_provider;
+use crate::llm_config::DataPosture;
 use crate::value::VmValue;
 
 /// Sender for streaming text deltas from an in-flight LLM call.
@@ -385,6 +386,10 @@ pub(crate) struct LlmCallOptions {
     // --- Routing ---
     pub provider: String,
     pub model: String,
+    /// Typed origin-to-route decision. Script-facing extraction always sets
+    /// this before credential lookup; hand-built internal options may leave it
+    /// absent and receive a route-local projection at the transport boundary.
+    pub model_resolution: Option<crate::llm_config::ModelResolution>,
     pub api_key: String,
     pub api_mode: LlmApiMode,
     pub route_policy: LlmRoutePolicy,
@@ -495,6 +500,10 @@ pub(crate) struct LlmCallOptions {
     /// wire field. Runtime admission checks this set for every resolved route.
     pub(crate) portable_option_intent:
         std::collections::BTreeSet<crate::llm::capabilities::PortableOption>,
+    /// Internal empirical-probe contract captured at option extraction. This
+    /// travels with spawned transport work so async task boundaries cannot
+    /// silently restore catalog shaping or bounded retries.
+    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
 
     // --- Serving tier ---
     /// Opt into the model's accelerated-serving ("fast mode") tier. Maps to
@@ -559,6 +568,11 @@ pub(crate) struct LlmCallOptions {
     pub previous_response_id: Option<String>,
     /// OpenAI Responses persistence flag.
     pub store: Option<bool>,
+    /// Requested provider retention/training posture, in provider-neutral
+    /// terms. `None` resolves to the catalog's `[data_controls_policy]`
+    /// default so an embedder chooses the default once, in config, instead of
+    /// it being chosen by omission inside the runtime.
+    pub data_controls: Option<DataPosture>,
     /// OpenAI Responses background execution flag.
     pub background: Option<bool>,
     /// OpenAI Responses truncation/compaction policy.
@@ -604,6 +618,7 @@ impl Default for LlmCallOptions {
         Self {
             provider: String::new(),
             model: String::new(),
+            model_resolution: None,
             api_key: String::new(),
             api_mode: LlmApiMode::default(),
             route_policy: LlmRoutePolicy::default(),
@@ -645,6 +660,7 @@ impl Default for LlmCallOptions {
             presence_penalty: None,
             parallel_tool_calls: None,
             portable_option_intent: std::collections::BTreeSet::new(),
+            provider_contract_probe: None,
             fast: false,
             output_format: OutputFormat::default(),
             output_schema: None,
@@ -666,6 +682,7 @@ impl Default for LlmCallOptions {
             provider_overrides: None,
             previous_response_id: None,
             store: None,
+            data_controls: None,
             background: None,
             truncation: None,
             compact: None,
@@ -732,6 +749,13 @@ impl LlmCallOptions {
 
     pub(crate) fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout, &self.model)
+    }
+
+    /// The posture this request will carry: the caller's when they named one,
+    /// otherwise the catalog's `[data_controls_policy] default_posture`.
+    pub(crate) fn resolved_data_posture(&self) -> DataPosture {
+        self.data_controls
+            .unwrap_or_else(crate::llm_config::data_controls_default_posture)
     }
 
     pub(crate) fn anthropic_beta_features_for_request(&self) -> Vec<String> {
@@ -833,6 +857,9 @@ pub(crate) struct LlmRequestPayload {
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
     pub parallel_tool_calls: Option<bool>,
+    /// See [`LlmCallOptions::provider_contract_probe`].
+    #[serde(skip_serializing)]
+    pub(crate) provider_contract_probe: Option<crate::llm::capabilities::PortableOption>,
     /// See [`LlmCallOptions::fast`]. Forwarded to provider body builders so
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
@@ -861,6 +888,9 @@ pub(crate) struct LlmRequestPayload {
     pub provider_overrides: Option<serde_json::Value>,
     pub previous_response_id: Option<String>,
     pub store: Option<bool>,
+    /// Resolved posture for this request. Already merged with the catalog
+    /// policy default, so the transport never re-resolves it.
+    pub data_controls: DataPosture,
     pub background: Option<bool>,
     pub truncation: Option<String>,
     pub compact: Option<bool>,
@@ -1001,6 +1031,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             frequency_penalty: opts.frequency_penalty,
             presence_penalty: opts.presence_penalty,
             parallel_tool_calls: opts.parallel_tool_calls,
+            provider_contract_probe: opts.provider_contract_probe,
             fast: opts.fast,
             output_format,
             output_schema,
@@ -1019,6 +1050,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider_overrides: opts.provider_overrides.clone(),
             previous_response_id: opts.previous_response_id.clone(),
             store: opts.store,
+            data_controls: opts.resolved_data_posture(),
             background: opts.background,
             truncation: opts.truncation.clone(),
             compact: opts.compact,

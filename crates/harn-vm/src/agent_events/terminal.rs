@@ -174,7 +174,9 @@ const NATURAL_STOP_REASONS: [&str; 9] = [
 /// named the same way whichever side of the JSON-RPC boundary it comes back on.
 ///
 /// Additive: absent on any outcome without a class, so a consumer that does not
-/// read it sees byte-identical metadata.
+/// read it sees byte-identical metadata. [`Self::to_json`] also emits lifecycle
+/// and run-record status projections computed from `kind`; they are deliberately
+/// not stored as parallel struct fields that could drift.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentTerminalOutcome {
     pub kind: AgentTerminalKind,
@@ -241,10 +243,13 @@ impl AgentTerminalOutcome {
     }
 
     pub fn to_json(&self) -> serde_json::Value {
+        let lifecycle = self.kind.lifecycle_state().projection();
         let mut value = serde_json::json!({
             "kind": self.kind.as_str(),
             "reason": self.reason,
             "owner": self.owner,
+            "lifecycle_state": lifecycle.wire_name,
+            "run_record_status": lifecycle.run_record_status,
         });
         if let Some(class) = self.terminal_class {
             value["terminalClass"] = serde_json::Value::String(class.as_str().to_string());
@@ -471,6 +476,16 @@ mod tests {
             AgentTerminalKind::Unknown,
         ] {
             assert_eq!(kind.lifecycle_state(), AgentLifecycleState::Failed);
+        }
+    }
+
+    #[test]
+    fn terminal_json_carries_the_canonical_run_record_status() {
+        for kind in AgentTerminalKind::ALL {
+            let encoded = AgentTerminalOutcome::new(kind, kind.as_str()).to_json();
+            let projection = kind.lifecycle_state().projection();
+            assert_eq!(encoded["lifecycle_state"], projection.wire_name);
+            assert_eq!(encoded["run_record_status"], projection.run_record_status);
         }
     }
 
@@ -720,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn an_outcome_without_a_class_serializes_exactly_as_it_did_before() {
+    fn an_outcome_without_optional_diagnostics_still_omits_them() {
         let outcome = AgentTerminalOutcome::new(AgentTerminalKind::PolicyBudget, "max_iterations");
 
         assert_eq!(outcome.terminal_class, None);
@@ -732,8 +747,10 @@ mod tests {
                 "kind": "policy_budget",
                 "reason": "max_iterations",
                 "owner": "policy",
+                "lifecycle_state": "stopped",
+                "run_record_status": "stopped",
             }),
-            "the key must be absent, not null, so an existing consumer sees identical bytes"
+            "optional diagnostic keys must be absent rather than null"
         );
         let encoded = serde_json::to_value(&outcome).unwrap();
         assert!(encoded.get("terminalClass").is_none());

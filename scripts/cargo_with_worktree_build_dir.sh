@@ -8,6 +8,34 @@ unset HARN_CARGO_LEASE_WORKSPACE
 # shellcheck source=scripts/lib/cargo_env.sh
 source "$script_dir/lib/cargo_env.sh"
 
+# A rustc earlier on PATH than the rustup shim shadows rust-toolchain.toml, so
+# a local gate silently compiles under a different compiler than CI and its
+# green or red is not comparable. Refuse before Cargo starts, naming both
+# versions and the correction.
+harn_require_pinned_rustc() {
+  local pin_file="$workspace/rust-toolchain.toml"
+  local pinned resolved
+  [[ -f "$pin_file" ]] || return 0
+  pinned="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$pin_file" | head -n 1)"
+  # Only an exact version pin is comparable; a channel name resolves per host.
+  [[ "$pinned" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 0
+  # A rustc that cannot report a version is Cargo's problem to fail on, loudly
+  # and by itself. This guard only answers "which compiler", never "is there one".
+  resolved="$(rustc --version 2>/dev/null | awk '{print $2}')" || return 0
+  [[ -n "$resolved" && "$resolved" != "$pinned" ]] || return 0
+  echo "error: rust-toolchain.toml pins rustc $pinned but $(command -v rustc) resolves to $resolved" >&2
+  echo "       local results under $resolved are not comparable to CI" >&2
+  # PATH order is the fix, not RUSTUP_TOOLCHAIN: a shadowing compiler that is
+  # not a rustup shim ignores that variable entirely, so suggesting it first
+  # would send the reader in a circle.
+  echo "       fix: put the rustup shim directory (usually \$HOME/.cargo/bin) ahead of $(dirname "$(command -v rustc)") on PATH" >&2
+  echo "       RUSTUP_TOOLCHAIN=$pinned only helps once the shim resolves first" >&2
+  exit 1
+}
+if [[ "${HARN_ALLOW_TOOLCHAIN_MISMATCH:-0}" != "1" ]]; then
+  harn_require_pinned_rustc
+fi
+
 lease_runner_request="${HARN_CARGO_LEASE_RUNNER:-}"
 lease_owner="${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
 lease_host="${HARN_CARGO_LEASE_HOST:-}"
@@ -62,6 +90,29 @@ cargo_subcommand_is_static() {
   esac
 }
 
+lease_runner_keeps_contended_waits_idle() (
+  local candidate="$1"
+  local probe_root=""
+
+  probe_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-lease-runner-probe.XXXXXX")" || return 1
+  trap 'rm -rf "$probe_root"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  # Harn releases before v0.10.73 watched the SQLite registry directory while
+  # waiting. Their own read/write transactions therefore woke the watcher and
+  # spun until the lease deadline. Exercise the store boundary instead of
+  # version-matching: compatible runners create the dedicated wake file that
+  # separates availability signals from SQLite activity.
+  HARN_HOST_LEASE_ROOT="$probe_root" \
+    "$candidate" host lease status \
+      --host harn-lease-runner-probe \
+      --resource-class rust-heavy \
+      --json >/dev/null 2>&1 \
+    && [[ -f "$probe_root/host-leases.wake" ]]
+)
+
 resolve_lease_runner() {
   local candidate=""
   local can_run_target_binary=1
@@ -102,13 +153,15 @@ resolve_lease_runner() {
   # Windows cannot replace an executable while that same image supervises the
   # Cargo build. Use only an independently installed runner there.
   if [[ "$can_run_target_binary" == "1" && -x "$candidate" ]] \
-    && "$candidate" host lease run cargo --help >/dev/null 2>&1; then
+    && "$candidate" host lease run cargo --help >/dev/null 2>&1 \
+    && lease_runner_keeps_contended_waits_idle "$candidate"; then
     printf '%s\n' "$candidate"
     return
   fi
   candidate="$(command -v harn || true)"
   if [[ -n "$candidate" && -x "$candidate" ]] \
-    && "$candidate" host lease run cargo --help >/dev/null 2>&1; then
+    && "$candidate" host lease run cargo --help >/dev/null 2>&1 \
+    && lease_runner_keeps_contended_waits_idle "$candidate"; then
     printf '%s\n' "$candidate"
   fi
 }

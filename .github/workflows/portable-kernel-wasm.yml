@@ -76,7 +76,7 @@ jobs:
           cache-bin: false
           save: false
       - name: Install pinned browser build tool
-        uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: wasm-pack@0.15.0
           fallback: none

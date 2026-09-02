@@ -10,6 +10,7 @@ pub import {
   agent_options,
   agent_preset_options,
   agent_refresh_tool_format_for_route,
+  agent_route_capabilities,
   agent_sanitize_model_options,
   autonomy_policy,
 } from "std/agent/options_public"

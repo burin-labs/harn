@@ -51,6 +51,14 @@ fn collect_vm_tool_schemas(
         .into_iter()
         .filter_map(|value| match value {
             VmValue::Dict(td) => {
+                if !crate::tool_registry::tool_entry_allows_audience(
+                    td,
+                    crate::tool_registry::ToolAudience::Agent,
+                )
+                .unwrap_or(false)
+                {
+                    return None;
+                }
                 let name = td.get("name")?.display();
                 let description = td
                     .get("description")

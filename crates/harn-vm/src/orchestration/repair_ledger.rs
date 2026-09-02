@@ -154,7 +154,11 @@ fn message_text(message: &Value) -> String {
     value_text(content)
 }
 
-fn value_text(value: &Value) -> String {
+/// Flatten a message `content` value to plain text. Handles the string shape
+/// and the block-array shape (`[{"type":"text","text":...}]`) that real agent
+/// transcripts carry, so callers that summarize a transcript never read a
+/// tool-result turn as empty. Shared with the compaction summarizers.
+pub(super) fn value_text(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         Value::Array(items) => items.iter().map(value_text).collect::<Vec<_>>().join("\n"),

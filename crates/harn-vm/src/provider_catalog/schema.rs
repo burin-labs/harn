@@ -44,6 +44,7 @@ pub fn schema_value() -> Value {
                     "healthcheck": {"$ref": "#/$defs/healthcheck"},
                     "cache_usage_accounting": {"type": "boolean"},
                     "stream_usage_accounting": {"type": "boolean"},
+                    "data_controls": {"$ref": "#/$defs/data_controls"},
                     "protocols": {"type": "array", "items": {"type": "string"}},
                     "features": {"type": "array", "items": {"type": "string"}},
                     "caveats": {"type": "array", "items": {"type": "string"}},
@@ -52,6 +53,39 @@ pub fn schema_value() -> Value {
                     "local_runtime": {"$ref": "#/$defs/local_runtime"},
                     "latency_p50_ms": {"type": "integer", "minimum": 0},
                     "performance": {"$ref": "#/$defs/performance"}
+                },
+                "additionalProperties": false
+            },
+            "data_controls": {
+                "type": "object",
+                "required": ["control_scope", "retention_default", "training_default", "checked_on", "sources"],
+                "properties": {
+                    "control_scope": {"enum": ["per_request", "account", "none"]},
+                    "retention_default": {"enum": ["retained", "not_retained", "abuse_monitoring_only", "unspecified"]},
+                    "training_default": {"enum": ["trains", "does_not_train", "unspecified"]},
+                    "checked_on": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+                    "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
+                    "note": {"type": "string"},
+                    "request_controls": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["location", "name", "value_kind", "value", "effect"],
+                            "properties": {
+                                "location": {"enum": ["body", "header"]},
+                                "name": {"type": "string", "minLength": 1},
+                                "value_kind": {"enum": ["bool", "string"]},
+                                "value": {"type": "string"},
+                                "effect": {"enum": ["retention", "training"]},
+                                "applies_to": {
+                                    "type": "array",
+                                    "items": {"enum": ["anthropic_sse", "open_ai_sse", "ollama_ndjson", "gemini_json", "gemini_interactions_sse"]}
+                                },
+                                "caveat": {"type": "string"}
+                            },
+                            "additionalProperties": false
+                        }
+                    }
                 },
                 "additionalProperties": false
             },

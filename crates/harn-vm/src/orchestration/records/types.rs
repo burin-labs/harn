@@ -14,6 +14,7 @@ use crate::personas::{
     PersonaStatus, PersonaValueReceipt,
 };
 
+pub const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 pub const ACTION_GRAPH_NODE_KIND_RUN: &str = "run";
 pub const ACTION_GRAPH_NODE_KIND_TRIGGER: &str = "trigger";
 pub const ACTION_GRAPH_NODE_KIND_PREDICATE: &str = "predicate";
@@ -1110,7 +1111,7 @@ pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     tool_name.hash(&mut hasher);
-    let args_str = serde_json::to_string(args).unwrap_or_default();
+    let args_str = crate::canonical_json::to_string(args);
     args_str.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
@@ -1135,6 +1136,10 @@ pub struct RunTraceSpanRecord {
     pub ttft_ms: Option<u64>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub links: Vec<crate::tracing::SpanLink>,
+    /// Ordered sub-phase annotations emitted inside this span. Empty for
+    /// records written before span events became durable execution evidence.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<crate::tracing::SpanEvent>,
     /// First-class per-call cost projection for `llm_call` spans, in USD.
     /// Mirrors the `cost_usd` metadata key so downstream viewers can build
     /// cost flame graphs without parsing the metadata map. `None` for
@@ -1161,6 +1166,7 @@ impl From<&crate::tracing::Span> for RunTraceSpanRecord {
                 .and_then(serde_json::Value::as_u64),
             metadata: span.metadata.clone(),
             links: span.links.clone(),
+            events: span.events.clone(),
             cost_usd: span
                 .metadata
                 .get(crate::tracing::meta::COST_USD)
@@ -1316,6 +1322,20 @@ mod trace_span_record_tests {
                 ("cost_usd".to_string(), serde_json::json!(0.0123)),
             ]),
             links: Vec::new(),
+            events: vec![
+                crate::tracing::SpanEvent {
+                    name: "first-token".to_string(),
+                    time_unix_ms: 1_700_000_000_125,
+                    offset_ms: 125,
+                    attributes: BTreeMap::from([("cached".to_string(), serde_json::json!(true))]),
+                },
+                crate::tracing::SpanEvent {
+                    name: "complete".to_string(),
+                    time_unix_ms: 1_700_000_000_900,
+                    offset_ms: 900,
+                    attributes: BTreeMap::new(),
+                },
+            ],
             cost_usd: Some(0.0123),
         };
         let encoded = serde_json::to_string(&span).unwrap();
@@ -1326,6 +1346,14 @@ mod trace_span_record_tests {
         assert_eq!(json["ttft_ms"], serde_json::json!(125));
         assert!(json.get("parent_id").is_none());
         assert_eq!(decoded.cost_usd, Some(0.0123));
+        assert_eq!(
+            decoded
+                .events
+                .iter()
+                .map(|event| event.name.as_str())
+                .collect::<Vec<_>>(),
+            ["first-token", "complete"]
+        );
         assert_eq!(
             decoded.metadata["cache_read_tokens"],
             serde_json::json!(800)
@@ -1351,8 +1379,35 @@ mod trace_span_record_tests {
         let decoded: RunTraceSpanRecord = serde_json::from_value(legacy).unwrap();
         assert_eq!(decoded.parent_id, Some(11));
         assert_eq!(decoded.cost_usd, None);
+        assert!(decoded.events.is_empty());
         assert_eq!(decoded.kind, "llm_call");
         assert_eq!(decoded.metadata["model"], serde_json::json!("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn runtime_span_conversion_preserves_ordered_events() {
+        let events = vec![crate::tracing::SpanEvent {
+            name: "tool.result".to_string(),
+            time_unix_ms: 42,
+            offset_ms: 7,
+            attributes: BTreeMap::from([("ok".to_string(), serde_json::json!(true))]),
+        }];
+        let span = crate::tracing::Span {
+            execution_id: None,
+            trace_id: "trace_1".to_string(),
+            span_id: 1,
+            parent_id: None,
+            kind: crate::tracing::SpanKind::ToolCall,
+            name: "tool".to_string(),
+            start_ms: 10,
+            start_unix_ms: 1_700_000_000_000,
+            duration_ms: 8,
+            metadata: BTreeMap::new(),
+            links: Vec::new(),
+            events: events.clone(),
+        };
+
+        assert_eq!(RunTraceSpanRecord::from(&span).events, events);
     }
 
     #[test]
@@ -1369,6 +1424,7 @@ mod trace_span_record_tests {
         };
         let encoded = serde_json::to_value(&span).unwrap();
         assert!(encoded.get("cost_usd").is_none());
+        assert!(encoded.get("events").is_none());
     }
 
     #[test]

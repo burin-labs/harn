@@ -12,6 +12,7 @@ flowchart LR
     R --> C[harn-tools catalog]
     R --> M[MCP server]
     R --> L[Generated CLI]
+    R --> D[Operator dashboard]
     R --> A[Agent runtime]
 ```
 
@@ -42,8 +43,9 @@ publishes or projects the registry. The normalized entry contains:
 
 - stable name, title, and description;
 - input and output JSON Schemas;
-- one local handler closure;
+- one declared execution backend, with a local handler closure for in-VM tools;
 - Harn execution policy and protocol annotations;
+- closed CLI, MCP, catalog, dashboard, and agent/model audiences;
 - CLI path and visibility;
 - typed source coordinates with a protocol-specific binding object;
 - deferred-loading, icon, execution, and namespaced extension metadata.
@@ -59,11 +61,21 @@ loader installs project capabilities and connectors, runs the script once,
 captures every published capability on the same thread, validates the complete
 registry, and retains the VM and connector lease for later dispatch.
 
-MCP projects the registry onto protocol discovery and calls the original
-handler. The CLI builds a clap command tree at runtime, validates merged JSON
-and flag input against the same schema, calls that handler, validates its
-output, and renders the selected output format. The static catalog uses the
-same normalization without carrying runtime-only values.
+MCP projects only MCP-audience entries onto protocol discovery and calls their
+original handlers. The CLI builds its command tree only from CLI-audience
+entries, validates merged JSON and flag input against the same schema, calls
+that handler, validates its output, and renders the selected output format.
+The static catalog applies its own audience through the same normalization
+without carrying runtime-only values. A future dashboard adapter consumes the
+same normalized governance field rather than maintaining another exposure
+list.
+
+The agent loop is also an adapter. It projects the executable registry once at
+its option boundary, before prompt guidance, progressive search, surface
+narrowing, schema generation, or dispatch can inspect it. Direct LLM calls use
+the same normalized `agent` projection. A tool intentionally reserved for an
+operator surface therefore cannot leak its name or instructions to the model,
+appear in a search result, or execute through a forged call.
 
 ## Language bridges
 

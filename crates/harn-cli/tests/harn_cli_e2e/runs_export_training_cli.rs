@@ -138,6 +138,11 @@ fn tool_named<'a>(catalog: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("catalog has no `{name}`"))
 }
 
+fn source_run_record(run: &Run) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(&run.record).expect("read run record"))
+        .expect("run record JSON")
+}
+
 #[test]
 fn projects_a_native_channel_run_with_paired_calls_and_exact_provenance() {
     let run = agent_run("native", "run_native");
@@ -172,9 +177,17 @@ fn projects_a_native_channel_run_with_paired_calls_and_exact_provenance() {
     assert_eq!(messages[3]["name"], Value::String("read_file".to_string()));
 
     let provenance = &example["provenance"];
+    let source_run = source_run_record(&run);
     assert_eq!(
         provenance["run_id"],
         Value::String("run_native".to_string())
+    );
+    assert!(source_run["evidence"]["execution_id"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty()));
+    assert_eq!(
+        provenance["execution_id"], source_run["evidence"]["execution_id"],
+        "training provenance must preserve the Harn-owned execution identity exactly",
     );
     assert!(provenance["session_id"]
         .as_str()

@@ -138,6 +138,33 @@ fn empty_completion_retries_then_succeeds_on_second_attempt() {
 }
 
 #[test]
+fn provider_contract_probe_stops_after_one_physical_request() {
+    current_thread_runtime().block_on(async {
+        reset_agent_trace_state();
+        let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()));
+        let mut opts = fake_opts();
+        opts.provider_contract_probe = Some(crate::llm::capabilities::PortableOption::Temperature);
+        let result = observed_llm_call(&opts, None, None, None, false, false, None, None)
+            .await
+            .expect("a probe must return its first served response without retrying");
+
+        assert!(result.text.is_empty());
+        assert_eq!(
+            fake_llm_captured_calls().len(),
+            1,
+            "one logical probe must equal one physical provider request"
+        );
+        assert!(
+            peek_agent_trace()
+                .iter()
+                .all(|event| !matches!(event, AgentTraceEvent::EmptyCompletionRetry { .. })),
+            "a probe must not emit a retry receipt"
+        );
+        reset_agent_trace_state();
+    });
+}
+
+#[test]
 fn errored_actionless_completion_retries_then_succeeds() {
     // An errored turn that narrated intent but emitted no tool call must be
     // RETRIED (not advanced on); the next good turn proceeds.
@@ -901,7 +928,17 @@ fn budget_exhausted_error(completion_tokens: i64) -> crate::value::VmError {
     crate::llm::api::empty_generation_error(
         "fake",
         "fake-stream",
-        crate::llm::usage::ProviderUsageReceipt::new(None, Some(completion_tokens), None, false),
+        crate::llm::api::ProviderResponseEnvelope::new(
+            None,
+            None,
+            Vec::new(),
+            crate::llm::usage::ProviderUsageReceipt::new(
+                None,
+                Some(completion_tokens),
+                None,
+                false,
+            ),
+        ),
         format!(
             "openai-compatible model fake:fake-stream reported \
              completion_tokens={completion_tokens} but delivered no content, reasoning, \

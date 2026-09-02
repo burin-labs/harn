@@ -20,22 +20,46 @@ fn llm_execution_contract_builtin(args: &[VmValue], _out: &mut String) -> Result
             "llm_execution_contract: selector is required".to_string(),
         ));
     }
-    Ok(model_execution_contract_to_vm_value(
-        &llm_config::model_execution_contract(selector),
-    ))
+    let contract = llm_config::model_execution_contract(selector)
+        .map_err(|error| VmError::Runtime(format!("llm_execution_contract: {error}")))?;
+    Ok(model_execution_contract_to_vm_value(&contract))
 }
 
 fn model_execution_contract_to_vm_value(contract: &llm_config::ModelExecutionContract) -> VmValue {
     let mut dict = crate::value::DictMap::new();
-    dict.put_str("schema", "harn.llm.execution-contract/v1");
-    dict.put_str("selector", contract.selector.as_str());
-    dict.put_str("model_id", contract.resolved.id.as_str());
-    dict.put_str("provider", contract.resolved.provider.as_str());
+    dict.put_str("schema", "harn.llm.execution-contract/v2");
+    dict.put_str(
+        "requested_model",
+        contract.resolution.requested_model.as_str(),
+    );
+    dict.insert(
+        crate::value::intern_key("alias_chain"),
+        VmValue::List(std::sync::Arc::new(
+            contract
+                .resolution
+                .alias_chain
+                .iter()
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
+                .collect(),
+        )),
+    );
+    dict.put_str(
+        "resolved_provider",
+        contract.resolution.resolved_provider.as_str(),
+    );
+    dict.put_str(
+        "resolved_model",
+        contract.resolution.resolved_model.as_str(),
+    );
+    dict.put_str(
+        "catalog_version",
+        contract.resolution.catalog_version.as_str(),
+    );
     dict.put_str("wire_model", contract.wire_model.as_str());
-    dict.put_str("tool_format", contract.resolved.tool_format.as_str());
-    dict.put_str("tier", contract.resolved.tier.as_str());
-    dict.put_str("family", contract.resolved.family.as_str());
-    dict.put_str("lineage", contract.resolved.lineage.as_str());
+    dict.put_str("tool_format", contract.tool_format.as_str());
+    dict.put_str("tier", contract.tier.as_str());
+    dict.put_str("family", contract.family.as_str());
+    dict.put_str("lineage", contract.lineage.as_str());
 
     let mut defaults = crate::value::DictMap::new();
     for (key, value) in &contract.generation_defaults {
@@ -117,11 +141,25 @@ mod tests {
 
         assert_eq!(
             contract.get("schema").map(VmValue::display).as_deref(),
-            Some("harn.llm.execution-contract/v1")
+            Some("harn.llm.execution-contract/v2")
         );
         assert_eq!(
-            contract.get("selector").map(VmValue::display).as_deref(),
+            contract
+                .get("requested_model")
+                .map(VmValue::display)
+                .as_deref(),
             Some("receipt-contract-model")
+        );
+        assert!(matches!(
+            contract.get("alias_chain"),
+            Some(VmValue::List(values)) if values.is_empty()
+        ));
+        assert_eq!(
+            contract
+                .get("catalog_version")
+                .map(VmValue::display)
+                .as_deref(),
+            Some(llm_config::MODEL_CATALOG_VERSION)
         );
         let defaults = contract
             .get("generation_defaults")

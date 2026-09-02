@@ -10,6 +10,7 @@ use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
 /// A minimal single-user-turn Gemini payload.
 pub(super) fn gemini_payload(model: &str, thinking: ThinkingConfig) -> LlmRequestPayload {
     LlmRequestPayload {
+        data_controls: crate::llm_config::DataPosture::Default,
         provider: "gemini".to_string(),
         model: model.to_string(),
         region: None,
@@ -36,6 +37,7 @@ pub(super) fn gemini_payload(model: &str, thinking: ThinkingConfig) -> LlmReques
         frequency_penalty: None,
         presence_penalty: None,
         parallel_tool_calls: None,
+        provider_contract_probe: None,
         fast: false,
         output_format: crate::llm::api::OutputFormat::Text,
         output_schema: None,

@@ -165,7 +165,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.123-dev"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.126-dev"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -310,6 +310,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "orchestration_decision",
     "pack_thinking_stripped",
     "progress_reported",
+    "purpose_label",
     "repair_output_contract_applied",
     "require_successful_tools_violation",
     "reserved_terminal_verify",

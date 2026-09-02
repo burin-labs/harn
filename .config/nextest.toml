@@ -296,6 +296,14 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::burin_mini_rate_limit_(overresearch_planner_commits_final_action_graph|weak_verify_plan_normalizes_to_single_verify_action)/)'
 threads-required = "num-cpus"
 
+# Exact offline coding replay runs three clean-room agent executions. It takes
+# 8s in isolation, but 30 of 40 copies exceeded the workspace's 60s cap under
+# full CPU contention. Reserve the configured test pool so the cap measures
+# replay work rather than unrelated tests.
+[[profile.default.overrides]]
+filter = 'package(=harn-cli) and kind(=lib) and test(=commands::replay_offline_coding::tests::exact_replay_executes_recorded_read_edit_verify_turn)'
+threads-required = "num-test-threads"
+
 # ---------------------------------------------------------------------------
 # Wall-clock budget tests: reserve the runner while they measure
 # ---------------------------------------------------------------------------

@@ -1,0 +1,175 @@
+// Run: harn test tests/agent/purpose_labels_test.harn
+//
+// Deterministic unit tests for the purpose-label declaration grammar. These
+// cover the pure half of the mechanism: option normalization, label clamping,
+// and extracting the declaration out of one turn's prose. The event contract
+// and its wire shape are proven separately by the Rust ACP fixture test.
+import {
+  agent_purpose_label_config,
+  agent_purpose_label_extract,
+  agent_purpose_label_normalize,
+  agent_purpose_label_prefill,
+  agent_purpose_label_prompt_fragment,
+  agent_purpose_label_turn_nudge,
+} from "std/agent/purpose_labels"
+
+pipeline test_purpose_labels_default_off(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config()
+  assert(config.enabled == false)
+  assert(config.max_chars == 64)
+  assert(agent_purpose_label_prompt_fragment(config) == "")
+}
+
+pipeline test_purpose_labels_bool_shorthand(harness: Harness, task: unknown) {
+  assert(agent_purpose_label_config(true).enabled == true)
+  assert(agent_purpose_label_config(false).enabled == false)
+  assert(agent_purpose_label_config({max_chars: 24}).enabled == true)
+  assert(agent_purpose_label_config({max_chars: 24}).max_chars == 24)
+}
+
+pipeline test_purpose_labels_reject_bad_option(harness: Harness, task: unknown) {
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config("yes")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config({enabled: "yes"})
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config({max_chars: 4})
+      },
+    ),
+  )
+}
+
+pipeline test_purpose_label_normalize_collapses_and_clamps(harness: Harness, task: unknown) {
+  assert(agent_purpose_label_normalize("  Searching\n  for issues  ", 64) == "Searching for issues")
+  assert(agent_purpose_label_normalize(nil, 64) == "")
+  assert(agent_purpose_label_normalize("   ", 64) == "")
+  // Clipping keeps whole words and marks the truncation.
+  assert(
+    agent_purpose_label_normalize("Searching for open GitHub issues", 16) == "Searching for...",
+  )
+}
+
+pipeline test_purpose_label_extract_pulls_declaration(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config(true)
+  const result = agent_purpose_label_extract(
+    config,
+    "<purpose>Searching for GitHub issues</purpose>\nI will look at the tracker.",
+  )
+  assert(result.declared == true)
+  assert(result.label == "Searching for GitHub issues")
+  // The tag never reaches the rendered prose or the replayed history.
+  assert(result.text == "I will look at the tracker.")
+}
+
+pipeline test_purpose_label_extract_strips_every_declaration(harness: Harness, task: unknown) {
+  const result = agent_purpose_label_extract(
+    agent_purpose_label_config(true),
+    "<purpose>First</purpose>a<purpose>Second</purpose>b",
+  )
+  assert(result.label == "First")
+  assert(result.text == "ab")
+}
+
+pipeline test_purpose_label_extract_is_inert_when_off(harness: Harness, task: unknown) {
+  const text = "<purpose>Searching</purpose>rest"
+  const result = agent_purpose_label_extract(agent_purpose_label_config(), text)
+  assert(result.declared == false)
+  assert(result.label == "")
+  // Off means untouched, not stripped: the option must have no effect on prose.
+  assert(result.text == text)
+}
+
+pipeline test_purpose_label_extract_tolerates_undeclared_turn(harness: Harness, task: unknown) {
+  const result = agent_purpose_label_extract(
+    agent_purpose_label_config(true),
+    "Just prose, no declaration.",
+  )
+  assert(result.declared == false)
+  assert(result.label == "")
+  assert(result.text == "Just prose, no declaration.")
+}
+
+pipeline test_purpose_label_prompt_fragment_teaches_the_grammar(harness: Harness, task: unknown) {
+  const fragment = agent_purpose_label_prompt_fragment(agent_purpose_label_config(true))
+  assert(contains(fragment, "<purpose>"))
+  assert(contains(fragment, "</purpose>"))
+  assert(contains(fragment, "64"))
+}
+
+pipeline test_purpose_label_delivery_defaults_to_system(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config(true)
+  assert(config.delivery == "system")
+  assert(agent_purpose_label_prompt_fragment(config) != "")
+  // Only one seam carries the instruction wording, so `system` and `nudge`
+  // stay comparable. `prefill` is the exception and adds an opener on top.
+  assert(agent_purpose_label_turn_nudge(config) == "")
+  assert(agent_purpose_label_prefill(config) == "")
+}
+
+pipeline test_purpose_label_nudge_delivery_moves_the_instruction(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config({delivery: "nudge"})
+  assert(agent_purpose_label_prompt_fragment(config) == "")
+  assert(contains(agent_purpose_label_turn_nudge(config), "<purpose>"))
+  assert(agent_purpose_label_prefill(config) == "")
+}
+
+pipeline test_purpose_label_prefill_delivery_arms_the_opening_tag(harness: Harness, task: unknown) {
+  const config = agent_purpose_label_config({delivery: "prefill"})
+  // Prefill positions the declaration and the instruction says what belongs
+  // in it. Measured with the opener alone, the model continued its ordinary
+  // narration past the tag on 5 of 8 turns — every one a fired event carrying
+  // prose, which is worse than a miss because it reads as compliance.
+  assert(contains(agent_purpose_label_prompt_fragment(config), "<purpose>"))
+  assert(agent_purpose_label_turn_nudge(config) == "")
+  assert(agent_purpose_label_prefill(config) == "<purpose>")
+}
+
+pipeline test_purpose_label_reject_unknown_delivery(harness: Harness, task: unknown) {
+  assert(
+    is_err(
+      try {
+        agent_purpose_label_config({delivery: "sidecar"})
+      },
+    ),
+  )
+}
+
+/**
+ * A prefilled turn comes back without its opening tag. Reading that as "no
+ * declaration" would make the whole prefill rung measure zero while looking
+ * like model non-compliance.
+ */
+pipeline test_purpose_label_extract_recovers_a_prefilled_heading(harness: Harness, task: unknown) {
+  const result = agent_purpose_label_extract(
+    agent_purpose_label_config({delivery: "prefill"}),
+    "Listing the agent stdlib</purpose>\nHere are the entries.",
+  )
+  assert(result.declared == true)
+  assert(result.label == "Listing the agent stdlib")
+  assert(result.text == "Here are the entries.")
+}
+
+/**
+ * The orphan pattern is anchored, so a stray closing tag mid-prose cannot
+ * promote arbitrary text into a heading.
+ */
+pipeline test_purpose_label_orphan_recovery_is_anchored(harness: Harness, task: unknown) {
+  const result = agent_purpose_label_extract(
+    agent_purpose_label_config(true),
+    "I read the file. Then</purpose> I stopped.",
+  )
+  assert(result.declared == false)
+  assert(result.label == "")
+}

@@ -437,7 +437,11 @@ pub(crate) fn build_sandboxed_command(
     params: &crate::value::DictMap,
     label: &str,
 ) -> Result<tokio::process::Command, VmError> {
-    let launch = ProcessExecLaunch::from_params(params, label)?;
+    let mut launch = ProcessExecLaunch::from_params(params, label)?;
+    crate::process_sandbox::apply_active_rustc_wrapper_policy(
+        &mut launch.env,
+        &mut launch.env_remove,
+    );
     let mut cmd = crate::process_sandbox::tokio_command_for(&launch.program, &launch.args)
         .map_err(|error| contextualize_process_error(label, "sandbox setup", error))?;
     if let Some(cwd) = launch.cwd {
