@@ -9,6 +9,91 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.126
+
+### Added
+
+- Agents can now declare a plain-language purpose heading for a run of tool
+  calls — `<purpose>Searching for GitHub issues</purpose>` — which the loop
+  strips from the visible prose and publishes as a typed `purpose_label` event
+  for clients to render as a section heading. Default off behind the
+  `purpose_labels` agent-loop option, whose `delivery` field chooses whether the
+  instruction rides the system prompt, a per-turn nudge, or an assistant prefill.
+  A label is presentation metadata: it never gates, reorders, or delays a tool
+  call.
+
+### Changed
+
+- The calls verification, recovery, and terminal reporting can spend past the
+  iteration cap now come from one owner instead of three separate counters. The
+  allowances are unchanged; what changes is that the number the loop reports and
+  the number it obeys are the same number, so they can no longer drift.
+- `harn.agent_loop_call_budget_projection.v1` gained `grants_remaining`, the
+  live per-bucket count of extra iterations a run can still obtain.
+- The projected allowance for terminal reporting no longer varies with
+  `final_wrapup`. The guard that governs the terminal callback never consulted
+  it, so runs with wrap-up disabled were reported as having no terminal
+  allowance when they in fact had one.
+- Extended the canonical run-view fixture corpus to cover ordered execution spans, flight-recorder metadata,
+  explicit evidence gaps, and public suppression of host-local artifact paths.
+
+### Fixed
+
+- The agent loop now projects its remaining call budget before each turn spends
+  anything, emitting a `harn.agent_loop_call_budget_projection.v1` receipt
+  instead of discovering exhaustion once useful work can no longer be completed.
+  A measured zero is kept distinguishable from an unavailable measurement, so an
+  unmeasured loop no longer reads as exhausted. The projected reserve is a
+  forecast of whether the remaining budget can cover verification, recovery, and
+  terminal reporting; it does not yet withhold those calls.
+- The calls a run intends to keep for verification, recovery, and terminal
+  reporting are now named in one place rather than derived from a
+  verification-only reserve, and the recovery figure comes from the bound that
+  is actually enforced instead of a literal that had drifted from it.
+- A run blocked by the host-side pre-call budget gate is now attributed as
+  `pre_call_budget_block` rather than stopping unattributed.
+- **Empty user-test selections fail closed (#7709).** `harn test` now exits
+  nonzero when a user-test selection runs zero tests, matching its documented
+  default. Pass `--allow-empty` when an empty selection is intentional;
+  zero-file `--affected-from` selections keep producing successful empty
+  reports.
+- Preserve MCP elicitation form field order and JSON Schema dialects through input-required retries.
+- Preserve JSON Schema `minimum`, `maximum`, and fractional or large-integer
+  `multipleOf` constraints across Harn's canonical validation boundary.
+- The interactive REPL now expands or displays completions when you press Tab.
+- `harn connect status` no longer raises an operating-system credential prompt
+  for each stored connector secret. Deciding whether a connector is usable now
+  asks the secret store whether a credential exists instead of reading its value,
+  which on macOS is the difference between an attribute search and one Keychain
+  access dialog per item.
+- Repeated equivalent egress-policy contributions now preserve one rule and one provenance entry per axis.
+- Cargo bootstrap now rejects automatically discovered lease runners that can
+  spin while waiting on a contended Rust build lease.
+- **Maintained runnable examples now import their public stdlib entrypoints
+  explicitly (#7788).** Agent-loop and portal examples no longer fail checking
+  or execution with undefined-function diagnostics.
+- An accepted mid-run steer now updates what the run is obligated to deliver.
+  The completion judge previously read only the task the session opened with, so
+  a user who redirected a run mid-turn — "stop doing that, report what you found
+  instead" — would watch the judge veto the very stop they had authorized and
+  order the withdrawn work redone. The judge's prompt now carries the accepted
+  steering with explicit supersession authority over the completion goal, the
+  rubric, and any requirement row frozen at loop start.
+- The amended completion target is derived once, at the judge payload seam, and
+  carried on the terminal evidence snapshot, so a `verify_completion` closure and
+  the completion gate read the same obligations the judge does rather than
+  re-deriving a goal from raw transcript history. A steer is identified by the
+  typed delivery mode the host bridge now stamps on each delivered user message,
+  not by transcript position; an `audit_only` note the model never saw cannot
+  change the completion target.
+- A run with no accepted steer renders no steering block, keeps a byte-identical
+  judge prefix, and keeps an unchanged terminal evidence identity. The judge's
+  authority over a lazy or unverified stop is unchanged.
+- The VS Code extension now compiles against its oldest supported editor API, and
+  dependency automation keeps the editor engine and compile-time types coupled.
+- The optional testbench WASI process sandbox now supports Wasmtime 48 while
+  keeping guest writes inside its ephemeral preopen and filesystem overlay.
+
 ## v0.10.125
 
 ### Breaking
