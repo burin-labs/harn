@@ -1,6 +1,8 @@
 import { run_ci_cache_policy } from "./ci_cache_policy/entrypoint.harn"
 pub import {
   ci_linux_lane_policy_errors,
+  producer_cache_save_reserve_minutes,
+  producer_hosted_ceiling_minutes,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
   sccache_action_cache_size_errors,
