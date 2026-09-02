@@ -343,11 +343,9 @@ mod tests {
             dir.path().join("locks"),
         );
         let source = dir.path().join("main.harn");
-        std::fs::write(
-            crate::runtime_paths::run_root(dir.path()),
-            "not a directory",
-        )
-        .unwrap();
+        let run_root = crate::runtime_paths::run_root(dir.path());
+        std::fs::create_dir_all(run_root.parent().unwrap()).unwrap();
+        std::fs::write(run_root, "not a directory").unwrap();
         let flight_path = dir.path().join("flight.json");
         let mut vm = crate::Vm::new();
         vm.enable_flight_recorder(8);

@@ -287,11 +287,9 @@ async fn run_record_failure_reports_the_surviving_flight_artifact() {
     let script = temp.path().join("main.harn");
     let flight_path = temp.path().join("flight.json");
     std::fs::write(&script, "fn main(harness: Harness) { return 0 }").unwrap();
-    std::fs::write(
-        harn_vm::runtime_paths::run_root(temp.path()),
-        "not a directory",
-    )
-    .unwrap();
+    let run_root = harn_vm::runtime_paths::run_root(temp.path());
+    std::fs::create_dir_all(run_root.parent().unwrap()).unwrap();
+    std::fs::write(run_root, "not a directory").unwrap();
 
     let outcome = execute_run_with_options(
         script.to_str().unwrap(),
