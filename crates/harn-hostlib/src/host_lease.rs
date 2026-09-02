@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use uuid::Uuid;
 
-use self::admission::WaiterIdentity;
+use self::admission::{WaitProgressSchedule, WaiterIdentity};
 use self::schema::{
     add_domain_key, add_execution_context_column, create_current_lease_table, create_waiter_table,
     lease_table_layout, migrate_legacy_lease_table, LeaseTableLayout,
@@ -53,33 +53,6 @@ const RUN_RECEIPT_SCHEMA_VERSION: u32 = 4;
 const WHOLE_MACHINE_RESOURCE_CLASS: &str = "whole-machine";
 /// Coordination domain used when callers do not name one explicitly.
 pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
-
-const WAIT_PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
-
-#[derive(Clone, Copy, Debug)]
-struct WaitProgressSchedule {
-    next_due: Duration,
-}
-
-impl WaitProgressSchedule {
-    fn new() -> Self {
-        Self {
-            next_due: Duration::ZERO,
-        }
-    }
-
-    fn should_report(&mut self, elapsed: Duration) -> bool {
-        if elapsed < self.next_due {
-            return false;
-        }
-        self.next_due = elapsed.saturating_add(WAIT_PROGRESS_INTERVAL);
-        true
-    }
-
-    fn until_next(self, elapsed: Duration) -> Duration {
-        self.next_due.saturating_sub(elapsed)
-    }
-}
 
 /// Failures produced while validating or mutating host lease state.
 #[derive(Debug, thiserror::Error)]
