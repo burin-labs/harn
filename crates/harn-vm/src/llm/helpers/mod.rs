@@ -126,6 +126,79 @@ pub fn vm_value_to_export_json(val: &VmValue) -> serde_json::Value {
     }
 }
 
+/// Strict structural JSON representation for values crossing a portable tool
+/// boundary.
+///
+/// This preserves nominal enum identity like [`vm_value_to_export_json`] while
+/// refusing runtime-only values like [`vm_value_to_json_strict`]. Tool schemas
+/// and tool results therefore share one wire representation without silently
+/// stringifying capabilities or handles.
+pub fn vm_value_to_export_json_strict(
+    val: &VmValue,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    match val {
+        VmValue::EnumVariant(value) => {
+            let mut fields = Vec::with_capacity(value.fields.len());
+            for (index, field) in value.fields.iter().enumerate() {
+                fields.push(vm_value_to_export_json_strict(
+                    field,
+                    &format!("{path}.fields[{index}]"),
+                )?);
+            }
+            Ok(serde_json::json!({
+                "enum": value.enum_name.as_str(),
+                "variant": value.variant.as_str(),
+                "fields": fields,
+            }))
+        }
+        VmValue::List(items) => {
+            let mut values = Vec::with_capacity(items.len());
+            for (index, item) in items.iter().enumerate() {
+                values.push(vm_value_to_export_json_strict(
+                    item,
+                    &format!("{path}[{index}]"),
+                )?);
+            }
+            Ok(serde_json::Value::Array(values))
+        }
+        VmValue::Set(items) => {
+            let mut values = Vec::with_capacity(items.len());
+            for (index, item) in items.iter().enumerate() {
+                values.push(vm_value_to_export_json_strict(
+                    item,
+                    &format!("{path}[{index}]"),
+                )?);
+            }
+            Ok(serde_json::Value::Array(values))
+        }
+        VmValue::Dict(entries) => {
+            let mut values = serde_json::Map::new();
+            for (key, value) in entries.iter() {
+                values.insert(
+                    key.to_string(),
+                    vm_value_to_export_json_strict(value, &format!("{path}.{key}"))?,
+                );
+            }
+            Ok(serde_json::Value::Object(values))
+        }
+        VmValue::StructInstance(_) => {
+            let fields = val
+                .struct_fields_map()
+                .expect("a struct instance always has a field map");
+            let mut values = serde_json::Map::new();
+            for (key, value) in fields.iter() {
+                values.insert(
+                    key.to_string(),
+                    vm_value_to_export_json_strict(value, &format!("{path}.{key}"))?,
+                );
+            }
+            Ok(serde_json::Value::Object(values))
+        }
+        other => vm_value_to_json_strict(other, path),
+    }
+}
+
 /// Strict variant of [`vm_value_to_json`] for durable persistence seams
 /// (worker snapshots, session state written to disk).
 ///
@@ -168,7 +241,11 @@ pub fn vm_value_to_json_strict(val: &VmValue, path: &str) -> Result<serde_json::
         | VmValue::Generator(_)
         | VmValue::Stream(_)
         | VmValue::Iter(_)
-        | VmValue::Harness(_) => Err(format!("{path}: {} is not serializable", val.type_name())),
+        | VmValue::Harness(_)
+        | VmValue::Resource(_)
+        | VmValue::ResourceGuard(_) => {
+            Err(format!("{path}: {} is not serializable", val.type_name()))
+        }
         other => Ok(vm_value_to_json(other)),
     }
 }
@@ -196,6 +273,57 @@ mod tests {
     use crate::value::VmDictExt;
 
     use std::rc::Rc;
+
+    #[test]
+    fn strict_export_json_preserves_nominal_enums_and_rejects_resources() {
+        let value = VmValue::enum_variant(
+            "Outcome",
+            "Success",
+            vec![VmValue::Dict(
+                crate::value::DictMap::from_iter([(
+                    crate::value::intern_key("message"),
+                    VmValue::String("hello".into()),
+                )])
+                .into(),
+            )],
+        );
+        assert_eq!(
+            vm_value_to_export_json_strict(&value, "result").expect("portable enum"),
+            serde_json::json!({
+                "enum": "Outcome",
+                "variant": "Success",
+                "fields": [{"message": "hello"}],
+            })
+        );
+
+        let set = VmValue::set([
+            VmValue::String("first".into()),
+            VmValue::String("second".into()),
+        ]);
+        assert_eq!(
+            vm_value_to_export_json_strict(&set, "result").expect("portable set"),
+            serde_json::json!(["first", "second"]),
+        );
+
+        let resource = VmValue::resource(crate::value::VmResourceHandle::new(
+            "private-resource-label",
+            (),
+        ));
+        let error = vm_value_to_export_json_strict(&resource, "result")
+            .expect_err("root resource must not cross a portable boundary");
+        assert!(error.contains("resource is not serializable"), "{error}");
+        assert!(!error.contains("private-resource-label"), "{error}");
+
+        let guard = VmValue::resource_guard(crate::value::VmResourceGuardHandle::new(
+            "private-guard-label",
+            || Ok(VmValue::Nil),
+        ));
+        let nested = VmValue::List(std::sync::Arc::new(vec![guard]));
+        let error = vm_value_to_export_json_strict(&nested, "result")
+            .expect_err("nested resource guard must not cross a portable boundary");
+        assert!(error.contains("result[0]: resource_guard is not serializable"));
+        assert!(!error.contains("private-guard-label"), "{error}");
+    }
 
     #[test]
     fn local_provider_is_selected_when_local_base_url_and_model_are_set() {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -10,27 +10,34 @@ use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 use harn_vm::event_log::{
     active_event_log, install_active_event_log, install_default_for_base_dir, AnyEventLog,
 };
-use harn_vm::llm::vm_value_to_export_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
-use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm, VmValue};
+#[cfg(test)]
+use harn_vm::VmValue;
+use harn_vm::{inject_leading_authority, ActorChain, TenantId, TraceId, Vm};
 use tokio::task::LocalSet;
 use tracing::Instrument;
 
 use crate::auth::{AuthPolicy, AuthRequest, AuthenticatedPrincipal, AuthorizationDecision};
 use crate::limits::{LimitContext, LimitDecision, LimitGuard, LimitRegistry};
 use crate::replay::{InMemoryReplayCache, ReplayCache, ReplayCacheEntry, ReplayKey};
-use crate::{BudgetSpec, DispatchError, ExportCatalog, ExportedCallableKind};
+use crate::{BudgetSpec, DispatchError, ExportedCallableKind};
 
+mod arguments;
 mod config;
 mod error_classification;
 mod prepared_generation;
+mod prepared_tools;
+#[cfg(test)]
+use arguments::lift_flat_single_object_arg;
+use arguments::{build_vm_args, canonical_arguments_json};
 pub use config::DispatchCoreConfig;
 #[cfg(test)]
 use error_classification::budget_category_from_error;
 use error_classification::classify_vm_error;
 use prepared_generation::PreparedDispatchGeneration;
 pub use prepared_generation::{DispatchCallReceipt, DispatchGenerationReceipt};
+use prepared_tools::PreparedTools;
 
 struct ActiveEventLogGuard {
     previous: Option<Arc<AnyEventLog>>,
@@ -256,31 +263,27 @@ impl VmConfigurator for NoopVmConfigurator {}
 
 pub struct DispatchCore {
     config: DispatchCoreConfig,
-    catalog: ExportCatalog,
+    tools: PreparedTools,
     event_log: Arc<harn_vm::event_log::AnyEventLog>,
     generation: PreparedDispatchGeneration,
 }
 
 impl DispatchCore {
     pub fn new(config: DispatchCoreConfig) -> Result<Self, DispatchError> {
-        let catalog = ExportCatalog::from_path(&config.script_path)?;
+        let tools = PreparedTools::prepare(&config.script_path)?;
         let event_log = install_default_for_base_dir(&config.base_dir).map_err(|error| {
             DispatchError::Io(format!(
                 "failed to initialize event log for {}: {error}",
                 config.base_dir.display()
             ))
         })?;
-        let generation = PreparedDispatchGeneration::prepare(&config, &catalog)?;
+        let generation = PreparedDispatchGeneration::prepare(&config, tools.exports())?;
         Ok(Self {
             config,
-            catalog,
+            tools,
             event_log,
             generation,
         })
-    }
-
-    pub fn catalog(&self) -> &ExportCatalog {
-        &self.catalog
     }
 
     pub fn auth_policy(&self) -> &AuthPolicy {
@@ -294,7 +297,7 @@ impl DispatchCore {
     pub async fn dispatch(&self, mut request: CallRequest) -> Result<CallResponse, DispatchError> {
         let trace_id = request.trace_id.clone().unwrap_or_default();
         let function_scopes = self
-            .catalog
+            .catalog()
             .function(&request.function)
             .map(|function| function.required_scopes.clone())
             .unwrap_or_default();
@@ -370,13 +373,17 @@ impl DispatchCore {
             }
         }
 
-        let function = self.catalog.function(&request.function).ok_or_else(|| {
+        let function = self.catalog().function(&request.function).ok_or_else(|| {
             DispatchError::MissingExport(format!(
                 "function '{}' is not exported by {}",
                 request.function,
-                self.catalog.script_path.display()
+                self.catalog().script_path.display()
             ))
         })?;
+        let canonical_input = canonical_arguments_json(&request.arguments, function)?;
+        self.prepared_tool_catalog()
+            .validate_input(&request.function, &canonical_input)
+            .map_err(|error| DispatchError::Validation(error.to_string()))?;
 
         // Rate-limit + backpressure gate. Every dispatch attempt passes this
         // gate before replay lookup. The in-flight counter decrements when the
@@ -386,6 +393,13 @@ impl DispatchCore {
         let replay_key = request.replay_key.clone().map(ReplayKey);
         if let Some(key) = replay_key.as_ref() {
             if let Some(cached) = self.config.replay_cache.get(key).await? {
+                self.prepared_tool_catalog()
+                    .validate_output(&request.function, &cached.value)
+                    .map_err(|error| {
+                        DispatchError::Execution(format!(
+                            "replay cache contains a value outside the current tool contract: {error}"
+                        ))
+                    })?;
                 return Ok(CallResponse {
                     function: request.function.clone(),
                     value: cached.value,
@@ -432,7 +446,13 @@ impl DispatchCore {
         let invocation = async {
             let value = match function.kind {
                 ExportedCallableKind::Function => self.invoke_function(&request, function).await?,
-                ExportedCallableKind::Pipeline => self.invoke_pipeline(&request, function).await?,
+                ExportedCallableKind::Pipeline => {
+                    let value = self.invoke_pipeline(&request, function).await?;
+                    self.prepared_tool_catalog()
+                        .validate_output(&request.function, &value.0)
+                        .map_err(DispatchError::Contract)?;
+                    value
+                }
             };
             Ok::<_, DispatchError>(value)
         }
@@ -568,7 +588,7 @@ impl DispatchCore {
                             self.generation.source(),
                         )
                         .await
-                        .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                        .map_err(classify_vm_error)?;
                     let Some(closure) = exports.get(&request.function) else {
                         return Err(DispatchError::MissingExport(format!(
                             "function '{}' is not exported by {}",
@@ -587,10 +607,8 @@ impl DispatchCore {
                     args.extend(user_args);
                     let result = vm.call_closure_pub(closure, &args).await;
 
-                    match result {
-                        Ok(value) => Ok((vm_value_to_export_json(&value), vm.output().to_string())),
-                        Err(error) => Err(classify_vm_error(error)),
-                    }
+                    let (_, json) = self.tools.classify_result(&request.function, result)?;
+                    Ok((json, vm.output().to_string()))
                 })
                 .await
             }))
@@ -668,7 +686,7 @@ impl DispatchCore {
                             let output = vm.output().to_string();
                             Ok((serde_json::Value::String(output.clone()), output))
                         }
-                        Err(error) => Err(classify_vm_error(error)),
+                        Err(error) => Err(self.tools.classify_failure(&function.name, error)),
                     }
                 })
                 .await
@@ -719,129 +737,6 @@ impl DispatchCore {
             .map_err(|error| {
                 DispatchError::Execution(format!("failed to append trust record: {error}"))
             })
-    }
-}
-
-fn build_vm_args(
-    arguments: &CallArguments,
-    function: &crate::ExportedFunction,
-) -> Result<Vec<VmValue>, DispatchError> {
-    // ExportCatalog already removes the contiguous host-injected authority
-    // prefix. The remaining parameters are exactly the caller-owned JSON API.
-    let params = function.params.as_slice();
-
-    let rest = match arguments {
-        CallArguments::Positional(values) => {
-            values.iter().map(json_to_vm_value).collect::<Vec<_>>()
-        }
-        CallArguments::Named(values) => {
-            // Tolerate clients that emit a single-object-param tool's arguments
-            // FLAT at the top level instead of nested under the parameter name
-            // (harn#5039). See `lift_flat_single_object_arg`.
-            let lifted = lift_flat_single_object_arg(params, values);
-            let values: &BTreeMap<String, serde_json::Value> = lifted.as_ref().unwrap_or(values);
-            let mut args = Vec::new();
-            let mut saw_gap = false;
-            for param in params {
-                let value = values.get(&param.name);
-                match value {
-                    Some(value) => {
-                        if saw_gap {
-                            return Err(DispatchError::Validation(format!(
-                                "named arguments for '{}' skipped '{}' before later arguments",
-                                function.name, param.name
-                            )));
-                        }
-                        args.push(json_to_vm_value(value));
-                    }
-                    None if param.has_default => {
-                        saw_gap = true;
-                    }
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
-            }
-            trim_trailing_defaults(args)
-        }
-    };
-
-    Ok(rest)
-}
-
-/// Tolerate MCP/JSON-RPC clients that emit a single-object-parameter tool's
-/// arguments FLAT at the top level instead of nested under the parameter name
-/// (harn#5039).
-///
-/// Harn projects `pub fn tool(params: { field: T, .. })` into an MCP
-/// `inputSchema` that nests every field under `params`. Some model clients
-/// (notably local/open-weight models) ignore that wrapper and emit the inner
-/// fields at the top level — e.g. `{ "events_dir": ".." }` instead of
-/// `{ "params": { "events_dir": ".." } }`. Bound by name, those flat keys match
-/// no parameter and are dropped, so the tool silently runs on its default and
-/// reports the field as "required".
-///
-/// When the function declares exactly one object-typed parameter and the
-/// incoming named map both (a) omits that parameter's own name and (b) is
-/// non-empty, wrap the whole map as that parameter's value. This is:
-/// - **idempotent** — a correctly-nested `{ "params": { .. } }` call already
-///   contains the parameter name, so it is passed through untouched;
-/// - **strictly additive** — it only rewrites calls whose keys would otherwise
-///   all be dropped (the parameter falling back to its default), never a call
-///   that already binds the parameter;
-/// - **shape-guarded** — it fires only for object-typed parameters, so a scalar
-///   single-parameter tool still reports a clear "missing required argument"
-///   instead of a spurious type error.
-///
-/// Returns the rewritten map when the lift applies, else `None` (bind the
-/// original arguments unchanged).
-fn lift_flat_single_object_arg(
-    params: &[crate::ExportedParam],
-    values: &BTreeMap<String, serde_json::Value>,
-) -> Option<BTreeMap<String, serde_json::Value>> {
-    let [only] = params else {
-        return None;
-    };
-    if only.rest || !only.accepts_json_object() {
-        return None;
-    }
-    if values.is_empty() || values.contains_key(&only.name) {
-        return None;
-    }
-    let wrapped = serde_json::Value::Object(values.clone().into_iter().collect());
-    Some(BTreeMap::from([(only.name.clone(), wrapped)]))
-}
-
-fn trim_trailing_defaults(mut args: Vec<VmValue>) -> Vec<VmValue> {
-    let mut tail = VecDeque::from(args);
-    while matches!(tail.back(), Some(VmValue::Nil)) {
-        tail.pop_back();
-    }
-    args = tail.into_iter().collect();
-    args
-}
-
-fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
-    match value {
-        serde_json::Value::Null => VmValue::Nil,
-        serde_json::Value::Bool(value) => VmValue::Bool(*value),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map(VmValue::Int)
-            .or_else(|| value.as_f64().map(VmValue::Float))
-            .unwrap_or(VmValue::Nil),
-        serde_json::Value::String(value) => VmValue::String(arcstr::ArcStr::from(value.as_str())),
-        serde_json::Value::Array(items) => VmValue::List(Arc::new(
-            items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
-        )),
-        serde_json::Value::Object(map) => VmValue::dict(
-            map.iter()
-                .map(|(key, value)| (key.clone(), json_to_vm_value(value)))
-                .collect::<harn_vm::value::DictMap>(),
-        ),
     }
 }
 
@@ -1629,6 +1524,8 @@ pub fn whoami(harness: Harness) -> string {
     mod dispatch_error_tests;
     #[path = "prepared_generation_tests.rs"]
     mod prepared_generation_tests;
+    #[path = "prepared_tools_tests.rs"]
+    mod prepared_tools_tests;
     #[path = "trusted_host_dispatch_tests.rs"]
     mod trusted_host_dispatch_tests;
     #[path = "typed_pipeline_tests.rs"]

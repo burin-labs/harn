@@ -18,11 +18,9 @@ mod string_list;
 use string_list::parse_string_list;
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
-
 #[cfg(test)]
 #[path = "agents_sub_agent_lifecycle_tests.rs"]
 mod lifecycle_tests;
-
 pub(super) struct ParsedSubAgentRequest {
     pub(super) spec: SubAgentRunSpec,
     pub(super) background: bool,
@@ -572,6 +570,8 @@ fn nested_budget_denial_error(result: &serde_json::Value) -> Option<VmValue> {
         .unwrap_or_else(|| {
             serde_json::json!({
                 "category": "budget_exceeded",
+                "kind": "budget_exhausted",
+                "reason": "nested_execution_budget_exhausted",
                 "message": "nested execution budget exhausted",
             })
         });

@@ -8,10 +8,23 @@ use crate::DispatchError;
 /// * `ErrorCategory::Cancelled` — caller-initiated cancel (HTTP 499).
 /// * `ErrorCategory::BudgetExceeded` — a `@budget(...)` ceiling fired
 ///   (HTTP 429, `code = "budget_exceeded"`).
+/// * the owned missing-tenant auth diagnostic retains its actionable text;
+///   every other auth error remains value-free at this boundary.
 /// * everything else → `Execution` (HTTP 500).
 pub(super) fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
     let category = harn_vm::error_to_category(&error);
-    let message = error.to_string();
+    if matches!(category, harn_vm::ErrorCategory::Auth)
+        && matches!(
+            &error,
+            harn_vm::VmError::CategorizedError { message, .. }
+                if message == harn_vm::harness_tenant::MISSING_TENANT_MESSAGE
+        )
+    {
+        return DispatchError::Execution(
+            harn_vm::harness_tenant::MISSING_TENANT_MESSAGE.to_string(),
+        );
+    }
+    let message = harn_vm::tool_registry::tool_runtime_error_summary(&error);
     match category {
         harn_vm::ErrorCategory::Cancelled => DispatchError::Cancelled(message),
         harn_vm::ErrorCategory::BudgetExceeded => DispatchError::BudgetExceeded {
@@ -32,10 +45,17 @@ pub(super) fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
 /// mid-call variant instead, where we disambiguate on the message.
 pub(super) fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
     match error {
-        harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => d
-            .get("limit")
-            .map(|value| value.display())
-            .filter(|s| !s.is_empty()),
+        harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => {
+            let harn_vm::VmValue::String(limit) = d.get("limit")? else {
+                return None;
+            };
+            let limit = limit.as_str();
+            matches!(
+                limit,
+                "llm_cost_usd" | "llm_tokens" | "mcp_calls" | "pg_queries"
+            )
+            .then(|| limit.to_string())
+        }
         harn_vm::VmError::CategorizedError { message, .. } if message.contains("LLM") => {
             if message.contains("token") {
                 Some("llm_tokens".to_string())

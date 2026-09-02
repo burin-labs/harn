@@ -4,6 +4,7 @@ use super::*;
 mod stream_helpers;
 mod terminal_projection;
 mod tool_call_artifacts;
+mod typed_application_errors;
 
 use stream_helpers::{collect_task_stream_until_terminal, events_json, is_progress_status_update};
 

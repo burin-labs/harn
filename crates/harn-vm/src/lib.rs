@@ -357,7 +357,7 @@ pub use mcp_server::{
     take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,
     take_mcp_serve_resource_templates, take_mcp_serve_resources, tool_registry_to_mcp_tools,
     McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServer, McpServerMetadata,
-    McpServerReload,
+    McpServerReload, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
@@ -845,12 +845,17 @@ impl TypeSchemaResolver {
         let mut required = Vec::new();
 
         for param in params {
-            let param_schema = param
+            let item_schema = param
                 .type_expr
                 .as_ref()
                 .and_then(|type_expr| self.json_schema_for_input_type_expr(type_expr))
                 .unwrap_or_else(|| serde_json::json!({}));
-            if param.default_value.is_none() {
+            let param_schema = if param.rest {
+                serde_json::json!({"type": "array", "items": item_schema})
+            } else {
+                item_schema
+            };
+            if param.default_value.is_none() && !param.rest {
                 required.push(serde_json::Value::String(param.name.clone()));
             }
             properties.insert(param.name.clone(), param_schema);
@@ -972,6 +977,14 @@ mod schema_alias_resolver_tests {
             serde_json::json!({}),
             "the alias parameter must not erase to an empty schema",
         );
+    }
+
+    #[test]
+    fn rest_parameters_project_as_optional_arrays_of_the_declared_item_type() {
+        let schema = fn_params_schema("pub fn collect(prefix: string, ...values: int) {}");
+        assert_eq!(schema["properties"]["values"]["type"], "array");
+        assert_eq!(schema["properties"]["values"]["items"]["type"], "integer");
+        assert_eq!(schema["required"], serde_json::json!(["prefix"]));
     }
 
     #[test]

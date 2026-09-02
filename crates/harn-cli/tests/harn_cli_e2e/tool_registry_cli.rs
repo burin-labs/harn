@@ -12,6 +12,12 @@ fn fixture() -> (tempfile::TempDir, String) {
         r#"
 import { ToolRegistry, tool_registry_from } from "std/tools"
 
+type WidgetLookupError = {variant: "NotFound", message: string, secret: string}
+
+fn fail_widget(_args: dict) -> any throws WidgetLookupError {
+  throw {variant: "NotFound", message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456", secret: "typed-detail"}
+}
+
 fn registry() -> ToolRegistry {
   return tool_registry_from([
     {
@@ -29,7 +35,13 @@ fn registry() -> ToolRegistry {
       },
       annotations: {readOnlyHint: true, destructiveHint: false},
       execution_policy: {kind: "fetch", side_effect_level: "network"},
-      cli: {command: ["widgets", "get"]},
+      cli: {
+        command: ["widgets", "get"],
+        arguments: {
+          widget_id: {position: 0, value_name: "WIDGET"},
+          verbose: {long: "verbose", short: "v", aliases: ["detailed"]},
+        },
+      },
       source: {
         kind: "openapi",
         id: "getWidget",
@@ -53,7 +65,34 @@ fn registry() -> ToolRegistry {
       cli: {command: ["remote", "probe"]},
       handler: {_args -> {surface: "mcp"}},
     },
-  ], {name: "widgets", version: "1.2.3", description: "Widget integration"})
+    {
+      name: "fail_widget",
+      description: "Return one declared widget failure.",
+      parameters: {},
+      error_schema: {
+        type: "object",
+        properties: {
+          variant: {const: "NotFound"},
+          message: {type: "string"},
+          secret: {type: "string"},
+        },
+        required: ["variant", "message", "secret"],
+        additionalProperties: false,
+      },
+      cli: {command: ["widgets", "fail"]},
+      handler: fail_widget,
+    },
+  ], {
+    info: {name: "widgets", version: "1.2.3", description: "Widget integration"},
+    cli: {
+      commands: [{
+        command: ["widgets"],
+        title: "Manage widgets",
+        aliases: ["w"],
+        display_order: 1,
+      }],
+    },
+  })
 }
 
 fn main(harness: Harness) {
@@ -79,7 +118,7 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
         String::from_utf8_lossy(&schema.stderr)
     );
     let schema: JsonValue = serde_json::from_slice(&schema.stdout).expect("schema JSON");
-    assert_eq!(schema["schema_version"], "harn-tools/1.0");
+    assert_eq!(schema["schema_version"], "harn-tools/2.0");
     assert_eq!(schema["info"]["name"], "widgets");
     assert_eq!(schema["tools"][0]["name"], "lookup_widget");
     assert_eq!(
@@ -99,22 +138,14 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
         .expect("help command");
     assert!(help.status.success());
     let help = String::from_utf8_lossy(&help.stdout);
-    assert!(help.contains("--widget-id <INT>"), "{help}");
+    assert!(help.contains("[WIDGET]"), "{help}");
+    assert!(help.contains("-v, --verbose <VERBOSE>"), "{help}");
     assert!(help.contains("--harn-input"), "{help}");
     assert!(help.contains("--json"), "{help}");
 
     let run = harn_e2e_command()
         .args([
-            "tool",
-            "run",
-            &path,
-            "widgets",
-            "get",
-            "--widget-id",
-            "42",
-            "--verbose",
-            "false",
-            "--json",
+            "tool", "run", &path, "w", "get", "42", "-v", "false", "--json",
         ])
         .output()
         .expect("run command");
@@ -127,6 +158,27 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
         serde_json::from_slice::<JsonValue>(&run.stdout).expect("run JSON"),
         serde_json::json!({"id": 42, "verbose": false})
     );
+}
+
+#[test]
+fn tool_registry_generates_completion_from_the_same_command_tree() {
+    let (_temp, path) = fixture();
+
+    for shell in ["bash", "zsh", "fish", "power-shell"] {
+        let output = harn_e2e_command()
+            .args(["tool", "completions", &path, "--shell", shell])
+            .output()
+            .expect("completion command");
+        assert!(
+            output.status.success(),
+            "{shell} completion failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let script = String::from_utf8_lossy(&output.stdout);
+        for token in ["widgets", "get", "verbose"] {
+            assert!(script.contains(token), "{shell} omitted {token}: {script}");
+        }
+    }
 }
 
 #[test]
@@ -171,4 +223,154 @@ fn tool_registry_cli_rejects_schema_violations_before_dispatch() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("do not match its schema"), "{stderr}");
     assert!(stderr.contains("minimum"), "{stderr}");
+}
+
+#[test]
+fn tool_registry_cli_emits_typed_application_errors_without_raw_human_data() {
+    let (_temp, path) = fixture();
+    let json = harn_e2e_command()
+        .args(["tool", "run", &path, "widgets", "fail", "--json"])
+        .output()
+        .expect("JSON application error");
+    assert!(!json.status.success());
+    assert_eq!(
+        serde_json::from_slice::<JsonValue>(&json.stdout).expect("error envelope"),
+        serde_json::json!({
+            "ok": false,
+            "error": {
+                "kind": "application",
+                "tool": "fail_widget",
+                "data": {
+                    "variant": "NotFound",
+                    "message": "PRIVATE-CUSTOMER-DIAGNOSTIC-123456",
+                    "secret": "typed-detail",
+                },
+            },
+        })
+    );
+
+    let human = harn_e2e_command()
+        .args([
+            "tool",
+            "run",
+            &path,
+            "widgets",
+            "fail",
+            "--harn-output",
+            "text",
+        ])
+        .output()
+        .expect("human application error");
+    assert!(!human.status.success());
+    assert!(human.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&human.stderr);
+    assert!(stderr.contains("declared application error"), "{stderr}");
+    assert!(!stderr.contains("typed-detail"), "{stderr}");
+    assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+}
+
+#[test]
+fn tool_registry_cli_does_not_render_a_top_level_thrown_value() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = temp.path().join("startup-failure.harn");
+    fs::write(
+        &script,
+        r#"throw {message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"}"#,
+    )
+    .expect("write startup failure");
+
+    let output = harn_e2e_command()
+        .args(["tool", "run", &script.display().to_string()])
+        .output()
+        .expect("startup failure");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("tool threw an undeclared value"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+}
+
+#[test]
+fn tool_schema_exports_is_offline_typed_and_byte_deterministic() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let contracts = temp.path().join("contracts.harn");
+    let script = temp.path().join("server.harn");
+    let execution_marker = temp.path().join("main-executed.txt");
+    fs::write(
+        &contracts,
+        r"
+pub struct Envelope<T> {
+  value: T
+  tags: list<string>
+}
+pub type Request = {query: string, options: {limit: int}}
+pub type Response = Envelope<{id: string, score: float}>
+",
+    )
+    .expect("write imported contracts");
+    fs::write(
+        &script,
+        format!(
+            r#"
+import {{ Request, Response }} from "./contracts"
+fn main(harness: Harness) {{
+  harness.fs.write_text({}, "executed")
+  panic("tool schema exports executed main")
+}}
+/// Search records
+pub fn search(request: Request) -> Response {{
+  return {{value: {{id: request.query, score: 1.0}}, tags: []}}
+}}
+"#,
+            serde_json::to_string(&execution_marker.display().to_string()).unwrap()
+        ),
+    )
+    .expect("write export server");
+
+    let run = || {
+        harn_e2e_command()
+            .args([
+                "tool",
+                "schema",
+                &script.display().to_string(),
+                "--surface",
+                "exports",
+            ])
+            .output()
+            .expect("tool schema exports command")
+    };
+    let first = run();
+    let second = run();
+    for output in [&first, &second] {
+        assert!(
+            output.status.success(),
+            "exports schema failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("executed main"), "{stderr}");
+        assert!(!stderr.contains("capability"), "{stderr}");
+    }
+    assert_eq!(first.stdout, second.stdout, "catalog bytes must be stable");
+    assert!(
+        !execution_marker.exists(),
+        "offline export discovery must not invoke main or filesystem capabilities"
+    );
+
+    let catalog: JsonValue = serde_json::from_slice(&first.stdout).expect("catalog JSON");
+    assert_eq!(catalog["schema_version"], "harn-tools/2.0");
+    assert_eq!(catalog["tools"][0]["name"], "search");
+    assert_eq!(
+        catalog["tools"][0]["inputSchema"]["properties"]["request"]["properties"]["options"]
+            ["properties"]["limit"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        catalog["tools"][0]["outputSchema"]["properties"]["value"]["properties"]["score"]["type"],
+        "number"
+    );
+    assert_eq!(catalog["tools"][0]["cli"]["hidden"], false);
+    assert_eq!(catalog["tools"][0]["deferLoading"], false);
 }
