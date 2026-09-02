@@ -45,10 +45,15 @@ pub(crate) fn tool_summary(description: &str) -> String {
         return description.trim().to_string();
     }
 
+    // `str::get` rather than `head[..end]` throughout: the workspace denies
+    // `clippy::string_slice`, and the fallback is the honest one either way —
+    // an offset that is somehow not a character boundary serves the whole
+    // sentence rather than panicking or cutting a character in half.
     let mut taken = 0usize;
     for end in sentence_ends(head) {
         taken = end;
-        if head[..end].trim().chars().count() >= MIN_SUMMARY_CHARS {
+        let prefix = head.get(..end).unwrap_or(head);
+        if prefix.trim().chars().count() >= MIN_SUMMARY_CHARS {
             break;
         }
     }
@@ -57,7 +62,7 @@ pub(crate) fn tool_summary(description: &str) -> String {
         // sentence, and half of it is worse than all of it.
         return head.to_string();
     }
-    head[..taken].trim().to_string()
+    head.get(..taken).unwrap_or(head).trim().to_string()
 }
 
 /// Byte offsets just past each sentence-ending punctuation run in `text`.
@@ -83,7 +88,14 @@ fn sentence_ends(text: &str) -> Vec<usize> {
         while end < bytes.len() && matches!(bytes[end], b'.' | b'!' | b'?' | b'"' | b')' | b'\'') {
             end += 1;
         }
-        match text[end..].chars().next() {
+        // `end` only ever walks forward over ASCII punctuation from a
+        // character boundary, so this lookup succeeds. Treating a failure as
+        // "not a boundary" keeps the fallback conservative if that changes:
+        // one sentence too many beats a summary cut inside a character.
+        let Some(rest) = text.get(end..) else {
+            continue;
+        };
+        match rest.chars().next() {
             None => ends.push(end),
             Some(following) if following.is_whitespace() => ends.push(end),
             Some(_) => {}
@@ -158,5 +170,29 @@ mod tests {
     #[test]
     fn an_empty_description_stays_empty() {
         assert_eq!(tool_summary("   "), "");
+    }
+
+    #[test]
+    fn multi_byte_characters_survive_the_cut() {
+        // The hazard `clippy::string_slice` names: every offset here has to
+        // land on a character boundary, including one past a multi-byte
+        // character and one inside the sentence that gets kept.
+        let summary = tool_summary(
+            "Résumé a paused run — pick up where the agent stopped, naïvely. \
+             Prefer it over restarting when the transcript is intact. \
+             SENTINEL: this sentence must be dropped.",
+        );
+        assert!(
+            summary.starts_with("Résumé a paused run — pick up"),
+            "a multi-byte opener must survive intact, got {summary:?}"
+        );
+        assert!(
+            !summary.contains("SENTINEL"),
+            "the tail must still be dropped, got {summary:?}"
+        );
+        assert!(
+            summary.is_char_boundary(summary.len()),
+            "the summary must be valid UTF-8 through its end"
+        );
     }
 }
