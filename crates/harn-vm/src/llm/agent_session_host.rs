@@ -118,6 +118,10 @@ struct AgentHostSession {
     output_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
+    /// Physical provider requests dispatched while this agent session was
+    /// active. Incremented at the observed transport boundary, independently
+    /// of whether a response was accepted, rejected, or never arrived.
+    provider_call_count: i64,
     active_skills: Vec<String>,
     tool_calls: Vec<serde_json::Value>,
     successful_tools: Vec<String>,
@@ -263,6 +267,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        provider_call_count: 0,
         active_skills: Vec::new(),
         tool_calls: Vec::new(),
         successful_tools: Vec::new(),
@@ -303,6 +308,16 @@ fn with_session<R>(
         })?;
         f(session)
     })
+}
+
+/// Record one physical provider dispatch for the active agent loop. The
+/// observed-attempt token captures the session before any off-thread transport
+/// handoff, so this remains session-correct under concurrent agent calls.
+pub(crate) fn record_provider_dispatch(session_id: &str) {
+    let _ = with_session(session_id, "record_provider_dispatch", |session| {
+        session.provider_call_count = session.provider_call_count.saturating_add(1);
+        Ok(())
+    });
 }
 
 /// Append a taint record to the session's lethal-trifecta ledger. No-op when

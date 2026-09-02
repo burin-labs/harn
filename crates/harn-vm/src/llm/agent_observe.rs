@@ -395,7 +395,24 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 /// Capability proving that the transcript request event was emitted before a
 /// single-route provider primitive can run. Only this module can construct the
 /// token; logical callers must use the observed API entry points.
-pub(crate) struct ObservedAttemptToken(());
+#[derive(Clone)]
+pub(crate) struct ObservedAttemptToken {
+    session_id: Option<String>,
+}
+
+impl ObservedAttemptToken {
+    fn for_current_session() -> Self {
+        Self {
+            session_id: super::agent_runtime::current_agent_session_id(),
+        }
+    }
+
+    pub(super) fn record_provider_dispatch(&self) {
+        if let Some(session_id) = self.session_id.as_deref() {
+            super::agent_session_host::record_provider_dispatch(session_id);
+        }
+    }
+}
 
 /// Make one LLM call with full observability: call-id generation, bridge
 /// notifications (call_start / call_progress / call_end), span annotation,
@@ -538,7 +555,7 @@ pub(crate) async fn observed_llm_call(
             &effective_tool_format,
             opts,
         )?;
-        let observed_attempt = ObservedAttemptToken(());
+        let observed_attempt = ObservedAttemptToken::for_current_session();
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();

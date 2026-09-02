@@ -4,6 +4,7 @@ import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
+import { agent_transcript_text } from "std/agent/transcript"
 import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
 pub fn __scope_classifier_recent_context(
@@ -1104,19 +1105,27 @@ pub fn __agent_loop_output_contract_repair_prompt(schema: any, text: string) -> 
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_apply_output_contract(
+pub fn __agent_loop_prepare_output_contract(
   harness: Harness,
-  final_result: dict,
   opts: dict,
   session: dict,
-  message: unknown,
   iteration: int,
 ) -> dict {
   const schema = __agent_loop_output_contract(opts)?.schema
-  let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
+  const messages = agent_session_messages(harness.agent, session.session_id)
+  const last = if len(messages) > 0 {
+    messages[len(messages) - 1]
+  } else {
+    nil
+  }
+  let text = if last?.role == "assistant" {
+    agent_transcript_text(last?.content ?? last?.text ?? "")
+  } else {
+    ""
+  }
   const direct = __agent_loop_output_contract_value(text, schema)
   if direct.ok {
-    return final_result + {output: direct.value, output_valid: true}
+    return {output: direct.value, output_valid: true}
   }
   const repair_opts = __agent_loop_effective_llm_options(
     harness.llm,
@@ -1140,19 +1149,27 @@ pub fn __agent_loop_apply_output_contract(
     )
   }
   if is_err(repair) {
-    return final_result + {output: direct.value, output_valid: false}
+    return {output: direct.value, output_valid: false}
   }
   let call = unwrap(repair)
   if !(call?.ok ?? false) {
-    return final_result + {output: direct.value, output_valid: false}
+    return {output: direct.value, output_valid: false}
   }
+  agent_session_record_usage(
+    harness.agent,
+    session.session_id,
+    call.value,
+    repair_opts,
+    iteration + 1,
+  )
   const repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
   const second = __agent_loop_output_contract_value(repaired_text, schema)
-  return final_result
-    + {
-      text: repaired_text,
-      visible_text: repaired_text,
-      output: second.value,
-      output_valid: second.ok,
-    }
+  const normalized = call.value + {text: repaired_text, visible_text: repaired_text}
+  agent_session_record_assistant(harness.agent, session.session_id, normalized)
+  return {
+    text: repaired_text,
+    visible_text: repaired_text,
+    output: second.value,
+    output_valid: second.ok,
+  }
 }

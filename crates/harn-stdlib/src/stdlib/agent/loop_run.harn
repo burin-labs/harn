@@ -1434,66 +1434,49 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       }
       break
     }
-    const finalized = __agent_loop_finalize_session(
-      harness,
-      message,
-      session,
-      {
-        opts: opts,
-        final_status: final_status,
-        stop_reason: stop_reason,
-        iteration: iteration,
-        loop_start_ms: loop_start_ms,
-        suspend_result: suspend_result,
-        terminal_error: terminal_error,
-        audit_background_tasks: audit_background_tasks,
-        budget: budget,
-        budget_exhausted_emitted: budget_exhausted_emitted,
-        budget_decisions: budget_decisions,
-        current_max: current_max,
-        extensions_used: extensions_used,
-        last_tool_count: last_tool_count,
-        stall_state: stall_state,
-        stall_enabled_seen: stall_enabled_seen,
-        verify_completion_judge_invocations: verify_completion_judge_invocations,
-        verify_completion_judge_vetoes: verify_completion_judge_vetoes,
-        turn_end_judge_invocations: turn_end_judge_invocations,
-        turn_end_judge_vetoes: turn_end_judge_vetoes,
-      },
-    )
+    const final_state = {
+      opts: opts,
+      final_status: final_status,
+      stop_reason: stop_reason,
+      iteration: iteration,
+      loop_start_ms: loop_start_ms,
+      suspend_result: suspend_result,
+      terminal_error: terminal_error,
+      audit_background_tasks: audit_background_tasks,
+      budget: budget,
+      budget_exhausted_emitted: budget_exhausted_emitted,
+      budget_decisions: budget_decisions,
+      current_max: current_max,
+      extensions_used: extensions_used,
+      last_tool_count: last_tool_count,
+      stall_state: stall_state,
+      stall_enabled_seen: stall_enabled_seen,
+      verify_completion_judge_invocations: verify_completion_judge_invocations,
+      verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+      turn_end_judge_invocations: turn_end_judge_invocations,
+      turn_end_judge_vetoes: turn_end_judge_vetoes,
+    }
+    const finalized = __agent_loop_finalize(harness, message, session, final_state)
     session_finalized = true
-    const final_result = __agent_loop_project_final_result(
+    const projection_state = final_state
+      + {budget_decisions: finalized.budget_decisions, output_contract: finalized.output_contract}
+    const final_result = __agent_loop_project_terminal_result(
       harness,
       finalized.result,
       message,
       session,
-      {
-        opts: opts,
-        final_status: final_status,
-        stop_reason: stop_reason,
-        iteration: iteration,
-        suspend_result: suspend_result,
-        terminal_error: terminal_error,
-        budget: budget,
-        budget_decisions: finalized.budget_decisions,
-        current_max: current_max,
-        extensions_used: extensions_used,
-        stall_state: stall_state,
-        stall_enabled_seen: stall_enabled_seen,
-        verify_completion_judge_invocations: verify_completion_judge_invocations,
-        verify_completion_judge_vetoes: verify_completion_judge_vetoes,
-        turn_end_judge_invocations: turn_end_judge_invocations,
-        turn_end_judge_vetoes: turn_end_judge_vetoes,
-      },
+      projection_state,
     )
     final_result
   }
-  if is_err(run) {
-    __drain_audit_flushes(audit_background_tasks)
-    if !session_finalized {
-      __agent_loop_finalize_failed(harness.agent, session, iteration)
-    }
-    throw unwrap_err(run)
-  }
-  return unwrap(run)
+  return __agent_loop_finish_run(
+    harness.agent,
+    session,
+    {
+      iteration: iteration,
+      session_finalized: session_finalized,
+      audit_background_tasks: audit_background_tasks,
+    },
+    run,
+  )
 }

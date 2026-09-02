@@ -227,11 +227,23 @@ pub type AgentResult = {
   known_cost_usd: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
+  provider_call_count: int,
   session_id: string,
   run_id: string,
   started_at: string,
   task: string,
   daemon_state: any,
   daemon_snapshot_path: any,
+  ...rest,
+}
+
+/** Additive error envelope for an agent loop that aborts by throwing. */
+pub type AgentLoopTerminalError = {
+  kind: string,
+  category: string,
+  reason: string,
+  message: string,
+  cause: unknown,
+  provider_call_count: int,
   ...rest,
 }

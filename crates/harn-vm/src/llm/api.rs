@@ -251,7 +251,7 @@ pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult,
 /// primitive after it emits the request receipt. The unforgeable token keeps
 /// every other caller on the logical, observed entry points above.
 pub(crate) async fn vm_call_llm_full_single_route_prepared(
-    _observed: &super::agent_observe::ObservedAttemptToken,
+    observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
@@ -259,7 +259,11 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
     let mut deltas_open = true;
-    let mut call = Box::pin(vm_call_llm_full_inner_request(request, Some(delta_tx)));
+    let mut call = Box::pin(vm_call_llm_full_inner_request(
+        observed,
+        request,
+        Some(delta_tx),
+    ));
     let result = loop {
         tokio::select! {
             maybe_delta = delta_rx.recv(), if deltas_open => {
@@ -300,13 +304,13 @@ pub(crate) async fn vm_call_llm_full_streaming(
 }
 
 pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
-    _observed: &super::agent_observe::ObservedAttemptToken,
+    observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
-    let result = vm_call_llm_full_inner_request(request, Some(delta_tx)).await?;
+    let result = vm_call_llm_full_inner_request(observed, request, Some(delta_tx)).await?;
     super::cost::record_llm_usage(&result)?;
     Ok(result)
 }
@@ -335,7 +339,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
 }
 
 pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
-    _observed: &super::agent_observe::ObservedAttemptToken,
+    observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: LlmRequestPayload,
     delta_tx: DeltaSender,
@@ -358,14 +362,15 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     }
     request.emit_reminder_lifecycle();
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
+    let observed = observed.clone();
     let result = tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
         if let Some(context) = raw_capture_context {
             crate::llm::agent_observe::with_raw_provider_capture_context(context, async {
-                vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
+                vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
             })
             .await
         } else {
-            vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
+            vm_call_llm_full_inner_offthread(&observed, &request, Some(delta_tx)).await
         }
     }))
     .await
@@ -380,6 +385,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
 }
 
 async fn vm_call_llm_full_inner_request(
+    observed: &super::agent_observe::ObservedAttemptToken,
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
@@ -395,6 +401,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::providers::MockProvider::should_intercept_request(request) {
+        observed.record_provider_dispatch();
         request.emit_reminder_lifecycle();
         let result = mock_llm_response(request)?;
         super::trigger_predicate::note_result(request, &result);
@@ -419,6 +426,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
+        observed.record_provider_dispatch();
         // Bypass fixture/replay so the script-driven fake never collides
         // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
         request.emit_reminder_lifecycle();
@@ -446,6 +454,7 @@ async fn vm_call_llm_full_inner_request(
 
     super::ensure_real_llm_allowed(&request.provider)?;
     request.emit_reminder_lifecycle();
+    observed.record_provider_dispatch();
 
     // Provider/model failover is owned by `routing::execute_with_routing`.
     // This layer executes exactly one route so no attempt can bypass the
@@ -462,6 +471,7 @@ async fn vm_call_llm_full_inner_request(
 }
 
 async fn vm_call_llm_full_inner_offthread(
+    observed: &super::agent_observe::ObservedAttemptToken,
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, OffthreadLlmError> {
@@ -471,6 +481,7 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     if crate::llm::providers::MockProvider::should_intercept_request(request) {
+        observed.record_provider_dispatch();
         let result = mock_llm_response(request).map_err(OffthreadLlmError::from_vm_error)?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
@@ -478,6 +489,7 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
+        observed.record_provider_dispatch();
         let result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await
@@ -503,6 +515,7 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
+    observed.record_provider_dispatch();
 
     // Keep the off-thread transport primitive single-route as well. The caller
     // routing executor owns all retries across provider/model alternatives.

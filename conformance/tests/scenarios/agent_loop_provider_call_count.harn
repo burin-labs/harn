@@ -1,0 +1,105 @@
+import { agent_loop } from "std/agent/loop"
+import { default_llm_caller } from "std/llm/caller"
+import { with_budget } from "std/llm/handlers"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  // The real runtime budget gate rejects before the mock transport. An exact
+  // zero on the public result proves that no dispatch occurred; an absent
+  // field would fail both the type and value assertions.
+  with_llm_script(
+    harness.llm,
+    [llm_text("must remain unconsumed")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "reject before dispatch",
+        nil,
+        {
+          provider: "mock",
+          model: "claude-opus-4-20250514",
+          max_tokens: 1024,
+          max_iterations: 2,
+          final_wrapup: false,
+          budget: {total_budget_usd: 0.0001},
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(type_of(result.provider_call_count))
+      harness.stdio.println(result.provider_call_count)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  // The first caller invocation reaches the real mock provider. The second is
+  // refused by caller middleware before transport, so the run total remains 1.
+  with_llm_script(
+    harness.llm,
+    [llm_text("still working")],
+    { ->
+      const caller = with_budget(
+        harness,
+        default_llm_caller(harness.agent, harness.llm),
+        {max_calls: 1, on_exceed: "short_circuit"},
+      )
+      const result = agent_loop(
+        harness,
+        "one request then refuse",
+        nil,
+        {
+          provider: "mock",
+          llm_caller: caller,
+          loop_until_done: true,
+          done_sentinel: "NEVER",
+          max_iterations: 3,
+          max_nudges: 3,
+          final_wrapup: false,
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.provider_call_count)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  // An unexpected scalar throw after one real request stays exceptional, but
+  // is normalized once into the typed terminal error envelope with the same
+  // session-owned count.
+  with_llm_script(
+    harness.llm,
+    [llm_text("continue")],
+    { ->
+      const invoked = harness.runtime.shared_cell(
+        {scope: "task_group", key: "provider-count-throw", initial: 0},
+      )
+      const base = default_llm_caller(harness.agent, harness.llm)
+      const caller = { call ->
+        const snapshot = harness.runtime.shared_snapshot(invoked)
+        if snapshot.value == 0 {
+          harness.runtime.shared_cas(invoked, snapshot, 1)
+          return base(call)
+        }
+        throw "after one request"
+      }
+      const outcome = try {
+        agent_loop(
+          harness,
+          "throw after dispatch",
+          nil,
+          {
+            provider: "mock",
+            llm_caller: caller,
+            loop_until_done: true,
+            done_sentinel: "NEVER",
+            max_iterations: 3,
+            max_nudges: 3,
+            final_wrapup: false,
+          },
+        )
+      }
+      const error = unwrap_err(outcome)
+      harness.stdio.println(is_err(outcome))
+      harness.stdio.println(error.provider_call_count)
+      harness.stdio.println(error.cause)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}
