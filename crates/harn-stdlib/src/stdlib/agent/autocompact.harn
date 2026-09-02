@@ -207,9 +207,13 @@ fn __compact_options(opts: dict, engine_strategy: string, keep_last: any) {
  */
 fn __session_compaction_fields(
   compact_result: dict,
+  session_id: string,
+  mode: string,
+  reason: string,
+  strategy: string,
   requested_strategy: string,
   threshold_modified: bool,
-) {
+) -> dict {
   const receipt = compact_result.receipt
   guard type_of(receipt) == "dict" else {
     throw "transcript_auto_compact archived messages without an engine receipt"
@@ -223,6 +227,11 @@ fn __session_compaction_fields(
   }
   const canonical_receipt = receipt
     + {
+      session_id: session_id,
+      transcript_id: session_id,
+      mode: mode,
+      reason: reason,
+      strategy: strategy,
       requested_strategy: requested_strategy,
       threshold_source: if threshold_modified {
         "pre_compact_modify"
@@ -461,14 +470,15 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   const messages = agent.session_messages(session.session_id)
   const policy = __compaction_policy_from_options(compact_opts)
   const policy_fields = __compaction_policy_event_fields(policy)
+  const receipt_strategy = if policy_label != "" {
+    policy_label
+  } else {
+    requested_strategy
+  }
   const pre_payload = {
     session: {id: session.session_id},
     reason: "threshold",
-    strategy: if policy_label != "" {
-      policy_label
-    } else {
-      requested_strategy
-    },
+    strategy: receipt_strategy,
     requested_strategy: requested_strategy,
     engine_strategy: requested_strategy,
     message_count: len(messages),
@@ -494,6 +504,10 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
   if archived > 0 {
     const engine_fields = __session_compaction_fields(
       compact_result,
+      session.session_id,
+      "auto",
+      "threshold",
+      receipt_strategy,
       requested_strategy,
       effective.threshold_modified,
     )
@@ -501,11 +515,7 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
     const metadata = {
       mode: "auto",
       reason: "threshold",
-      strategy: if policy_label != "" {
-        policy_label
-      } else {
-        engine_fields.requested_strategy
-      },
+      strategy: receipt_strategy,
       archived_messages: archived,
       new_summary_len: len(summary),
       keep_last: keep_last ?? 0,
@@ -604,7 +614,15 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
   const archived = compact_result.archived
   const summary = compact_result.summary
   if archived > 0 {
-    const engine_fields = __session_compaction_fields(compact_result, "observation_mask", false)
+    const engine_fields = __session_compaction_fields(
+      compact_result,
+      session.session_id,
+      "emergency",
+      "context_overflow",
+      "observation_mask",
+      "observation_mask",
+      false,
+    )
     agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "emergency",
