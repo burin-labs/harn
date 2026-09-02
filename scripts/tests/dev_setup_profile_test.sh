@@ -8,6 +8,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 ambient_bin="$tmp_root/ambient-bin"
 ambient_rustc_record="$tmp_root/ambient-rustc.txt"
+fixture_system_path="$ambient_bin:/usr/bin:/bin"
 mkdir -p "$ambient_bin"
 cat > "$ambient_bin/rustc" <<SH
 #!/usr/bin/env bash
@@ -128,7 +129,7 @@ run_setup() {
   HARN_DEV_SETUP_STORAGE_ROOT='' \
   HARN_DEV_TARGET_DIR='' \
   HARN_DEV_BUILD_DIR='' \
-  PATH="$repo/bin:$ambient_bin:/usr/bin:/bin" \
+  PATH="$repo/bin:$fixture_system_path" \
     HOME="$tmp_root/home-$profile" \
     XDG_CACHE_HOME="$tmp_root/cache-$profile" \
     TMPDIR="$tmp_root/tmp-$profile" \
@@ -158,7 +159,7 @@ seed_key_with_ambient="$(
   cd "$rust_repo"
   HARN_CARGO_TARGET_SEED_KEY='' \
     DEV_SETUP_TEST_CARGO_RECORD="$seed_effect_record" \
-    PATH="$rust_repo/bin:$ambient_bin:/usr/bin:/bin" \
+    PATH="$rust_repo/bin:$fixture_system_path" \
     ./scripts/cargo_target_seed.sh key
 )"
 if [[ "$seed_key_without_ambient" != "$seed_key_with_ambient" \
@@ -175,7 +176,7 @@ build_effect_record="$tmp_root/build-effect-cargo.txt"
 (
   cd "$rust_repo"
   DEV_SETUP_TEST_CARGO_RECORD="$build_effect_record" \
-    PATH="$rust_repo/bin:$ambient_bin:/usr/bin:/bin" cargo build
+    PATH="$rust_repo/bin:$fixture_system_path" cargo build
 )
 if ! grep -Fxq build "$build_effect_record"; then
   echo "fixture Cargo did not preserve a real build as an observable effect" >&2
@@ -253,7 +254,7 @@ chmod +x "$rust_repo/bin/stat"
 # executable. Re-running setup should be free when it is present and should
 # rebuild when the binary was removed or replaced by a non-executable file.
 cached_cargo="$tmp_root/rust-cached-cargo.txt"
-PATH="$rust_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$rust_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-rust" \
   XDG_CACHE_HOME="$tmp_root/cache-rust" \
   TMPDIR="$tmp_root/tmp-rust" \
@@ -271,7 +272,7 @@ fi
 
 chmod -x "$rust_harn_bin"
 missing_artifact_cargo="$tmp_root/rust-missing-artifact-cargo.txt"
-PATH="$rust_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$rust_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-rust" \
   XDG_CACHE_HOME="$tmp_root/cache-rust" \
   TMPDIR="$tmp_root/tmp-rust" \
@@ -406,7 +407,7 @@ mkdir -p "$tmp_root/tmp-profile-switch"
 HARN_DEV_SETUP_STORAGE_ROOT='' \
 HARN_DEV_TARGET_DIR='' \
 HARN_DEV_BUILD_DIR='' \
-PATH="$rust_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$rust_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-profile-switch" \
   TMPDIR="$tmp_root/tmp-profile-switch" \
   HARN_DEV_SETUP_PROFILE=full \
@@ -442,7 +443,7 @@ HARN_DEV_TARGET_DIR='' \
 HARN_DEV_BUILD_DIR='' \
 HARN_DEV_TARGET_WORKTREE_PATH='' \
 CODEX_WORKTREE_PATH='' \
-PATH="$bootstrap_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$bootstrap_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-bootstrap" \
   XDG_CACHE_HOME="$tmp_root/cache-bootstrap" \
   TMPDIR="$tmp_root/tmp-bootstrap" \
@@ -461,7 +462,7 @@ fi
 override_repo=$(make_fixture_repo build-dir-override)
 add_available_cargo_tools "$override_repo"
 mkdir -p "$tmp_root/tmp-build-dir-override"
-PATH="$override_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$override_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-build-dir-override" \
   TMPDIR="$tmp_root/tmp-build-dir-override" \
   HARN_DEV_SETUP_PROFILE=full \
@@ -494,7 +495,7 @@ mkdir -p "$tmp_root/tmp-user-config"
 HARN_DEV_SETUP_STORAGE_ROOT='' \
 HARN_DEV_TARGET_DIR='' \
 HARN_DEV_BUILD_DIR='' \
-PATH="$user_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$user_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-user-config" \
   TMPDIR="$tmp_root/tmp-user-config" \
   HARN_DEV_SETUP_PROFILE=full \
@@ -527,7 +528,7 @@ mkdir -p "$tmp_root/tmp-legacy-config"
 HARN_DEV_SETUP_STORAGE_ROOT='' \
 HARN_DEV_TARGET_DIR='' \
 HARN_DEV_BUILD_DIR='' \
-PATH="$legacy_repo/bin:$ambient_bin:/usr/bin:/bin" \
+PATH="$legacy_repo/bin:$fixture_system_path" \
   HOME="$tmp_root/home-legacy-config" \
   TMPDIR="$tmp_root/tmp-legacy-config" \
   HARN_DEV_SETUP_PROFILE=full \
@@ -613,7 +614,7 @@ mv "$rust_repo/bin/rustc" "$rust_repo/bin/rustc.fixture-owned"
   cd "$rust_repo"
   HARN_CARGO_TARGET_SEED_KEY='' \
     DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/negative-control-cargo.txt" \
-    PATH="$rust_repo/bin:$ambient_bin:/usr/bin:/bin" \
+    PATH="$rust_repo/bin:$fixture_system_path" \
     ./scripts/cargo_target_seed.sh key >/dev/null
 )
 if [[ ! -s "$ambient_rustc_record" ]]; then
