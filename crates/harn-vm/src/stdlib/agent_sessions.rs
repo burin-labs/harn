@@ -12,6 +12,9 @@ use crate::stdlib::args::{Args, ErrorKind, Options};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
+mod compact_config;
+use compact_config::build_compact_config;
+
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
 use crate::vm::Vm;
@@ -1714,101 +1717,6 @@ fn session_compactable_events(id: &str) -> Vec<VmValue> {
         return Vec::new();
     };
     crate::orchestration::transcript_compactable_events(dict)
-}
-
-const COMPACT_OPT_KEYS: &[&str] = &[
-    "keep_last",
-    "token_threshold",
-    "tool_output_max_chars",
-    "compact_strategy",
-    "hard_limit_tokens",
-    "hard_limit_strategy",
-    "custom_compactor",
-    "mask_callback",
-    "compress_callback",
-    "policy",
-    "compaction_policy",
-    "compaction_request",
-    "instructions",
-    "mode",
-    "scope",
-    "preserve",
-    "drop",
-    "extend_default_instructions",
-    "author",
-];
-
-fn build_compact_config(
-    opts: &crate::value::DictMap,
-) -> Result<crate::orchestration::AutoCompactConfig, VmError> {
-    for key in opts.keys() {
-        if !COMPACT_OPT_KEYS.contains(&key.as_str()) {
-            let expected = COMPACT_OPT_KEYS.join(", ");
-            return Err(err(format!(
-                "agent_session_compact: unknown option key '{key}' (expected one of: {expected})"
-            )));
-        }
-    }
-    let mut cfg = crate::orchestration::AutoCompactConfig {
-        policy: crate::orchestration::parse_compaction_policy_options(
-            Some(opts),
-            "agent_session_compact",
-        )?,
-        ..Default::default()
-    };
-    if let Some(v) = compact_usize_opt(opts, "keep_last")? {
-        cfg.keep_last = v;
-    }
-    if let Some(v) = compact_usize_opt(opts, "token_threshold")? {
-        cfg.token_threshold = v;
-    }
-    if let Some(v) = compact_usize_opt(opts, "tool_output_max_chars")? {
-        cfg.tool_output_max_chars = v;
-    }
-    if let Some(VmValue::String(s)) = opts.get("compact_strategy") {
-        cfg.compact_strategy = crate::orchestration::parse_compact_strategy(s)?;
-        cfg.policy_strategy =
-            crate::orchestration::compact_strategy_name(&cfg.compact_strategy).to_string();
-    }
-    if let Some(v) = compact_usize_opt(opts, "hard_limit_tokens")? {
-        cfg.hard_limit_tokens = Some(v);
-    }
-    if let Some(VmValue::String(s)) = opts.get("hard_limit_strategy") {
-        cfg.hard_limit_strategy = crate::orchestration::parse_compact_strategy(s)?;
-    }
-    if let Some(v) = opts.get("custom_compactor").cloned() {
-        if !matches!(v, VmValue::Closure(_)) {
-            return Err(err(
-                "agent_session_compact: `custom_compactor` must be a closure",
-            ));
-        }
-        cfg.custom_compactor = Some(v);
-    }
-    if let Some(v) = opts.get("mask_callback").cloned() {
-        if !matches!(v, VmValue::Closure(_)) {
-            return Err(err(
-                "agent_session_compact: `mask_callback` must be a closure",
-            ));
-        }
-        cfg.mask_callback = Some(v);
-    }
-    if let Some(v) = opts.get("compress_callback").cloned() {
-        if !matches!(v, VmValue::Closure(_)) {
-            return Err(err(
-                "agent_session_compact: `compress_callback` must be a closure",
-            ));
-        }
-        cfg.compress_callback = Some(v);
-    }
-    cfg.request_provenance = crate::orchestration::CompactionRequestProvenance {
-        requested_strategy: Some(
-            crate::orchestration::compact_strategy_name(&cfg.compact_strategy).to_string(),
-        ),
-        threshold_source: opts
-            .contains_key("token_threshold")
-            .then_some(crate::orchestration::CompactionThresholdSource::TokenThreshold),
-    };
-    Ok(cfg)
 }
 
 const CANCEL_TOOL_CALL_OPT_KEYS: &[&str] = &["reason", "inject_reminder", "timeout_ms"];

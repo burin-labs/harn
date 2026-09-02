@@ -20,6 +20,7 @@ use harn_vm::orchestration::{
 use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
 mod budget_exhausted;
+mod compaction_events;
 mod mcp_events;
 mod plan_document;
 mod registration_fixtures;
@@ -28,6 +29,7 @@ mod schema_contract;
 mod subagent_stop;
 mod tool_data;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
+use compaction_events::fixture_compaction_receipt;
 use plan_document::fixture_plan_document_event;
 
 pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
@@ -139,41 +141,6 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             ]))),
         },
     ]
-}
-
-/// A `CompactionReceipt` for ACP session-update fixtures. Only the fields the
-/// two fixtures differ on are parameters; the rest are fixed sample values.
-fn fixture_compaction_receipt(
-    receipt_id: &str,
-    instruction_mode: Option<&str>,
-    instruction_source: Option<&str>,
-    compaction_policy: Option<serde_json::Value>,
-) -> harn_vm::orchestration::CompactionReceipt {
-    harn_vm::orchestration::CompactionReceipt {
-        schema_version: harn_vm::orchestration::COMPACTION_RECEIPT_SCHEMA_VERSION,
-        receipt_id: receipt_id.to_string(),
-        session_id: Some("session-1".to_string()),
-        transcript_id: Some("session-1".to_string()),
-        mode: "auto".to_string(),
-        reason: "threshold".to_string(),
-        strategy: "summary".to_string(),
-        engine_strategy: "observation_mask".to_string(),
-        requested_strategy: Some("summary".to_string()),
-        resolved_threshold_tokens: Some(1),
-        threshold_source: Some("runtime_config".to_string()),
-        hard_limit_tokens: None,
-        archived_messages: 3,
-        estimated_tokens_before: 100,
-        estimated_tokens_after: 40,
-        snapshot_asset_id: Some("asset-1".to_string()),
-        instruction_mode: instruction_mode.map(str::to_string),
-        instruction_source: instruction_source.map(str::to_string),
-        compaction_policy,
-        // The ACP session-update projection does not surface the source
-        // measurement, so these fixtures stay about what ACP actually emits.
-        source_measurement: None,
-        recap: None,
-    }
 }
 
 fn extension_fixture_events() -> Vec<AgentEvent> {

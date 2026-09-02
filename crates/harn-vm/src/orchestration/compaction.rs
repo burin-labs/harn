@@ -3,10 +3,15 @@
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmError, VmValue};
 
+mod config;
 mod policy;
 mod prompt;
 mod tool_output;
 use crate::vm::AsyncBuiltinCtx;
+pub use config::{
+    compact_strategy_name, parse_compact_strategy, AutoCompactConfig, CompactStrategy,
+    CompactionRequestProvenance, CompactionThresholdSource, DEFAULT_RECAP_BUDGET_BYTES,
+};
 pub use policy::{
     compaction_policy_metadata_fields, compaction_policy_option_keys,
     compaction_policy_to_vm_value, parse_compaction_policy_options, CompactionPolicy,
@@ -16,178 +21,6 @@ use prompt::render_llm_compaction_prompt;
 pub use tool_output::{
     microcompact_tool_output, microcompact_tool_output_result, MicrocompactedToolOutput,
 };
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CompactStrategy {
-    Llm,
-    Truncate,
-    Custom,
-    ObservationMask,
-}
-
-pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
-    match value {
-        "llm" => Ok(CompactStrategy::Llm),
-        "truncate" => Ok(CompactStrategy::Truncate),
-        "custom" => Ok(CompactStrategy::Custom),
-        "observation_mask" => Ok(CompactStrategy::ObservationMask),
-        other => Err(VmError::Runtime(format!(
-            "unknown compact_strategy '{other}' (expected 'llm', 'truncate', 'custom', or 'observation_mask')"
-        ))),
-    }
-}
-
-pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
-    match strategy {
-        CompactStrategy::Llm => "llm",
-        CompactStrategy::Truncate => "truncate",
-        CompactStrategy::Custom => "custom",
-        CompactStrategy::ObservationMask => "observation_mask",
-    }
-}
-
-/// Configuration for automatic transcript compaction in agent loops.
-///
-/// Two-tier compaction:
-///   Tier 1 (`token_threshold` / `compact_strategy`): lightweight, deterministic
-///     observation masking that fires early. Masks verbose tool results while
-///     preserving assistant prose and error output.
-///   Tier 2 (`hard_limit_tokens` / `hard_limit_strategy`): aggressive LLM-powered
-///     summarization that fires when tier-1 alone isn't enough, typically as the
-///     transcript approaches the model's actual context window.
-#[derive(Clone, Debug, Default)]
-pub struct CompactionRequestProvenance {
-    /// Normalized strategy requested at the owning boundary, before a
-    /// lifecycle hook or fallback changes the engine that actually runs.
-    pub requested_strategy: Option<String>,
-    /// Boundary field that supplied the tier-1 threshold.
-    pub threshold_source: Option<CompactionThresholdSource>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CompactionThresholdSource {
-    TokenThreshold,
-    CompactThreshold,
-    TargetTokens,
-    CompactionPolicy,
-    RuntimeConfig,
-    PreCompactModify,
-    Default,
-}
-
-impl CompactionThresholdSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::TokenThreshold => "token_threshold",
-            Self::CompactThreshold => "compact_threshold",
-            Self::TargetTokens => "target_tokens",
-            Self::CompactionPolicy => "compaction_policy",
-            Self::RuntimeConfig => "runtime_config",
-            Self::PreCompactModify => "pre_compact_modify",
-            Self::Default => "default",
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct AutoCompactConfig {
-    /// Request facts captured by the boundary that parsed this config. The
-    /// lifecycle snapshots them before hooks run, while the remaining config
-    /// fields continue to describe the effective policy.
-    pub request_provenance: CompactionRequestProvenance,
-    /// Number of earliest messages to keep verbatim before the compacted
-    /// summary. The system prompt is not part of this list and is always
-    /// preserved separately by the caller.
-    pub keep_first: usize,
-    /// Tier-1 threshold: estimated tokens before lightweight compaction.
-    pub token_threshold: usize,
-    /// Maximum character length for a single tool result before microcompaction.
-    pub tool_output_max_chars: usize,
-    /// Number of recent messages to keep during compaction.
-    pub keep_last: usize,
-    /// Tier-1 strategy (default: ObservationMask).
-    pub compact_strategy: CompactStrategy,
-    /// Tier-2 threshold: fires when tier-1 result still exceeds this.
-    /// Typically set to ~75% of the model's actual context window.
-    /// When `None`, tier-2 is disabled.
-    pub hard_limit_tokens: Option<usize>,
-    /// Tier-2 strategy (default: Llm).
-    pub hard_limit_strategy: CompactStrategy,
-    /// Optional Harn callback used when a strategy is `custom`.
-    pub custom_compactor: Option<VmValue>,
-    /// Pending reminders supplied to `custom_compactor` as a second
-    /// argument. Built-in compaction strategies decide reminder retention
-    /// before rebuilding the transcript, so they do not consume this list.
-    pub custom_compactor_reminders: Vec<VmValue>,
-    /// Optional callback for domain-specific per-message masking during
-    /// observation mask compaction. Called with a list of archived messages,
-    /// returns a list of `Option<String>` — `Some(masked)` to override the
-    /// default mask for that message, `None` to use the default.
-    /// This lets the host (e.g. an IDE or cloud runner) inject AST outlines,
-    /// file summaries, etc. without putting language-specific logic in Harn.
-    pub mask_callback: Option<VmValue>,
-    /// Optional callback for per-tool-result compression. Called with
-    /// `{tool_name, output, max_chars}` and returns compressed output string.
-    /// When set, used INSTEAD of the built-in `microcompact_tool_output`.
-    /// This allows the pipeline to use LLM-based compression rather than
-    /// keyword heuristics.
-    pub compress_callback: Option<VmValue>,
-    /// Optional prompt-template asset path used when LLM compaction is
-    /// selected. The rendered template becomes the user message sent to
-    /// the summarizer.
-    pub summarize_prompt: Option<String>,
-    /// User-facing policy label for replay and observability. This can be
-    /// broader than the engine strategy, e.g. `hybrid` lowers to LLM
-    /// summarization plus truncate fallback.
-    pub policy_strategy: String,
-    /// Strategy to try when the primary strategy fails. Budget-pressure
-    /// compaction uses this to keep the session within its hard cap even when
-    /// an LLM summarizer is unavailable.
-    pub fallback_strategy: Option<CompactStrategy>,
-    /// Host/user-supplied instructions that guide compaction without
-    /// becoming part of the compacted transcript unless `scope` explicitly
-    /// asks for model-visible policy text.
-    pub policy: CompactionPolicy,
-    /// Upper bound (bytes) on the observation-mask recap body, excluding the
-    /// bounded pinned snapshots and the single carried-forward prior recap.
-    /// The budget is spent newest-first on load-bearing observations (verify /
-    /// test / build results and the errors that preceded edits) rather than on
-    /// verbatim assistant call replay, so a long session cannot inject an
-    /// unbounded (and compounding) recap at the exact moment context pressure
-    /// forced compaction.
-    pub recap_budget_bytes: usize,
-}
-
-impl Default for AutoCompactConfig {
-    fn default() -> Self {
-        Self {
-            request_provenance: CompactionRequestProvenance::default(),
-            keep_first: 0,
-            token_threshold: 48_000,
-            tool_output_max_chars: 16_000,
-            keep_last: 12,
-            compact_strategy: CompactStrategy::ObservationMask,
-            hard_limit_tokens: None,
-            hard_limit_strategy: CompactStrategy::Llm,
-            custom_compactor: None,
-            custom_compactor_reminders: Vec::new(),
-            mask_callback: None,
-            compress_callback: None,
-            summarize_prompt: None,
-            policy_strategy: compact_strategy_name(&CompactStrategy::ObservationMask).to_string(),
-            fallback_strategy: None,
-            policy: CompactionPolicy::default(),
-            recap_budget_bytes: DEFAULT_RECAP_BUDGET_BYTES,
-        }
-    }
-}
-
-/// Default byte budget for an observation-mask recap body (~4k tokens). Chosen
-/// well below the multi-tens-of-KB recaps that motivated the bound: large
-/// enough to carry the load-bearing observations across a compaction, small
-/// enough that re-injecting it never re-creates the pressure that forced the
-/// compaction.
-pub const DEFAULT_RECAP_BUDGET_BYTES: usize = 16_000;
 
 /// Observation-mask recap metrics, carried verbatim (typed) inside
 /// [`super::CompactionReceipt`] so recap behavior survives every projection.
