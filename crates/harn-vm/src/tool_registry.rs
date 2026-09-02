@@ -1076,7 +1076,7 @@ mod tests {
         assert!(bool_error.to_string().contains("use input_schema"));
 
         let invalid = VmValue::dict(DictMap::from_iter([(
-            "id".into(),
+            arcstr::ArcStr::from("id"),
             VmValue::String("unrecognized".into()),
         )]));
         let shorthand_error = params_to_json_schema(Some(&invalid))

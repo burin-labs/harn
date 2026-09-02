@@ -194,18 +194,18 @@ fn cancelled_module_initializer_never_displaces_the_calling_vm_state() {
         {
             let load = vm.load_module_from_source(
                 PathBuf::from("<test>/cancelled_initializer.harn"),
-                r#"
+                r"
 let initialized = wait_in_initializer()
 
 pub fn value() {
   return initialized
 }
-"#,
+",
             );
             tokio::pin!(load);
             tokio::select! {
                 entered = entered_rx.recv() => assert_eq!(entered, Some(())),
-                result = &mut load => panic!("initializer unexpectedly completed: {result:?}"),
+                _ = &mut load => panic!("initializer unexpectedly completed"),
             }
         }
 

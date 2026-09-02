@@ -543,7 +543,7 @@ impl McpServer {
                     self.tasks.complete_with_tool_result(
                         &task.task_id,
                         crate::tool_registry::application_error_mcp_result(&error),
-                    )
+                    );
                 }
                 Err(crate::tool_registry::ToolInvocationError::Runtime(
                     VmError::McpInputRequired(_),
