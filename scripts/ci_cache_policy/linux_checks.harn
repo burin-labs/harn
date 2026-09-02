@@ -14,11 +14,88 @@ fn blacksmith_tier_expression() -> string {
     + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${paid_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
 }
 
+/**
+ * The hosted producer's budget is owned by its workload, not by a round number.
+ *
+ * Each heavy step carries its own ceiling and the job ceiling is exactly the sum
+ * of those ceilings, plus fixed setup overhead, plus a reserve the main-branch
+ * cache save can spend without competing with the tests. The save is a post
+ * step, so it runs inside whatever margin the earlier steps happen to leave: on
+ * a contended runner a full-generation save then cancels a job whose tests all
+ * passed. Reserving the save's time here is what makes the passed job stay
+ * green (#7845), and bounding each step is what keeps an overrun from eating
+ * that reserve.
+ *
+ * Sized from the five most recent green main runs of `rust-check-inputs` plus
+ * the two slowest in that window, with a full-generation save measured at
+ * 8m35s. Observed step maxima: portable CLI 7m01s, security archive 8m56s,
+ * workspace tests 20m03s, setup and cache restore together 3m33s.
+ */
+const PRODUCER_STEP_BUDGETS: list<{name: string, minutes: int}> = [
+  {name: "Build portable Harn CLI", minutes: 9},
+  {name: "Build security test archive", minutes: 12},
+  {name: "Run Rust workspace tests", minutes: 26},
+]
+
+/** Checkout, disk reclaim, mold, toolchain, cache restore, nextest, uploads. */
+const PRODUCER_SETUP_OVERHEAD_MINUTES = 6
+
+/** A full cache generation save, not a near-hit. Measured at 8m35s. */
+const PRODUCER_CACHE_SAVE_RESERVE_MINUTES = 12
+
+/** Paid Blacksmith capacity keeps its hard cost fuse; it never saves a cache. */
+const PRODUCER_PAID_FUSE_MINUTES = 20
+
+/** The reserve a full cache generation save may spend without cancelling. */
+pub fn producer_cache_save_reserve_minutes() -> int {
+  return PRODUCER_CACHE_SAVE_RESERVE_MINUTES
+}
+
+pub fn producer_hosted_ceiling_minutes() -> int {
+  let total = PRODUCER_SETUP_OVERHEAD_MINUTES + PRODUCER_CACHE_SAVE_RESERVE_MINUTES
+  for budget in PRODUCER_STEP_BUDGETS {
+    total = total + budget.minutes
+  }
+  return total
+}
+
 fn blacksmith_timeout_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 20 || 40 }}"
+    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && ${PRODUCER_PAID_FUSE_MINUTES} || ${producer_hosted_ceiling_minutes()} }}"
+}
+
+fn step_named(job: dict, name: string) {
+  for step in job?.steps ?? [] {
+    if trim(to_string(step?.name ?? "")) == name {
+      return step
+    }
+  }
+  return nil
+}
+
+/**
+ * Every budgeted step must carry its own ceiling. Without this the job ceiling
+ * is the only bound, one slow step can spend the cache save's reserve, and the
+ * reserve becomes a comment rather than a guarantee.
+ */
+fn producer_step_budget_errors(job: dict, job_name: string) -> list<string> {
+  let errors: list<string> = []
+  for budget in PRODUCER_STEP_BUDGETS {
+    const name = budget.name
+    const expected = budget.minutes
+    const step = step_named(job, name)
+    if step == nil {
+      errors = errors + ["ci.yml:${job_name} must keep the budgeted step '${name}'"]
+    } else if trim(to_string(step?.["timeout-minutes"] ?? "")) != to_string(expected) {
+      errors = errors
+        + [
+          "ci.yml:${job_name} step '${name}' must carry its own ${expected}-minute budget so the cache save reserve stays reserved",
+        ]
+    }
+  }
+  return errors
 }
 
 /** Keep the action's effective cache ceiling aligned with its caller contract. */
@@ -137,9 +214,10 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.["timeout-minutes"] ?? "")) != blacksmith_timeout_expression() {
     errors = errors
       + [
-        "ci.yml:${job_name} must keep the 20-minute paid-runner fuse and 40-minute hosted recovery ceiling",
+        "ci.yml:${job_name} must keep the ${PRODUCER_PAID_FUSE_MINUTES}-minute paid-runner fuse and ${producer_hosted_ceiling_minutes()}-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
       ]
   }
+  errors = errors + producer_step_budget_errors(job, job_name)
   const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
   if len(persistent) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure persistent sccache exactly once"]
