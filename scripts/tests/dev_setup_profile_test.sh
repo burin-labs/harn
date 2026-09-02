@@ -7,16 +7,23 @@ export HARN_CARGO_LEASE_MODE=off
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 ambient_bin="$tmp_root/ambient-bin"
+ambient_cargo_record="$tmp_root/ambient-cargo.txt"
 ambient_rustc_record="$tmp_root/ambient-rustc.txt"
 fixture_system_path="$ambient_bin:/usr/bin:/bin"
 mkdir -p "$ambient_bin"
+cat > "$ambient_bin/cargo" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >> "$ambient_cargo_record"
+printf 'cargo 99.0.0 (hostile ambient fixture)\n'
+SH
 cat > "$ambient_bin/rustc" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$*" >> "$ambient_rustc_record"
 printf 'rustc 99.0.0 (hostile ambient fixture)\n'
 SH
-chmod +x "$ambient_bin/rustc"
+chmod +x "$ambient_bin/cargo" "$ambient_bin/rustc"
 cleanup() {
   local status=$?
   if [[ "$status" -ne 0 ]]; then
@@ -82,6 +89,7 @@ SH
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'if [[ "${1:-}" == "-V" || "${1:-}" == "--version" ]]; then'
+    printf '%s\n' '  printf "cargo:%s\n" "$*" >> "${DEV_SETUP_TEST_CARGO_QUERY_RECORD:-/dev/null}"'
     printf '%s\n' '  printf "cargo 1.90.0 (fixture)\n"'
     printf '%s\n' '  exit 0'
     printf '%s\n' 'fi'
@@ -97,6 +105,7 @@ SH
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "-vV" ]]; then
+  printf 'rustc:%s\n' "$*" >> "${DEV_SETUP_TEST_RUSTC_QUERY_RECORD:-/dev/null}"
   printf 'rustc 1.90.0 (fixture)\nhost: fixture-target\n'
   exit 0
 fi
@@ -117,6 +126,17 @@ add_available_cargo_tools() {
     printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/$tool"
     chmod +x "$repo/bin/$tool"
   done
+}
+
+cargo_record_contains_build() {
+  grep -Eq '^build([[:space:]]|$)' "$1"
+}
+
+assert_no_cargo_build() {
+  if cargo_record_contains_build "$1"; then
+    echo "Cargo build escaped the canonical resolver" >&2
+    return 1
+  fi
 }
 
 run_setup() {
@@ -148,10 +168,14 @@ run_setup() {
 rust_repo=$(make_fixture_repo rust)
 add_available_cargo_tools "$rust_repo"
 seed_effect_record="$tmp_root/seed-effect-cargo.txt"
+seed_cargo_query_record="$tmp_root/seed-query-cargo.txt"
+seed_rustc_query_record="$tmp_root/seed-query-rustc.txt"
 seed_key_without_ambient="$(
   cd "$rust_repo"
   HARN_CARGO_TARGET_SEED_KEY='' \
     DEV_SETUP_TEST_CARGO_RECORD="$seed_effect_record" \
+    DEV_SETUP_TEST_CARGO_QUERY_RECORD="$seed_cargo_query_record" \
+    DEV_SETUP_TEST_RUSTC_QUERY_RECORD="$seed_rustc_query_record" \
     PATH="$rust_repo/bin:/usr/bin:/bin" \
     ./scripts/cargo_target_seed.sh key
 )"
@@ -159,13 +183,18 @@ seed_key_with_ambient="$(
   cd "$rust_repo"
   HARN_CARGO_TARGET_SEED_KEY='' \
     DEV_SETUP_TEST_CARGO_RECORD="$seed_effect_record" \
+    DEV_SETUP_TEST_CARGO_QUERY_RECORD="$seed_cargo_query_record" \
+    DEV_SETUP_TEST_RUSTC_QUERY_RECORD="$seed_rustc_query_record" \
     PATH="$rust_repo/bin:$fixture_system_path" \
     ./scripts/cargo_target_seed.sh key
 )"
-if [[ "$seed_key_without_ambient" != "$seed_key_with_ambient" \
+if [[ "$(grep -Fxc 'cargo:-V' "$seed_cargo_query_record")" -ne 2 \
+  || "$(grep -Fxc 'rustc:-vV' "$seed_rustc_query_record")" -ne 2 \
+  || "$seed_key_without_ambient" != "$seed_key_with_ambient" \
   || -s "$seed_effect_record" \
+  || -e "$ambient_cargo_record" \
   || -e "$ambient_rustc_record" ]]; then
-  echo "fixture toolchain identity depended on ambient tools or recorded a query as an effect" >&2
+  echo "fixture toolchain identity did not use exactly the fixture tools" >&2
   exit 1
 fi
 rm -f "$seed_effect_record"
@@ -178,13 +207,16 @@ build_effect_record="$tmp_root/build-effect-cargo.txt"
   DEV_SETUP_TEST_CARGO_RECORD="$build_effect_record" \
     PATH="$rust_repo/bin:$fixture_system_path" cargo build
 )
-if ! grep -Fxq build "$build_effect_record"; then
+if assert_no_cargo_build "$build_effect_record" 2>/dev/null; then
+  echo "direct Cargo build rejection negative control did not fire" >&2
+  exit 1
+fi
+if ! cargo_record_contains_build "$build_effect_record"; then
   echo "fixture Cargo did not preserve a real build as an observable effect" >&2
   exit 1
 fi
 
-if grep -Eq '^build([[:space:]]|$)' "$rust_cargo"; then
-  echo "rust setup bypassed the canonical resolver with a separate Cargo build" >&2
+if ! assert_no_cargo_build "$rust_cargo"; then
   cat "$rust_cargo" >&2
   exit 1
 fi
@@ -604,9 +636,10 @@ if ! grep -Fq "does not name this checkout" "$tmp_root/mismatch-output.txt"; the
   echo "setup did not warn that the configured worktree path was ignored" >&2
   exit 1
 fi
-if [[ -e "$ambient_rustc_record" ]]; then
-  echo "a dev-setup fixture resolved the hostile ambient rustc" >&2
-  cat "$ambient_rustc_record" >&2
+if [[ -e "$ambient_cargo_record" || -e "$ambient_rustc_record" ]]; then
+  echo "a dev-setup fixture resolved a hostile ambient Rust tool" >&2
+  [[ ! -e "$ambient_cargo_record" ]] || cat "$ambient_cargo_record" >&2
+  [[ ! -e "$ambient_rustc_record" ]] || cat "$ambient_rustc_record" >&2
   exit 1
 fi
 mv "$rust_repo/bin/rustc" "$rust_repo/bin/rustc.fixture-owned"
@@ -617,8 +650,24 @@ mv "$rust_repo/bin/rustc" "$rust_repo/bin/rustc.fixture-owned"
     PATH="$rust_repo/bin:$fixture_system_path" \
     ./scripts/cargo_target_seed.sh key >/dev/null
 )
-if [[ ! -s "$ambient_rustc_record" ]]; then
+if [[ "$(grep -Fxc -- '-vV' "$ambient_rustc_record")" -ne 1 \
+  || -e "$ambient_cargo_record" ]]; then
   echo "hostile ambient rustc negative control did not fire" >&2
+  exit 1
+fi
+mv "$rust_repo/bin/rustc.fixture-owned" "$rust_repo/bin/rustc"
+rm -f "$ambient_rustc_record"
+mv "$rust_repo/bin/cargo" "$rust_repo/bin/cargo.fixture-owned"
+(
+  cd "$rust_repo"
+  HARN_CARGO_TARGET_SEED_KEY='' \
+    DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/negative-control-cargo.txt" \
+    PATH="$rust_repo/bin:$fixture_system_path" \
+    ./scripts/cargo_target_seed.sh key >/dev/null
+)
+if [[ "$(grep -Fxc -- '-V' "$ambient_cargo_record")" -ne 1 \
+  || -e "$ambient_rustc_record" ]]; then
+  echo "hostile ambient Cargo negative control did not fire" >&2
   exit 1
 fi
 
