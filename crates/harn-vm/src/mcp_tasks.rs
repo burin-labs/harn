@@ -607,12 +607,12 @@ fn sweep_expired(state: &mut McpTaskStoreState, now_ms: i64) {
     let expired = state
         .tasks
         .iter()
-        .filter_map(|(task_id, stored)| {
+        .filter(|(_, stored)| {
             stored
                 .expires_at_ms
                 .is_some_and(|deadline| now_ms >= deadline)
-                .then(|| task_id.clone())
         })
+        .map(|(task_id, _)| task_id.clone())
         .collect::<Vec<_>>();
     for task_id in expired {
         if let Some(stored) = state.tasks.remove(&task_id) {
