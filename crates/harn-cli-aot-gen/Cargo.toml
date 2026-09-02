@@ -16,12 +16,12 @@ publish = false
 ignored = ["serde_json", "sha2"]
 
 [dependencies]
-harn-modules = { path = "../harn-modules", version = "=0.10.126" }
-harn-parser = { path = "../harn-parser", version = "=0.10.126" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.126" }
+harn-modules = { path = "../harn-modules", version = "=0.10.127-dev" }
+harn-parser = { path = "../harn-parser", version = "=0.10.127-dev" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.127-dev" }
 # AOT generation targets the distributed CLI surface; opt into `full` + otel
 # explicitly so library crates can stay lean by default (#6416).
-harn-vm = { path = "../harn-vm", version = "=0.10.126", default-features = false, features = [
+harn-vm = { path = "../harn-vm", version = "=0.10.127-dev", default-features = false, features = [
     "full",
     "otel",
 ] }

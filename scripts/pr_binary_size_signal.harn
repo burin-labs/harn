@@ -1,0 +1,333 @@
+// Render the pull-request binary-growth signal.
+//
+// The release binary-size policy is measured on a stripped, LTO'd, AOT-embedded
+// release build for one Linux target, and that build costs ~40 minutes. Paying
+// it per pull request would put a 40-minute lane on every Rust PR to answer a
+// question that is almost always "no change". So this reports two different
+// things and never conflates them:
+//
+//   1. The growth heuristic. CI already builds a debug `harn` for every Rust
+//      PR and publishes it as `harn-cli.tar.zst`. Measuring those bytes costs
+//      nothing, and their ratio against main's last debug measurement moves
+//      with the same code that moves the release binary. It is a proxy, it is
+//      labelled a proxy, and its absolute bytes are never compared against a
+//      release baseline.
+//   2. The real release measurement, when one is available: main's most recent
+//      release-profile build, its delta against the recorded baseline, and how
+//      much headroom is left under the distribution fuse.
+//
+// Nothing here fails a pull request. Growth is a complexity signal about code
+// that still ships; only the distribution fuse refuses, and only in the release
+// workflow that measured a real release artifact.
+//
+// Usage:
+//   harn run scripts/pr_binary_size_signal.harn -- [options]
+import { read_json_typed_result } from "std/fs"
+import "./release_binary_size_policy.harn"
+
+/** One debug-profile `harn` binary, measured. */
+pub type DebugBinaryMeasurement = {revision: string, bytes: int}
+
+pub type PrBinarySizeStatus = "no-baseline" | "unchanged" | "grew" | "shrank"
+
+/** The proxy verdict. `crosses_threshold` never blocks; it only bolds a line. */
+pub type PrBinarySizeSignal = {
+  status: PrBinarySizeStatus,
+  head_revision: string,
+  head_bytes: int,
+  baseline_revision: string,
+  baseline_bytes: int,
+  delta_bytes: int,
+  delta_percent_hundredths: int,
+  warn_percent_hundredths: int,
+  crosses_threshold: bool,
+}
+
+pub const PR_BINARY_SIZE_COMMENT_MARKER: string = "<!-- harn:pr-binary-size -->"
+
+/** MiB to two decimals, matching the release size report's rendering. */
+pub fn mib(bytes: int) -> string {
+  const negative = bytes < 0
+  const magnitude = if negative {
+    0 - bytes
+  } else {
+    bytes
+  }
+  const whole = magnitude / 1048576
+  const hundredths = magnitude % 1048576 * 100 / 1048576
+  const padded = if hundredths < 10 {
+    "0${hundredths}"
+  } else {
+    "${hundredths}"
+  }
+  return if negative {
+    "-${whole}.${padded}"
+  } else {
+    "${whole}.${padded}"
+  }
+}
+
+/** A signed integer with an explicit sign, so a reader never has to infer one. */
+pub fn signed(value: int) -> string {
+  return if value > 0 {
+    "+${value}"
+  } else {
+    "${value}"
+  }
+}
+
+fn signed_mib(bytes: int) -> string {
+  return if bytes > 0 {
+    "+${mib(bytes)}"
+  } else {
+    mib(bytes)
+  }
+}
+
+fn signed_percent(hundredths: int) -> string {
+  const negative = hundredths < 0
+  const magnitude = if negative {
+    0 - hundredths
+  } else {
+    hundredths
+  }
+  const whole = magnitude / 100
+  const rest = magnitude % 100
+  const padded = if rest < 10 {
+    "0${rest}"
+  } else {
+    "${rest}"
+  }
+  const sign = if negative {
+    "-"
+  } else {
+    "+"
+  }
+  return "${sign}${whole}.${padded}%"
+}
+
+/**
+ * Compare this pull request's debug binary against main's recorded one.
+ *
+ * A missing baseline is its own status. Reporting "0 bytes of growth" when
+ * nothing was measured would make an absent measurement indistinguishable from
+ * a clean one, which is the failure mode this whole change exists to remove.
+ */
+pub fn evaluate_pr_binary_size(
+  head: DebugBinaryMeasurement,
+  baseline: DebugBinaryMeasurement?,
+  warn_percent_hundredths: int,
+) -> PrBinarySizeSignal {
+  if baseline == nil || baseline.bytes <= 0 {
+    return {
+      status: "no-baseline",
+      head_revision: head.revision,
+      head_bytes: head.bytes,
+      baseline_revision: baseline?.revision ?? "",
+      baseline_bytes: baseline?.bytes ?? 0,
+      delta_bytes: 0,
+      delta_percent_hundredths: 0,
+      warn_percent_hundredths: warn_percent_hundredths,
+      crosses_threshold: false,
+    }
+  }
+  const delta_bytes = head.bytes - baseline.bytes
+  const delta_percent_hundredths = delta_bytes * 10000 / baseline.bytes
+  return {
+    status: if delta_bytes > 0 {
+      "grew"
+    } else if delta_bytes < 0 {
+      "shrank"
+    } else {
+      "unchanged"
+    },
+    head_revision: head.revision,
+    head_bytes: head.bytes,
+    baseline_revision: baseline.revision,
+    baseline_bytes: baseline.bytes,
+    delta_bytes: delta_bytes,
+    delta_percent_hundredths: delta_percent_hundredths,
+    // Only the ratio carries across profiles. The policy's absolute
+    // `warn_bytes` is calibrated for a stripped release artifact and would be
+    // meaningless against a debug binary several times its size.
+    warn_percent_hundredths: warn_percent_hundredths,
+    crosses_threshold: delta_percent_hundredths >= warn_percent_hundredths,
+  }
+}
+
+fn proxy_lines(signal: PrBinarySizeSignal) -> list<string> {
+  if signal.status == "no-baseline" {
+    return [
+      "| Debug `harn` (this PR) | ${signal.head_bytes} bytes (${mib(signal.head_bytes)} MiB) |",
+      "| Compared against main | not recorded |",
+      "",
+      "No main measurement was available to compare against, so no growth is reported. This is an absent comparison, not a clean one.",
+    ]
+  }
+  const emphasis = if signal.crosses_threshold {
+    " ⚠️"
+  } else {
+    ""
+  }
+  return [
+    "| Debug `harn` (this PR) | ${signal.head_bytes} bytes (${mib(signal.head_bytes)} MiB) |",
+    "| Debug `harn` (main `${signal.baseline_revision.slice(0, 12)}`) | ${signal.baseline_bytes} bytes (${mib(signal.baseline_bytes)} MiB) |",
+    "| Change | ${signed(signal.delta_bytes)} bytes (${signed_mib(signal.delta_bytes)} MiB, ${signed_percent(signal.delta_percent_hundredths)})${emphasis} |",
+  ]
+}
+
+fn release_lines(release: ReleaseBinarySizeReport?) -> list<string> {
+  if release == nil {
+    return [
+      "",
+      "**Release binary:** no recorded measurement for main. `release-size-watch.yml` measures it every four hours.",
+    ]
+  }
+  const headroom = release.fuse_bytes - release.bytes
+  const headroom_percent_hundredths = headroom * 10000 / release.fuse_bytes
+  return [
+    "",
+    "**Release binary** (`${release.target}`, main `${release.source_sha.slice(0, 12)}`)",
+    "",
+    "| Measure | Value |",
+    "| --- | --- |",
+    "| Size | ${release.bytes} bytes (${mib(release.bytes)} MiB) |",
+    "| Versus the `${release.baseline_version}` baseline | ${signed(release.delta_bytes)} bytes (${signed_percent(release.delta_percent_hundredths)}), growth signal `${release.growth}` |",
+    "| Distribution fuse headroom | ${headroom} bytes (${mib(headroom)} MiB, ${headroom_percent_hundredths / 100}% of the ${mib(release.fuse_bytes)} MiB ceiling) |",
+  ]
+}
+
+/**
+ * The whole comment body, marker first so the workflow can find and replace
+ * its own previous comment rather than adding one per push.
+ */
+pub fn pr_binary_size_comment(
+  signal: PrBinarySizeSignal,
+  release: ReleaseBinarySizeReport?,
+) -> string {
+  let lines = [
+    PR_BINARY_SIZE_COMMENT_MARKER,
+    "### Binary size",
+    "",
+    "| Measure | Value |",
+    "| --- | --- |",
+  ]
+  lines = lines + proxy_lines(signal)
+  lines = lines + release_lines(release)
+  lines = lines
+    + [
+      "",
+      "The debug binary is a growth proxy, not the shipped artifact: its bytes are never compared against the release baseline, only against main's debug binary built the same way. The release row is main's last real measurement.",
+      "",
+      "This check never fails a pull request. Only the distribution fuse can refuse a release, and only in `build-release-binaries.yml`.",
+    ]
+  return lines.join("\n") + "\n"
+}
+
+fn arg_value(args: list<string>, name: string) -> string {
+  let i = 0
+  while i + 1 < args.count {
+    if args[i] == name {
+      return args[i + 1] ?? ""
+    }
+    i = i + 1
+  }
+  return ""
+}
+
+fn read_measurement(fs: HarnessFs, path: string) -> DebugBinaryMeasurement? {
+  if path == "" || !fs.exists(path) {
+    return nil
+  }
+  // A recorded measurement that does not parse is an absent one, and the
+  // caller renders absence honestly. Reading a partial record as a number
+  // would be the failure mode this whole comment exists to avoid.
+  const parsed = read_json_typed_result<DebugBinaryMeasurement>(
+    fs,
+    path,
+    schema_of(DebugBinaryMeasurement),
+  )
+  if !is_ok(parsed) {
+    return nil
+  }
+  const measurement = unwrap(parsed)
+  if measurement.bytes <= 0 {
+    return nil
+  }
+  return measurement
+}
+
+fn read_release_report(fs: HarnessFs, path: string) -> ReleaseBinarySizeReport? {
+  if path == "" || !fs.exists(path) {
+    return nil
+  }
+  const parsed = read_json_typed_result<ReleaseBinarySizeReport>(
+    fs,
+    path,
+    schema_of(ReleaseBinarySizeReport),
+  )
+  if !is_ok(parsed) {
+    return nil
+  }
+  const report = unwrap(parsed)
+  // An older artifact may predate this schema. Reporting no measurement is
+  // correct there; reporting its numbers under a contract it never signed
+  // is not.
+  if report.schema != RELEASE_BINARY_SIZE_REPORT_SCHEMA {
+    return nil
+  }
+  return report
+}
+
+pipeline main(harness: Harness) {
+  const bin = arg_value(argv, "--bin")
+  const revision = arg_value(argv, "--revision")
+  if bin == "" || revision == "" {
+    harness.stdio.eprintln("error: --bin PATH and --revision SHA are required")
+    return 2
+  }
+  if !harness.fs.exists(bin) {
+    harness.stdio.eprintln("error: binary not found at ${bin}")
+    return 2
+  }
+  const repo_root = harness.process.run({program: "git", args: ["rev-parse", "--show-toplevel"]})
+    .stdout
+    .trim()
+  const policy_result = read_release_binary_size_policy_result(
+    harness.fs,
+    path_join(repo_root, RELEASE_BINARY_SIZE_POLICY_PATH),
+  )
+  if !is_ok(policy_result) {
+    harness.stdio.eprintln(
+      "error: invalid release binary-size policy: " + json_stringify(unwrap_err(policy_result)),
+    )
+    return 2
+  }
+  const policy = unwrap(policy_result)
+  const entry = release_binary_size_target_policy(policy, policy.default_target)
+  if entry == nil {
+    harness.stdio.eprintln("error: policy has no entry for ${policy.default_target}")
+    return 2
+  }
+  const head: DebugBinaryMeasurement = {revision: revision, bytes: harness.fs.stat(bin).size}
+  const signal = evaluate_pr_binary_size(
+    head,
+    read_measurement(harness.fs, arg_value(argv, "--baseline")),
+    entry.growth.warn_percent_hundredths,
+  )
+  const comment = pr_binary_size_comment(
+    signal,
+    read_release_report(harness.fs, arg_value(argv, "--release-report")),
+  )
+  harness.stdio.print(comment)
+  const comment_out = arg_value(argv, "--out-comment")
+  if comment_out != "" {
+    harness.fs.write_text(comment_out, comment)
+  }
+  // The measurement this run publishes for the next one to compare against.
+  const record_out = arg_value(argv, "--out-record")
+  if record_out != "" {
+    harness.fs.write_text(record_out, json_stringify(head) + "\n")
+  }
+  return 0
+}

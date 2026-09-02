@@ -1,0 +1,617 @@
+// std/agent/workspace_guidance - resolve a workspace's own instruction files
+// (AGENTS.md, CLAUDE.md, per-directory copies, local overrides, editor rule
+// packs) into an ordered, deduped, budgeted, provenance-carrying set.
+//
+// This is the single owner of the discovery rules. Every surface that answers
+// "which guidance is active?" -- a system prompt, a TUI notice, an IDE rules
+// panel, a headless receipt -- consumes this resolution instead of restating
+// the filenames and the walk. When a panel and a prompt each derive the set,
+// they diverge silently and nothing notices.
+//
+// Precedence runs broadest to most specific, so the most specific text is last
+// and therefore read last. This matches both peers: Claude Code orders "from
+// the filesystem root down to your working directory", and Codex "concatenates
+// files from the root down, joining them with blank lines".
+//
+// Reads flow only through `HarnessFs`, so the resolver is deterministic and
+// testable without a host.
+/** Where one resolved source sits in the precedence order. */
+pub type GuidanceScope = "user" | "ancestor" | "workspace" | "scoped" | "editor_pack"
+
+/** One resolved guidance source, carrying enough provenance to be a receipt. */
+pub type GuidanceSource = {
+  path: string,
+  scope: GuidanceScope,
+  depth: int,
+  body: string,
+  bytes: int,
+  imported_from?: string,
+}
+
+/** A source that was discovered but did not reach the model, and why. */
+pub type GuidanceOmission = {path: string, reason: string, bytes: int}
+
+/** The complete resolution: what loaded, in order, and what did not. */
+pub type GuidanceResolution = {
+  sources: list<GuidanceSource>,
+  omitted: list<GuidanceOmission>,
+  total_bytes: int,
+  budget_bytes: int,
+  dirs_scanned: int,
+}
+
+/**
+ * Discovery inputs. Only `workspace_root` is required; every other field has a
+ * documented default so a host opts into breadth rather than reconstructing it.
+ */
+pub type GuidanceRequest = {
+  workspace_root: string,
+  working_dir?: string,
+  home_dir?: string,
+  max_bytes?: int,
+  max_depth?: int,
+  max_dirs?: int,
+  max_import_hops?: int,
+  include_user_scope?: bool,
+  include_ancestors?: bool,
+  include_subtree?: bool,
+  editor_packs?: list<string>,
+  skip_dirs?: list<string>,
+}
+
+// Per-directory instruction filenames, in the order they are read within one
+// directory. `AGENTS.md` is the portable spelling and comes first; `CLAUDE.md`
+// follows and is dropped when its body matches, which is the whole point of the
+// widespread `ln -s AGENTS.md CLAUDE.md` convention. Local and override files
+// come last within the directory so personal notes are read last, matching
+// Claude Code's "CLAUDE.local.md is appended after CLAUDE.md".
+const DIRECTORY_INSTRUCTION_FILES: list<string> = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "AGENTS.override.md",
+  "CLAUDE.local.md",
+]
+
+// User-scope files, checked under the home directory. These are the files a
+// person writes once and expects every agent on the machine to honor.
+const USER_SCOPE_FILES: list<string> = [
+  ".codex/AGENTS.override.md",
+  ".codex/AGENTS.md",
+  ".agents/AGENTS.md",
+  ".claude/CLAUDE.md",
+]
+
+// Root-only editor rule packs. Hosts may extend this through `editor_packs`;
+// these are the spellings every host wants.
+const DEFAULT_EDITOR_PACKS: list<string> = [
+  ".cursorrules",
+  ".cursor/rules/*.mdc",
+  ".github/copilot-instructions.md",
+]
+
+// Directory names never walked. Guidance never lives in build output, and a
+// walk into `node_modules` is how a 4000-directory ceiling gets spent on
+// nothing.
+const DEFAULT_SKIP_DIRS: list<string> = [
+  ".git",
+  ".build",
+  "target",
+  "node_modules",
+  "dist",
+  "vendor",
+  ".venv",
+  "__pycache__",
+]
+
+const DEFAULT_MAX_BYTES: int = 32768
+
+const DEFAULT_MAX_DEPTH: int = 8
+
+const DEFAULT_MAX_DIRS: int = 4000
+
+const DEFAULT_MAX_IMPORT_HOPS: int = 4
+
+// A single file larger than this is skipped outright rather than truncated,
+// matching Claude Code's "skips a file over 4 MiB".
+const MAX_SINGLE_FILE_BYTES: int = 4194304
+
+/**
+ * Resolve every guidance source for one workspace, in precedence order.
+ *
+ * The returned `sources` are budget-approved and ready to render; `omitted`
+ * names what was discovered and dropped, with the reason. A caller that only
+ * reads `sources` cannot tell "dropped for budget" from "never found", so the
+ * omission list is the load-bearing half of the receipt.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> GuidanceResolution {
+  const root = __guidance_norm(request.workspace_root)
+  const working_dir = __guidance_norm(request.working_dir ?? root)
+  const max_depth = request.max_depth ?? DEFAULT_MAX_DEPTH
+  const max_dirs = request.max_dirs ?? DEFAULT_MAX_DIRS
+  const hops = request.max_import_hops ?? DEFAULT_MAX_IMPORT_HOPS
+  const skip = request.skip_dirs ?? DEFAULT_SKIP_DIRS
+  // Ordered candidate directories, broadest scope first.
+  let candidates: list<{dir: string, scope: GuidanceScope, depth: int, file?: string}> = []
+  if request.include_user_scope ?? true {
+    const home = request.home_dir ?? ""
+    if home != "" {
+      for rel in USER_SCOPE_FILES {
+        candidates = candidates
+          + [{dir: __guidance_norm(home), scope: "user", depth: -1, file: rel}]
+      }
+    }
+  }
+  if request.include_ancestors ?? true {
+    for dir in __guidance_ancestors(root) {
+      candidates = candidates + [{dir: dir, scope: "ancestor", depth: -1}]
+    }
+  }
+  // Workspace root, then each directory down to the working directory.
+  for dir in __guidance_chain(root, working_dir) {
+    candidates = candidates + [{dir: dir, scope: "workspace", depth: 0}]
+  }
+  let dirs_scanned = len(candidates)
+  if request.include_subtree ?? true {
+    const subtree = __guidance_subtree_dirs(fs, working_dir, max_depth, max_dirs, skip)
+    dirs_scanned = dirs_scanned + len(subtree)
+    for entry in subtree {
+      candidates = candidates + [{dir: entry.dir, scope: "scoped", depth: entry.depth}]
+    }
+  }
+  // Collect bodies in candidate order, deduping identical text globally so the
+  // symlink convention is not paid for twice.
+  let sources: list<GuidanceSource> = []
+  let seen_bodies: list<string> = []
+  let seen_paths: list<string> = []
+  let omitted: list<GuidanceOmission> = []
+  for candidate in candidates {
+    const names = if candidate.file != nil {
+      [to_string(candidate.file)]
+    } else {
+      DIRECTORY_INSTRUCTION_FILES
+    }
+    for name in names {
+      const full = path_join(candidate.dir, name)
+      if seen_paths.contains(full) {
+        continue
+      }
+      const raw = __guidance_read(fs, full)
+      if raw == nil {
+        continue
+      }
+      seen_paths = seen_paths + [full]
+      const text = to_string(raw)
+      if len(text) > MAX_SINGLE_FILE_BYTES {
+        omitted = omitted + [{path: full, reason: "file_too_large", bytes: len(text)}]
+        continue
+      }
+      const expanded = __guidance_expand(
+        fs,
+        __guidance_strip_comments(text),
+        candidate.dir,
+        hops,
+        [full],
+      )
+      const body = trim(expanded)
+      if body == "" {
+        continue
+      }
+      // One global content check covers both cases that matter: a CLAUDE.md
+      // symlinked to the AGENTS.md beside it, and one shared rules file reached
+      // through two directories.
+      if seen_bodies.contains(body) {
+        omitted = omitted + [{path: full, reason: "duplicate_body", bytes: len(body)}]
+        continue
+      }
+      seen_bodies = seen_bodies + [body]
+      sources = sources
+        + [
+          {
+            path: full,
+            scope: candidate.scope,
+            depth: candidate.depth,
+            body: body,
+            bytes: len(body),
+          },
+        ]
+    }
+  }
+  // Root-only editor packs come last: they are the least specific about the
+  // task and the most likely to be stale. A pack entry may be a glob, because
+  // rule-card directories (`.cursor/rules/*.mdc`) are how two editors spell
+  // this; expanding it here keeps the walk with its one owner instead of
+  // pushing a second discovery rule into each host.
+  let pack_paths: list<string> = []
+  for rel in request.editor_packs ?? DEFAULT_EDITOR_PACKS {
+    if rel.contains("*") {
+      const matches = try {
+        fs.glob(rel, {base: root})
+      }
+      if is_ok(matches) {
+        pack_paths = pack_paths + unwrap(matches).sorted()
+      }
+    } else {
+      pack_paths = pack_paths + [path_join(root, rel)]
+    }
+  }
+  for full in pack_paths {
+    if seen_paths.contains(full) {
+      continue
+    }
+    const raw = __guidance_read(fs, full)
+    if raw == nil {
+      continue
+    }
+    seen_paths = seen_paths + [full]
+    const body = trim(__guidance_strip_comments(to_string(raw)))
+    if body == "" || seen_bodies.contains(body) {
+      continue
+    }
+    seen_bodies = seen_bodies + [body]
+    sources = sources + [{path: full, scope: "editor_pack", depth: 0, body: body, bytes: len(body)}]
+  }
+  return __guidance_apply_budget(
+    sources,
+    omitted,
+    request.max_bytes ?? DEFAULT_MAX_BYTES,
+    dirs_scanned,
+  )
+}
+
+/**
+ * Project a resolution into prompt fragments, one per source.
+ *
+ * Each fragment keeps its own id and digest through context assembly, so the
+ * `harn.llm.context_manifest.v1` receipt shows exactly which guidance files
+ * reached the model, in which order. One joined blob would collapse that to a
+ * single row and lose the evidence.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn guidance_prompt_fragments(
+  resolution: GuidanceResolution,
+) -> list<{id: string, source: string, body: string}> {
+  return resolution.sources.map(
+    { entry ->
+      return {
+        id: "guidance:" + entry.path,
+        source: "workspace_guidance",
+        body: "Guidance from " + entry.path + " (" + entry.scope + " scope):\n\n" + entry.body,
+      }
+    },
+  )
+    .to_list()
+}
+
+/**
+ * Render a resolution as one path-labelled block, for hosts that inject a
+ * single section rather than per-file fragments.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn render_guidance_block(resolution: GuidanceResolution) -> string {
+  if len(resolution.sources) == 0 {
+    return ""
+  }
+  let parts: list<string> = []
+  for entry in resolution.sources {
+    parts = parts + ["## " + entry.path + "\n\n" + entry.body]
+  }
+  if len(resolution.omitted) > 0 {
+    let dropped: list<string> = []
+    for entry in resolution.omitted {
+      if entry.reason == "budget_exhausted" {
+        dropped = dropped + [entry.path]
+      }
+    }
+    if len(dropped) > 0 {
+      parts = parts
+        + [
+          "Not shown here, read them if the task touches their area: "
+            + join(dropped, ", "),
+        ]
+    }
+  }
+  return join(parts, "\n\n")
+}
+
+// -------------------------------------------------------------------------------------------------
+// Internals
+// -------------------------------------------------------------------------------------------------
+
+fn __guidance_norm(path: string) -> string {
+  let value = path
+  while len(value) > 1 && ends_with(value, "/") {
+    value = substring(value, 0, len(value) - 1)
+  }
+  return value
+}
+
+fn __guidance_parent(path: string) -> string? {
+  const norm = __guidance_norm(path)
+  let cut = -1
+  let index = 0
+  for ch in norm.chars() {
+    if ch == "/" {
+      cut = index
+    }
+    index = index + 1
+  }
+  if cut <= 0 {
+    return nil
+  }
+  return substring(norm, 0, cut)
+}
+
+/** Directories above `root`, ordered from the filesystem root downward. */
+fn __guidance_ancestors(root: string) -> list<string> {
+  let chain: list<string> = []
+  let current = __guidance_parent(root)
+  while current != nil {
+    chain = [to_string(current)] + chain
+    current = __guidance_parent(to_string(current))
+  }
+  return chain
+}
+
+/** `root` and each directory below it down to `target`, root first. */
+fn __guidance_chain(root: string, target: string) -> list<string> {
+  let chain: list<string> = [root]
+  if target == root || !starts_with(target + "/", root + "/") {
+    return chain
+  }
+  const rest = substring(target, len(root) + 1, len(target))
+  let current = root
+  for segment in split(rest, "/") {
+    if segment == "" {
+      continue
+    }
+    current = path_join(current, segment)
+    chain = chain + [current]
+  }
+  return chain
+}
+
+/** Directories strictly below `root`, breadth-first, bounded. */
+fn __guidance_subtree_dirs(
+  fs: HarnessFs,
+  root: string,
+  max_depth: int,
+  max_dirs: int,
+  skip: list<string>,
+) -> list<{dir: string, depth: int}> {
+  let out: list<{dir: string, depth: int}> = []
+  let frontier: list<{dir: string, depth: int}> = [{dir: root, depth: 0}]
+  let scanned = 0
+  while len(frontier) > 0 && scanned < max_dirs {
+    let next: list<{dir: string, depth: int}> = []
+    for entry in frontier {
+      if entry.depth >= max_depth || scanned >= max_dirs {
+        continue
+      }
+      const children = try {
+        fs.list_dir(entry.dir)
+      }
+      if !is_ok(children) {
+        continue
+      }
+      for name in unwrap(children).sorted() {
+        if skip.contains(name) || starts_with(name, ".") {
+          continue
+        }
+        const full = path_join(entry.dir, name)
+        const info = try {
+          fs.stat(full)
+        }
+        if !is_ok(info) {
+          continue
+        }
+        if !(unwrap(info)?.is_dir ?? false) {
+          continue
+        }
+        scanned = scanned + 1
+        const child = {dir: full, depth: entry.depth + 1}
+        out = out + [child]
+        next = next + [child]
+        if scanned >= max_dirs {
+          break
+        }
+      }
+    }
+    frontier = next
+  }
+  return out
+}
+
+/** Read a file, returning nil when it is absent, unreadable, or empty. */
+fn __guidance_read(fs: HarnessFs, path: string) -> string? {
+  const read = fs.read_text_result(path)
+  if !is_ok(read) {
+    return nil
+  }
+  const text = to_string(unwrap(read))
+  if trim(text) == "" {
+    return nil
+  }
+  return text
+}
+
+/**
+ * Strip block-level HTML comments so maintainer notes do not spend context.
+ * Comments inside fenced code blocks are preserved, because a fence's content
+ * is usually the very example the note is about.
+ */
+fn __guidance_strip_comments(text: string) -> string {
+  if !text.contains("<!--") {
+    return text
+  }
+  let out: list<string> = []
+  let in_fence = false
+  let in_comment = false
+  for line in text.lines() {
+    const trimmed = trim(line)
+    if starts_with(trimmed, "```") || starts_with(trimmed, "~~~") {
+      in_fence = !in_fence
+      out = out + [line]
+      continue
+    }
+    if in_fence {
+      out = out + [line]
+      continue
+    }
+    if in_comment {
+      if trimmed.contains("-->") {
+        in_comment = false
+      }
+      continue
+    }
+    if starts_with(trimmed, "<!--") {
+      if !trimmed.contains("-->") {
+        in_comment = true
+      }
+      continue
+    }
+    out = out + [line]
+  }
+  return join(out, "\n")
+}
+
+/**
+ * Expand `@path` imports, matching Claude Code: relative to the file that
+ * contains the import, at most `hops` levels deep, cycles refused, and
+ * occurrences inside code spans or fenced blocks left literal so a documented
+ * `@name` stays documentation.
+ */
+fn __guidance_expand(
+  fs: HarnessFs,
+  text: string,
+  base_dir: string,
+  hops: int,
+  seen: list<string>,
+) -> string {
+  if hops <= 0 || !text.contains("@") {
+    return text
+  }
+  let out: list<string> = []
+  let in_fence = false
+  for line in text.lines() {
+    const trimmed = trim(line)
+    if starts_with(trimmed, "```") || starts_with(trimmed, "~~~") {
+      in_fence = !in_fence
+      out = out + [line]
+      continue
+    }
+    if in_fence || !line.contains("@") {
+      out = out + [line]
+      continue
+    }
+    const target = __guidance_import_target(line)
+    if target == nil {
+      out = out + [line]
+      continue
+    }
+    const spec = to_string(target)
+    const resolved = if starts_with(spec, "/") {
+      spec
+    } else {
+      path_join(base_dir, spec)
+    }
+    if seen.contains(resolved) {
+      out = out + [line]
+      continue
+    }
+    const body = __guidance_read(fs, resolved)
+    if body == nil {
+      out = out + [line]
+      continue
+    }
+    out = out
+      + [
+        __guidance_expand(
+          fs,
+          __guidance_strip_comments(to_string(body)),
+          __guidance_parent(resolved) ?? base_dir,
+          hops - 1,
+          seen + [resolved],
+        ),
+      ]
+  }
+  return join(out, "\n")
+}
+
+/**
+ * The import path on a line, or nil. A line carries at most one import, and an
+ * `@` inside backticks is literal text rather than a reference.
+ */
+fn __guidance_import_target(line: string) -> string? {
+  let ticks = 0
+  let index = 0
+  let candidate: string? = nil
+  let collecting = false
+  let buffer = ""
+  let prev = " "
+  for ch in line.chars() {
+    if ch == "`" {
+      ticks = ticks + 1
+      if collecting {
+        collecting = false
+        buffer = ""
+      }
+    } else if collecting {
+      if ch == " " || ch == "\t" {
+        candidate = buffer
+        collecting = false
+      } else {
+        buffer = buffer + ch
+      }
+    } else if ch == "@" && ticks % 2 == 0 && (prev == " " || prev == "\t" || index == 0) {
+      collecting = true
+      buffer = ""
+    }
+    prev = ch
+    index = index + 1
+  }
+  if collecting && buffer != "" {
+    candidate = buffer
+  }
+  if candidate == nil {
+    return nil
+  }
+  const value = to_string(candidate)
+  if value == "" || !value.contains(".") {
+    return nil
+  }
+  return value
+}
+
+/** Keep whole sources until the budget is spent; name every drop. */
+fn __guidance_apply_budget(
+  sources: list<GuidanceSource>,
+  omitted: list<GuidanceOmission>,
+  budget: int,
+  dirs_scanned: int,
+) -> GuidanceResolution {
+  let kept: list<GuidanceSource> = []
+  let dropped = omitted
+  let used = 0
+  for entry in sources {
+    if used + entry.bytes > budget && len(kept) > 0 {
+      dropped = dropped + [{path: entry.path, reason: "budget_exhausted", bytes: entry.bytes}]
+      continue
+    }
+    kept = kept + [entry]
+    used = used + entry.bytes
+  }
+  return {
+    sources: kept,
+    omitted: dropped,
+    total_bytes: used,
+    budget_bytes: budget,
+    dirs_scanned: dirs_scanned,
+  }
+}
