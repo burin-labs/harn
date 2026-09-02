@@ -229,19 +229,19 @@ pipeline default(harness: Harness) {
     tools,
     "file_read",
     "Read",
-    {handler: { _ -> "" }, parameters: file_schema(), returns: {type: "string"}},
+    {handler: { _ -> "" }, input_schema: file_schema(), returns: {type: "string"}},
   )
   const transform = natural_language_executor_schema_transform()
   const transformed = transform(tools.tools[0])
-  harness.stdio.println(contains(transformed.parameters.properties.keys(), "_nl_intent"))
-  harness.stdio.println(contains(transformed.parameters.required, "_nl_intent"))
-  harness.stdio.println(transformed.parameters.properties._nl_intent.required)
+  harness.stdio.println(contains(transformed.inputSchema.properties.keys(), "_nl_intent"))
+  harness.stdio.println(contains(transformed.inputSchema.required, "_nl_intent"))
+  harness.stdio.println(transformed.inputSchema.properties._nl_intent.required)
   const paired = natural_language_executor_middleware(
     harness,
     {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
   const paired_entry = paired.schema_transform(tools.tools[0])
-  harness.stdio.println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
+  harness.stdio.println(contains(paired_entry.inputSchema.properties.keys(), "_nl_intent"))
   const _ = harness.testing.clock_set(0)
   const r7 = paired.caller(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),

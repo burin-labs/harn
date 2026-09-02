@@ -206,7 +206,7 @@ mod tests {
             name: name.to_string(),
             description: String::new(),
             params,
-            compact: false,
+            summary_only: false,
         }
     }
 

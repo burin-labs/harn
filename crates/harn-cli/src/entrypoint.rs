@@ -963,6 +963,14 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(error.exit_code);
                 }
             }
+            ToolCommand::Completions(completion_args) => {
+                if let Err(error) =
+                    commands::tool::print_registry_completions(&completion_args).await
+                {
+                    eprintln!("error: {error}");
+                    process::exit(error.exit_code);
+                }
+            }
             ToolCommand::Schema(schema_args) => {
                 if let Err(error) = commands::tool::print_registry_schema(&schema_args).await {
                     eprintln!("error: {error}");

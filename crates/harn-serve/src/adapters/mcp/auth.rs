@@ -30,20 +30,6 @@ pub(super) fn accepts_media(headers: &HeaderMap, media_type: &str) -> bool {
     })
 }
 
-pub(super) fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
-    let Some(value) = headers
-        .get(MCP_PROTOCOL_HEADER)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return Ok(());
-    };
-    if mcp_protocol::is_request_metadata_protocol_version(value) {
-        Ok(())
-    } else {
-        Err(Box::new(StatusCode::BAD_REQUEST.into_response()))
-    }
-}
-
 /// Cross-check the stable-required `Mcp-Method` / `Mcp-Name` headers against
 /// the parsed JSON-RPC body. A mismatch is the stable MCP `-32020` error so
 /// the caller can ship it back as either an HTTP 200 with the error body

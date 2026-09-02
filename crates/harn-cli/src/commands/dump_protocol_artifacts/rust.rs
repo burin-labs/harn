@@ -388,20 +388,65 @@ pub(super) fn generate_rust_for_version(
     out.push_str(&rust_const_group_owned(
         "AGENT_TERMINAL_CLASS",
         "AGENT_TERMINAL_CLASSES",
-        "Stable terminal classes carried by typed ACP prompt-error data.",
+        "Stable terminal classes carried by typed ACP prompt-error data. \
+         Superseded by `HarnAgentTerminalClass`; retained for one release so \
+         existing consumers keep compiling.",
         &agent_terminal_class_values(),
     ));
     out.push_str(&rust_const_group_owned(
         "AGENT_TERMINAL_KIND",
         "AGENT_TERMINAL_KINDS",
-        "Producer-owned agent terminal outcome kinds.",
+        "Producer-owned agent terminal outcome kinds. Superseded by \
+         `HarnAgentTerminalKind`; retained for one release so existing \
+         consumers keep compiling.",
         &agent_terminal_kind_values(),
     ));
     out.push_str(&rust_const_group_owned(
         "AGENT_TERMINAL_OWNER",
         "AGENT_TERMINAL_OWNERS",
+        "Owners attributed by producer-owned agent terminal outcomes. \
+         Superseded by `HarnAgentTerminalOwner`; retained for one release so \
+         existing consumers keep compiling.",
+        &agent_terminal_owner_values(),
+    ));
+    out.push_str(&rust_open_string_enum(
+        "HarnAgentTerminalClass",
+        "Stable terminal classes carried by typed ACP prompt-error data.",
+        &agent_terminal_class_values(),
+    ));
+    out.push_str(&rust_open_string_enum(
+        "HarnAgentTerminalKind",
+        "Producer-owned agent terminal outcome kinds.",
+        &agent_terminal_kind_values(),
+    ));
+    out.push_str(&rust_open_string_enum(
+        "HarnAgentTerminalOwner",
         "Owners attributed by producer-owned agent terminal outcomes.",
         &agent_terminal_owner_values(),
+    ));
+    out.push_str(&rust_open_string_enum(
+        "HarnLlmErrorCategory",
+        "Thrown-error categories carried in `category` on the \
+         `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s \
+         `ErrorCategory`.",
+        &llm_error_category_values(),
+    ));
+    out.push_str(&rust_open_string_enum(
+        "HarnLlmErrorKind",
+        "Coarse retry semantics carried in `kind` on the \
+         `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s \
+         `LlmErrorKind`. `transient` means a byte-identical replay may \
+         succeed; `terminal` means it cannot.",
+        &llm_error_kind_values(),
+    ));
+    out.push_str(&rust_open_string_enum(
+        "HarnLlmErrorReason",
+        "Canonical provider-failure reason carried in `reason` on the \
+         `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s \
+         `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH \
+         with no closed set: it is opaque diagnostic text, and a host must \
+         never branch on it. Branch on `reason` instead.",
+        &llm_error_reason_values(),
     ));
     out.push_str(&rust_const_group(
         "HARN_PROMPT_RESULT_EXTENSION_FIELD",
@@ -479,6 +524,103 @@ pub(super) fn format_rust_source(source: String, repo_root: &Path) -> Result<Str
     String::from_utf8(output.stdout).map_err(|error| {
         format!("rustfmt returned non-UTF-8 output for generated Rust protocol artifact: {error}")
     })
+}
+
+/// Emit a closed vocabulary as an *open* Rust enum: every known wire value
+/// gets a unit variant, and one `Unrecognized(String)` escape carries anything
+/// this binding was not generated against.
+///
+/// The escape is what makes a version skew survivable in both directions. A
+/// host pinned to an older Harn round-trips a newer value unchanged instead of
+/// folding it into a neighbouring variant, and a `match` on the enum is
+/// exhaustive, so an arm for a value that no longer exists is a compile error
+/// rather than dead code that silently never fires.
+///
+/// `Unrecognized` deliberately does not reuse the name `Unknown`: at least one
+/// exported vocabulary (`HarnLlmErrorReason`) carries a literal `unknown` wire
+/// value, and "Harn classified this as unknown" is a different fact from "this
+/// binding does not recognize this string".
+fn rust_open_string_enum(name: &str, doc: &str, values: &[String]) -> String {
+    for value in values {
+        assert!(
+            rust_type_name(value) != "Unrecognized",
+            "wire value `{value}` in `{name}` collides with the open-enum escape variant"
+        );
+    }
+    let mut out = rust_doc_comment(doc);
+    out.push_str(&rust_doc_comment(
+        "Open vocabulary: unit variants are the values this binding was generated \
+         from, and `Unrecognized` carries any other string verbatim so a newer \
+         Harn never breaks an older consumer.",
+    ));
+    out.push_str("#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]\n");
+    out.push_str("#[serde(from = \"String\", into = \"String\")]\n");
+    out.push_str(&format!("pub enum {name} {{\n"));
+    for value in values {
+        out.push_str(&format!("    {},\n", rust_type_name(value)));
+    }
+    out.push_str(
+        "    /// A wire value outside the vocabulary this binding was generated \
+         from. Preserved verbatim.\n    Unrecognized(String),\n",
+    );
+    out.push_str("}\n\n");
+
+    out.push_str(&format!("impl {name} {{\n"));
+    out.push_str(
+        "    /// Every value this binding was generated from, in wire order.\n\
+         \x20   /// Excludes the `Unrecognized` escape.\n",
+    );
+    out.push_str("    pub const KNOWN: &'static [Self] = &[\n");
+    for value in values {
+        out.push_str(&format!("        Self::{},\n", rust_type_name(value)));
+    }
+    out.push_str("    ];\n\n");
+
+    out.push_str("    /// The JSON wire string for this value.\n");
+    out.push_str("    pub fn as_str(&self) -> &str {\n        match self {\n");
+    for value in values {
+        out.push_str(&format!(
+            "            Self::{} => {},\n",
+            rust_type_name(value),
+            json_string_literal(value)
+        ));
+    }
+    out.push_str("            Self::Unrecognized(value) => value.as_str(),\n");
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str(
+        "    /// Parse a wire string. An unrecognized value is preserved rather \
+         than rejected.\n",
+    );
+    out.push_str("    pub fn from_wire(value: &str) -> Self {\n        match value {\n");
+    for value in values {
+        out.push_str(&format!(
+            "            {} => Self::{},\n",
+            json_string_literal(value),
+            rust_type_name(value)
+        ));
+    }
+    out.push_str("            other => Self::Unrecognized(other.to_string()),\n");
+    out.push_str("        }\n    }\n\n");
+
+    out.push_str(
+        "    /// Whether this value is part of the vocabulary this binding was \
+         generated from.\n",
+    );
+    out.push_str("    pub fn is_known(&self) -> bool {\n");
+    out.push_str("        !matches!(self, Self::Unrecognized(_))\n    }\n");
+    out.push_str("}\n\n");
+
+    out.push_str(&format!(
+        "impl From<String> for {name} {{\n    fn from(value: String) -> Self {{\n        Self::from_wire(&value)\n    }}\n}}\n\n"
+    ));
+    out.push_str(&format!(
+        "impl From<{name}> for String {{\n    fn from(value: {name}) -> Self {{\n        value.as_str().to_string()\n    }}\n}}\n\n"
+    ));
+    out.push_str(&format!(
+        "impl std::fmt::Display for {name} {{\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        f.write_str(self.as_str())\n    }}\n}}\n\n"
+    ));
+    out
 }
 
 fn rust_string_enum(name: &str, doc: &str, values: &[String]) -> String {

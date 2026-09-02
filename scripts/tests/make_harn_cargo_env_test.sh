@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+default_lease_owner=$(basename "$repo_root")
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -177,6 +178,24 @@ if ! diff -u "$tmp_root/expected-harn-lease-record.txt" "$lease_record"; then
   exit 1
 fi
 
+spaced_workspace="$tmp_root/workspace with ünicode"
+mkdir -p "$spaced_workspace"
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE -u HARN_CARGO_LEASE_OWNER \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  HARN_CARGO_LEASE_WORKSPACE="$spaced_workspace" \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+if ! awk 'previous == "--owner" && $0 == "workspace-with-nicode" { found = 1 }
+          { previous = $0 }
+          END { exit !found }' "$lease_record"; then
+  echo "wrapper did not normalize its derived workspace owner" >&2
+  cat "$lease_record" >&2
+  exit 1
+fi
+
 auto_harn="$target_dir/debug/harn"
 mkdir -p "$(dirname "$auto_harn")"
 cp "$fake_bin/harn-lease" "$auto_harn"
@@ -194,7 +213,7 @@ lease
 run
 cargo
 --owner
-cargo-wrapper
+$default_lease_owner
 --workspace
 $repo_root
 --target-dir
@@ -236,7 +255,7 @@ lease
 run
 cargo
 --owner
-cargo-wrapper
+$default_lease_owner
 --workspace
 $repo_root
 --target-dir
@@ -274,7 +293,7 @@ lease
 run
 cargo
 --owner
-cargo-wrapper
+$default_lease_owner
 --workspace
 $repo_root
 --target-dir
@@ -722,8 +741,23 @@ if ! grep -Fq 'make HARN_BIN="$harn_bin" lint lint-md lint-actions' "$make_all";
   cat "$make_all" >&2
   exit 1
 fi
+if ! grep -Fq 'HARN_BIN="$harn_bin" ./scripts/harn_bin.sh --print-build-freshness' "$make_all"; then
+  echo "all did not verify the compiled identity before snapshotting the Harn binary" >&2
+  cat "$make_all" >&2
+  exit 1
+fi
+if ! grep -Fq 'export HARN_BUILD_FRESHNESS_ID="$build_freshness_id"' "$make_all"; then
+  echo "all did not preserve the verified compiled identity for recursive Cargo gates" >&2
+  cat "$make_all" >&2
+  exit 1
+fi
 if ! grep -Fq './scripts/snapshot_harn_bin.sh "$harn_bin" "$stable_root/harn-bin"' "$make_all"; then
   echo "all did not snapshot the resolved Cargo output before parallel execution" >&2
+  cat "$make_all" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt" "$make_all"; then
+  echo "all did not republish the canonical binary receipt after recursive Cargo gates" >&2
   cat "$make_all" >&2
   exit 1
 fi
