@@ -224,6 +224,7 @@ if ! cat "$receipt"; then
   exit 1
 fi
 if ((runner_status != 0)); then
+  echo "error: exact-test runner failed with status $runner_status" >&2
   exit "$runner_status"
 fi
 if ! grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;' "$receipt"; then

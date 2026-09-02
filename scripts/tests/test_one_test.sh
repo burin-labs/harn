@@ -210,6 +210,11 @@ if ! grep -Fq 'cargo failed' "$tmp_root/failure.out"; then
   cat "$tmp_root/failure.out" >&2
   exit 1
 fi
+if ! grep -Fq 'exact-test runner failed with status 17' "$tmp_root/failure.err"; then
+  echo "Cargo failure was not named separately from receipt failures" >&2
+  cat "$tmp_root/failure.err" >&2
+  exit 1
+fi
 
 # A descendant holding the runner's stdout open must not own the exact-test
 # command's lifetime. Start the wrapper asynchronously so the control can fail
