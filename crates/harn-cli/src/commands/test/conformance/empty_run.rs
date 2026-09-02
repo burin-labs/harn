@@ -25,6 +25,36 @@ pub(super) fn expectation_sibling(harn_file: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.exists())
 }
 
+/// Whether a source must carry an expectation sibling.
+///
+/// `Compiler::compile` executes the `default` pipeline when present and the
+/// first pipeline otherwise. Mirror that structural boundary here instead of
+/// guessing from file or directory names: function-only modules remain inert,
+/// while every source the compiler could execute must carry an oracle. A source
+/// inside a test tree that cannot be read or parsed also requires an oracle: an
+/// unmeasured file is not allowed to disappear as a successful skip.
+pub(super) fn requires_expectation_sibling(harn_file: &Path, rel_path: &str) -> bool {
+    let in_test_tree = matches!(
+        Path::new(rel_path).components().next(),
+        Some(std::path::Component::Normal(component))
+            if component == std::ffi::OsStr::new("tests")
+                || component == std::ffi::OsStr::new("errors")
+    );
+    if !in_test_tree {
+        return false;
+    }
+    let Ok(source) = std::fs::read_to_string(harn_file) else {
+        return true;
+    };
+    let Ok(program) = harn_parser::parse_source(&source) else {
+        return true;
+    };
+    program.iter().any(|node| {
+        let (_, declaration) = harn_parser::peel_attributes(node);
+        matches!(&declaration.node, harn_parser::Node::Pipeline { .. })
+    })
+}
+
 /// How many of `selected` the runner can see but cannot run.
 ///
 /// Recomputed from the selection rather than plumbed out of the run, so both
@@ -106,16 +136,62 @@ mod tests {
         }
 
         fn write(&self, relative: &str) {
+            self.write_source(relative, "// test");
+        }
+
+        fn write_source(&self, relative: &str, source: &str) {
             let path = self.dir.path().join(relative);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).unwrap();
             }
-            fs::write(path, "// test").unwrap();
+            fs::write(path, source).unwrap();
         }
 
         fn path(&self) -> &Path {
             self.dir.path()
         }
+    }
+
+    #[test]
+    fn expectation_requirement_is_structural_and_scoped_to_test_trees() {
+        let temp = TempTestDir::new();
+        temp.write_source(
+            "tests/executable.harn",
+            "pipeline test(harness: Harness) {}\n",
+        );
+        temp.write_source("tests/library.harn", "fn helper() { return nil }\n");
+        temp.write_source(
+            "helpers/server.harn",
+            "pipeline serve(harness: Harness) {}\n",
+        );
+
+        assert!(requires_expectation_sibling(
+            &temp.path().join("tests/executable.harn"),
+            "tests/executable.harn"
+        ));
+        assert!(!requires_expectation_sibling(
+            &temp.path().join("tests/library.harn"),
+            "tests/library.harn"
+        ));
+        assert!(!requires_expectation_sibling(
+            &temp.path().join("helpers/server.harn"),
+            "helpers/server.harn"
+        ));
+    }
+
+    #[test]
+    fn unreadable_or_unparseable_test_source_fails_closed() {
+        let temp = TempTestDir::new();
+        temp.write_source("errors/broken.harn", "const =");
+
+        assert!(requires_expectation_sibling(
+            &temp.path().join("errors/broken.harn"),
+            "errors/broken.harn"
+        ));
+        assert!(requires_expectation_sibling(
+            &temp.path().join("tests/missing.harn"),
+            "tests/missing.harn"
+        ));
     }
 
     #[test]

@@ -14,7 +14,7 @@ fn __dispatch_reject_removed_options(options: dict?) {
   }
 }
 
-fn __dispatch_messages_include_tool_result(messages: list) {
+fn __dispatch_messages_include_tool_result(messages: list?) {
   if type_of(messages) != "list" {
     return false
   }

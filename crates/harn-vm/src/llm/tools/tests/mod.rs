@@ -10,6 +10,7 @@ pub(super) use crate::value::VmValue;
 pub(super) use serde_json::json;
 use std::collections::BTreeMap;
 
+mod compact_tools;
 mod native_tools;
 mod non_dialect;
 
