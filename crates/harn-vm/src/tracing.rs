@@ -878,6 +878,23 @@ pub fn peek_spans() -> Vec<Span> {
     COLLECTOR.with(|c| c.borrow().spans().to_vec())
 }
 
+/// Peek at the completed spans owned by the ambient execution scope.
+///
+/// Use this, not [`peek_spans`], whenever the result is written into an
+/// execution-evidence field: a span completed under a different execution scope
+/// on this thread belongs to that execution's evidence, not to this one's.
+///
+/// When no scope is active there is nothing to select on, so this returns every
+/// completed span. That keeps an unscoped run's evidence intact instead of
+/// silently emptying it, which would read as "no spans happened" rather than as
+/// "no owner was recorded".
+pub fn peek_spans_for_current_execution() -> Vec<Span> {
+    match crate::current_execution_scope() {
+        Some(execution_id) => active_tracing_runtime().completed_spans_for_execution(&execution_id),
+        None => peek_spans(),
+    }
+}
+
 /// Reset the tracing collector.
 pub fn reset_tracing() {
     COLLECTOR.with(|c| c.borrow_mut().reset());
