@@ -1,0 +1,112 @@
+// A tool declaring `compact: true` is listed as a one-liner under "Other
+// tools" instead of getting a full catalog entry, and its description tail
+// never reaches the model. The flag was collected but read by no renderer
+// from its introduction until #7767, so this asserts the served system prompt
+// rather than the registry: a catalog row carrying the flag proved nothing.
+//
+// A capturing caller echoes the assembled system prompt back, the same way
+// agent_goal_prompt_fragment.harn proves a fragment reached the request.
+import { agent_loop } from "std/agent/loop"
+
+const TAIL = "SENTINEL_TAIL"
+
+fn describe(kind: string) {
+  return "Return a deterministic " + kind + " result for this turn. Callers use "
+    + "it to prove the catalog rendered. " + TAIL + ": this trailing sentence "
+    + "exists only so a test can prove it was dropped."
+}
+
+fn listing_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "quiet_tool",
+    describe("quiet"),
+    {
+      compact: true,
+      handler: { _args -> return "ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tool_define(
+    tools,
+    "loud_tool",
+    describe("loud"),
+    {
+      handler: { _args -> return "ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn system_echo_caller() {
+  return { call ->
+    return {
+      ok: true,
+      value: {
+        input_tokens: 0,
+        model: "mock",
+        output_tokens: 0,
+        provider: "mock",
+        text: "SYS[" + to_string(call.system ?? "") + "]",
+      },
+    }
+  }
+}
+
+pipeline default(harness: Harness) {
+  const result = agent_loop(
+    harness,
+    "Report the catalog.",
+    nil,
+    {
+      llm_caller: system_echo_caller(),
+      max_iterations: 1,
+      provider: "mock",
+      session_id: "compact-listing-conformance",
+      tool_format: "text",
+      tools: listing_tools(),
+      turn_end_condition: false,
+    },
+  )
+  const system = result.visible_text
+
+  // The compact tool is listed, under the heading that tells the model how to
+  // recover the rest.
+  assert(
+    system.contains("## Other tools"),
+    "a compact tool must render the Other tools heading; saw: " + system,
+  )
+  assert(
+    system.contains("- `quiet_tool`"),
+    "the compact tool must still be listed — an unlisted name is rejected",
+  )
+  assert(
+    system.contains("Return a deterministic quiet result for this turn."),
+    "the compact line must carry the leading sentences",
+  )
+
+  // The saving is real: the tail is gone for the compact tool but present for
+  // its non-compact sibling. Without the sibling this passes vacuously if the
+  // catalog stopped rendering descriptions at all.
+  assert(
+    !system.contains("### quiet_tool"),
+    "the compact tool must not also get a full expanded entry",
+  )
+  assert(
+    system.contains("### loud_tool"),
+    "a non-compact tool must keep its full entry; saw: " + system,
+  )
+  const tail_count = len(split(system, TAIL)) - 1
+  assert(
+    tail_count == 1,
+    "exactly one tool (the non-compact one) may ship the description tail, saw "
+      + to_string(tail_count) + " in: " + system,
+  )
+
+  harness.stdio.log("agent compact tool listing test passed")
+}

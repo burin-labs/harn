@@ -74,21 +74,36 @@ pub(crate) fn project_llm_call_context_breakdown(
             _ => other_message_tokens += tokens,
         }
     }
-    let tool_tokens: i64 = opts
+    // Deferred tools ship in the same array as resident ones but stay out of
+    // the model's context until a tool-search call surfaces them, so a single
+    // total cannot tell "this tool costs nothing yet" from "this measurement
+    // did not fire". Splitting the two makes a `defer_loading` change visible
+    // instead of reading as zero (#7768). The two partition the array, so
+    // every total below — and every budget decision taken from it — is
+    // byte-identical to a single combined segment.
+    let tool_token_estimate = |tool: &serde_json::Value| {
+        estimate_text_tokens_for_model(
+            &serde_json::to_string(tool).unwrap_or_default(),
+            &opts.model,
+        )
+    };
+    let (resident_tools, deferred_tools): (Vec<_>, Vec<_>) = opts
         .native_tools
-        .as_ref()
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| {
-                    estimate_text_tokens_for_model(
-                        &serde_json::to_string(tool).unwrap_or_default(),
-                        &opts.model,
-                    )
-                })
-                .sum()
-        })
-        .unwrap_or(0);
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .partition(|tool| !crate::llm::tools::native_tool_is_deferred(tool));
+    let resident_tool_tokens: i64 = resident_tools
+        .iter()
+        .copied()
+        .map(tool_token_estimate)
+        .sum();
+    let deferred_tool_tokens: i64 = deferred_tools
+        .iter()
+        .copied()
+        .map(tool_token_estimate)
+        .sum();
+    let tool_tokens = resident_tool_tokens.saturating_add(deferred_tool_tokens);
     let provider_tool_tokens: i64 = opts
         .provider_tools
         .iter()
@@ -136,7 +151,12 @@ pub(crate) fn project_llm_call_context_breakdown(
         LlmContextTokenSegment {
             id: "native_tool_schemas",
             label: "Native tool schemas",
-            tokens: tool_tokens,
+            tokens: resident_tool_tokens,
+        },
+        LlmContextTokenSegment {
+            id: "deferred_tool_schemas",
+            label: "Deferred tool schemas",
+            tokens: deferred_tool_tokens,
         },
         LlmContextTokenSegment {
             id: "provider_tools",
