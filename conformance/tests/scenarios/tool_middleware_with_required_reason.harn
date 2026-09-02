@@ -60,15 +60,15 @@ pipeline default(harness: Harness) {
     "Read",
     {
       handler: { _ -> "" },
-      parameters: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
+      input_schema: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
       returns: {type: "string"},
     },
   )
   const entry = mw.schema_transform(tools.tools[0])
-  harness.stdio.println(contains(entry.parameters.properties.keys(), "reason"))
-  harness.stdio.println(contains(entry.parameters.required, "reason"))
-  harness.stdio.println(entry.parameters.properties.reason.required)
-  harness.stdio.println(entry.parameters.properties.reason.description)
+  harness.stdio.println(contains(entry.inputSchema.properties.keys(), "reason"))
+  harness.stdio.println(contains(entry.inputSchema.required, "reason"))
+  harness.stdio.println(entry.inputSchema.properties.reason.required)
+  harness.stdio.println(entry.inputSchema.properties.reason.description)
   // (4) custom field name + audit_key.
   const mw2 = with_required_reason({field: "intent", audit_key: "rationale"})
   const r3 = mw2.caller(envelope("write", {intent: "ship the fix", body: "x"}), next)
@@ -80,9 +80,9 @@ pipeline default(harness: Harness) {
   // but original args are preserved when `strip: false`.
   const mw3 = with_required_reason({on_missing: "fill_blank", strip: false, schema_required: false})
   const entry3 = mw3.schema_transform(tools.tools[0])
-  harness.stdio.println(contains(entry3.parameters.properties.keys(), "reason"))
-  harness.stdio.println(contains(entry3.parameters.required, "reason"))
-  harness.stdio.println(entry3.parameters.properties.reason.required)
+  harness.stdio.println(contains(entry3.inputSchema.properties.keys(), "reason"))
+  harness.stdio.println(contains(entry3.inputSchema.required, "reason"))
+  harness.stdio.println(entry3.inputSchema.properties.reason.required)
   const r4 = mw3.caller(envelope("read", {path: "/tmp/y"}), next)
   harness.stdio.println(r4.ok)
   harness.stdio.println(r4.audit.summary)

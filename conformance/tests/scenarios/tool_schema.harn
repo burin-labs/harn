@@ -1,6 +1,18 @@
 pipeline default(harness: Harness) {
   // Create registry with tools
-  let tools = tool_registry()
+  let tools = tool_registry(
+    nil,
+    {
+      schemas: {
+        Widget: {
+          type: "object",
+          properties: {id: {type: "string"}},
+          required: ["id"],
+          additionalProperties: false,
+        },
+      },
+    },
+  )
   tools = tool_define(
     tools,
     "search",
@@ -26,6 +38,7 @@ pipeline default(harness: Harness) {
   )
   // Test tool_schema generates OpenAPI-like schema
   const schema = tool_schema(tools)
+  require schema.components.schemas.Widget.required == ["id"], "components survive projection"
   harness.stdio.println(schema.schema_version)
   harness.stdio.println(schema.tools.count())
   harness.stdio.println(schema.tools[0].name)

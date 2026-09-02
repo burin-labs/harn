@@ -811,6 +811,21 @@ impl crate::vm::Vm {
             CancelTimedOut,
         }
 
+        // Import execution temporarily replaces frame-, environment-, and
+        // module-graph state. Dropping that future from this outer selector
+        // would strand the replacement state in the caller VM. The imported
+        // module's own bytecode still runs through this interrupt-aware loop,
+        // so let the import transaction observe and unwind the interrupt
+        // instead of cancelling the transaction future itself.
+        if matches!(
+            Op::from_byte(op),
+            Some(
+                Op::Import | Op::SelectiveImport | Op::NamespaceImport | Op::NamespaceImportMembers
+            )
+        ) {
+            return self.execute_op(op).await;
+        }
+
         let execution_deadline = Arc::clone(&self.execution_deadline);
         let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
         let interrupt_handler_deadline = self.interrupt_handler_deadline;
