@@ -4,7 +4,7 @@
   "targets": [
     {
       "target": "x86_64-unknown-linux-gnu",
-      "distribution_fuse_bytes": 293601280,
+      "distribution_fuse_bytes": 285212672,
       "growth": {
         "warn_bytes": 4194304,
         "warn_percent_hundredths": 200
