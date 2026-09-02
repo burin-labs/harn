@@ -57,17 +57,49 @@ pipeline test(harness: Harness, task: unknown) {
     {role: "assistant", content: "We should isolate the lexer first."},
     {role: "user", content: "Then update the diagnostics."},
   ]
+  const mask_calls_before = len(harness.llm.mock_calls())
   const llm_compacted = harness.agent.transcript_auto_compact(
     base_messages,
-    {provider: "mock", keep_last: 1, token_threshold: 1},
+    {provider: "mock", keep_last: 1, token_threshold: 1, hard_limit_tokens: 999999},
   )
-  // transcript_auto_compact now returns { messages, archived, summary }; the
-  // archived count and summary come straight from the engine instead of being
-  // inferred from a length delta.
+  // transcript_auto_compact returns {messages, archived, summary, receipt};
+  // counts, text, and lifecycle facts come from the engine instead of being
+  // inferred from a length delta or reconstructed from request options.
   harness.stdio.println(len(llm_compacted.messages))
   harness.stdio.println(llm_compacted.archived)
   harness.stdio.println(llm_compacted.messages[0].content.contains("auto-compacted"))
   harness.stdio.println(llm_compacted.summary.contains("auto-compacted"))
+  harness.stdio.println(len(harness.llm.mock_calls()) == mask_calls_before)
+  harness.stdio.println(llm_compacted.receipt.requested_strategy == "observation_mask")
+  harness.stdio.println(llm_compacted.receipt.engine_strategy == "observation_mask")
+  harness.stdio.println(llm_compacted.receipt.resolved_threshold_tokens == 1)
+  harness.stdio.println(llm_compacted.receipt.threshold_source == "token_threshold")
+  harness.stdio.println(llm_compacted.receipt.hard_limit_tokens == 999999)
+  harness.stdio.println(llm_compacted.receipt.source_measurement.summary_bytes > 0)
+  const deferred_compaction = harness.agent.transcript_auto_compact(
+    base_messages,
+    {token_threshold: 999999},
+  )
+  harness.stdio.println(deferred_compaction.archived == 0 && deferred_compaction.receipt == nil)
+  const alias_compacted = harness.agent.transcript_auto_compact(
+    base_messages,
+    {keep_last: 1, compact_threshold: 1},
+  )
+  harness.stdio.println(alias_compacted.receipt.resolved_threshold_tokens == 1)
+  harness.stdio.println(alias_compacted.receipt.threshold_source == "compact_threshold")
+  const tier_two_compacted = harness.agent.transcript_auto_compact(
+    base_messages,
+    {
+      keep_last: 1,
+      token_threshold: 1,
+      compact_strategy: "observation_mask",
+      hard_limit_tokens: 1,
+      hard_limit_strategy: "truncate",
+    },
+  )
+  harness.stdio.println(tier_two_compacted.receipt.requested_strategy == "observation_mask")
+  harness.stdio.println(tier_two_compacted.receipt.engine_strategy == "truncate")
+  harness.stdio.println(tier_two_compacted.receipt.hard_limit_tokens == 1)
   const custom_compacted = harness.agent.transcript_auto_compact(
     base_messages,
     {

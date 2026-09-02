@@ -1,0 +1,153 @@
+// Tests for scripts/pr_binary_size_signal.harn — the pull-request growth
+// proxy, the release row it carries alongside, and the rendered comment.
+import "../pr_binary_size_signal.harn"
+import "../release_binary_size_policy.harn"
+
+fn head(bytes: int) -> DebugBinaryMeasurement {
+  return {revision: "9d1f0c4b2ae7f6531c08d4b9a2e7f0c3b8d51a26", bytes: bytes}
+}
+
+fn base(bytes: int) -> DebugBinaryMeasurement {
+  return {revision: "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc", bytes: bytes}
+}
+
+fn release_report(bytes: int) -> ReleaseBinarySizeReport {
+  return {
+    schema: RELEASE_BINARY_SIZE_REPORT_SCHEMA,
+    target: "x86_64-unknown-linux-gnu",
+    source_sha: "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc",
+    bytes: bytes,
+    fuse_bytes: 267386880,
+    fuse: "ok",
+    comparability: "comparable",
+    baseline_version: "0.10.118",
+    baseline_source_sha: "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc",
+    baseline_bytes: 242554944,
+    delta_bytes: bytes - 242554944,
+    delta_percent_hundredths: (bytes - 242554944) * 10000 / 242554944,
+    growth: "warn",
+    accepted_reason: "",
+    blocking: false,
+    failures: [],
+    warnings: ["growth signal: above the 0.10.118 baseline"],
+    build_identity: {
+      profile: "release",
+      codegen_units: 8,
+      lto: "thin",
+      strip: "symbols",
+      rustc: "1.95.0",
+      aot_embedded: true,
+    },
+  }
+}
+
+// --- the proxy verdict ------------------------------------------------------
+/**
+ * Falsifier (c). Seed a delta past the policy's percent threshold and the
+ * signal must say so, in bytes and in percent, without ever reporting a
+ * blocking state. A signal that renders the same text for a grown binary as
+ * for an unchanged one measures nothing.
+ */
+@test
+pipeline test_a_seeded_delta_moves_the_signal(harness: Harness, task: unknown) {
+  const unchanged = evaluate_pr_binary_size(head(400000000), base(400000000), 200)
+  assert_eq(unchanged.status, "unchanged")
+  assert_eq(unchanged.delta_bytes, 0)
+  assert_eq(unchanged.crosses_threshold, false)
+  // +5% on the same baseline: past the 2% policy ratio.
+  const grown = evaluate_pr_binary_size(head(420000000), base(400000000), 200)
+  assert_eq(grown.status, "grew")
+  assert_eq(grown.delta_bytes, 20000000)
+  assert_eq(grown.delta_percent_hundredths, 500)
+  assert_eq(grown.crosses_threshold, true)
+  const shrank = evaluate_pr_binary_size(head(380000000), base(400000000), 200)
+  assert_eq(shrank.status, "shrank")
+  assert_eq(shrank.delta_bytes, -20000000)
+  assert_eq(shrank.crosses_threshold, false)
+  // The rendered comments must differ, or the check reports nothing.
+  assert(pr_binary_size_comment(grown, nil) != pr_binary_size_comment(unchanged, nil))
+  assert(pr_binary_size_comment(grown, nil).contains("+20000000 bytes"))
+  assert(pr_binary_size_comment(grown, nil).contains("+5.00%"))
+  assert(pr_binary_size_comment(shrank, nil).contains("-20000000 bytes"))
+}
+
+/** Just under the threshold is still reported, just not emphasized. */
+@test
+pipeline test_growth_below_the_threshold_is_reported_without_emphasis(
+  harness: Harness,
+  task: unknown,
+) {
+  const modest = evaluate_pr_binary_size(head(404000000), base(400000000), 200)
+  assert_eq(modest.status, "grew")
+  assert_eq(modest.delta_percent_hundredths, 100)
+  assert_eq(modest.crosses_threshold, false)
+  const body = pr_binary_size_comment(modest, nil)
+  assert(body.contains("+4000000 bytes"))
+  assert(!body.contains("⚠️"))
+}
+
+/**
+ * A missing baseline is a distinct state, never a clean one. If this ever
+ * renders as "0 bytes", an unmeasured pull request becomes indistinguishable
+ * from one that grew nothing.
+ */
+@test
+pipeline test_a_missing_baseline_never_renders_as_no_growth(harness: Harness, task: unknown) {
+  const signal = evaluate_pr_binary_size(head(400000000), nil, 200)
+  assert_eq(signal.status, "no-baseline")
+  assert_eq(signal.crosses_threshold, false)
+  const body = pr_binary_size_comment(signal, nil)
+  assert(body.contains("not recorded"))
+  assert(body.contains("an absent comparison, not a clean one"))
+  assert(!body.contains("| Change |"))
+  // A zero-byte recorded baseline is the same absence wearing a number.
+  assert_eq(evaluate_pr_binary_size(head(400000000), base(0), 200).status, "no-baseline")
+}
+
+// --- the comment ------------------------------------------------------------
+/** The marker is what makes this one updated comment rather than one per push. */
+@test
+pipeline test_the_comment_leads_with_its_update_marker(harness: Harness, task: unknown) {
+  const body = pr_binary_size_comment(evaluate_pr_binary_size(head(1), base(1), 200), nil)
+  assert(body.starts_with(PR_BINARY_SIZE_COMMENT_MARKER))
+  assert(body.contains("### Binary size"))
+  assert(body.contains("never fails a pull request"))
+}
+
+/** The release row carries the real bytes, the baseline delta, and headroom. */
+@test
+pipeline test_the_release_row_reports_fuse_headroom(harness: Harness, task: unknown) {
+  const body = pr_binary_size_comment(
+    evaluate_pr_binary_size(head(400000000), base(400000000), 200),
+    release_report(250385000),
+  )
+  assert(body.contains("250385000 bytes"))
+  assert(body.contains("0.10.118"))
+  assert(body.contains("Distribution fuse headroom"))
+  // 267386880 - 250385000
+  assert(body.contains("17001880 bytes"))
+  assert(body.contains("growth signal `warn`"))
+}
+
+/** No release measurement says so, rather than omitting the row silently. */
+@test
+pipeline test_a_missing_release_measurement_is_stated(harness: Harness, task: unknown) {
+  const body = pr_binary_size_comment(
+    evaluate_pr_binary_size(head(400000000), base(400000000), 200),
+    nil,
+  )
+  assert(body.contains("no recorded measurement for main"))
+  assert(body.contains("release-size-watch.yml"))
+}
+
+// --- rendering --------------------------------------------------------------
+@test
+pipeline test_mib_and_sign_rendering(harness: Harness, task: unknown) {
+  assert_eq(mib(1048576), "1.00")
+  assert_eq(mib(1572864), "1.50")
+  assert_eq(mib(0), "0.00")
+  assert_eq(mib(-1048576), "-1.00")
+  assert_eq(signed(5), "+5")
+  assert_eq(signed(-5), "-5")
+  assert_eq(signed(0), "0")
+}

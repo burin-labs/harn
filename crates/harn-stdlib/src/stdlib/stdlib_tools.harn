@@ -7,10 +7,72 @@
  */
 pub type ToolRegistryInfo = {name: string, version?: string, description?: string}
 
-pub type ToolRegistry = {_type: "tool_registry", tools: list, info?: ToolRegistryInfo}
+/** Draft 2020-12 schema document, including the standard boolean form. */
+pub type JsonSchema202012 = bool | dict<string, unknown>
+
+/** Reusable named JSON Schemas shared by every adapter projection. */
+pub type ToolComponents = {schemas: dict<string, JsonSchema202012>}
+
+pub type ToolCliValueHint = "file" \
+  | "directory" \
+  | "path" \
+  | "url" \
+  | "email" \
+  | "username" \
+  | "hostname" \
+  | "command" \
+  | "other"
+
+pub type ToolCliBooleanStyle = "value" | "set_true" | "set_false"
+
+pub type ToolCliArgumentSpec = {
+  long?: string,
+  short?: string,
+  aliases?: list<string>,
+  position?: int,
+  value_name?: string,
+  help?: string,
+  value_hint?: ToolCliValueHint,
+  boolean_style?: ToolCliBooleanStyle,
+  repeatable?: bool,
+  hidden?: bool,
+  completions?: list<string>,
+  display_order?: int,
+  help_group?: string,
+}
+
+pub type ToolCliCommandSpec = {
+  command: list<string>,
+  title?: string,
+  description?: string,
+  aliases?: list<string>,
+  hidden?: bool,
+  display_order?: int,
+}
+
+pub type ToolCliTreeSpec = {commands: list<ToolCliCommandSpec>}
+
+pub type ToolRegistryOptions = {
+  info?: ToolRegistryInfo,
+  components?: ToolComponents,
+  cli?: ToolCliTreeSpec,
+}
+
+pub type ToolRegistry = {
+  _type: "tool_registry",
+  tools: list,
+  info?: ToolRegistryInfo,
+  components?: ToolComponents,
+  cli?: ToolCliTreeSpec,
+}
 
 /** Deterministic command path projected by `harn tool run`. */
-pub type ToolCliSpec = {command: list<string>, hidden?: bool}
+pub type ToolCliSpec = {
+  command: list<string>,
+  aliases?: list<string>,
+  hidden?: bool,
+  arguments?: dict<string, ToolCliArgumentSpec>,
+}
 
 /** Closed set of adapters that may discover and invoke a tool. */
 pub type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard" | "agent"
@@ -43,8 +105,9 @@ pub type ToolCatalogEntry = {
   name: string,
   title?: string,
   description?: string,
-  inputSchema: dict,
-  outputSchema?: dict,
+  inputSchema: JsonSchema202012,
+  outputSchema?: JsonSchema202012,
+  errorSchema?: JsonSchema202012,
   annotations?: dict,
   icons?: list<ToolIcon>,
   execution?: ToolExecution,
@@ -59,16 +122,21 @@ pub type ToolCatalogEntry = {
 
 /** Versioned static projection shared by generated presentation adapters. */
 pub type ToolCatalog = {
-  schema_version: "harn-tools/1.0",
+  schema_version: "harn-tools/2.0",
   info?: ToolRegistryInfo,
+  cli?: ToolCliTreeSpec,
   tools: list<ToolCatalogEntry>,
-  components?: dict,
+  components?: ToolComponents,
 }
 
 type ToolDefinitionConfig = {
+  /** Legacy per-parameter shorthand. Prefer input_schema for new adapters. */
   parameters?: dict,
-  returns?: dict,
-  output_schema?: dict,
+  /** Complete caller-owned object schema, normalized directly into inputSchema. */
+  input_schema?: dict<string, unknown>,
+  returns?: JsonSchema202012,
+  output_schema?: JsonSchema202012,
+  error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
   executor?: string,
   host_capability?: string,
@@ -102,9 +170,13 @@ pub type ToolDefinitionSpec = {
   description?: string,
   desc?: string,
   config?: ToolDefinitionConfig,
+  /** Legacy per-parameter shorthand. Prefer input_schema for new adapters. */
   parameters?: dict,
-  returns?: dict,
-  output_schema?: dict,
+  /** Complete caller-owned object schema, normalized directly into inputSchema. */
+  input_schema?: dict<string, unknown>,
+  returns?: JsonSchema202012,
+  output_schema?: JsonSchema202012,
+  error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
   executor?: string,
   host_capability?: string,
@@ -204,7 +276,8 @@ pub fn tool_define_many(registry: ToolRegistry, specs: list<ToolDefinitionSpec>)
  */
 pub fn tool_registry_from(
   specs: list<ToolDefinitionSpec>,
-  info: ToolRegistryInfo? = nil,
+  options: ToolRegistryOptions? = nil,
 ) -> ToolRegistry {
-  return tool_define_many(tool_registry(info), specs)
+  const opts = options ?? {}
+  return tool_define_many(tool_registry(opts.info, opts.components, opts.cli), specs)
 }

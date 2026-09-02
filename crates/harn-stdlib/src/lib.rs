@@ -299,6 +299,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/truncation" => "stdlib/agent/truncation.harn",
     "agent/canon" => "stdlib/agent/canon.harn",
     "agent/skills" => "stdlib/agent/skills.harn",
+    "agent/workspace_guidance" => "stdlib/agent/workspace_guidance.harn",
     "agent/autocompact" => "stdlib/agent/autocompact.harn",
     "agent/response_compaction" => "stdlib/agent/response_compaction.harn",
     "agent/mcp" => "stdlib/agent/mcp.harn",
@@ -319,6 +320,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/sitrep" => "stdlib/agent/sitrep.harn",
     "agent/verdict" => "stdlib/agent/verdict.harn",
     "agent/judge_internals" => "stdlib/agent/judge_internals.harn",
+    "agent/judge_itemization" => "stdlib/agent/judge_itemization.harn",
+    "agent/judge_verdict" => "stdlib/agent/judge_verdict.harn",
     "agent/completion_gate" => "stdlib/agent/completion_gate.harn",
     "agent/completion_review" => "stdlib/agent/completion_review.harn",
     "agent/completion_requirements" => "stdlib/agent/completion_requirements.harn",
@@ -893,6 +896,19 @@ mod tests {
         );
         assert_eq!(exports[0].required_params, 3);
         assert_eq!(exports[0].total_params, 5);
+    }
+
+    #[test]
+    fn tool_registry_from_catalog_includes_cli_metadata_parameter() {
+        let function = public_functions_for_module("tools")
+            .into_iter()
+            .find(|function| function.name == "tool_registry_from")
+            .expect("std/tools should export tool_registry_from");
+        assert_eq!(function.required_params, 1);
+        assert_eq!(function.total_params, 2);
+        assert!(function
+            .signature
+            .contains("options: ToolRegistryOptions? = nil"));
     }
 
     #[test]

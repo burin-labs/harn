@@ -155,6 +155,45 @@ fn snapshot_trace_spans_returns_completed_trace_tree() {
 }
 
 #[test]
+fn snapshot_trace_spans_excludes_a_foreign_execution_scope() {
+    // `run.evidence.trace_spans` is an execution-evidence field, and the
+    // canonical writer in `vm/execution_evidence.rs` fills it with
+    // `completed_spans_for_execution`. The workflow writers must agree: a span
+    // completed under a different execution scope on this same thread belongs
+    // to that execution's evidence, not to this one's.
+    set_tracing_enabled(true);
+
+    let foreign = {
+        let _scope = crate::enter_execution_scope(crate::mint_execution_scope());
+        let span = span_start(SpanKind::ToolCall, "foreign_execution_tool".to_string());
+        span_end(span);
+        span
+    };
+
+    let owned = {
+        let _scope = crate::enter_execution_scope(crate::mint_execution_scope());
+        let span = span_start(SpanKind::ToolCall, "owned_execution_tool".to_string());
+        span_end(span);
+        let spans = snapshot_trace_spans();
+        assert!(
+            spans.iter().any(|s| s.name == "owned_execution_tool"),
+            "the owning execution's span must be present, got {:?}",
+            spans.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+        assert!(
+            !spans.iter().any(|s| s.name == "foreign_execution_tool"),
+            "a span from another execution scope leaked into this execution's \
+             evidence, got {:?}",
+            spans.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+        span
+    };
+    assert_ne!(foreign, owned);
+
+    set_tracing_enabled(false);
+}
+
+#[test]
 fn enclosing_open_span_survives_workflow_tracing_enable() {
     // Regression (v0.9.16): a caller holding an OPEN enclosing span across
     // a workflow run must not have it stranded, nor its completed siblings

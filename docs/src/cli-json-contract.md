@@ -153,6 +153,30 @@ artifact descriptor stored in the run record. Otherwise the field is omitted.
 The path is readable when the event arrives. A terminal `result` or `error`
 always has a higher `seq`.
 
+Import failures discovered while launching a source program keep
+`error.code = "compile_error"` and attach a closed detail object:
+
+```json
+{
+  "kind": "import_failure",
+  "failure_class": "missing_imported_symbol",
+  "module": "./helpers",
+  "symbol": "old_name",
+  "source": "helpers.harn",
+  "harn_version": "0.10.125-dev",
+  "harn_revision": null
+}
+```
+
+`failure_class` is `unresolved_module`, `missing_imported_symbol`,
+`private_imported_symbol`, or `imported_module_compile_failure`. `symbol` is
+`null` when the import does not name one. `source` is a workspace-relative path,
+or a `harn://` module URI when the target is outside the workspace.
+`harn_revision` is the immutable build revision when the binary carries one;
+local builds still identify the producer through `harn_version`. Entrypoint
+parse failures and dependency materialization failures do not use this detail
+kind.
+
 ### `harn version --json`
 
 ```json

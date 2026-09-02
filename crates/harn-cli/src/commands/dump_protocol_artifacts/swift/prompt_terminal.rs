@@ -5,7 +5,7 @@
 
 use super::{
     agent_terminal_class_values, agent_terminal_kind_values, agent_terminal_owner_values,
-    swift_enum,
+    llm_error_category_values, llm_error_kind_values, llm_error_reason_values, swift_enum,
 };
 
 pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema: &str) {
@@ -22,6 +22,15 @@ pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema
         &agent_terminal_owner_values(),
     ));
     out.push_str(&swift_enum(
+        "HarnLlmErrorCategory",
+        &llm_error_category_values(),
+    ));
+    out.push_str(&swift_enum("HarnLlmErrorKind", &llm_error_kind_values()));
+    out.push_str(&swift_enum(
+        "HarnLlmErrorReason",
+        &llm_error_reason_values(),
+    ));
+    out.push_str(&swift_enum(
         "HarnACPPromptErrorSchema",
         &[prompt_error_schema.to_string()],
     ));
@@ -29,9 +38,16 @@ pub(super) fn append_prompt_terminal_types(out: &mut String, prompt_error_schema
         r"public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
+    /// Wire string for `HarnLlmErrorCategory`. Decode with
+    /// `HarnLlmErrorCategory(rawValue:)`; `nil` means the producing Harn used
+    /// a value this binding predates.
     public var category: String?
+    /// Wire string for `HarnLlmErrorKind` (`transient` or `terminal`).
     public var kind: String?
+    /// Wire string for `HarnLlmErrorReason`.
     public var reason: String?
+    /// PROVIDER PASSTHROUGH. Opaque diagnostic text with no closed set and no
+    /// Harn-owned vocabulary. Never branch on it; branch on `reason`.
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?

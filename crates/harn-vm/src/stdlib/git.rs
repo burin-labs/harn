@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value as JsonValue};
 use uuid::Uuid;
 
-use crate::event_log::{
-    active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
-};
+use crate::event_log::{active_event_log, install_memory_for_current_thread};
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, Options};
 use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
@@ -24,7 +22,6 @@ use read::{
     describe_argv, ls_remote_argv, parse_describe, parse_ls_remote, parse_tag_list, tag_list_argv,
 };
 
-const GIT_RECEIPTS_TOPIC: &str = "stdlib.git.receipts";
 const EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1026,21 +1023,6 @@ async fn persist_receipt_and_trust(
 ) -> Result<(), VmError> {
     let log = active_event_log()
         .unwrap_or_else(|| install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH));
-    let topic = Topic::new(GIT_RECEIPTS_TOPIC)
-        .map_err(|error| VmError::Runtime(format!("git receipt topic: {error}")))?;
-    let mut headers = std::collections::BTreeMap::new();
-    if let Some(trace_id) = receipt.get("trace_id").and_then(|value| value.as_str()) {
-        headers.insert("trace_id".to_string(), trace_id.to_string());
-    }
-    if let Some(agent) = receipt.get("agent").and_then(|value| value.as_str()) {
-        headers.insert("agent".to_string(), agent.to_string());
-    }
-    log.append(
-        &topic,
-        LogEvent::new("stdlib.git.receipt", receipt.clone()).with_headers(headers),
-    )
-    .await
-    .map_err(|error| VmError::Runtime(format!("git receipt append: {error}")))?;
 
     let context = identity_context();
     let mut record = TrustRecord::new(

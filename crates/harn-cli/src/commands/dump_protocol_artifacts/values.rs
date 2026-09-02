@@ -7,8 +7,9 @@ use harn_vm::agent_events::{
     AgentLifecycleEvent, AgentLifecycleState, AgentTerminalKind, ToolCallErrorCategory,
     ToolCallStatus, ToolMutationStatus,
 };
-use harn_vm::llm::AgentTerminalClass;
+use harn_vm::llm::{AgentTerminalClass, LlmErrorKind, LlmErrorReason};
 use harn_vm::tool_annotations::{CompletionEvidenceRole, SideEffectLevel, ToolKind};
+use harn_vm::value::ErrorCategory;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 
@@ -134,6 +135,30 @@ pub(super) fn agent_terminal_kind_values() -> Vec<String> {
 
 pub(super) fn agent_terminal_owner_values() -> Vec<String> {
     unique_ordered(AgentTerminalKind::ALL.iter().map(|kind| kind.owner()))
+}
+
+/// Coarse retry semantics on the `harn.acp.prompt_error.v1` envelope's `kind`.
+pub(super) fn llm_error_kind_values() -> Vec<String> {
+    LlmErrorKind::ALL
+        .iter()
+        .map(|kind| kind.as_str().to_string())
+        .collect()
+}
+
+/// Canonical provider-failure reasons on the envelope's `reason`.
+pub(super) fn llm_error_reason_values() -> Vec<String> {
+    LlmErrorReason::ALL
+        .iter()
+        .map(|reason| reason.as_str().to_string())
+        .collect()
+}
+
+/// Thrown-error categories on the envelope's `category`.
+pub(super) fn llm_error_category_values() -> Vec<String> {
+    ErrorCategory::ALL
+        .iter()
+        .map(|category| category.as_str().to_string())
+        .collect()
 }
 
 pub(super) fn worker_status_values() -> Vec<String> {

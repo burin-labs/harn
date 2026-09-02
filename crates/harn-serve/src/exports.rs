@@ -10,6 +10,7 @@ use crate::DispatchError;
 mod diagnostics;
 mod mcp_metadata;
 mod schema_projection;
+mod tool_catalog;
 
 pub use diagnostics::{
     emit_export_diagnostics, ExportDiagnostic, ANNOTATIONS_BAD_ARGS, JOB_BAD_NAME,
@@ -19,6 +20,7 @@ pub use diagnostics::{
     STREAM_WITHOUT_ROUTE, WS_BAD_ARGS, WS_CONFLICTS_WITH_STREAM_OR_RAW, WS_WITHOUT_ROUTE,
 };
 pub use mcp_metadata::ToolAnnotations;
+pub use schema_projection::type_expr_accepts_json_object;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportedParam {
@@ -46,20 +48,6 @@ impl ExportedParam {
                 .and_then(serde_json::Value::as_str)
                 == Some("object")
             || self.input_schema.get("properties").is_some()
-    }
-}
-
-/// Whether a declared type expression accepts a JSON object value: a bare
-/// `dict`, an inline object shape, a `DictType`, or any union/intersection
-/// member that does. Backs [`ExportedParam::accepts_json_object`].
-pub fn type_expr_accepts_json_object(type_expr: &TypeExpr) -> bool {
-    match type_expr {
-        TypeExpr::Named(name) => name == "dict",
-        TypeExpr::Shape(_) | TypeExpr::DictType(_, _) => true,
-        TypeExpr::Union(types) | TypeExpr::Intersection(types) => {
-            types.iter().any(type_expr_accepts_json_object)
-        }
-        _ => false,
     }
 }
 
@@ -120,8 +108,10 @@ pub struct ExportedFunction {
     pub annotations: Option<ToolAnnotations>,
     pub params: Vec<ExportedParam>,
     pub return_type: Option<TypeExpr>,
+    pub throws_type: Option<TypeExpr>,
     pub input_schema: serde_json::Value,
     pub output_schema: Option<serde_json::Value>,
+    pub error_schema: Option<serde_json::Value>,
     /// Scopes the caller's credential must carry to invoke this function,
     /// for *every* HTTP method (the method-agnostic baseline). Populated
     /// from un-prefixed `@scopes("...", "...")` literals on the
@@ -328,6 +318,7 @@ impl ExportCatalog {
                 name,
                 params,
                 return_type,
+                throws,
                 is_pub,
                 ..
             } = &inner.node
@@ -363,8 +354,12 @@ impl ExportCatalog {
                     ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
+                    throws_type: throws.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
+                        .as_ref()
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
+                    error_schema: throws
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
                     required_scopes: scopes.baseline,
@@ -388,6 +383,7 @@ impl ExportCatalog {
                 name,
                 params,
                 return_type,
+                throws,
                 is_pub,
                 ..
             } = &inner.node
@@ -423,8 +419,12 @@ impl ExportCatalog {
                     ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
+                    throws_type: throws.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
+                        .as_ref()
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
+                    error_schema: throws
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
                     required_scopes: scopes.baseline,

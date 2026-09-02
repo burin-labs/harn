@@ -18,13 +18,14 @@ use super::defs::{
     McpCompletionSource, McpPromptDef, McpResourceDef, McpResourceTemplateDef, McpServerMetadata,
     McpToolDef,
 };
+use super::tools_schema::McpToolSet;
 use super::uri::{match_uri_template, uri_template_variables};
 
 /// MCP server that exposes Harn tools, resources, and prompts over MCP JSON-RPC.
 pub struct McpServer {
     server_name: String,
     server_version: String,
-    tools: Vec<McpToolDef>,
+    tools: McpToolSet,
     resources: Vec<McpResourceDef>,
     resource_templates: Vec<McpResourceTemplateDef>,
     prompts: Vec<McpPromptDef>,
@@ -61,7 +62,7 @@ impl<A> McpServerReload<A> {
 impl McpServer {
     pub fn new(
         server_name: String,
-        tools: Vec<McpToolDef>,
+        tools: McpToolSet,
         resources: Vec<McpResourceDef>,
         resource_templates: Vec<McpResourceTemplateDef>,
         prompts: Vec<McpPromptDef>,
@@ -310,25 +311,37 @@ impl McpServer {
         {
             return Some(response);
         }
+        if request_profile.uses_result_envelope()
+            && mcp_protocol::is_task_method(method)
+            && !mcp_protocol::client_supports_tasks(&params)
+        {
+            return Some(mcp_protocol::missing_tasks_capability_response(id.clone()));
+        }
 
         let response = match method {
             mcp_protocol::METHOD_SERVER_DISCOVER => self.handle_server_discover(&id),
             "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
             "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
             "tools/list" => self.handle_tools_list(&id, &params),
-            "tools/call" => self.handle_tools_call(&id, &params, vm).await,
-            mcp_protocol::METHOD_TASKS_GET => {
-                self.tasks
-                    .handle_get(id.clone(), &self.client_identity(), &params)
+            "tools/call" => {
+                self.handle_tools_call(&id, &params, vm, request_profile.uses_result_envelope())
+                    .await
             }
-            mcp_protocol::METHOD_TASKS_UPDATE => {
-                self.tasks
-                    .handle_update(id.clone(), &self.client_identity(), &params)
-            }
-            mcp_protocol::METHOD_TASKS_CANCEL => {
-                self.tasks
-                    .handle_cancel(id.clone(), &self.client_identity(), &params)
-            }
+            mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(
+                &crate::mcp_tasks::McpTaskAccess::unscoped(),
+                id.clone(),
+                &params,
+            ),
+            mcp_protocol::METHOD_TASKS_UPDATE => self.tasks.handle_update(
+                &crate::mcp_tasks::McpTaskAccess::unscoped(),
+                id.clone(),
+                &params,
+            ),
+            mcp_protocol::METHOD_TASKS_CANCEL => self.tasks.handle_cancel(
+                &crate::mcp_tasks::McpTaskAccess::unscoped(),
+                id.clone(),
+                &params,
+            ),
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
@@ -429,41 +442,12 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
     ) -> serde_json::Value {
-        let page = match mcp_protocol::mcp_list_page(params, self.tools.len(), "tools/list") {
+        let prepared_tools = self.tools.prepared().mcp_tools();
+        let page = match mcp_protocol::mcp_list_page(params, prepared_tools.len(), "tools/list") {
             Ok(page) => page,
             Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
         };
-        let tools: Vec<serde_json::Value> = self.tools[page.start..page.end]
-            .iter()
-            .map(|t| {
-                let mut entry = serde_json::json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "inputSchema": t.input_schema,
-                });
-                if let Some(ref title) = t.title {
-                    entry["title"] = serde_json::json!(title);
-                }
-                if let Some(ref output_schema) = t.output_schema {
-                    entry["outputSchema"] = output_schema.clone();
-                }
-                if let Some(ref annotations) = t.annotations {
-                    entry["annotations"] = annotations.clone();
-                }
-                if let Some(ref icons) = t.icons {
-                    entry["icons"] = icons.clone();
-                }
-                if let Some(ref meta) = t.meta {
-                    entry["_meta"] = meta.clone();
-                }
-                if t.task_support.allows_task() {
-                    entry["execution"] = serde_json::json!({
-                        "taskSupport": t.task_support.wire_name(),
-                    });
-                }
-                entry
-            })
-            .collect();
+        let tools = prepared_tools[page.start..page.end].to_vec();
 
         let mut result = serde_json::json!({ "tools": tools });
         if let Some(next_cursor) = page.next_cursor {
@@ -482,9 +466,14 @@ impl McpServer {
         id: &serde_json::Value,
         params: &serde_json::Value,
         vm: &mut Vm,
+        uses_result_envelope: bool,
     ) -> serde_json::Value {
         let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-        let tool = match self.tools.iter().find(|t| t.name == tool_name) {
+        let tool = match self
+            .tools
+            .iter()
+            .find(|tool| tool.catalog.name == tool_name)
+        {
             Some(t) => t,
             None => {
                 return serde_json::json!({
@@ -498,19 +487,24 @@ impl McpServer {
         // A tool that declares `required` refuses a plain call outright, so a
         // client cannot get the work done by simply not asking for a task.
         let wants_task = mcp_protocol::client_supports_tasks(params);
-        let as_task = tool.task_support.allows_task() && wants_task;
-        if tool.task_support == crate::mcp_tasks::McpTaskSupport::Required && !wants_task {
-            return crate::jsonrpc::error_response(
-                id.clone(),
-                -32602,
-                &format!("Tool '{tool_name}' must be invoked as a task"),
-            );
+        let task_support = tool
+            .catalog
+            .execution
+            .as_ref()
+            .map(|execution| execution.task_support)
+            .unwrap_or_default();
+        let as_task = task_support.allows_task() && wants_task;
+        if task_support == crate::mcp_tasks::McpTaskSupport::Required && !wants_task {
+            return mcp_protocol::missing_tasks_capability_response(id.clone());
         }
 
         let arguments = params
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::json!({}));
+        if let Err(error) = self.tools.prepared().validate_input(tool_name, &arguments) {
+            return crate::jsonrpc::error_response(id.clone(), -32602, &error.to_string());
+        }
         let args_vm = json_to_vm_value(&arguments);
 
         // Bind a per-call progress context so the handler (and any
@@ -547,20 +541,46 @@ impl McpServer {
         // behave, whereas the previous stub advertised the capability and told
         // every `tasks/get` its task did not exist.
         if as_task {
-            let task = self.tasks.create(
-                &self.client_identity(),
+            let lease = match self.tasks.begin(
+                crate::mcp_tasks::McpTaskAccess::unscoped(),
                 Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS),
-            );
-            self.tasks.complete(
-                &task.task_id,
-                match &result {
-                    Ok(value) => Ok(vm_value_to_json(value)),
-                    Err(VmError::McpInputRequired(_)) => {
-                        Err("Tool requested client input, which a task cannot carry".to_string())
+            ) {
+                Ok(lease) => lease,
+                Err(error) => {
+                    return crate::jsonrpc::error_response(id.clone(), -32000, &error.to_string());
+                }
+            };
+            let task = lease.task().clone();
+            match crate::tool_registry::classify_tool_result(
+                self.tools.prepared(),
+                &tool.catalog.name,
+                result,
+            ) {
+                Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
+                    match successful_tool_call_result(&self.tools, tool, &value, json) {
+                        Ok(result) => lease.complete_with_tool_result(result, uses_result_envelope),
+                        Err(error) => lease.complete(Err(error), uses_result_envelope),
                     }
-                    Err(error) => Err(tool_error_text(error)),
-                },
-            );
+                }
+                Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => lease
+                    .complete_with_tool_result(
+                        crate::tool_registry::application_error_mcp_result(&error),
+                        uses_result_envelope,
+                    ),
+                Err(crate::tool_registry::ToolInvocationError::Runtime(
+                    VmError::McpInputRequired(_),
+                )) => lease.complete(
+                    Err("Tool requested client input, which a task cannot carry".to_string()),
+                    uses_result_envelope,
+                ),
+                Err(error) => lease.complete_with_tool_result(
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": error.to_string()}],
+                        "isError": true,
+                    }),
+                    uses_result_envelope,
+                ),
+            }
             return crate::mcp_tasks::task_created_response(
                 id.clone(),
                 &task,
@@ -568,46 +588,45 @@ impl McpServer {
             );
         }
 
-        match result {
-            Ok(value) => {
-                let content = vm_value_to_content(&value);
-                let mut call_result = serde_json::json!({
-                    "content": content,
-                    "isError": false
-                });
-                if tool.output_schema.is_some() {
-                    call_result["structuredContent"] = vm_value_to_json(&value);
+        match crate::tool_registry::classify_tool_result(
+            self.tools.prepared(),
+            &tool.catalog.name,
+            result,
+        ) {
+            Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
+                match successful_tool_call_result(&self.tools, tool, &value, json) {
+                    Ok(result) => serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": result
+                    }),
+                    Err(error) => crate::jsonrpc::response(
+                        id.clone(),
+                        serde_json::json!({
+                            "content": [{"type": "text", "text": error}],
+                            "isError": true,
+                        }),
+                    ),
                 }
-                serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": call_result
-                })
             }
-            Err(VmError::McpInputRequired(required)) => {
-                crate::jsonrpc::response(id.clone(), crate::mcp_input::input_result(*required))
+            Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
+                crate::jsonrpc::response(
+                    id.clone(),
+                    crate::tool_registry::application_error_mcp_result(&error),
+                )
             }
-            Err(e) => serde_json::json!({
+            Err(crate::tool_registry::ToolInvocationError::Runtime(VmError::McpInputRequired(
+                required,
+            ))) => crate::jsonrpc::response(id.clone(), crate::mcp_input::input_result(*required)),
+            Err(error) => serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
-                    "content": [{ "type": "text", "text": tool_error_text(&e) }],
+                    "content": [{ "type": "text", "text": error.to_string() }],
                     "isError": true,
                 },
             }),
         }
-    }
-
-    /// Who the current connection is, for task ownership.
-    ///
-    /// This server holds one connection at a time, so the identity is a
-    /// property of the session rather than of the request.
-    fn client_identity(&self) -> String {
-        self.connection
-            .lock()
-            .expect("MCP session lock poisoned")
-            .client_identity()
-            .to_string()
     }
 
     async fn handle_hitl_respond(
@@ -1060,6 +1079,31 @@ impl McpServer {
     }
 }
 
+fn successful_tool_call_result(
+    tools: &McpToolSet,
+    tool: &McpToolDef,
+    value: &crate::value::VmValue,
+    value_json: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut result = serde_json::json!({
+        "content": vm_value_to_content(value),
+        "isError": false,
+    });
+    let entry = tools
+        .prepared()
+        .entry(&tool.catalog.name)
+        .expect("prepared MCP catalog covers every executable handler");
+    if let Some(structured) = tools
+        .prepared()
+        .catalog()
+        .mcp_structured_content(entry, value_json)
+        .map_err(|error| error.to_string())?
+    {
+        result["structuredContent"] = structured;
+    }
+    Ok(result)
+}
+
 /// Map a JSON-RPC method to its conservative cache hint. Read/list
 /// methods get a TTL; everything else is `None`, which still routes
 /// through [`apply_envelope`] so Stable clients see `resultType`.
@@ -1072,15 +1116,6 @@ fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
         }
         "resources/read" => Some(&READ),
         _ => None,
-    }
-}
-
-/// Stamp the stable `resultType`/cache-hint envelope onto a handler's
-/// response in one place. Error responses pass through untouched.
-fn tool_error_text(error: &VmError) -> String {
-    match error {
-        VmError::Thrown(value) => value.display(),
-        other => format!("{other}"),
     }
 }
 

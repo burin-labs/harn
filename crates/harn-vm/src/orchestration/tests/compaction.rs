@@ -11,6 +11,35 @@ use crate::orchestration::*;
 use crate::value::VmDictExt;
 
 #[tokio::test(flavor = "current_thread")]
+async fn manual_compaction_without_a_threshold_source_remains_unmeasured() {
+    let mut messages = vec![
+        serde_json::json!({"role": "user", "content": "old task"}),
+        serde_json::json!({"role": "assistant", "content": "old evidence"}),
+        serde_json::json!({"role": "user", "content": "current task"}),
+    ];
+    let mut config = AutoCompactConfig {
+        token_threshold: 0,
+        keep_last: 1,
+        compact_strategy: CompactStrategy::Truncate,
+        policy_strategy: "truncate".to_string(),
+        ..Default::default()
+    };
+
+    let outcome = run_compaction_lifecycle(
+        &mut messages,
+        &mut config,
+        None,
+        CompactLifecycle::new(CompactMode::Manual).with_hook_dispatch(false),
+    )
+    .await
+    .expect("manual compaction succeeds")
+    .expect("manual compaction fires");
+
+    assert_eq!(outcome.receipt.resolved_threshold_tokens, None);
+    assert_eq!(outcome.receipt.threshold_source, None);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn llm_compaction_call_is_manifested_at_the_provider_boundary() {
     crate::llm::reset_llm_state();
     crate::llm::push_llm_mock(

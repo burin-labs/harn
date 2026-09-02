@@ -197,6 +197,15 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         &agent_terminal_owner_values(),
     ));
     out.push_str(&py_str_enum_owned(
+        "LlmErrorCategory",
+        &llm_error_category_values(),
+    ));
+    out.push_str(&py_str_enum_owned("LlmErrorKind", &llm_error_kind_values()));
+    out.push_str(&py_str_enum_owned(
+        "LlmErrorReason",
+        &llm_error_reason_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
         "ACPPromptErrorSchema",
         &[ACP_PROMPT_ERROR_DATA_SCHEMA.to_string()],
     ));

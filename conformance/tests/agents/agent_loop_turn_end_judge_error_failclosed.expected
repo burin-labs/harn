@@ -1,5 +1,5 @@
 status=completion_unverified
-stop_reason=turn_end_judge_cap_reached
+stop_reason=completion_judge_error
 judge_invocations=1
-judge_cap_reached=true
-provider_calls=3
+judge_cap_reached=false
+provider_calls=6

@@ -204,8 +204,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Keep the description to roughly five sentences: what changed in behavior
   terms, why, the one risk or blind spot, and how you verified the claim at the
   level of the claim. Do not restate the Files or Checks tabs.
-- Name the sub-asks a pull request closes with `Closes #N items: 1, 3`, or
-  `Single-ask: #N` when the issue is not enumerated.
+- Use a closing keyword only when the pull request resolves the whole issue:
+  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
+  #N` when the issue is not enumerated. For partial work, use `Partial: #N
+  items: 1, 3` or `Refs #N`; never use a closing keyword.
 
 ## Release
 

@@ -231,13 +231,13 @@ mod tests {
                 name: "look".to_string(),
                 description: String::new(),
                 params: Vec::new(),
-                compact: false,
+                summary_only: false,
             },
             crate::llm::tools::ToolSchema {
                 name: "dispatch".to_string(),
                 description: String::new(),
                 params: Vec::new(),
-                compact: false,
+                summary_only: false,
             },
         ];
         let native = serde_json::json!([
@@ -1122,6 +1122,10 @@ mod tests {
             reason: "threshold".to_string(),
             strategy: "observation_mask".to_string(),
             engine_strategy: "observation_mask".to_string(),
+            requested_strategy: None,
+            resolved_threshold_tokens: None,
+            threshold_source: None,
+            hard_limit_tokens: None,
             archived_messages: 2,
             estimated_tokens_before: 1,
             estimated_tokens_after: 1,

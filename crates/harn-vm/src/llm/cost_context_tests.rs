@@ -112,3 +112,71 @@ fn context_breakdown_counts_user_role_tool_result_content_as_tool_results() {
     );
     assert_eq!(segment_tokens(&breakdown, "other_messages"), Some(0));
 }
+
+#[test]
+fn deferred_tools_leave_the_resident_segment_without_changing_the_total() {
+    // #7768: a single tool segment made "this tool is deferred, so it costs
+    // nothing yet" and "the measurement never fired" the same number. The
+    // split is only worth anything if a deferred tool actually moves, so both
+    // directions are asserted against the same two-tool request.
+    let resident = serde_json::json!({
+        "name": "read_file",
+        "description": "Read a slice of a file",
+        "input_schema": {"type": "object"},
+    });
+    let deferred = serde_json::json!({
+        "name": "run_migration",
+        "description": "Run a database migration",
+        "input_schema": {"type": "object"},
+        "defer_loading": true,
+    });
+
+    let mut both_resident = crate::llm::api::options::base_opts("anthropic");
+    both_resident.native_tools = Some(vec![resident.clone(), {
+        let mut undeferred = deferred.clone();
+        undeferred
+            .as_object_mut()
+            .expect("tool object")
+            .remove("defer_loading");
+        undeferred
+    }]);
+
+    let mut one_deferred = crate::llm::api::options::base_opts("anthropic");
+    one_deferred.native_tools = Some(vec![resident, deferred]);
+
+    let all = project_llm_call_context_breakdown(&both_resident);
+    let split = project_llm_call_context_breakdown(&one_deferred);
+
+    // The measured zero, and the non-null read that makes it mean something.
+    assert_eq!(segment_tokens(&all, "deferred_tool_schemas"), Some(0));
+    assert!(
+        segment_tokens(&split, "deferred_tool_schemas").unwrap_or(0) > 0,
+        "deferring a tool must put tokens in the deferred segment"
+    );
+    assert!(
+        segment_tokens(&split, "native_tool_schemas").unwrap_or(0)
+            < segment_tokens(&all, "native_tool_schemas").unwrap_or(0),
+        "the resident segment must shrink by what the deferred segment gained"
+    );
+
+    // Counts: every tool is still sent, only residency changed.
+    assert_eq!(split.native_tool_count, 2);
+    assert_eq!(split.resident_tool_count, 1);
+    assert_eq!(all.native_tool_count, all.resident_tool_count);
+
+    // Splitting a segment must not change any budget taken from it: the two
+    // parts still add up to what one combined segment reported, which is what
+    // `input_tokens` and every ceiling downstream are computed from.
+    let combined: i64 = one_deferred
+        .native_tools
+        .as_ref()
+        .expect("native tools set")
+        .iter()
+        .map(|tool| estimate_json_tokens(&serde_json::json!(tool.to_string()), &one_deferred.model))
+        .sum();
+    assert_eq!(
+        segment_tokens(&split, "native_tool_schemas").unwrap_or(0)
+            + segment_tokens(&split, "deferred_tool_schemas").unwrap_or(0),
+        combined,
+    );
+}

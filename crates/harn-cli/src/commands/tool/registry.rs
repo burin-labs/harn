@@ -1,11 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 
-use clap::{Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command, ValueHint};
+use harn_vm::tool_registry::ToolCliBooleanStyle;
 
-use crate::cli::{ToolRunArgs, ToolSchemaArgs};
+use crate::cli::{
+    ToolCompletionShell, ToolCompletionsArgs, ToolRunArgs, ToolSchemaArgs, ToolSchemaSurface,
+};
 
 #[derive(Debug)]
 pub(crate) struct ToolCommandError {
@@ -49,24 +51,19 @@ async fn run_loaded_registry(
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
+    let catalog = harn_vm::tool_registry::tool_registry_catalog_for_audience(
+        &loaded.registry,
+        harn_vm::tool_registry::ToolAudience::Cli,
+    )
+    .map_err(|error| error.to_string())?;
+    let prepared = harn_vm::tool_registry::PreparedToolCatalog::prepare(catalog)
+        .map_err(|error| error.to_string())?;
     let tools = harn_vm::tool_registry::executable_tools_for_audience(
         &loaded.registry,
         harn_vm::tool_registry::ToolAudience::Cli,
     )
     .map_err(|error| error.to_string())?;
-    let registry_info = harn_vm::tool_registry::tool_registry_catalog(&loaded.registry)
-        .map_err(|error| error.to_string())?
-        .info;
-    let catalog = tools
-        .iter()
-        .map(|tool| tool.catalog.clone())
-        .collect::<Vec<_>>();
-    let invocation = match parse_registry_invocation(
-        &args.file,
-        &args.arguments,
-        registry_info.as_ref(),
-        &catalog,
-    )? {
+    let invocation = match parse_registry_invocation(&args.file, &args.arguments, &prepared)? {
         Some(invocation) => invocation,
         None => return Ok(()),
     };
@@ -82,33 +79,35 @@ async fn run_loaded_registry(
     let input = harn_vm::schema::json_to_vm_value(&invocation.arguments);
     let result = tokio::task::LocalSet::new()
         .run_until(loaded.vm.call_closure_pub(&tool.handler, &[input]))
-        .await
-        .map_err(|error| format!("tool {:?} failed: {error}", tool.catalog.name))?;
-    let json = harn_vm::tool_registry::result_to_json(&result).map_err(|error| {
-        format!(
-            "tool {:?} returned a non-JSON value: {error}",
-            tool.catalog.name
-        )
-    })?;
-    if let Some(output_schema) = tool.catalog.output_schema.as_ref() {
-        let validator = jsonschema::draft202012::new(output_schema).map_err(|error| {
-            format!(
-                "tool {:?} has an invalid output schema: {error}",
-                tool.catalog.name
-            )
-        })?;
-        let violations = validator
-            .iter_errors(&json)
-            .map(|error| error.to_string())
-            .collect::<Vec<_>>();
-        if !violations.is_empty() {
+        .await;
+    let outcome =
+        harn_vm::tool_registry::classify_tool_result(&prepared, &tool.catalog.name, result)
+            .map_err(|error| format!("tool {:?} failed: {error}", tool.catalog.name))?;
+    let json = match outcome {
+        harn_vm::tool_registry::ToolInvocationOutcome::Success { json, .. } => json,
+        harn_vm::tool_registry::ToolInvocationOutcome::ApplicationError(error) => {
+            if invocation.output == "json" || invocation.output == "pretty" {
+                let envelope = harn_vm::tool_registry::application_error_cli_envelope(&error);
+                if invocation.output == "pretty" {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&envelope)
+                            .map_err(|error| error.to_string())?
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&envelope).map_err(|error| error.to_string())?
+                    );
+                }
+            }
             return Err(format!(
-                "tool {:?} returned a value that does not match its output schema:\n  - {}",
+                "tool {:?} returned application error: {}",
                 tool.catalog.name,
-                violations.join("\n  - ")
+                error.summary()
             ));
         }
-    }
+    };
     match invocation.output.as_str() {
         "json" => println!(
             "{}",
@@ -130,28 +129,99 @@ async fn run_loaded_registry(
     Ok(())
 }
 
-pub(crate) async fn print_registry_schema(args: &ToolSchemaArgs) -> Result<(), ToolCommandError> {
+/// Generate static completion from the same prepared tree used for parsing.
+pub(crate) async fn print_registry_completions(
+    args: &ToolCompletionsArgs,
+) -> Result<(), ToolCommandError> {
     let loaded = crate::commands::run::load_file_tool_registry(&args.file)
         .await
         .map_err(|error| ToolCommandError {
             message: error.message,
             exit_code: error.exit_code,
         })?;
-    print_loaded_registry_schema(args, &loaded).map_err(ToolCommandError::message)
-}
-
-fn print_loaded_registry_schema(
-    args: &ToolSchemaArgs,
-    loaded: &crate::commands::run::LoadedToolRegistry,
-) -> Result<(), String> {
     if !loaded.diagnostics.is_empty() {
         eprint!("{}", loaded.diagnostics);
     }
     let catalog = harn_vm::tool_registry::tool_registry_catalog_for_audience(
         &loaded.registry,
-        harn_vm::tool_registry::ToolAudience::Catalog,
+        harn_vm::tool_registry::ToolAudience::Cli,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| ToolCommandError::message(error.to_string()))?;
+    let prepared = harn_vm::tool_registry::PreparedToolCatalog::prepare(catalog)
+        .map_err(|error| ToolCommandError::message(error.to_string()))?;
+    let binary_name = prepared
+        .catalog()
+        .info
+        .as_ref()
+        .map(|info| info.name.clone())
+        .or_else(|| {
+            Path::new(&args.file)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "harn-tool".to_string());
+    let mut command =
+        prepared_clap_command(binary_name.clone(), &prepared).map_err(ToolCommandError::message)?;
+    clap_complete::generate(
+        completion_shell(args.shell),
+        &mut command,
+        binary_name,
+        &mut std::io::stdout(),
+    );
+    Ok(())
+}
+
+fn completion_shell(shell: ToolCompletionShell) -> clap_complete::Shell {
+    match shell {
+        ToolCompletionShell::Bash => clap_complete::Shell::Bash,
+        ToolCompletionShell::Zsh => clap_complete::Shell::Zsh,
+        ToolCompletionShell::Fish => clap_complete::Shell::Fish,
+        ToolCompletionShell::PowerShell => clap_complete::Shell::PowerShell,
+    }
+}
+
+pub(crate) async fn print_registry_schema(args: &ToolSchemaArgs) -> Result<(), ToolCommandError> {
+    let catalog = load_schema_catalog(args).await?;
+    print_catalog(args, &catalog).map_err(ToolCommandError::message)
+}
+
+async fn load_schema_catalog(
+    args: &ToolSchemaArgs,
+) -> Result<harn_vm::tool_registry::ToolCatalog, ToolCommandError> {
+    let catalog = match args.surface {
+        ToolSchemaSurface::Script => {
+            let loaded = crate::commands::run::load_file_tool_registry(&args.file)
+                .await
+                .map_err(|error| ToolCommandError {
+                    message: error.message,
+                    exit_code: error.exit_code,
+                })?;
+            if !loaded.diagnostics.is_empty() {
+                eprint!("{}", loaded.diagnostics);
+            }
+            harn_vm::tool_registry::tool_registry_catalog_for_audience(
+                &loaded.registry,
+                harn_vm::tool_registry::ToolAudience::Catalog,
+            )
+            .map_err(|error| ToolCommandError::message(error.to_string()))?
+        }
+        ToolSchemaSurface::Exports => {
+            let catalog = harn_serve::ExportCatalog::from_path(Path::new(&args.file))
+                .map_err(|error| ToolCommandError::message(error.message()))?;
+            harn_serve::emit_export_diagnostics(catalog.diagnostics());
+            catalog
+                .tool_catalog()
+                .map_err(|error| ToolCommandError::message(error.message()))?
+        }
+    };
+    Ok(catalog)
+}
+
+fn print_catalog(
+    args: &ToolSchemaArgs,
+    catalog: &harn_vm::tool_registry::ToolCatalog,
+) -> Result<(), String> {
     if args.pretty {
         println!(
             "{}",
@@ -166,12 +236,6 @@ fn print_loaded_registry_schema(
     Ok(())
 }
 
-#[derive(Default)]
-struct CommandNode {
-    tool_index: Option<usize>,
-    children: BTreeMap<String, CommandNode>,
-}
-
 #[derive(Debug)]
 struct RegistryInvocation {
     tool_name: String,
@@ -182,10 +246,9 @@ struct RegistryInvocation {
 fn parse_registry_invocation(
     file: &str,
     arguments: &[String],
-    info: Option<&harn_vm::tool_registry::ToolRegistryInfo>,
-    tools: &[harn_vm::tool_registry::ToolCatalogEntry],
+    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Option<RegistryInvocation>, String> {
-    let root = command_tree(tools)?;
+    let info = prepared.catalog().info.as_ref();
     let binary_name = info
         .map(|info| info.name.clone())
         .or_else(|| {
@@ -195,15 +258,7 @@ fn parse_registry_invocation(
                 .map(ToOwned::to_owned)
         })
         .unwrap_or_else(|| "harn-tool".to_string());
-    let mut command = clap_command(binary_name.clone(), &root, tools)?;
-    if let Some(info) = info {
-        if let Some(version) = info.version.as_ref() {
-            command = command.version(version.clone());
-        }
-        if let Some(description) = info.description.as_ref() {
-            command = command.about(description.clone());
-        }
-    }
+    let command = prepared_clap_command(binary_name.clone(), prepared)?;
     let argv = std::iter::once(binary_name)
         .chain(arguments.iter().cloned())
         .collect::<Vec<_>>();
@@ -222,8 +277,13 @@ fn parse_registry_invocation(
         }
         Err(error) => return Err(error.to_string()),
     };
-    let (tool_index, leaf) = selected_leaf(&matches, &root)?;
-    let tool = &tools[tool_index];
+    let (leaf_command, leaf) = selected_prepared_leaf(&matches, prepared.cli_tree())?;
+    let tool_name = leaf_command
+        .tool_name()
+        .ok_or_else(|| "a leaf tool command is required".to_string())?;
+    let tool = prepared
+        .entry(tool_name)
+        .ok_or_else(|| format!("generated parser selected unknown tool {tool_name:?}"))?;
     let mut input = read_base_input(leaf.get_one::<String>("__harn_input"))?;
     let object = input
         .as_object_mut()
@@ -234,24 +294,36 @@ fn parse_registry_invocation(
         .and_then(serde_json::Value::as_object)
         .cloned()
         .unwrap_or_default();
-    for (name, schema) in &properties {
-        if let Some(value) = leaf.get_one::<String>(name) {
-            object.insert(name.clone(), coerce_argument(name, value, schema)?);
+    for argument in leaf_command.arguments() {
+        let name = argument.property();
+        let schema = properties.get(name).ok_or_else(|| {
+            format!("prepared CLI argument {name:?} is absent from the input schema")
+        })?;
+        if argument.boolean_style() != ToolCliBooleanStyle::Value {
+            if leaf.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
+                let value = leaf
+                    .get_one::<bool>(name)
+                    .copied()
+                    .ok_or_else(|| format!("generated boolean option {name:?} has no value"))?;
+                object.insert(name.to_string(), serde_json::Value::Bool(value));
+            }
+        } else if argument.repeatable() {
+            if let Some(values) = leaf.get_many::<String>(name) {
+                let item_schema = schema
+                    .get("items")
+                    .expect("prepared repeatable arguments have an items schema");
+                let values = values
+                    .map(|value| coerce_argument(name, value, item_schema))
+                    .collect::<Result<Vec<_>, _>>()?;
+                object.insert(name.to_string(), serde_json::Value::Array(values));
+            }
+        } else if let Some(value) = leaf.get_one::<String>(name) {
+            object.insert(name.to_string(), coerce_argument(name, value, schema)?);
         }
     }
-    let validator = jsonschema::draft202012::new(&tool.input_schema)
-        .map_err(|error| format!("tool {:?} has an invalid input schema: {error}", tool.name))?;
-    let violations = validator
-        .iter_errors(&input)
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>();
-    if !violations.is_empty() {
-        return Err(format!(
-            "arguments for tool {:?} do not match its schema:\n  - {}",
-            tool.name,
-            violations.join("\n  - ")
-        ));
-    }
+    prepared
+        .validate_input(&tool.name, &input)
+        .map_err(|error| error.to_string())?;
     Ok(Some(RegistryInvocation {
         tool_name: tool.name.clone(),
         arguments: input,
@@ -271,137 +343,269 @@ fn parse_registry_invocation(
     }))
 }
 
-fn command_tree(tools: &[harn_vm::tool_registry::ToolCatalogEntry]) -> Result<CommandNode, String> {
-    let mut root = CommandNode::default();
-    for (index, tool) in tools.iter().enumerate() {
-        let mut node = &mut root;
-        for part in &tool.cli.command {
-            if node.tool_index.is_some() {
-                return Err(format!(
-                    "CLI command {:?} is both a tool and a parent command",
-                    tool.cli.command
-                ));
-            }
-            node = node.children.entry(part.clone()).or_default();
-        }
-        if !node.children.is_empty() {
-            return Err(format!(
-                "CLI command {:?} is both a parent command and a tool",
-                tool.cli.command
-            ));
-        }
-        node.tool_index = Some(index);
-    }
-    Ok(root)
-}
-
-fn clap_command(
+fn prepared_clap_command(
     name: String,
-    node: &CommandNode,
-    tools: &[harn_vm::tool_registry::ToolCatalogEntry],
+    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Command, String> {
     let mut command = Command::new(name)
         .subcommand_required(true)
         .arg_required_else_help(true);
-    for (child_name, child) in &node.children {
-        let mut subcommand = clap_command(child_name.clone(), child, tools)?;
-        if let Some(index) = child.tool_index {
-            let tool = &tools[index];
-            if let Some(description) = tool.description.as_ref() {
-                subcommand = subcommand.about(description.clone());
-            }
-            let properties = tool
-                .input_schema
-                .get("properties")
-                .and_then(serde_json::Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            let has_json_input = properties
-                .keys()
-                .any(|property_name| property_name.replace('_', "-") == "json");
-            subcommand = subcommand
-                .hide(tool.cli.hidden)
-                .subcommand_required(false)
-                .arg_required_else_help(false)
-                .arg(
-                    Arg::new("__harn_input")
-                        .long("harn-input")
-                        .value_name("JSON|@FILE|-")
-                        .help("Base JSON object; individual flags override its properties"),
-                )
-                .arg(
-                    Arg::new("__harn_output")
-                        .long("harn-output")
-                        .value_parser(["json", "pretty", "text"])
-                        .default_value("json")
-                        .help("Output encoding"),
-                );
-            if !has_json_input {
-                subcommand = subcommand.arg(
-                    Arg::new("__harn_json")
-                        .long("json")
-                        .action(ArgAction::SetTrue)
-                        .conflicts_with("__harn_output")
-                        .help("Emit compact JSON (alias for --harn-output json)"),
-                );
-            }
-            let mut long_names = BTreeSet::new();
-            for (property_name, schema) in properties {
-                let long_name = property_name.replace('_', "-");
-                if long_name.is_empty()
-                    || long_name.starts_with('-')
-                    || !long_name
-                        .chars()
-                        .all(|character| character.is_ascii_alphanumeric() || character == '-')
-                {
-                    return Err(format!(
-                        "tool {:?} parameter {property_name:?} cannot be projected as a portable CLI flag",
-                        tool.name
-                    ));
-                }
-                if matches!(long_name.as_str(), "harn-input" | "harn-output")
-                    || !long_names.insert(long_name.clone())
-                {
-                    return Err(format!(
-                        "tool {:?} has parameters that collide at CLI flag --{long_name}",
-                        tool.name
-                    ));
-                }
-                let mut argument = Arg::new(property_name.clone())
-                    .long(long_name)
-                    .action(ArgAction::Set)
-                    .value_name(schema_value_name(&schema));
-                if let Some(description) = schema
-                    .get("description")
-                    .and_then(serde_json::Value::as_str)
-                {
-                    argument = argument.help(description.to_string());
-                }
-                command_arg_schema_guard(&tool.name, &property_name, &schema)?;
-                subcommand = subcommand.arg(argument);
-            }
+    if let Some(info) = prepared.catalog().info.as_ref() {
+        if let Some(version) = info.version.as_ref() {
+            command = command.version(version.clone());
         }
+        if let Some(description) = info.description.as_ref() {
+            command = command.about(description.clone());
+        }
+    }
+    add_prepared_subcommands(command, prepared.cli_tree().commands(), prepared)
+}
+
+fn add_prepared_subcommands(
+    mut command: Command,
+    children: &[harn_vm::tool_registry::PreparedCliCommand],
+    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
+) -> Result<Command, String> {
+    for child in children {
+        let mut subcommand = Command::new(child.name().to_string())
+            .visible_aliases(child.aliases().iter().cloned())
+            .hide(child.hidden());
+        if let Some(order) = child.display_order() {
+            subcommand = subcommand.display_order(order as usize);
+        }
+        match (child.title(), child.description()) {
+            (Some(title), Some(description)) => {
+                subcommand = subcommand
+                    .about(title.to_string())
+                    .long_about(description.to_string());
+            }
+            (Some(title), None) => subcommand = subcommand.about(title.to_string()),
+            (None, Some(description)) => {
+                subcommand = subcommand.about(description.to_string());
+            }
+            (None, None) => {}
+        }
+        if child.tool_name().is_some() {
+            subcommand = add_prepared_leaf_arguments(subcommand, child, prepared)?;
+        } else {
+            subcommand = subcommand
+                .subcommand_required(true)
+                .arg_required_else_help(true);
+        }
+        subcommand = add_prepared_subcommands(subcommand, child.children(), prepared)?;
         command = command.subcommand(subcommand);
     }
     Ok(command)
 }
 
-fn selected_leaf<'a>(
+fn add_prepared_leaf_arguments(
+    mut command: Command,
+    leaf: &harn_vm::tool_registry::PreparedCliCommand,
+    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
+) -> Result<Command, String> {
+    let tool_name = leaf.tool_name().expect("prepared CLI leaf names one tool");
+    let tool = prepared
+        .entry(tool_name)
+        .expect("prepared CLI leaf resolves to its catalog entry");
+    let properties = tool
+        .input_schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let has_json_input = leaf.arguments().iter().any(|argument| {
+        argument.long() == Some("json") || argument.aliases().iter().any(|alias| alias == "json")
+    });
+    command = command
+        .subcommand_required(false)
+        .arg_required_else_help(false)
+        .arg(
+            Arg::new("__harn_input")
+                .long("harn-input")
+                .value_name("JSON|@FILE|-")
+                .help("Base JSON object; individual arguments override its properties"),
+        )
+        .arg(
+            Arg::new("__harn_output")
+                .long("harn-output")
+                .value_parser(["json", "pretty", "text"])
+                .default_value("json")
+                .help("Output encoding"),
+        );
+    if !has_json_input {
+        command = command.arg(
+            Arg::new("__harn_json")
+                .long("json")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("__harn_output")
+                .help("Emit compact JSON (alias for --harn-output json)"),
+        );
+    }
+    for projection in leaf.arguments() {
+        let schema = properties.get(projection.property()).ok_or_else(|| {
+            format!(
+                "tool {tool_name:?} prepared CLI argument {:?} is absent from its input schema",
+                projection.property()
+            )
+        })?;
+        let value_schema = if projection.repeatable() {
+            schema
+                .get("items")
+                .expect("prepared repeatable argument has items")
+        } else {
+            schema
+        };
+        command_arg_schema_guard(tool_name, projection.property(), value_schema)?;
+        let mut argument =
+            Arg::new(projection.property().to_string()).action(match projection.boolean_style() {
+                ToolCliBooleanStyle::Value if projection.repeatable() => ArgAction::Append,
+                ToolCliBooleanStyle::Value => ArgAction::Set,
+                ToolCliBooleanStyle::SetTrue => ArgAction::SetTrue,
+                ToolCliBooleanStyle::SetFalse => ArgAction::SetFalse,
+            });
+        if projection.boolean_style() == ToolCliBooleanStyle::Value {
+            argument = argument.value_name(projection.value_name().to_string());
+        }
+        if let Some(position) = projection.position() {
+            argument = argument.index((position + 1) as usize);
+            if projection.repeatable() {
+                argument = argument.num_args(1..);
+            }
+        } else if let Some(long) = projection.long() {
+            argument = argument.long(long.to_string());
+        }
+        if let Some(short) = projection.short() {
+            argument = argument.short(short);
+        }
+        if !projection.aliases().is_empty() {
+            argument = argument.visible_aliases(projection.aliases().iter().cloned());
+        }
+        if let Some(help) = projection.help() {
+            argument = argument.help(help.to_string());
+        }
+        if let Some(order) = projection.display_order() {
+            argument = argument.display_order(order as usize);
+        }
+        if let Some(group) = projection.help_group() {
+            argument = argument.help_heading(group.to_string());
+        }
+        argument = argument.hide(projection.hidden());
+        if let Some(hint) = projection.value_hint() {
+            argument = argument.value_hint(clap_value_hint(hint));
+        }
+        if matches!(schema_type(value_schema), Some("integer" | "number")) {
+            argument = argument.allow_negative_numbers(true);
+        }
+        let has_advisory_candidates = !projection.completions().is_empty();
+        let mut candidates = projection.completions().to_vec();
+        if let Some(values) = static_string_enum(value_schema) {
+            for value in values {
+                if !candidates.contains(&value) {
+                    candidates.push(value);
+                }
+            }
+        }
+        if !candidates.is_empty() {
+            argument = argument.value_parser(AdvisoryValueParser::new(candidates));
+            if has_advisory_candidates {
+                argument = argument.hide_possible_values(true);
+            }
+        }
+        command = command.arg(argument);
+    }
+    Ok(command)
+}
+
+fn clap_value_hint(hint: harn_vm::tool_registry::ToolCliValueHint) -> ValueHint {
+    match hint {
+        harn_vm::tool_registry::ToolCliValueHint::File => ValueHint::FilePath,
+        harn_vm::tool_registry::ToolCliValueHint::Directory => ValueHint::DirPath,
+        harn_vm::tool_registry::ToolCliValueHint::Path => ValueHint::AnyPath,
+        harn_vm::tool_registry::ToolCliValueHint::Url => ValueHint::Url,
+        harn_vm::tool_registry::ToolCliValueHint::Email => ValueHint::EmailAddress,
+        harn_vm::tool_registry::ToolCliValueHint::Username => ValueHint::Username,
+        harn_vm::tool_registry::ToolCliValueHint::Hostname => ValueHint::Hostname,
+        harn_vm::tool_registry::ToolCliValueHint::Command => ValueHint::CommandName,
+        harn_vm::tool_registry::ToolCliValueHint::Other => ValueHint::Other,
+    }
+}
+
+fn static_string_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
+    schema
+        .get("enum")?
+        .as_array()?
+        .iter()
+        .map(|value| value.as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+/// Advertise ordered candidates to help/completion generators without turning
+/// them into an allowlist. The prepared JSON Schema remains the validator.
+#[derive(Clone, Debug)]
+struct AdvisoryValueParser {
+    candidates: Vec<clap::builder::PossibleValue>,
+}
+
+impl AdvisoryValueParser {
+    fn new(candidates: Vec<String>) -> Self {
+        Self {
+            candidates: candidates
+                .into_iter()
+                .map(clap::builder::PossibleValue::new)
+                .collect(),
+        }
+    }
+}
+
+impl clap::builder::TypedValueParser for AdvisoryValueParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        command: &Command,
+        argument: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        clap::builder::TypedValueParser::parse_ref(
+            &clap::builder::StringValueParser::new(),
+            command,
+            argument,
+            value,
+        )
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(self.candidates.iter().cloned()))
+    }
+}
+
+fn selected_prepared_leaf<'a>(
     matches: &'a ArgMatches,
-    root: &CommandNode,
-) -> Result<(usize, &'a ArgMatches), String> {
+    tree: &'a harn_vm::tool_registry::PreparedCliTree,
+) -> Result<
+    (
+        &'a harn_vm::tool_registry::PreparedCliCommand,
+        &'a ArgMatches,
+    ),
+    String,
+> {
     let mut current_matches = matches;
-    let mut current_node = root;
+    let mut children = tree.commands();
+    let mut selected = None;
     while let Some((name, child_matches)) = current_matches.subcommand() {
-        current_node = current_node
-            .children
-            .get(name)
+        let child = children
+            .iter()
+            .find(|child| child.name() == name || child.aliases().iter().any(|alias| alias == name))
             .ok_or_else(|| format!("generated parser selected unknown command {name:?}"))?;
+        selected = Some(child);
+        children = child.children();
         current_matches = child_matches;
     }
-    current_node
-        .tool_index
-        .map(|index| (index, current_matches))
+    selected
+        .map(|command| (command, current_matches))
+        .filter(|(command, _)| command.tool_name().is_some())
         .ok_or_else(|| "a leaf tool command is required".to_string())
 }
 
@@ -460,16 +664,6 @@ fn schema_type(schema: &serde_json::Value) -> Option<&str> {
     schema.get("type").and_then(serde_json::Value::as_str)
 }
 
-fn schema_value_name(schema: &serde_json::Value) -> &'static str {
-    match schema_type(schema) {
-        Some("integer") => "INT",
-        Some("number") => "NUMBER",
-        Some("boolean") => "BOOL",
-        Some("object" | "array") | None => "JSON",
-        _ => "VALUE",
-    }
-}
-
 fn command_arg_schema_guard(
     tool_name: &str,
     property_name: &str,
@@ -495,6 +689,8 @@ fn command_arg_schema_guard(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     fn catalog_tool(
@@ -508,13 +704,16 @@ mod tests {
             description: Some(format!("Run {name}")),
             input_schema,
             output_schema: None,
+            error_schema: None,
             annotations: None,
             icons: None,
             execution: None,
             governance: harn_vm::tool_registry::ToolGovernance::default(),
             cli: harn_vm::tool_registry::ToolCliSpec {
                 command: command.iter().map(|part| (*part).to_string()).collect(),
+                aliases: Vec::new(),
                 hidden: false,
+                arguments: BTreeMap::new(),
             },
             namespace: None,
             defer_loading: false,
@@ -522,6 +721,25 @@ mod tests {
             policy: None,
             meta: None,
         }
+    }
+
+    fn test_catalog(
+        tools: Vec<harn_vm::tool_registry::ToolCatalogEntry>,
+    ) -> harn_vm::tool_registry::ToolCatalog {
+        harn_vm::tool_registry::ToolCatalog {
+            schema_version: harn_vm::tool_registry::ToolCatalogSchemaVersion::V2,
+            info: None,
+            cli: None,
+            tools,
+            components: None,
+        }
+    }
+
+    fn prepared_catalog(
+        tools: Vec<harn_vm::tool_registry::ToolCatalogEntry>,
+    ) -> harn_vm::tool_registry::PreparedToolCatalog {
+        harn_vm::tool_registry::PreparedToolCatalog::prepare(test_catalog(tools))
+            .expect("prepare test catalog")
     }
 
     #[test]
@@ -539,6 +757,7 @@ mod tests {
                 "additionalProperties": false
             }),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let invocation = parse_registry_invocation(
             "server.harn",
             &[
@@ -551,8 +770,7 @@ mod tests {
                 "--harn-output".into(),
                 "pretty".into(),
             ],
-            None,
-            &[tool],
+            &prepared,
         )
         .unwrap()
         .unwrap();
@@ -571,11 +789,11 @@ mod tests {
             &["widgets", "get"],
             serde_json::json!({"type": "object", "properties": {}}),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let invocation = parse_registry_invocation(
             "server.harn",
             &["widgets".into(), "get".into(), "--json".into()],
-            None,
-            &[tool],
+            &prepared,
         )
         .unwrap()
         .unwrap();
@@ -594,6 +812,7 @@ mod tests {
                 "required": ["json"]
             }),
         );
+        let prepared = prepared_catalog(vec![tool]);
         let invocation = parse_registry_invocation(
             "server.harn",
             &[
@@ -602,8 +821,7 @@ mod tests {
                 "--json".into(),
                 "raw-payload".into(),
             ],
-            None,
-            &[tool],
+            &prepared,
         )
         .unwrap()
         .unwrap();
@@ -623,24 +841,345 @@ mod tests {
                 "required": ["widget_id"]
             }),
         );
-        let error = parse_registry_invocation(
-            "server.harn",
-            &["widgets".into(), "get".into()],
-            None,
-            &[tool],
-        )
-        .unwrap_err();
+        let prepared = prepared_catalog(vec![tool]);
+        let error =
+            parse_registry_invocation("server.harn", &["widgets".into(), "get".into()], &prepared)
+                .unwrap_err();
         assert!(error.contains("widget_id"));
     }
 
     #[test]
+    fn generated_cli_preserves_boolean_omission_and_accepts_negative_numbers() {
+        use harn_vm::tool_registry::{ToolCliArgumentSpec, ToolCliBooleanStyle};
+
+        let mut tool = catalog_tool(
+            "configure_widget",
+            &["widgets", "configure"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "enabled": {"type": "boolean", "default": false},
+                    "cached": {"type": "boolean", "default": true},
+                    "offset": {"type": "integer"}
+                },
+                "additionalProperties": false
+            }),
+        );
+        tool.cli.arguments = BTreeMap::from([
+            (
+                "enabled".to_string(),
+                ToolCliArgumentSpec {
+                    long: Some("enable".to_string()),
+                    boolean_style: ToolCliBooleanStyle::SetTrue,
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+            (
+                "cached".to_string(),
+                ToolCliArgumentSpec {
+                    long: Some("no-cache".to_string()),
+                    boolean_style: ToolCliBooleanStyle::SetFalse,
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+        ]);
+        let prepared = prepared_catalog(vec![tool]);
+
+        let omitted = parse_registry_invocation(
+            "server.harn",
+            &["widgets".into(), "configure".into()],
+            &prepared,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(omitted.arguments, serde_json::json!({}));
+
+        let explicit = parse_registry_invocation(
+            "server.harn",
+            &[
+                "widgets".into(),
+                "configure".into(),
+                "--enable".into(),
+                "--no-cache".into(),
+                "--offset".into(),
+                "-4".into(),
+            ],
+            &prepared,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            explicit.arguments,
+            serde_json::json!({"enabled": true, "cached": false, "offset": -4})
+        );
+    }
+
+    #[test]
+    fn generated_cli_uses_prepared_parent_and_argument_projections() {
+        use harn_vm::tool_registry::{
+            ToolCliArgumentSpec, ToolCliCommandSpec, ToolCliTreeSpec, ToolCliValueHint,
+        };
+
+        let mut tool = catalog_tool(
+            "create_widget",
+            &["widgets", "create"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "widget_id": {"type": "integer", "description": "Widget identifier"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "mode": {"type": "string", "enum": ["safe", "fast"]},
+                    "internal": {"type": "string"}
+                },
+                "required": ["widget_id"],
+                "additionalProperties": false
+            }),
+        );
+        tool.cli.arguments = BTreeMap::from([
+            (
+                "widget_id".to_string(),
+                ToolCliArgumentSpec {
+                    position: Some(0),
+                    value_name: Some("WIDGET".to_string()),
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+            (
+                "tags".to_string(),
+                ToolCliArgumentSpec {
+                    long: Some("tag".to_string()),
+                    short: Some('t'),
+                    aliases: vec!["label".to_string()],
+                    value_name: Some("TAG".to_string()),
+                    value_hint: Some(ToolCliValueHint::File),
+                    repeatable: true,
+                    display_order: Some(2),
+                    help_group: Some("Selection".to_string()),
+                    completions: vec!["blue".to_string(), "green".to_string()],
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+            (
+                "internal".to_string(),
+                ToolCliArgumentSpec {
+                    hidden: true,
+                    ..ToolCliArgumentSpec::default()
+                },
+            ),
+        ]);
+        tool.cli.aliases = vec!["add".to_string()];
+        let mut catalog = test_catalog(vec![tool]);
+        catalog.info = Some(harn_vm::tool_registry::ToolRegistryInfo {
+            name: "widgetctl".to_string(),
+            version: None,
+            description: None,
+        });
+        catalog.cli = Some(ToolCliTreeSpec {
+            commands: vec![ToolCliCommandSpec {
+                command: vec!["widgets".to_string()],
+                title: Some("Manage widgets".to_string()),
+                description: Some("Create and inspect durable widgets".to_string()),
+                aliases: vec!["w".to_string()],
+                hidden: false,
+                display_order: Some(1),
+            }],
+        });
+        let prepared = harn_vm::tool_registry::PreparedToolCatalog::prepare(catalog)
+            .expect("prepare projected CLI");
+
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &[
+                "w".into(),
+                "create".into(),
+                "42".into(),
+                "--tag".into(),
+                "blue".into(),
+                "--label".into(),
+                "green".into(),
+                "--mode".into(),
+                "safe".into(),
+            ],
+            &prepared,
+        )
+        .expect("parse projected CLI")
+        .expect("invocation");
+        assert_eq!(
+            invocation.arguments,
+            serde_json::json!({
+                "widget_id": 42,
+                "tags": ["blue", "green"],
+                "mode": "safe"
+            })
+        );
+
+        let advisory_only = parse_registry_invocation(
+            "server.harn",
+            &[
+                "widgets".into(),
+                "add".into(),
+                "42".into(),
+                "--tag".into(),
+                "red".into(),
+            ],
+            &prepared,
+        )
+        .expect("advisory candidates do not restrict values")
+        .expect("invocation");
+        assert_eq!(advisory_only.arguments["tags"], serde_json::json!(["red"]));
+
+        let help = prepared_clap_command("widgetctl".to_string(), &prepared)
+            .expect("project command")
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("Manage widgets"), "{help}");
+        assert!(help.contains("[alias: w]"), "{help}");
+
+        let mut leaf_help_command =
+            prepared_clap_command("widgetctl".to_string(), &prepared).expect("command tree");
+        let leaf_help = leaf_help_command
+            .find_subcommand_mut("widgets")
+            .unwrap()
+            .find_subcommand_mut("create")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(leaf_help.contains("WIDGET"), "{leaf_help}");
+        assert!(leaf_help.contains("Selection"), "{leaf_help}");
+        assert!(leaf_help.contains("--tag"), "{leaf_help}");
+        assert!(!leaf_help.contains("blue"), "{leaf_help}");
+        assert!(!leaf_help.contains("--internal"), "{leaf_help}");
+
+        for shell in [
+            clap_complete::Shell::Bash,
+            clap_complete::Shell::Zsh,
+            clap_complete::Shell::Fish,
+            clap_complete::Shell::PowerShell,
+        ] {
+            let mut command =
+                prepared_clap_command("widgetctl".to_string(), &prepared).expect("command tree");
+            let mut output = Vec::new();
+            clap_complete::generate(shell, &mut command, "widgetctl", &mut output);
+            let script = String::from_utf8(output).expect("completion script is UTF-8");
+            assert!(script.contains("widgets"), "{shell:?}: {script}");
+            assert!(script.contains("create"), "{shell:?}: {script}");
+            assert!(script.contains("add"), "{shell:?}: {script}");
+            assert!(script.contains("tag"), "{shell:?}: {script}");
+            if shell != clap_complete::Shell::PowerShell {
+                assert!(script.contains("blue"), "{shell:?}: {script}");
+                assert!(script.contains("green"), "{shell:?}: {script}");
+                assert!(
+                    script.find("blue") < script.find("green"),
+                    "{shell:?}: {script}"
+                );
+                assert!(
+                    script.find("safe") < script.find("fast"),
+                    "{shell:?}: {script}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generated_cli_honors_option_termination_for_negative_positionals() {
+        use harn_vm::tool_registry::ToolCliArgumentSpec;
+
+        let mut tool = catalog_tool(
+            "shift_widget",
+            &["widgets", "shift"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {"offset": {"type": "integer"}},
+                "required": ["offset"],
+                "additionalProperties": false
+            }),
+        );
+        tool.cli.arguments.insert(
+            "offset".to_string(),
+            ToolCliArgumentSpec {
+                position: Some(0),
+                ..ToolCliArgumentSpec::default()
+            },
+        );
+        let prepared = prepared_catalog(vec![tool]);
+        let invocation = parse_registry_invocation(
+            "server.harn",
+            &["widgets".into(), "shift".into(), "--".into(), "-3".into()],
+            &prepared,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(invocation.arguments, serde_json::json!({"offset": -3}));
+    }
+
+    #[test]
     fn generated_cli_rejects_leaf_parent_ambiguity() {
-        let error = command_tree(&[
-            catalog_tool("widgets", &["widgets"], serde_json::json!({})),
-            catalog_tool("get_widget", &["widgets", "get"], serde_json::json!({})),
-        ])
-        .err()
-        .expect("ambiguous tree");
-        assert!(error.contains("both a tool and a parent"));
+        let error = harn_vm::tool_registry::PreparedToolCatalog::prepare(test_catalog(vec![
+            catalog_tool(
+                "widgets",
+                &["widgets"],
+                serde_json::json!({"type": "object", "properties": {}}),
+            ),
+            catalog_tool(
+                "get_widget",
+                &["widgets", "get"],
+                serde_json::json!({"type": "object", "properties": {}}),
+            ),
+        ]))
+        .expect_err("ambiguous tree");
+        assert!(error.to_string().contains("both a tool and a parent"));
+    }
+
+    #[test]
+    fn generated_cli_tree_shares_the_portable_component_contract() {
+        harn_vm::tool_registry::PreparedToolCatalog::prepare(test_catalog(vec![catalog_tool(
+            "nested",
+            &["inspect", "inspect"],
+            serde_json::json!({"type": "object", "properties": {}}),
+        )]))
+        .expect("repeated components are a valid nested command path");
+
+        for invalid in [["-inspect"], ["inspect me"]] {
+            let error = harn_vm::tool_registry::PreparedToolCatalog::prepare(test_catalog(vec![
+                catalog_tool(
+                    "invalid",
+                    &invalid,
+                    serde_json::json!({"type": "object", "properties": {}}),
+                ),
+            ]))
+            .expect_err("invalid component");
+            assert!(error
+                .to_string()
+                .contains("must match ^[A-Za-z0-9_][A-Za-z0-9_-]*$"));
+        }
+    }
+
+    #[tokio::test]
+    async fn export_schema_surface_is_offline_even_when_main_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("offline.harn");
+        std::fs::write(
+            &script,
+            r#"
+fn main() { panic("must not execute") }
+pub fn inspect(input: {id: string}) -> {id: string} { return input }
+"#,
+        )
+        .expect("write script");
+        let args = ToolSchemaArgs {
+            file: script.display().to_string(),
+            surface: ToolSchemaSurface::Exports,
+            pretty: false,
+        };
+
+        let catalog = load_schema_catalog(&args)
+            .await
+            .expect("offline export catalog");
+        assert_eq!(catalog.tools.len(), 1);
+        assert_eq!(catalog.tools[0].name, "inspect");
+        assert_eq!(
+            catalog.tools[0].input_schema["properties"]["input"]["properties"]["id"]["type"],
+            "string"
+        );
     }
 }

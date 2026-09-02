@@ -88,7 +88,7 @@ output="$(
 grep -Fq "preserve run=101 sha=$current_a" <<< "$output"
 grep -Fq "preserve run=103 sha=$current_b" <<< "$output"
 grep -Fq "stale run=102 sha=$stale" <<< "$output"
-grep -Fq 'summary current_heads=2 stale_runs=1 cancelled=1 zombies=0 apply=true' <<< "$output"
+grep -Fq 'summary queue_state=configured current_heads=2 active_runs=3 stale_runs=1 cancelled=1 zombies=0 apply=true' <<< "$output"
 grep -Fq 'repos/burin-labs/harn/actions/runs?event=merge_group&status=in_progress' "$calls"
 grep -Fq 'api --method POST repos/burin-labs/harn/actions/runs/102/cancel' "$calls"
 if grep -Eq 'runs/(101|103)/cancel' "$calls"; then
@@ -105,7 +105,7 @@ forced_output="$(
     "$script" --repo burin-labs/harn --apply 2> /dev/null
 )"
 grep -Fq 'force-cancelled run=102' <<< "$forced_output"
-grep -Fq 'summary current_heads=2 stale_runs=1 cancelled=1 zombies=0 apply=true' <<< "$forced_output"
+grep -Fq 'summary queue_state=configured current_heads=2 active_runs=3 stale_runs=1 cancelled=1 zombies=0 apply=true' <<< "$forced_output"
 grep -Fq 'api --method POST repos/burin-labs/harn/actions/runs/102/force-cancel' "$calls"
 
 : > "$calls"
@@ -143,9 +143,87 @@ empty_output="$(
   FAKE_QUEUE_JSON="$empty_queue_json" \
     "$script" --repo burin-labs/harn --apply
 )"
-grep -Fq 'summary current_heads=0 stale_runs=3 cancelled=3 zombies=0 apply=true' <<< "$empty_output"
+grep -Fq 'summary queue_state=configured current_heads=0 active_runs=3 stale_runs=3 cancelled=3 zombies=0 apply=true' <<< "$empty_output"
 for run_id in 101 102 103; do
   grep -Fq "api --method POST repos/burin-labs/harn/actions/runs/$run_id/cancel" "$calls"
+done
+
+: > "$calls"
+# GitHub returns an explicit null mergeQueue when the queue is disabled. That
+# is distinct from the configured queue's measured empty nodes list above and
+# cannot authorize even an Actions inventory read.
+null_queue_json='{"data":{"repository":{"mergeQueue":null}}}'
+null_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$null_queue_json" \
+    "$script" --repo burin-labs/harn --expected-sha "$current_a" --apply
+)"
+grep -Fxq 'summary queue_state=disabled pending=0 active_runs=not_queried action=none reason=nothing_to_supersede apply=true' <<< "$null_output"
+if grep -Fq 'actions/runs' "$calls"; then
+  echo "disabled merge queue reached the Actions API" >&2
+  exit 1
+fi
+
+: > "$calls"
+null_plan_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$null_queue_json" \
+    "$script" --repo burin-labs/harn
+)"
+grep -Fxq 'summary queue_state=disabled pending=0 active_runs=not_queried action=none reason=nothing_to_supersede apply=false' <<< "$null_plan_output"
+if grep -Fq 'actions/runs' "$calls"; then
+  echo "disabled merge queue plan reached the Actions API" >&2
+  exit 1
+fi
+
+# NEGATIVE CONTROL. A missing field is not the same observation as an explicit
+# null queue. It must still fail before any cancellation request is sent.
+: > "$calls"
+missing_queue_json='{"data":{"repository":{}}}'
+if PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$missing_queue_json" \
+    "$script" --repo burin-labs/harn --apply > /dev/null 2>&1; then
+  echo "missing mergeQueue field was accepted as an empty queue" >&2
+  exit 1
+fi
+if grep -Fq '/cancel' "$calls"; then
+  echo "missing mergeQueue field reached cancellation" >&2
+  exit 1
+fi
+
+# Every untrusted GraphQL shape must fail before the first Actions read. This
+# makes a missing observation distinguishable from a measured configured zero.
+malformed_queue_jsons=(
+  '{"errors":[{"message":"denied"}],"data":{"repository":{"mergeQueue":null}}}'
+  '{"errors":"","data":{"repository":{"mergeQueue":null}}}'
+  '{"data":{}}'
+  '{"data":{"repository":null}}'
+  '{"data":{"repository":{"mergeQueue":{}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{},"nodes":[]}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{"hasNextPage":false}}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{"hasNextPage":false},"nodes":{}}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{"hasNextPage":false},"nodes":[{}]}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{"hasNextPage":false},"nodes":[{"headCommit":{}}]}}}}}'
+  '{"data":{"repository":{"mergeQueue":{"entries":{"pageInfo":{"hasNextPage":false},"nodes":[{"headCommit":{"oid":"short"}}]}}}}}'
+)
+for malformed_queue_json in "${malformed_queue_jsons[@]}"; do
+  : > "$calls"
+  if PATH="$fixture_root/bin:$PATH" \
+    FAKE_GH_CALLS="$calls" \
+    FAKE_QUEUE_JSON="$malformed_queue_json" \
+      "$script" --repo burin-labs/harn --apply > /dev/null 2>&1; then
+    echo "malformed merge-queue response was accepted" >&2
+    exit 1
+  fi
+  if grep -Fq 'actions/runs' "$calls"; then
+    echo "malformed merge-queue response reached the Actions API" >&2
+    exit 1
+  fi
 done
 
 : > "$calls"
@@ -157,7 +235,7 @@ zombie_output="$(
     "$script" --repo burin-labs/harn --apply
 )"
 grep -Fq 'zombie run=104 sha=dddddddddddddddddddddddddddddddddddddddd status=queued workflow=SDK codegen action=none' <<< "$zombie_output"
-grep -Fq 'summary current_heads=2 stale_runs=2 cancelled=1 zombies=1 apply=true' <<< "$zombie_output"
+grep -Fq 'summary queue_state=configured current_heads=2 active_runs=4 stale_runs=2 cancelled=1 zombies=1 apply=true' <<< "$zombie_output"
 if grep -Fq 'runs/104/cancel' "$calls"; then
   echo "ancient jobless queue metadata reached cancellation" >&2
   exit 1
@@ -176,7 +254,7 @@ uncancellable_output="$(
 grep -Fq 'runs/105/cancel' "$calls"
 grep -Fq 'runs/105/force-cancel' "$calls"
 grep -Fq 'zombie run=105 sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee status=queued workflow=Lean embedding surface action=none reason=uncancellable' <<< "$uncancellable_output"
-grep -Fq 'summary current_heads=2 stale_runs=2 cancelled=1 zombies=1 apply=true' <<< "$uncancellable_output"
+grep -Fq 'summary queue_state=configured current_heads=2 active_runs=4 stale_runs=2 cancelled=1 zombies=1 apply=true' <<< "$uncancellable_output"
 
 # NEGATIVE CONTROL. The same double refusal on a RECENT run must still fail the
 # job. Without this, the branch above could swallow every cancellation failure
