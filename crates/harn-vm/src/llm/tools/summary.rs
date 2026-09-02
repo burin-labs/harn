@@ -2,11 +2,17 @@
 //!
 //! A tool entry that declares `compact: true` keeps its full description in
 //! the registry and in the transcript sidecar; only the copy the model is
-//! served is shortened. Every renderer that puts a description in front of a
-//! model goes through [`tool_summary`] so the native wire payload, the text
-//! catalog, and the training-corpus projection agree on what was served —
-//! three renderers each deciding independently is how a schema the model was
-//! never served gets recorded as if it had been.
+//! served is shortened. Every Rust renderer goes through [`tool_summary`] —
+//! the native wire payload and the training-corpus projection — so a corpus
+//! cannot record a description the model was never served.
+//!
+//! The text tool catalog is rendered in Harn, by `__agent_tool_summary` in
+//! `stdlib/agent/preflight.harn`, against the same [`MIN_SUMMARY_CHARS`] floor
+//! and the same whole-sentence rule. That is a second implementation of one
+//! policy and a real drift seam: the two are held in parity by their tests
+//! (`tests/compact_tools.rs` here, `agent_tool_compact_listing.harn` there)
+//! rather than by a shared owner, because the stdlib has no builtin to call
+//! into this module. Changing the rule means changing both.
 
 /// Below this length a summary is not worth its own paragraph, so the next
 /// sentence is pulled in. Without a floor the rule degenerates: a description

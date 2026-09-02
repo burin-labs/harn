@@ -235,7 +235,7 @@ mod tests {
                 default: None,
                 examples: Vec::new(),
             }],
-            compact: false,
+            summary_only: false,
         };
         let row = serde_json::to_value(&tool).unwrap();
         let rendered = function_schema_from_catalog_row(&row).expect("catalog row converts");

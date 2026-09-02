@@ -4,6 +4,12 @@
 //! projects before it is sent. [`super::cost`] owns "what does it cost" and
 //! prices these counts; keeping the two apart means a pricing change cannot
 //! silently redefine what a segment counts.
+//!
+//! Because the projection is request-side, it measures what Harn puts on the
+//! wire, not what the model ends up reading. Provider-side deferral is where
+//! that distinction bites: a deferred tool is sent but not resident, so it
+//! gets its own segment and its own count instead of being folded into the
+//! resident total, where it would make a real saving read as zero (#7768).
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(crate) struct LlmContextTokenBreakdown {
@@ -13,7 +19,14 @@ pub(crate) struct LlmContextTokenBreakdown {
     pub output_budget_tokens: i64,
     pub context_tokens: i64,
     pub message_count: usize,
+    /// Every tool in the request array, deferred ones included. This is what
+    /// Harn sends.
     pub native_tool_count: usize,
+    /// The subset whose schema is resident in the model's context on this
+    /// call. Without it a reader has the deferred token split but no count to
+    /// pair it with, and `native_tool_count` alone reads as "nothing was
+    /// deferred" (#7768).
+    pub resident_tool_count: usize,
     pub provider_tool_count: usize,
 }
 
@@ -176,6 +189,7 @@ pub(crate) fn project_llm_call_context_breakdown(
         output_budget_tokens: projected_output_tokens,
         context_tokens: projected_input_tokens.saturating_add(projected_output_tokens),
         message_count: opts.messages.len(),
+        resident_tool_count: resident_tools.len(),
         native_tool_count: opts
             .native_tools
             .as_ref()
