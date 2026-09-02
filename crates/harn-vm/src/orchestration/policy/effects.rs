@@ -128,6 +128,11 @@ pub(crate) struct ExecutedEffectRecorder {
     effects: HashSet<EffectRecord>,
 }
 
+struct StaticEffectRecord {
+    effect: EffectRecord,
+    contract: Option<harn_builtin_meta::BuiltinContract>,
+}
+
 impl ExecutedEffectRecorder {
     pub(crate) fn record(&mut self, specs: &[harn_builtin_meta::EffectSpec], args: &[VmValue]) {
         self.effects
@@ -165,7 +170,7 @@ pub fn compute_handoff_effects(
     let Ok(program) = harn_parser::parse_source(source) else {
         return Vec::new();
     };
-    let mut collected: BTreeSet<EffectRecord> = BTreeSet::new();
+    let mut collected = Vec::new();
 
     // Builtin / host-call effects via the existing IR analyzer — same
     // surface `harn graph --json` reads.
@@ -175,9 +180,7 @@ pub fn compute_handoff_effects(
             let NodeSemantics::Call(call) = &node.semantics else {
                 continue;
             };
-            for effect in effects_from_call(call) {
-                collected.insert(effect);
-            }
+            collected.extend(effects_from_call(call));
         }
     }
 
@@ -188,14 +191,21 @@ pub fn compute_handoff_effects(
         walk_for_harness_effects(node, &mut CapabilityBindings::default(), &mut collected);
     }
 
-    let mut effects: Vec<EffectRecord> = collected.into_iter().collect();
     if let Some(ceiling) = ceiling {
-        effects.retain(|effect| effect_allowed_by_ceiling(effect, ceiling));
+        collected.retain(|entry| match entry.contract {
+            Some(contract) => contract_effect_allowed_by_ceiling(&entry.effect, contract, ceiling),
+            None => effect_allowed_by_ceiling(&entry.effect, ceiling),
+        });
     }
-    effects
+    collected
+        .into_iter()
+        .map(|entry| entry.effect)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
-fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
+fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<StaticEffectRecord> {
     // `harn-ir` projects this classification directly from the builtin
     // contract manifest. Keeping name tables here would create a competing
     // semantic owner and let static ceilings drift from runtime receipts.
@@ -210,11 +220,21 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
             })
             .or_else(|| crate::stdlib::builtin_manifest_entry(&call.name));
         if let Some(entry) = contract {
-            return effect_specs_to_records(entry.contract.effects, &call.literal_args);
+            return effect_specs_to_records(entry.contract.effects, &call.literal_args)
+                .into_iter()
+                .map(|effect| StaticEffectRecord {
+                    effect,
+                    contract: Some(entry.contract),
+                })
+                .collect();
         }
         return capability_effects
             .iter()
             .filter_map(capability_effect_to_record)
+            .map(|effect| StaticEffectRecord {
+                effect,
+                contract: None,
+            })
             .collect();
     }
     Vec::new()
@@ -617,7 +637,7 @@ struct CapabilityBindings {
 fn walk_for_harness_effects(
     node: &SNode,
     bindings: &mut CapabilityBindings,
-    out: &mut BTreeSet<EffectRecord>,
+    out: &mut Vec<StaticEffectRecord>,
 ) {
     match &node.node {
         Node::FnDecl { params, body, .. }
@@ -674,7 +694,7 @@ fn capability_value(
     }
 }
 
-fn harness_method_effects(node: &SNode, bindings: &CapabilityBindings) -> Vec<EffectRecord> {
+fn harness_method_effects(node: &SNode, bindings: &CapabilityBindings) -> Vec<StaticEffectRecord> {
     let (object, method, args) = match &node.node {
         Node::MethodCall {
             object,
@@ -704,6 +724,12 @@ fn harness_method_effects(node: &SNode, bindings: &CapabilityBindings) -> Vec<Ef
     };
     let literal_args = args.iter().map(harn_ir::literal_value).collect::<Vec<_>>();
     effect_specs_to_records(entry.contract.effects, &literal_args)
+        .into_iter()
+        .map(|effect| StaticEffectRecord {
+            effect,
+            contract: Some(entry.contract),
+        })
+        .collect()
 }
 
 fn harness_sub_handle(node: &SNode) -> Option<(String, &SNode)> {
@@ -1364,6 +1390,72 @@ fn main(harness: Harness) {
                 .iter()
                 .any(|effect| matches!(effect.kind, EffectKind::Stdio)),
             "stdio observe should pass read_only ceiling, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn read_only_handoff_keeps_runtime_control_plane_and_drops_user_world_writes() {
+        let source = r#"fn main(harness: Harness) {
+            harness.agent.open("child-session")
+            harness.fs.write_text("artifact.txt", "must not survive")
+        }"#;
+        let ceiling = CapabilityPolicy {
+            side_effect_level: Some("read_only".to_string()),
+            ..Default::default()
+        };
+        let effects = compute_handoff_effects(source, Some(&ceiling));
+        assert!(
+            effects.iter().any(|effect| {
+                matches!(effect.kind, EffectKind::State)
+                    && effect.scope == EffectScope::Mutate
+                    && effect.resource.as_deref() == Some("agent-sessions")
+            }),
+            "runtime-owned child session state disappeared from handoff lineage: {effects:?}"
+        );
+        assert!(
+            effects
+                .iter()
+                .all(|effect| !matches!(effect.kind, EffectKind::Fs)),
+            "runtime classification must not disable the user-world ceiling: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn read_only_handoff_still_drops_unmarked_agent_state_mutation() {
+        let source = r#"fn main(harness: Harness) {
+            harness.agent.state_write("child-session", "key", "value")
+        }"#;
+        let ceiling = CapabilityPolicy {
+            side_effect_level: Some("read_only".to_string()),
+            ..Default::default()
+        };
+        let effects = compute_handoff_effects(source, Some(&ceiling));
+        assert!(
+            effects
+                .iter()
+                .all(|effect| !matches!(effect.kind, EffectKind::State)),
+            "unmarked state mutation escaped the read-only ceiling: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn restricted_capabilities_can_deny_runtime_control_plane_state() {
+        let source = r#"fn main(harness: Harness) {
+            harness.agent.open("child-session")
+        }"#;
+        let mut ceiling = CapabilityPolicy {
+            side_effect_level: Some("read_only".to_string()),
+            ..Default::default()
+        };
+        ceiling
+            .capabilities
+            .insert("workspace".to_string(), vec!["read_text".to_string()]);
+        let effects = compute_handoff_effects(source, Some(&ceiling));
+        assert!(
+            effects
+                .iter()
+                .all(|effect| !matches!(effect.kind, EffectKind::State)),
+            "runtime classification bypassed the explicit capability ceiling: {effects:?}"
         );
     }
 

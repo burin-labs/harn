@@ -95,7 +95,7 @@ fn builtin_contract_value(_args: &ContractsOutputArgs) -> serde_json::Value {
         }));
     }
     json!({
-        "version": 2,
+        "version": 3,
         "builtins": rows,
     })
 }
@@ -287,7 +287,7 @@ mod tests {
     fn builtin_export_projects_typed_exposure_and_effect_contracts() {
         harn_vm::stdlib::force_link();
         let value = builtin_contract_value(&ContractsOutputArgs { pretty: false });
-        assert_eq!(value["version"], 2);
+        assert_eq!(value["version"], 3);
 
         let builtins = value["builtins"].as_array().expect("builtin rows");
         let fs_read = builtins
