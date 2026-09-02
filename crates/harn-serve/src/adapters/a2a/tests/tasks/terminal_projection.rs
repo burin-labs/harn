@@ -91,6 +91,7 @@ fn complete_task_uses_agent_result_terminal_instead_of_dispatch_success() {
                 trace_id: harn_vm::TraceId("trace-terminal".to_string()),
                 cached: false,
                 duration_ms: 0,
+                dispatch: crate::DispatchCallReceipt::default(),
             },
         );
 

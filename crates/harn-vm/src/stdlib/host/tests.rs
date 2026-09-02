@@ -110,6 +110,96 @@ fn build_sandboxed_command_respects_a_caller_pinned_locale() {
 }
 
 #[test]
+fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
+        sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..crate::orchestration::CapabilityPolicy::default()
+    });
+
+    let mut params = crate::value::DictMap::new();
+    params.put_str("mode", "argv");
+    params.put(
+        "argv",
+        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+    );
+    let mut caller_env = crate::value::DictMap::new();
+    caller_env.put_str("RUSTC_WRAPPER", "/configured/wrapper");
+    caller_env.put_str("CARGO_BUILD_RUSTC_WRAPPER", "/caller/wrapper");
+    caller_env.put_str("RUSTC_WORKSPACE_WRAPPER", "/configured/workspace-wrapper");
+    caller_env.put_str(
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        "/caller/workspace-wrapper",
+    );
+    params.put("env", VmValue::dict_map(caller_env));
+    params.put(
+        "env_remove",
+        VmValue::List(Arc::new(vec![
+            VmValue::string("rustc_wrapper"),
+            VmValue::string("cargo_build_rustc_wrapper"),
+            VmValue::string("rustc_workspace_wrapper"),
+            VmValue::string("cargo_build_rustc_workspace_wrapper"),
+        ])),
+    );
+
+    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    crate::orchestration::pop_execution_policy();
+    let env = command_env(&cmd);
+
+    for key in [
+        "RUSTC_WRAPPER",
+        "CARGO_BUILD_RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    ] {
+        assert_eq!(
+            env.get(key),
+            Some(&Some(String::new())),
+            "sandbox policy must override caller wrapper policy for {key}"
+        );
+    }
+}
+
+#[test]
+fn unsandboxed_process_exec_preserves_caller_rustc_wrapper() {
+    let mut params = crate::value::DictMap::new();
+    params.put_str("mode", "argv");
+    params.put(
+        "argv",
+        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+    );
+    let mut caller_env = crate::value::DictMap::new();
+    caller_env.put_str("RUSTC_WRAPPER", "/configured/wrapper");
+    caller_env.put_str("CARGO_BUILD_RUSTC_WRAPPER", "/configured/cargo-wrapper");
+    caller_env.put_str("RUSTC_WORKSPACE_WRAPPER", "/configured/workspace-wrapper");
+    caller_env.put_str(
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        "/configured/cargo-workspace-wrapper",
+    );
+    params.put("env", VmValue::dict_map(caller_env));
+
+    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let env = command_env(&cmd);
+
+    for (key, value) in [
+        ("RUSTC_WRAPPER", "/configured/wrapper"),
+        ("CARGO_BUILD_RUSTC_WRAPPER", "/configured/cargo-wrapper"),
+        ("RUSTC_WORKSPACE_WRAPPER", "/configured/workspace-wrapper"),
+        (
+            "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+            "/configured/cargo-workspace-wrapper",
+        ),
+    ] {
+        assert_eq!(
+            env.get(key),
+            Some(&Some(value.to_string())),
+            "without an active sandbox, the caller keeps wrapper authority for {key}"
+        );
+    }
+}
+
+#[test]
 fn process_exec_relative_cwd_resolves_against_execution_root() {
     let dir = tempfile::tempdir().expect("tempdir");
     crate::stdlib::process::set_thread_execution_context(Some(

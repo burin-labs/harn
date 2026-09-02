@@ -368,6 +368,32 @@ fn group_by_trace_preserves_chronological_group_order() {
 }
 
 #[test]
+fn trust_record_hash_ignores_nested_metadata_key_order() {
+    let mut first = TrustRecord::new(
+        "bot",
+        "tool.call",
+        None,
+        TrustOutcome::Success,
+        "trace-order",
+        AutonomyTier::ActAuto,
+    );
+    let mut second = first.clone();
+    first.metadata.insert(
+        "payload".to_string(),
+        serde_json::from_str(r#"{"zeta":1,"alpha":2}"#).unwrap(),
+    );
+    second.metadata.insert(
+        "payload".to_string(),
+        serde_json::from_str(r#"{"alpha":2,"zeta":1}"#).unwrap(),
+    );
+
+    assert_eq!(
+        compute_trust_record_hash(&first).unwrap(),
+        compute_trust_record_hash(&second).unwrap()
+    );
+}
+
+#[test]
 fn opentrustgraph_schema_files_are_parseable_and_match_runtime_enums() {
     let record_schema: serde_json::Value = serde_json::from_str(RECORD_SCHEMA_JSON).unwrap();
     let record_schema_v0_1: serde_json::Value =

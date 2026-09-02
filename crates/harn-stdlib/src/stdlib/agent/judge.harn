@@ -21,6 +21,7 @@ import {
   completion_requirement_contract_prompt,
   completion_requirement_pending_feedback,
   completion_requirement_report,
+  completion_requirement_unassessed_feedback,
 } from "std/agent/completion_requirements"
 pub import {
   COMPLETION_JUDGE_DEFAULT_CAP,
@@ -42,6 +43,17 @@ import {
   __judge_emit_started,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
+import { __judge_resolve_itemization } from "std/agent/judge_itemization"
+pub import {
+  CompletionJudgeVerdict,
+  __judge_completion_verdict_read,
+  __judge_completion_verdict_schema,
+} from "std/agent/judge_verdict"
+import {
+  completion_obligations_digest,
+  completion_obligations_from_messages,
+  completion_obligations_prompt,
+} from "std/agent/obligations"
 import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
@@ -116,18 +128,6 @@ pub type CompletionDirective = {
   repair?: string?,
   receipt: CompletionDirectiveReceipt,
   feedback_history: dict,
-}
-
-/**
- * Decoded completion decision. The schema admits `done` and `continue` only;
- * an out-of-contract value is preserved verbatim so telemetry can show what
- * the judge actually said, and is treated as a non-veto by the caller.
- */
-pub type CompletionJudgeVerdict = {
-  verdict: string,
-  detail: string,
-  gap_class: CompletionJudgeGapClass,
-  requirement_report?: CompletionRequirementReport?,
 }
 
 /** Normalized result from either a deterministic or model completion check. */
@@ -628,18 +628,22 @@ fn __judge_payload(
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
+  const obligations = completion_obligations_from_messages(messages, session?.task ?? "")
   const evidence_id = completion_evidence_id(
     session?.task ?? "",
     stop_reason,
     text,
     evidence_packet,
     pending_tool_batch_effect_count,
+    nil,
+    completion_obligations_digest(obligations),
   )
   return {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
     session_id: session.session_id,
     task: session?.task ?? "",
+    obligations: obligations,
     stop_reason: stop_reason,
     text: text,
     visible_text: text,
@@ -683,6 +687,7 @@ fn __judge_payload_with_verification(
         evidence_packet,
         payload.pending_tool_batch_effect_count,
         verification,
+        completion_obligations_digest(payload?.obligations),
       ),
       judge_evidence: evidence_serialized,
       judge_evidence_packet: evidence_packet,
@@ -690,103 +695,6 @@ fn __judge_payload_with_verification(
         + {serialized_chars: len(evidence_serialized)},
       verification: verification,
     }
-}
-
-const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
-
-/**
- * __judge_completion_verdict_schema.
- *
- * One discriminant and one dual-purpose detail keep completion decisions
- * inside small-model output budgets. `detail` is the evidence basis for
- * `done`, or the single concrete gap and next action for `continue`.
- *
- * `gap_class` names WHAT a `continue` is refusing on. It is deliberately NOT
- * required: the checkpoint validates this schema strictly, and cached, replayed,
- * and older-pin judge responses carry no such field. An absent value decodes to
- * `other`, which is the reading that grants no authority — so the compatible
- * direction and the safe direction are the same direction.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: __judge_completion_verdict_schema()
- */
-pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil) -> dict {
-  const contract = completion_requirement_contract(raw_requirement_contract)
-  let properties = {
-    verdict: {type: "string", enum: ["done", "continue"]},
-    detail: {
-      type: "string",
-      minLength: 1,
-      description: "Brief evidence basis or gap. Harn keeps the first 240 characters.",
-    },
-    gap_class: {
-      type: "string",
-      enum: COMPLETION_JUDGE_GAP_CLASSES,
-      description: "On `continue`, the kind of gap being named. On `done`, use `other`.",
-    },
-  }
-  const assessments = completion_requirement_assessments_schema(contract)
-  if assessments != nil {
-    properties = properties + {requirement_report: assessments}
-  }
-  return {
-    type: "object",
-    properties: properties,
-    required: ["verdict", "detail"],
-    additionalProperties: false,
-  }
-}
-
-/**
- * __judge_completion_verdict_read.
- *
- * Decode a judge response into the compact verdict. The superseded shape
- * `{action, reason, repair, ...}` still decodes, because cached and replayed
- * judge responses outlive the schema that produced them and a decision read
- * as absent would silently become an approval.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- * @example: __judge_completion_verdict_read({verdict: "done", detail: "tests pass"})
- */
-pub fn __judge_completion_verdict_read(
-  result: dict,
-  raw_requirement_contract: unknown = nil,
-  evidence_packet: CompletionRequirementEvidencePacket = {},
-) -> CompletionJudgeVerdict {
-  const raw = trim(to_string(result?.verdict ?? result?.action ?? ""))
-  const verdict = if raw == "accept" {
-    "done"
-  } else {
-    raw
-  }
-  // First non-blank wins rather than first non-nil: the superseded shape
-  // carried an empty `repair` on approval, which would otherwise shadow the
-  // `reason` that holds the audit basis.
-  let detail = ""
-  for candidate in [result?.detail, result?.repair, result?.reason] {
-    if detail == "" {
-      detail = trim(to_string(candidate ?? ""))
-    }
-  }
-  const clamped = if len(detail) > __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT {
-    substring(detail, 0, __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT)
-  } else {
-    detail
-  }
-  return {
-    verdict: verdict,
-    detail: clamped,
-    gap_class: __completion_judge_gap_class(result?.gap_class),
-    requirement_report: completion_requirement_report(
-      completion_requirement_contract(raw_requirement_contract),
-      result?.requirement_report,
-      evidence_packet,
-    ),
-  }
 }
 
 fn __judge_stable_prefix(
@@ -805,11 +713,15 @@ fn __judge_stable_prefix(
   const requirement_block = completion_requirement_contract_prompt(
     completion_requirement_contract(judge_cfg?.requirement_contract),
   )
+  // The steering block sits AFTER the goal, rubric, and requirement rows so its
+  // supersession clause reads over all of them. It renders empty for an
+  // unsteered run, which keeps that run's prefix byte-identical (and cacheable).
   return system
     + "\n\nStable completion goal:\n"
     + payload.task
     + rubric_block
     + requirement_block
+    + completion_obligations_prompt(payload?.obligations)
     + "\n\nRequired verdict schema:\n"
     + json_stringify(schema)
 }
@@ -956,15 +868,35 @@ fn __judge_invoke_structured(
       typed_checkpoint: checkpoint,
     }
   }
-  const decoded = __judge_completion_verdict_read(
+  // A judge that answered `done` without itemizing has assessed nothing. Re-ask
+  // the JUDGE once, rather than sending the actor feedback it cannot act on.
+  const resolved = __judge_resolve_itemization(
+    harness,
+    {
+      judge_cfg: judge_cfg,
+      opts: opts,
+      payload: payload,
+      checkpoint_name: "agent.completion_judge",
+      system: stable_prefix,
+      user: user,
+      schema: schema,
+    },
+    contract,
     checkpoint.data,
+    __judge_completion_verdict_read(checkpoint.data).verdict == "done",
+  )
+  const decoded = __judge_completion_verdict_read(
+    resolved.data,
     contract,
     payload.judge_evidence_packet,
   )
   const requirement_report = decoded.requirement_report
+  const unassessed = resolved.omitted && requirement_report != nil
   const requirements_pending = requirement_report != nil && !requirement_report.complete
   const verdict = requirements_pending ? "continue" : decoded.verdict
-  const detail = if requirements_pending {
+  const detail = if unassessed {
+    completion_requirement_unassessed_feedback(requirement_report)
+  } else if requirements_pending {
     completion_requirement_pending_feedback(requirement_report)
   } else {
     decoded.detail
@@ -979,7 +911,13 @@ fn __judge_invoke_structured(
     vetoed: verdict == "continue",
     verdict: verdict,
     gap_class: decoded.gap_class,
-    reason: requirements_pending ? "completion_requirements_pending" : nil,
+    reason: if unassessed {
+      "completion_judge_report_omitted"
+    } else if requirements_pending {
+      "completion_requirements_pending"
+    } else {
+      nil
+    },
     feedback: if verdict == "continue" {
       feedback
     } else {

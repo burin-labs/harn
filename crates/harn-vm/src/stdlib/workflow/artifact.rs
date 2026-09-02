@@ -83,6 +83,7 @@ pub(super) fn snapshot_trace_spans() -> Vec<RunTraceSpanRecord> {
                 ttft_ms,
                 metadata: span.metadata,
                 links: span.links,
+                events: span.events,
                 cost_usd,
             }
         })

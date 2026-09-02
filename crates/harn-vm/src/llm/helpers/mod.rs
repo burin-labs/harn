@@ -15,13 +15,15 @@ pub(crate) use options::{
     apply_rendered_reminder_messages, assemble_system_prompt, compose_system_prompt,
     directive_envelope_message, expects_structured_output, extract_json, extract_llm_options,
     has_directive_commit_metadata, pending_reminders_from_session, prepare_llm_options,
-    prepare_llm_options_safe, project_llm_options, render_pending_reminders,
+    prepare_llm_options_safe, project_agent_tools, project_llm_options, render_pending_reminders,
     resolve_catalog_thinking_config, resolve_thinking_config, system_prompt_event_metadata,
     system_prompt_metadata, uncommitted_directives, validate_llm_option_keys, validate_options,
 };
 #[cfg(test)]
 pub(crate) use options::{strip_directive_commit_metadata, tracked_directive_envelope_message};
-pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
+pub(crate) use provider::{
+    vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider, ResolvedProvider,
+};
 #[cfg(test)]
 pub(crate) use transcript::transcript_to_vm_with_events;
 pub(crate) use transcript::{

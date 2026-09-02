@@ -575,3 +575,11 @@ fn approval_unavailable_class_count_uses_sorted_risk_labels() {
     let (_, count) = next_approval_unavailable_class_repeat_count("s1", &labels);
     assert_eq!(count, 1);
 }
+
+#[test]
+fn approval_repeat_digest_ignores_argument_key_order() {
+    let first: serde_json::Value = serde_json::from_str(r#"{"zeta":1,"alpha":2}"#).unwrap();
+    let second: serde_json::Value = serde_json::from_str(r#"{"alpha":2,"zeta":1}"#).unwrap();
+
+    assert_eq!(stable_json_digest(&first), stable_json_digest(&second));
+}

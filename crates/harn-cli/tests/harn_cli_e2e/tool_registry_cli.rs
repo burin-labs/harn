@@ -37,6 +37,22 @@ fn registry() -> ToolRegistry {
       },
       handler: {args -> {id: args.widget_id, verbose: args.verbose ?? false}},
     },
+    {
+      name: "operator_receipt",
+      description: "Read one operator receipt.",
+      parameters: {},
+      governance: {audiences: ["catalog", "cli"]},
+      cli: {command: ["operator", "receipt"]},
+      handler: {_args -> {surface: "cli"}},
+    },
+    {
+      name: "remote_probe",
+      description: "Probe one remote integration.",
+      parameters: {},
+      governance: {audiences: ["catalog", "mcp"]},
+      cli: {command: ["remote", "probe"]},
+      handler: {_args -> {surface: "mcp"}},
+    },
   ], {name: "widgets", version: "1.2.3", description: "Widget integration"})
 }
 
@@ -72,6 +88,10 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
     );
     assert_eq!(schema["tools"][0]["policy"]["kind"], "fetch");
     assert_eq!(schema["tools"][0]["source"]["binding"]["method"], "GET");
+    assert_eq!(
+        schema["tools"][1]["governance"]["audiences"],
+        serde_json::json!(["cli", "catalog"])
+    );
 
     let help = harn_e2e_command()
         .args(["tool", "run", &path, "widgets", "get", "--help"])
@@ -81,6 +101,7 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("--widget-id <INT>"), "{help}");
     assert!(help.contains("--harn-input"), "{help}");
+    assert!(help.contains("--json"), "{help}");
 
     let run = harn_e2e_command()
         .args([
@@ -93,6 +114,7 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
             "42",
             "--verbose",
             "false",
+            "--json",
         ])
         .output()
         .expect("run command");
@@ -104,6 +126,37 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
     assert_eq!(
         serde_json::from_slice::<JsonValue>(&run.stdout).expect("run JSON"),
         serde_json::json!({"id": 42, "verbose": false})
+    );
+}
+
+#[test]
+fn tool_registry_cli_allows_only_cli_governed_tools() {
+    let (_temp, path) = fixture();
+
+    let allowed = harn_e2e_command()
+        .args(["tool", "run", &path, "operator", "receipt", "--json"])
+        .output()
+        .expect("allowed CLI invocation");
+    assert!(
+        allowed.status.success(),
+        "allowed invocation failed: {}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<JsonValue>(&allowed.stdout).unwrap(),
+        serde_json::json!({"surface": "cli"})
+    );
+
+    let denied = harn_e2e_command()
+        .args(["tool", "run", &path, "remote", "probe"])
+        .output()
+        .expect("excluded CLI invocation");
+    assert!(!denied.status.success());
+    assert!(denied.stdout.is_empty(), "excluded handler must not run");
+    assert!(
+        String::from_utf8_lossy(&denied.stderr).contains("unrecognized subcommand"),
+        "{}",
+        String::from_utf8_lossy(&denied.stderr)
     );
 }
 

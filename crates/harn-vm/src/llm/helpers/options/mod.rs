@@ -14,7 +14,9 @@ mod defaults;
 mod directive_placement;
 mod extract;
 mod generation;
+mod governance;
 mod json;
+mod model_resolution;
 mod output;
 mod reminders;
 mod routing;
@@ -65,13 +67,15 @@ pub(super) use crate::value::{VmError, VmValue};
 
 pub(super) use super::{
     emit_reminder_lifecycle_event, opt_bool, opt_float, opt_int, opt_str, reminder_from_event,
-    vm_messages_to_json, vm_resolve_model, vm_resolve_provider, vm_value_dict_to_json,
-    vm_value_to_json, SystemReminder, REMINDER_DROPPED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
+    vm_messages_to_json, vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider,
+    vm_value_dict_to_json, vm_value_to_json, SystemReminder, REMINDER_DROPPED_EVENT_KIND,
+    SYSTEM_REMINDER_EVENT_KIND,
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).
 pub(crate) use extract::extract_llm_options;
 pub(crate) use generation::validate_options;
+pub(crate) use governance::project_agent_tools;
 pub(crate) use json::{expects_structured_output, extract_json};
 pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,

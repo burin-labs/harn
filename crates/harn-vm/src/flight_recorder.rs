@@ -59,7 +59,9 @@ pub struct FlightRecordingArtifact {
     pub schema_version: u32,
     pub execution_id: String,
     pub format: String,
-    pub path: String,
+    /// Local locator for the recording payload. Public projections omit it;
+    /// local hosts may opt in when they can actually open the artifact.
+    pub path: Option<String>,
     pub content_hash: String,
     pub byte_length: u64,
     pub retained_events: usize,
@@ -107,15 +109,15 @@ impl InternTable {
 /// Shared ring buffer for an execution tree.
 #[derive(Debug)]
 pub struct FlightRecorder {
-    execution_id: String,
+    execution_id: crate::ExecutionId,
     max_events: usize,
     state: Mutex<RecorderState>,
 }
 
 impl FlightRecorder {
-    pub fn new(execution_id: impl Into<String>, max_events: usize) -> Arc<Self> {
+    pub fn new(execution_id: crate::ExecutionId, max_events: usize) -> Arc<Self> {
         Arc::new(Self {
-            execution_id: execution_id.into(),
+            execution_id,
             max_events: max_events.max(1),
             state: Mutex::new(RecorderState {
                 next_sequence: 0,
@@ -130,7 +132,7 @@ impl FlightRecorder {
         })
     }
 
-    pub fn execution_id(&self) -> &str {
+    pub fn execution_id(&self) -> &crate::ExecutionId {
         &self.execution_id
     }
 
@@ -180,7 +182,7 @@ impl FlightRecorder {
         let state = self.state.lock().expect("flight recorder mutex poisoned");
         FlightRecording {
             schema_version: FLIGHT_RECORDING_SCHEMA_VERSION,
-            execution_id: self.execution_id.clone(),
+            execution_id: self.execution_id.to_string(),
             max_events: self.max_events,
             dropped_events: state.dropped_events,
             value_policy: FlightValuePolicy::Omitted,
@@ -239,7 +241,7 @@ pub fn persist_recording(
         schema_version: recording.schema_version,
         execution_id: recording.execution_id.clone(),
         format: FLIGHT_RECORDING_FORMAT.to_string(),
-        path: path.to_string_lossy().into_owned(),
+        path: Some(path.to_string_lossy().into_owned()),
         content_hash: format!("blake3:{}", blake3::hash(&bytes).to_hex()),
         byte_length: bytes.len() as u64,
         retained_events: recording.events.len(),
@@ -256,7 +258,7 @@ mod tests {
     fn ring_retains_the_exact_newest_path_and_counts_eviction() {
         let mut chunk = Chunk::new();
         chunk.emit(crate::chunk::Op::Nil, 7);
-        let recorder = FlightRecorder::new("exec-1", 2);
+        let recorder = FlightRecorder::new(crate::ExecutionId::mint(), 2);
         for task in ["a", "b", "c"] {
             recorder.record_instruction(task, 1, "main", &chunk, Some("main.harn"), 0, Op::Nil);
         }
@@ -278,7 +280,7 @@ mod tests {
         let mut chunk = Chunk::new();
         chunk.emit(Op::Nil, 1);
         let chunk = Arc::new(chunk);
-        let recorder = FlightRecorder::new("exec-concurrent", 8_000);
+        let recorder = FlightRecorder::new(crate::ExecutionId::mint(), 8_000);
         let writers = (0..8)
             .map(|worker| {
                 let chunk = Arc::clone(&chunk);
@@ -324,7 +326,7 @@ mod tests {
         let child = root.child_vm();
         assert!(root.owns_execution);
         assert!(!child.owns_execution);
-        assert_ne!(root.execution_id(), configured_id);
+        assert_ne!(root.execution_id().as_str(), configured_id);
         assert_eq!(root.execution_id(), first.execution_id());
         assert_eq!(root.execution_id(), child.execution_id());
         assert!(Arc::ptr_eq(

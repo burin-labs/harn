@@ -502,20 +502,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "tool_schema: requires a tool registry",
         )))
     })?;
-    let catalog = crate::tool_registry::tool_registry_catalog(registry)?;
-    let mut schema = serde_json::to_value(catalog)
-        .map_err(|error| VmError::Runtime(format!("tool_schema: {error}")))?;
-    if let Some(components) = args.get(1).and_then(VmValue::as_dict) {
-        let components = crate::tool_registry::result_to_json(&VmValue::dict(components.clone()))
-            .map_err(|error| {
-            VmError::Runtime(format!(
-                "tool_schema: components are not portable JSON: {error}"
-            ))
-        })?;
-        schema["components"] = serde_json::json!({
-            "schemas": components
-        });
-    }
+    let schema = crate::tool_registry::tool_registry_schema(registry, args.get(1))?;
     Ok(crate::schema::json_to_vm_value(&schema))
 }
 
@@ -1423,7 +1410,7 @@ fn synthesized_tool_hash(spec: &SynthesizedToolSpec) -> String {
         "side_effect_level": spec.side_effect_level,
         "executor": synthesized_executor_hash_value(&spec.executor),
     });
-    let hash = blake3::hash(json.to_string().as_bytes());
+    let hash = blake3::hash(&crate::canonical_json::to_vec(&json));
     format!("tool_synth_{}", &hash.to_hex()[..16])
 }
 

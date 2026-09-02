@@ -519,6 +519,7 @@ mod tests {
 
     fn fake_request() -> LlmRequestPayload {
         LlmRequestPayload {
+            data_controls: crate::llm_config::DataPosture::Default,
             provider: "fake".to_string(),
             model: "fake-model".to_string(),
             region: None,
@@ -542,6 +543,7 @@ mod tests {
             frequency_penalty: None,
             presence_penalty: None,
             parallel_tool_calls: None,
+            provider_contract_probe: None,
             fast: false,
             output_format: OutputFormat::Text,
             output_schema: None,

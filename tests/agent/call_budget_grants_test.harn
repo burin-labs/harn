@@ -1,0 +1,137 @@
+// Run: harn test tests/agent/call_budget_grants_test.harn
+//
+// Coverage for #7762: the three terminal grant allowances have one owner, and
+// that owner's numbers are what the spenders obey.
+//
+// A "grant" is permission to run one iteration PAST `current_max`. Nothing is
+// withheld from working spend, so these assertions are about who decides
+// whether the extra iteration is available.
+//
+// Deterministic: pure functions over the policy and the recovery bound. No
+// agent_loop, no mock LLM, no inference.
+import {
+  __agent_loop_call_budget_new,
+  __agent_loop_grant_allowed,
+  __agent_loop_grants_remaining,
+  __agent_loop_record_grant,
+} from "std/agent/loop_call_budget"
+import {
+  __agent_loop_max_consecutive_recoveries,
+  __agent_loop_recovery_bound_fired,
+} from "std/agent/loop_turn_scope"
+import { agent_stall_repair_config } from "std/agent/stall_verification"
+
+fn budget_with_verify(reserved: bool) {
+  const cfg = agent_stall_repair_config({reserved_terminal_verify: reserved})
+  return __agent_loop_call_budget_new({}, cfg)
+}
+
+/**
+ * EQUIVALENCE. The owner's allowances are the numbers the loop already used, so
+ * unifying them changed no effective allowance.
+ *
+ * This is the assertion that makes #7762 a refactor rather than a product
+ * change. If any of these drifts from its legacy source, the policy is issuing
+ * a number the spenders never agreed to.
+ */
+pipeline test_allowances_match_their_legacy_sources(harness: Harness, task: unknown) {
+  const cfg = agent_stall_repair_config({reserved_terminal_verify: true})
+  const state = __agent_loop_call_budget_new({}, cfg)
+  // Verification: whatever stall_config resolved, not a copy maintained here.
+  assert_eq(state.reserve.verification, cfg.reserved_terminal_verify_iterations)
+  // Recovery: #7682's bound owner, not a literal.
+  assert_eq(state.reserve.recovery, __agent_loop_max_consecutive_recoveries())
+  // Terminal reporting: the one-shot callback. The guard that governs it tests
+  // only that no continue has been spent, so the effective allowance is 1
+  // regardless of `final_wrapup`.
+  assert_eq(state.reserve.terminal_report, 1)
+  assert_eq(
+    __agent_loop_call_budget_new({final_wrapup: false}, cfg).reserve.terminal_report,
+    1,
+    "final_wrapup does not gate the terminal callback, so it must not gate its allowance",
+  )
+  assert_eq(
+    state.reserve.total,
+    state.reserve.verification + state.reserve.recovery + state.reserve.terminal_report,
+  )
+}
+
+/** The allowance is also the starting remaining count, per bucket. */
+pipeline test_remaining_starts_at_the_allowance(harness: Harness, task: unknown) {
+  const state = budget_with_verify(true)
+  assert_eq(__agent_loop_grants_remaining(state, "verification"), state.reserve.verification)
+  assert_eq(__agent_loop_grants_remaining(state, "recovery"), state.reserve.recovery)
+  assert_eq(__agent_loop_grants_remaining(state, "terminal_report"), 1)
+  // A bucket nobody owns fails closed rather than handing out a grant.
+  assert_eq(__agent_loop_grants_remaining(state, "not_a_bucket"), 0)
+  assert_eq(__agent_loop_grant_allowed(state, "not_a_bucket"), false)
+}
+
+/**
+ * Spending draws down one bucket and leaves the others alone, and an exhausted
+ * bucket cannot be spent into a negative count.
+ */
+pipeline test_recording_a_grant_draws_down_only_that_bucket(harness: Harness, task: unknown) {
+  const state = budget_with_verify(true)
+  const after = __agent_loop_record_grant(state, "terminal_report")
+  assert_eq(__agent_loop_grants_remaining(after, "terminal_report"), 0)
+  assert_eq(__agent_loop_grant_allowed(after, "terminal_report"), false)
+  // The other two buckets are untouched.
+  assert_eq(
+    __agent_loop_grants_remaining(after, "verification"),
+    __agent_loop_grants_remaining(state, "verification"),
+  )
+  assert_eq(
+    __agent_loop_grants_remaining(after, "recovery"),
+    __agent_loop_grants_remaining(state, "recovery"),
+  )
+  // Recording against an exhausted bucket is a no-op, not a negative balance.
+  const twice = __agent_loop_record_grant(after, "terminal_report")
+  assert_eq(__agent_loop_grants_remaining(twice, "terminal_report"), 0)
+}
+
+/**
+ * GOVERNANCE, with the negative control that matters.
+ *
+ * The recovery bound is the spender's own refusal rule. Feeding it the policy's
+ * allowance while holding the used-count fixed isolates ONE variable: only the
+ * allowance changes between the two arms. A run that may recover with the
+ * policy's real allowance must be refused when the policy says zero.
+ *
+ * Without the zero arm this test could not tell a governing policy from a
+ * number that merely describes one — which is exactly the gap #7750 had.
+ */
+pipeline test_the_policy_allowance_governs_the_recovery_bound(harness: Harness, task: unknown) {
+  const warning = {hard_stop: true, pattern: "repeated_same_observation", signature: "sig-1"}
+  const state = budget_with_verify(true)
+  const allowance = state.reserve.recovery
+  assert(allowance > 0, "the positive arm is only meaningful if a grant is actually available")
+  // POSITIVE: with the policy's allowance and none used, no bound fires.
+  assert_eq(__agent_loop_recovery_bound_fired(warning, 0, "", allowance), "")
+  // NEGATIVE CONTROL: same warning, same zero used-count, allowance zeroed. The
+  // refusal must now fire, and name the allowance as the rule that produced it.
+  assert_eq(
+    __agent_loop_recovery_bound_fired(warning, 0, "", 0),
+    "max_consecutive_recoveries",
+    "a zero allowance must refuse the grant the same allowance would otherwise permit",
+  )
+  // And the boundary itself: used == allowance refuses, one below permits.
+  assert_eq(
+    __agent_loop_recovery_bound_fired(warning, allowance, "", allowance),
+    "max_consecutive_recoveries",
+  )
+  assert_eq(__agent_loop_recovery_bound_fired(warning, allowance - 1, "", allowance), "")
+}
+
+/**
+ * Omitting the allowance falls back to the bound's own owner, so a caller that
+ * has no policy in hand cannot silently get a different answer.
+ */
+pipeline test_absent_allowance_falls_back_to_the_bound_owner(harness: Harness, task: unknown) {
+  const warning = {hard_stop: true, pattern: "repeated_same_observation", signature: "sig-2"}
+  const bound = __agent_loop_max_consecutive_recoveries()
+  assert_eq(
+    __agent_loop_recovery_bound_fired(warning, bound, "", nil),
+    __agent_loop_recovery_bound_fired(warning, bound, "", bound),
+  )
+}

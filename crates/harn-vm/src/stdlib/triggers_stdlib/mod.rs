@@ -11,6 +11,7 @@
 //! - `auto_resume` — the private triggers that resume suspended workers.
 //! - `args` — shared argument and dict-field accessors.
 
+use crate::orchestration::ACTION_GRAPH_TOPIC;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::VmBuiltinDef;
 use crate::vm::Vm;
@@ -31,7 +32,6 @@ pub(crate) use auto_resume::{
 };
 pub(crate) use binding_config::validate_resume_trigger_spec;
 
-const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 const TRIGGER_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 

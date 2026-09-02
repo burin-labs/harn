@@ -70,7 +70,9 @@ hatch_output=$(env HARN_ALLOW_TOOLCHAIN_MISMATCH=1 PATH="$fake_bin:$PATH" \
   HARN_CARGO_LEASE_MODE=off CARGO_TARGET_DIR="$tmp_root/target" "$wrapper" version 2>&1)
 hatch_status=$?
 set -e
-[[ "$hatch_status" -eq 0 ]] && grep -q "fake cargo ran" <<<"$hatch_output" \
-  || { echo "FAIL: the documented escape hatch did not reach Cargo" >&2; exit 1; }
+if [[ "$hatch_status" -ne 0 ]] || ! grep -q "fake cargo ran" <<<"$hatch_output"; then
+  echo "FAIL: the documented escape hatch did not reach Cargo" >&2
+  exit 1
+fi
 
 echo "cargo_toolchain_pin_test: OK"

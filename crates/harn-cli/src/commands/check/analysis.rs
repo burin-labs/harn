@@ -33,57 +33,10 @@ pub(crate) fn typecheck_config(
     config: &CheckConfig,
     module_graph: &harn_modules::ModuleGraph,
 ) -> TypeCheckConfig {
-    let namespace_imports = module_graph
-        .namespace_imports_for_file(path)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|info| {
-            (
-                info.alias,
-                harn_parser::NamespaceImportBinding {
-                    // Prefer the import string as written (`std/text`,
-                    // `./lib`) so diagnostics stay stable across machines.
-                    module_path: info.raw_path,
-                    members: info.member_names.into_iter().collect(),
-                    member_types: info
-                        .member_signatures
-                        .iter()
-                        .map(|(name, sig)| (name.clone(), sig.fn_type.clone()))
-                        .collect(),
-                    member_param_names: info
-                        .member_signatures
-                        .iter()
-                        .map(|(name, sig)| (name.clone(), sig.param_names.clone()))
-                        .collect(),
-                    member_required_params: info
-                        .member_signatures
-                        .iter()
-                        .map(|(name, sig)| (name.clone(), sig.required_params))
-                        .collect(),
-                    member_type_predicates: info
-                        .member_signatures
-                        .into_iter()
-                        .filter_map(|(name, sig)| sig.type_predicate.map(|value| (name, value)))
-                        .collect(),
-                },
-            )
-        })
-        .collect();
-    TypeCheckConfig::new()
+    module_graph
+        .typecheck_import_config_for_file(path)
         .with_strict_types(config.strict_types)
         .with_privileged_wire_builtins(config.trusted_host_dispatch)
-        .with_imported_names(module_graph.imported_names_for_file(path))
-        .with_imported_type_decls(
-            module_graph
-                .imported_type_declarations_for_file(path)
-                .unwrap_or_default(),
-        )
-        .with_imported_callable_decls(
-            module_graph
-                .imported_callable_declarations_for_file(path)
-                .unwrap_or_default(),
-        )
-        .with_namespace_imports(namespace_imports)
 }
 
 pub(crate) fn render_file_analysis_error_or_exit(path: &str, error: FileAnalysisError) -> ! {

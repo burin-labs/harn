@@ -50,7 +50,7 @@ use harn_glob::match_name as glob_match;
 use serde::Serialize;
 
 use super::catalog::is_logical_model_selector;
-use super::{ModelDef, ProvidersConfig};
+use super::{DataControlsPolicy, ModelDef, ProvidersConfig};
 
 /// One overlay entry that no longer earns its keep.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -479,6 +479,25 @@ const SECTIONS: &[SectionSpec] = &[
             )
         },
         remove: |overlay, _| overlay.usage_accounting_audit = None,
+        dangling_target: no_dangling_target,
+        baseline_duplicate: no_baseline_duplicate,
+    },
+    SectionSpec {
+        name: "data_controls_audit",
+        keys: |overlay| singleton("data_controls_audit", overlay.data_controls_audit.is_some()),
+        remove: |overlay, _| overlay.data_controls_audit = None,
+        dangling_target: no_dangling_target,
+        baseline_duplicate: no_baseline_duplicate,
+    },
+    SectionSpec {
+        name: "data_controls_policy",
+        keys: |overlay| {
+            singleton(
+                "data_controls_policy",
+                overlay.data_controls_policy != DataControlsPolicy::default(),
+            )
+        },
+        remove: |overlay, _| overlay.data_controls_policy = DataControlsPolicy::default(),
         dangling_target: no_dangling_target,
         baseline_duplicate: no_baseline_duplicate,
     },

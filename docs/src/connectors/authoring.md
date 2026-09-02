@@ -139,7 +139,7 @@ pub fn poll_tick(harness: Harness, ctx)
 ```
 
 After `harn install` materializes a dependency, both `harn run` and
-`harn run --serve mcp` activate its declared connector implementations for the
+`harn serve mcp` activate its declared connector implementations for the
 lifetime of that process. Calls through
 `harness.net.connector_call(provider, method, args)` therefore reach the
 package's `call` export without host-specific registration. A root manifest

@@ -43,7 +43,7 @@ pub import {
   agent_tool_format,
 } from "std/agent/options"
 pub import { agent_compute_post_turn, agent_compute_terminal_callback } from "std/agent/postturn"
-pub import { agent_take_one_shot_prefill } from "std/agent/prefill"
+pub import { agent_prefill_eligibility, agent_take_one_shot_prefill } from "std/agent/prefill"
 pub import {
   agent_build_turn_messages,
   agent_build_turn_system_fragments,

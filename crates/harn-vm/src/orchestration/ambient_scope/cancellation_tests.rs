@@ -14,7 +14,7 @@ async fn top_level_execution_owns_one_isolated_cancellation_registry() {
     ));
     crate::llm::install_current_host_bridge(bridge.clone());
     let scope = AmbientExecutionScope::capture_for_top_level_execution(
-        std::sync::Arc::from("isolated-execution"),
+        crate::ExecutionId::mint(),
         LlmMockContext::default(),
         crate::stdlib::agents::agents_workers::fresh_worker_registry(),
         crate::stdlib::agents_daemon::fresh_daemon_registry(),

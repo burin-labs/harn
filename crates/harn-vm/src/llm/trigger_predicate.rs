@@ -101,9 +101,7 @@ pub(crate) fn request_hash(request: &LlmRequestPayload) -> String {
         "mock_scope": request.mock_scope,
     });
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    serde_json::to_string(&canonical)
-        .unwrap_or_default()
-        .hash(&mut hasher);
+    crate::canonical_json::to_string(&canonical).hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 

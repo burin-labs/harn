@@ -370,28 +370,35 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
   assert_eq(policy.default_target, "x86_64-unknown-linux-gnu")
   assert_eq(policy.targets.count, 1)
   const target = unwrap(policy.targets[0])
-  assert_eq(target.distribution_fuse_bytes, 267386880)
-  assert_eq(target.baseline.version, "0.10.118")
-  assert_eq(target.baseline.source_sha, "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc")
-  assert_eq(target.baseline.bytes, 242554944)
-  assert_eq(target.baseline.observed_at, "2026-08-27T01:19:49Z")
-  // The fuse is a fuse, not a ratchet: ~10.2% of headroom, where the schema-1
-  // policy this replaced allowed at most 4 MiB (1.8%) and turned every real
-  // change into a release-day cliff.
-  assert_eq(target.distribution_fuse_bytes - target.baseline.bytes, 24831936)
+  assert_eq(target.distribution_fuse_bytes, 285212672)
+  assert_eq(target.baseline.version, "0.10.125")
+  assert_eq(target.baseline.source_sha, "57e7862b6c6374393bde724962107d3b765c0967")
+  assert_eq(target.baseline.bytes, 249726232)
+  assert_eq(target.baseline.observed_at, "2026-09-01T02:16:39Z")
+  // The fuse is a fuse, not a ratchet: ~14.2% of headroom above the released
+  // baseline, inside the validator's 10-15% band. The schema-1 policy this
+  // replaced allowed at most 4 MiB (1.8%) and turned every real change into a
+  // release-day cliff; the stale 0.10.118 baseline plus a one-off allowance did
+  // the same to the v0.10.126 cut.
+  assert_eq(target.distribution_fuse_bytes - target.baseline.bytes, 35486440)
   assert_eq(target.growth.warn_bytes, 4194304)
   assert_eq(target.growth.warn_percent_hundredths, 200)
   assert_eq(target.baseline.build_identity.codegen_units, 8)
   assert_eq(target.baseline.build_identity.rustc, "1.95.0")
+  // No standing allowance: growth is measured against the released baseline.
   assert_eq(target.accepted_growth.count, 0)
-  const baseline = evaluate_release_binary_size(target, measurement(242554944))
+  const baseline = evaluate_release_binary_size(target, measurement(249726232))
   assert_eq(baseline.growth, "ok")
   assert_eq(baseline.failures, [])
-  // Prove that the empty acceptance list still exposes a real regression.
-  const grown = evaluate_release_binary_size(target, measurement(247797824))
-  assert_eq(grown.growth, "warn")
-  assert_eq(grown.failures.count, 1)
-  assert(grown.failures[0]?.starts_with("growth signal:"))
+  // The exact candidate the stale policy refused (v0.10.126 cut, +662,400 bytes).
+  const measured_candidate = evaluate_release_binary_size(target, measurement(250388632))
+  assert_eq(measured_candidate.growth, "ok")
+  assert_eq(measured_candidate.failures, [])
+  // The decision is bounded: crossing both warn thresholds with no allowance fails.
+  const beyond_thresholds = evaluate_release_binary_size(target, measurement(255726232))
+  assert_eq(beyond_thresholds.growth, "warn")
+  assert_eq(beyond_thresholds.failures.count, 1)
+  assert(beyond_thresholds.failures[0]?.starts_with("growth signal:"))
   assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
 }
 

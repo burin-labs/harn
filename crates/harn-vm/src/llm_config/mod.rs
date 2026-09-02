@@ -9,6 +9,7 @@
 
 mod catalog;
 mod config;
+mod data_controls;
 mod loading;
 mod model_def;
 mod overlay_audit;
@@ -19,6 +20,8 @@ mod reviewer;
 mod taxonomy;
 mod usage_accounting_audit;
 
+#[cfg(test)]
+mod data_controls_tests;
 #[cfg(test)]
 mod local_runtime_tests;
 #[cfg(test)]
@@ -38,6 +41,7 @@ mod tool_format_fitness_tests;
 
 pub use catalog::*;
 pub use config::*;
+pub use data_controls::*;
 pub use loading::*;
 pub use model_def::*;
 pub use overlay_audit::*;

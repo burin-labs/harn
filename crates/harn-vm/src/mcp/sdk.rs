@@ -133,7 +133,7 @@ impl ClientHandler for HarnSdkClientHandler {
         let request = Self::request(
             crate::mcp_elicit::ELICITATION_METHOD,
             &context.id,
-            serde_json::to_value(params).map_err(|error| {
+            super::protocol::project_elicitation_params(&params).map_err(|error| {
                 McpError::new(ErrorCode::INVALID_PARAMS, error.to_string(), None)
             })?,
         );
@@ -234,6 +234,8 @@ impl ClientHandler for HarnSdkClientHandler {
 pub(crate) struct SdkMcpClientInner {
     pub(crate) running: RunningService<RoleClient, HarnSdkClientHandler>,
     pub(crate) handler: HarnSdkClientHandler,
+    pub(crate) raw_responses: super::raw_stdio::RawResponseLog,
+    pub(crate) child: tokio::process::Child,
 }
 
 pub(crate) fn sdk_protocol_version(value: &str) -> ProtocolVersion {
@@ -260,6 +262,7 @@ pub(crate) async fn sdk_call_raw(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
+    let raw_marker = inner.raw_responses.mark();
     let typed_result = match method {
         "tools/call" => {
             let params: CallToolRequestParams = sdk_request_params(method, &params)?;
@@ -287,13 +290,12 @@ pub(crate) async fn sdk_call_raw(
         }
         _ => None,
     };
-    if let Some(result) = typed_result {
-        let result = serde_json::to_value(result)
-            .map_err(|error| VmError::Runtime(format!("MCP SDK serialization error: {error}")))?;
+    if typed_result.is_some() {
+        let result = sdk_raw_result(inner, raw_marker, method)?;
         return Ok(serde_json::json!({"jsonrpc": "2.0", "result": result}));
     }
 
-    let result = inner
+    let _sdk_result = inner
         .running
         .send_request_with_option(
             ClientRequest::from(CustomRequest::new(method, Some(params))),
@@ -305,12 +307,26 @@ pub(crate) async fn sdk_call_raw(
         .await_response()
         .await
         .map_err(sdk_service_error)?;
-    let result = match result {
-        rmcp::model::ServerResult::CustomResult(result) => result.0,
-        typed => serde_json::to_value(typed)
-            .map_err(|error| VmError::Runtime(format!("MCP SDK serialization error: {error}")))?,
-    };
+    let result = sdk_raw_result(inner, raw_marker, method)?;
     Ok(serde_json::json!({"jsonrpc": "2.0", "result": result}))
+}
+
+fn sdk_raw_result(
+    inner: &SdkMcpClientInner,
+    marker: u64,
+    method: &str,
+) -> Result<serde_json::Value, VmError> {
+    inner
+        .raw_responses
+        .result_after(marker)
+        .map_err(|error| match error {
+            super::raw_stdio::RawResponseError::ResponseCount(count) => VmError::Runtime(format!(
+                "MCP SDK {method} completed after {count} raw responses; expected exactly one"
+            )),
+            super::raw_stdio::RawResponseError::MissingResult => VmError::Runtime(format!(
+                "MCP SDK {method} completed with a raw response that had no result"
+            )),
+        })
 }
 
 fn sdk_request_params<T>(method: &str, params: &serde_json::Value) -> Result<T, VmError>

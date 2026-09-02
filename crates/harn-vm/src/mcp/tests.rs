@@ -46,6 +46,23 @@ impl Drop for CurrentHostBridgeGuard {
     }
 }
 
+struct SessionLifecycleGuard(String);
+
+impl Drop for SessionLifecycleGuard {
+    fn drop(&mut self) {
+        crate::agent_sessions::close(&self.0);
+    }
+}
+
+struct SamplingMockGuard;
+
+impl Drop for SamplingMockGuard {
+    fn drop(&mut self) {
+        crate::llm::clear_cli_llm_mock_mode();
+        crate::stdlib::host::reset_host_state();
+    }
+}
+
 // Keep loopback HTTP server lifetimes isolated under the parallel Rust test
 // harness so one test cannot consume another test's local networking resources.
 async fn http_mcp_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
@@ -241,6 +258,61 @@ assert initialized["method"] == "notifications/initialized"
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn stdio_client_preserves_fields_outside_the_current_sdk_tool_model() {
+    let script = r#"
+import json, sys
+discover = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": discover["id"],
+    "error": {"code": -32601, "message": "Method not found"}
+}), flush=True)
+initialize = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": initialize["id"],
+    "result": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "versioned-fields", "version": "1.0.0"}
+    }
+}), flush=True)
+initialized = json.loads(sys.stdin.readline())
+assert initialized["method"] == "notifications/initialized"
+while True:
+    request = json.loads(sys.stdin.readline())
+    if request["method"] == "tools/list":
+        break
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "result": {
+        "tools": [{
+            "name": "long_task",
+            "inputSchema": {"type": "object"},
+            "execution": {"taskSupport": "optional"},
+            "x-future-display": {"density": "compact"}
+        }]
+    }
+}), flush=True)
+"#;
+    let handle = connect_stdio_test_script(script, "2025-11-25".to_string()).await;
+    let result = handle
+        .call("tools/list", serde_json::json!({}))
+        .await
+        .expect("tools/list should preserve the negotiated wire result");
+
+    assert_eq!(
+        result["tools"][0]["execution"]["taskSupport"],
+        serde_json::json!("optional")
+    );
+    assert_eq!(
+        result["tools"][0]["x-future-display"]["density"],
+        serde_json::json!("compact")
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn stable_http_sends_stateless_metadata_headers_and_schema_headers() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
@@ -302,7 +374,12 @@ async fn stable_input_required_result_dispatches_and_retries() {
         .run_until(async {
             let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
             let handle = stable_http_handle(&base_url).await;
-            install_sampling_mock().await;
+            let session_id =
+                crate::agent_sessions::open_or_create(Some("mcp-input-required".to_string()));
+            let _session_lifecycle = SessionLifecycleGuard(session_id.clone());
+            let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+            let captured_events = install_capturing_agent_sink(&session_id);
+            let _sampling_mock = install_sampling_mock().await;
             let result = call_mcp_tool(
                 &handle,
                 "needs_input",
@@ -333,7 +410,53 @@ async fn stable_input_required_result_dispatches_and_retries() {
                 retry_call.body["params"]["requestState"],
                 serde_json::json!("state-1")
             );
-            clear_sampling_mock().await;
+
+            // The schema belongs to the embedded input request and is not
+            // echoed in the protocol retry. This event is emitted after the
+            // production InputRequests decode and re-serialization boundary;
+            // the retry assertions above prove that the same round completed.
+            let events = captured_events.lock().unwrap();
+            let elicitation_requests = events
+                .iter()
+                .filter_map(|event| match event {
+                    crate::agent_events::AgentEvent::McpNotification {
+                        server,
+                        method,
+                        direction,
+                        params,
+                        ..
+                    } if server == "stable-http"
+                        && method == crate::mcp_elicit::ELICITATION_METHOD
+                        && direction == "request" =>
+                    {
+                        Some(params)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                elicitation_requests.len(),
+                1,
+                "expected one decoded elicitation request, got {events:?}"
+            );
+            let requested_schema = &elicitation_requests[0]["requestedSchema"];
+            assert_eq!(
+                requested_schema["$schema"],
+                serde_json::json!("https://json-schema.org/draft/2020-12/schema")
+            );
+            assert_eq!(
+                elicitation_requests[0]["requestedSchemaPropertyOrder"],
+                serde_json::json!(["zeta", "alpha"]),
+                "typed RMCP conversion must project declared property order explicitly"
+            );
+            assert_eq!(
+                requested_schema["properties"]["zeta"]["type"],
+                serde_json::json!("string")
+            );
+            assert_eq!(
+                requested_schema["properties"]["alpha"]["type"],
+                serde_json::json!("integer")
+            );
         })
         .await;
 }
@@ -445,7 +568,7 @@ pub(super) async fn connect_stdio_test_script(
         .expect("stdio test MCP server should connect")
 }
 
-async fn install_sampling_mock() {
+async fn arm_sampling_mock() {
     crate::llm::install_cli_llm_mocks(vec![crate::llm::parse_llm_mock_value(
         &serde_json::json!({"text": "sampled", "provider": "mock", "model": "mock"}),
     )
@@ -464,9 +587,9 @@ host_mock("mcp", "sample", {
     .await;
 }
 
-async fn clear_sampling_mock() {
-    crate::llm::clear_cli_llm_mock_mode();
-    execute_test_harn("host_mock_clear()").await;
+async fn install_sampling_mock() -> SamplingMockGuard {
+    arm_sampling_mock().await;
+    SamplingMockGuard
 }
 
 async fn stable_http_handle(base_url: &str) -> VmMcpClientHandle {
@@ -539,8 +662,15 @@ async fn spawn_stable_http_mcp_server() -> (String, mpsc::UnboundedReceiver<Reco
                 body: request.clone(),
             });
             let method = request.get("method").and_then(|value| value.as_str());
-            let response = stable_http_response(&request, method);
-            let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+            if stable_http_needs_input_round(&request) {
+                let body = stable_http_input_required_body(
+                    request.get("id").unwrap_or(&serde_json::Value::Null),
+                );
+                let _ = write_http_json_text(&mut stream, "200 OK", &[], &body).await;
+            } else {
+                let response = stable_http_response(&request, method);
+                let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+            }
         }
     });
 
@@ -734,40 +864,6 @@ fn stable_http_tool_call_response(
             }
         });
     }
-    if name == Some("needs_input") && params.get("inputResponses").is_none() {
-        return serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "resultType": "input_required",
-                "requestState": "state-1",
-                "inputRequests": {
-                    "roots": {"method": "roots/list", "params": {}},
-                    "elicitation": {
-                        "method": "elicitation/create",
-                        "params": {
-                            "mode": "form",
-                            "message": "Need input",
-                            "requestedSchema": {
-                                "type": "object",
-                                "properties": {"answer": {"type": "string"}}
-                            }
-                        }
-                    },
-                    "sampling": {
-                        "method": "sampling/createMessage",
-                        "params": {
-                            "messages": [{
-                                "role": "user",
-                                "content": {"type": "text", "text": "sample"}
-                            }],
-                            "maxTokens": 4
-                        }
-                    }
-                }
-            }
-        });
-    }
     let text = if name == Some("needs_input") {
         "done"
     } else {
@@ -785,6 +881,57 @@ fn stable_http_tool_call_response(
             "isError": false
         }
     })
+}
+
+fn stable_http_needs_input_round(request: &serde_json::Value) -> bool {
+    request.get("method").and_then(serde_json::Value::as_str) == Some("tools/call")
+        && request["params"].get("inputResponses").is_none()
+        && request["params"]
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            == Some("needs_input")
+}
+
+fn stable_http_input_required_body(id: &serde_json::Value) -> String {
+    let id = serde_json::to_string(id).expect("JSON-RPC id is JSON");
+    format!(
+        r#"{{
+  "jsonrpc": "2.0",
+  "id": {id},
+  "result": {{
+    "resultType": "input_required",
+    "requestState": "state-1",
+    "inputRequests": {{
+      "roots": {{"method": "roots/list", "params": {{}}}},
+      "elicitation": {{
+        "method": "elicitation/create",
+        "params": {{
+          "mode": "form",
+          "message": "Need input",
+          "requestedSchema": {{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {{
+              "zeta": {{"type": "string"}},
+              "alpha": {{"type": "integer"}}
+            }}
+          }}
+        }}
+      }},
+      "sampling": {{
+        "method": "sampling/createMessage",
+        "params": {{
+          "messages": [{{
+            "role": "user",
+            "content": {{"type": "text", "text": "sample"}}
+          }}],
+          "maxTokens": 4
+        }}
+      }}
+    }}
+  }}
+}}"#
+    )
 }
 
 async fn spawn_recording_http_mcp_server() -> (String, mpsc::UnboundedReceiver<serde_json::Value>) {
@@ -884,6 +1031,15 @@ async fn write_http_json(
     body: serde_json::Value,
 ) -> Result<(), std::io::Error> {
     let body = serde_json::to_string(&body).unwrap();
+    write_http_json_text(stream, status, headers, &body).await
+}
+
+async fn write_http_json_text(
+    stream: &mut TcpStream,
+    status: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Result<(), std::io::Error> {
     let mut response = format!(
         "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n",
         body.len()
@@ -895,7 +1051,7 @@ async fn write_http_json(
         response.push_str("\r\n");
     }
     response.push_str("\r\n");
-    response.push_str(&body);
+    response.push_str(body);
     stream.write_all(response.as_bytes()).await?;
     stream.flush().await
 }
