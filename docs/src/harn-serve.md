@@ -152,15 +152,17 @@ Behavior today:
 - stdio transport for local subprocess-style MCP clients
 - stable Streamable HTTP `POST` endpoint at `--path`
 - `tools/list` includes `outputSchema` from the resolved Harn return type and
-  `_meta.harn.errorSchema` from the resolved `throws` type.
+  `_meta["com.harnlang/toolContract"].errorSchema` from the resolved `throws`
+  type.
   Imported aliases, structs, enums, optional fields, lists, typed maps, unions,
   and generic instantiations keep their structure. `inputSchema` continues to
   project caller-owned parameters, inline records, and structural aliases.
 - `tools/call` returns object-shaped results in `structuredContent`. The value
   satisfies the same `outputSchema` advertised by `tools/list`.
 - A value matching a public callable's declared `throws` type returns
-  `isError: true` with typed data at `_meta.harn.applicationError`. It never
-  appears in success `structuredContent` or as a JSON-RPC transport error.
+  `isError: true` with typed data at
+  `_meta["com.harnlang/toolContract"].applicationError`. It never appears in
+  success `structuredContent` or as a JSON-RPC transport error.
 - record and enum results are direct objects. Scalar, list, and nullable
   top-level results use `{ "result": value }` because MCP structured content
   and output schemas are object-valued contracts.

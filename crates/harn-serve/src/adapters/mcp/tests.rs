@@ -1083,6 +1083,13 @@ fn streamable_http_accept_negotiation_uses_sse_only_when_json_is_absent() {
 
 /// A script with one `@job` export and one ordinary export.
 fn job_export_server(dir: &tempfile::TempDir) -> McpServer {
+    job_export_server_with_auth(dir, crate::AuthPolicy::default())
+}
+
+fn job_export_server_with_auth(
+    dir: &tempfile::TempDir,
+    auth_policy: crate::AuthPolicy,
+) -> McpServer {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
@@ -1105,8 +1112,17 @@ pub fn greet(name: string) -> string {
 "#,
     )
     .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.auth_policy = auth_policy;
+    let core = DispatchCore::new(config).expect("core");
     McpServer::new(McpServerConfig::new(core))
+}
+
+fn bearer_auth(key: &str) -> AuthRequest {
+    AuthRequest {
+        headers: BTreeMap::from([("authorization".to_string(), format!("Bearer {key}"))]),
+        ..AuthRequest::default()
+    }
 }
 
 /// A `_meta` block for a client that carries the tasks extension.
@@ -1215,6 +1231,165 @@ async fn a_job_export_runs_as_a_task_the_client_can_collect() {
         read["result"]["result"]["content"][0]["text"],
         json!("2026-08-23"),
     );
+}
+
+#[tokio::test]
+async fn task_reads_are_bound_to_the_authenticated_principal() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let auth_policy = crate::AuthPolicy {
+        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+            keys: vec![
+                crate::ApiKeyEntry::new("key-a", []).with_tenant("tenant-a"),
+                crate::ApiKeyEntry::new("key-b", []).with_tenant("tenant-b"),
+            ],
+        })],
+        mcp_allowlist: None,
+    };
+    let server = Arc::new(job_export_server_with_auth(&dir, auth_policy));
+    let session = SharedSession::new();
+    let (immediate, job) = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                1,
+                "tools/call",
+                json!({"name": "rollup", "arguments": {"day": "2026-09-02"}}),
+            )),
+            session.clone(),
+            bearer_auth("key-a"),
+        )
+        .await
+    {
+        ImmediateResult::TaskStream { immediate, job } => (immediate, job),
+        _ => panic!("authenticated job must create a task"),
+    };
+    let task_id = immediate["result"]["taskId"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    server
+        .execute_streaming_job(*job, notify_channel(|_| {}))
+        .await;
+
+    let read_as_other_tenant = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                2,
+                "tasks/get",
+                json!({"taskId": task_id}),
+            )),
+            session.clone(),
+            bearer_auth("key-b"),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        _ => panic!("task read must answer immediately"),
+    };
+    assert_eq!(
+        read_as_other_tenant["error"]["message"],
+        "Failed to retrieve task: task not found"
+    );
+
+    let read_as_owner = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                3,
+                "tasks/get",
+                json!({"taskId": task_id}),
+            )),
+            session,
+            bearer_auth("key-a"),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        _ => panic!("task read must answer immediately"),
+    };
+    assert_eq!(read_as_owner["result"]["status"], "completed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_cancel_signals_the_token_installed_in_execution() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+@job("cancellable")
+pub fn cancellable(value: string) -> string {
+  test_rendezvous(value)
+  return value
+}
+"#,
+    )
+    .expect("write script");
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.vm_configurator = Arc::new(McpRendezvousConfigurator {
+        entered: entered_tx,
+        releases: Arc::new(std::sync::Mutex::new(HashMap::from([(
+            "work".to_string(),
+            release.clone(),
+        )]))),
+    });
+    let core = DispatchCore::new(config).expect("core");
+    let server = Arc::new(McpServer::new(McpServerConfig::new(core)));
+    let session = SharedSession::new();
+    let (immediate, job) = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                1,
+                "tools/call",
+                json!({"name": "cancellable", "arguments": {"value": "work"}}),
+            )),
+            session.clone(),
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::TaskStream { immediate, job } => (immediate, job),
+        _ => panic!("cancellable job must create a task"),
+    };
+    let task_id = immediate["result"]["taskId"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    let executor = {
+        let server = server.clone();
+        tokio::spawn(async move {
+            server
+                .execute_streaming_job(*job, notify_channel(|_| {}))
+                .await;
+        })
+    };
+    assert_eq!(entered_rx.recv().await.as_deref(), Some("work"));
+
+    let cancel = mcp_response(
+        &server,
+        task_client_request(harn_vm::jsonrpc::request(
+            2,
+            "tasks/cancel",
+            json!({"taskId": task_id}),
+        )),
+        session.clone(),
+    )
+    .await;
+    assert_eq!(cancel["result"]["resultType"], "complete");
+    release.add_permits(1);
+    executor.await.expect("execution task joins");
+
+    let read = mcp_response(
+        &server,
+        task_client_request(harn_vm::jsonrpc::request(
+            3,
+            "tasks/get",
+            json!({"taskId": task_id}),
+        )),
+        session,
+    )
+    .await;
+    assert_eq!(read["result"]["status"], "cancelled");
 }
 
 #[tokio::test]

@@ -327,9 +327,21 @@ impl McpServer {
                 self.handle_tools_call(&id, &params, vm, request_profile.uses_result_envelope())
                     .await
             }
-            mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(id.clone(), &params),
-            mcp_protocol::METHOD_TASKS_UPDATE => self.tasks.handle_update(id.clone(), &params),
-            mcp_protocol::METHOD_TASKS_CANCEL => self.tasks.handle_cancel(id.clone(), &params),
+            mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(
+                &crate::mcp_tasks::McpTaskAccess::unscoped(),
+                id.clone(),
+                &params,
+            ),
+            mcp_protocol::METHOD_TASKS_UPDATE => self.tasks.handle_update(
+                &crate::mcp_tasks::McpTaskAccess::unscoped(),
+                id.clone(),
+                &params,
+            ),
+            mcp_protocol::METHOD_TASKS_CANCEL => self.tasks.handle_cancel(
+                &crate::mcp_tasks::McpTaskAccess::unscoped(),
+                id.clone(),
+                &params,
+            ),
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
@@ -529,9 +541,16 @@ impl McpServer {
         // behave, whereas the previous stub advertised the capability and told
         // every `tasks/get` its task did not exist.
         if as_task {
-            let task = self
-                .tasks
-                .create(Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS));
+            let lease = match self.tasks.begin(
+                crate::mcp_tasks::McpTaskAccess::unscoped(),
+                Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS),
+            ) {
+                Ok(lease) => lease,
+                Err(error) => {
+                    return crate::jsonrpc::error_response(id.clone(), -32000, &error.to_string());
+                }
+            };
+            let task = lease.task().clone();
             match crate::tool_registry::classify_tool_result(
                 self.tools.prepared(),
                 &tool.catalog.name,
@@ -539,33 +558,22 @@ impl McpServer {
             ) {
                 Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
                     match successful_tool_call_result(&self.tools, tool, &value, json) {
-                        Ok(result) => self.tasks.complete_with_tool_result(
-                            &task.task_id,
-                            result,
-                            uses_result_envelope,
-                        ),
-                        Err(error) => {
-                            self.tasks
-                                .complete(&task.task_id, Err(error), uses_result_envelope);
-                        }
+                        Ok(result) => lease.complete_with_tool_result(result, uses_result_envelope),
+                        Err(error) => lease.complete(Err(error), uses_result_envelope),
                     }
                 }
-                Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
-                    self.tasks.complete_with_tool_result(
-                        &task.task_id,
+                Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => lease
+                    .complete_with_tool_result(
                         crate::tool_registry::application_error_mcp_result(&error),
                         uses_result_envelope,
-                    );
-                }
+                    ),
                 Err(crate::tool_registry::ToolInvocationError::Runtime(
                     VmError::McpInputRequired(_),
-                )) => self.tasks.complete(
-                    &task.task_id,
+                )) => lease.complete(
                     Err("Tool requested client input, which a task cannot carry".to_string()),
                     uses_result_envelope,
                 ),
-                Err(error) => self.tasks.complete_with_tool_result(
-                    &task.task_id,
+                Err(error) => lease.complete_with_tool_result(
                     serde_json::json!({
                         "content": [{"type": "text", "text": error.to_string()}],
                         "isError": true,

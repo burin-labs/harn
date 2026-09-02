@@ -61,16 +61,17 @@ pub fn validate_application_meta_key(key: &str) -> Result<(), String> {
         }
     }
 
-    if !name.is_empty() {
-        let bytes = name.as_bytes();
-        if !bytes[0].is_ascii_alphanumeric()
-            || !bytes[bytes.len() - 1].is_ascii_alphanumeric()
-            || !bytes
-                .iter()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'.'))
-        {
-            return Err("has an invalid metadata name".to_string());
-        }
+    if name.is_empty() {
+        return Err("has an empty metadata name".to_string());
+    }
+    let bytes = name.as_bytes();
+    if !bytes[0].is_ascii_alphanumeric()
+        || !bytes[bytes.len() - 1].is_ascii_alphanumeric()
+        || !bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'-' | b'_' | b'.'))
+    {
+        return Err("has an invalid metadata name".to_string());
     }
     Ok(())
 }
@@ -955,6 +956,13 @@ mod tests {
             "com.harnlang/toolContract",
         ] {
             validate_application_meta_key(valid).expect(valid);
+        }
+        for invalid in ["", "com.example/"] {
+            assert_eq!(
+                validate_application_meta_key(invalid),
+                Err("has an empty metadata name".to_string()),
+                "empty MCP metadata name accepted: {invalid:?}"
+            );
         }
         for invalid in [
             "vendor.example/version/extra",
