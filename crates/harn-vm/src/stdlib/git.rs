@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value as JsonValue};
 use uuid::Uuid;
 
-use crate::event_log::{active_event_log, install_memory_for_current_thread, EventLog};
+use crate::event_log::{active_event_log, install_memory_for_current_thread};
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, Options};
 use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
