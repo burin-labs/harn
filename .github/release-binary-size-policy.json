@@ -4,16 +4,16 @@
   "targets": [
     {
       "target": "x86_64-unknown-linux-gnu",
-      "distribution_fuse_bytes": 267386880,
+      "distribution_fuse_bytes": 293601280,
       "growth": {
         "warn_bytes": 4194304,
         "warn_percent_hundredths": 200
       },
       "baseline": {
-        "version": "0.10.118",
-        "source_sha": "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc",
-        "bytes": 242554944,
-        "observed_at": "2026-08-27T01:19:49Z",
+        "version": "0.10.125",
+        "source_sha": "57e7862b6c6374393bde724962107d3b765c0967",
+        "bytes": 249726232,
+        "observed_at": "2026-09-01T02:16:39Z",
         "build_identity": {
           "profile": "release",
           "codegen_units": 8,
@@ -23,13 +23,7 @@
           "aot_embedded": true
         }
       },
-      "accepted_growth": [
-        {
-          "against_baseline_sha": "40a4030d5c2204d27975cfd22f4d65fbe89ad2cc",
-          "bytes": 7695576,
-          "reason": "Bound the final v0.10.125 cumulative runtime, CLI, and public-evidence projection growth from the exact release build plus 512 KiB variance; current-versus-prior section deltas remain code-dominant, not an embedded asset. Remove after the released baseline refresh."
-        }
-      ]
+      "accepted_growth": []
     }
   ]
 }
