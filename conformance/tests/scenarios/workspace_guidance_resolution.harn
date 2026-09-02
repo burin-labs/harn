@@ -21,8 +21,12 @@ pipeline test(harness: Harness) {
     path_join(root, "AGENTS.md"),
     "Root rule.\n\n<!-- maintainer note, must not reach the model -->\n@shared/style.md\n",
   )
-  // The symlink convention, spelled as a copy: identical body, must be deduped.
-  harness.fs.write_text(path_join(root, "CLAUDE.md"), "Root rule.\n")
+  // The symlink convention, spelled as a copy. The body must be byte-identical
+  // to AGENTS.md or there is nothing to dedupe and both files legitimately load.
+  harness.fs.write_text(
+    path_join(root, "CLAUDE.md"),
+    "Root rule.\n\n<!-- maintainer note, must not reach the model -->\n@shared/style.md\n",
+  )
   harness.fs.mkdir(path_join(root, "shared"))
   harness.fs.write_text(path_join(root, "shared/style.md"), "Imported style rule.")
   harness.fs.write_text(path_join(scoped, "AGENTS.md"), "Scoped api rule.")
