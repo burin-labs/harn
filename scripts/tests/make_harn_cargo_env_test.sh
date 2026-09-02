@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+default_lease_owner=$(basename "$repo_root")
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -194,7 +195,7 @@ lease
 run
 cargo
 --owner
-cargo-wrapper
+$default_lease_owner
 --workspace
 $repo_root
 --target-dir
@@ -236,7 +237,7 @@ lease
 run
 cargo
 --owner
-cargo-wrapper
+$default_lease_owner
 --workspace
 $repo_root
 --target-dir
@@ -274,7 +275,7 @@ lease
 run
 cargo
 --owner
-cargo-wrapper
+$default_lease_owner
 --workspace
 $repo_root
 --target-dir

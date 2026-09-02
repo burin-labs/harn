@@ -54,6 +54,33 @@ const WHOLE_MACHINE_RESOURCE_CLASS: &str = "whole-machine";
 /// Coordination domain used when callers do not name one explicitly.
 pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
 
+const WAIT_PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug)]
+struct WaitProgressSchedule {
+    next_due: Duration,
+}
+
+impl WaitProgressSchedule {
+    fn new() -> Self {
+        Self {
+            next_due: Duration::ZERO,
+        }
+    }
+
+    fn should_report(&mut self, elapsed: Duration) -> bool {
+        if elapsed < self.next_due {
+            return false;
+        }
+        self.next_due = elapsed.saturating_add(WAIT_PROGRESS_INTERVAL);
+        true
+    }
+
+    fn until_next(self, elapsed: Duration) -> Duration {
+        self.next_due.saturating_sub(elapsed)
+    }
+}
+
 /// Failures produced while validating or mutating host lease state.
 #[derive(Debug, thiserror::Error)]
 pub enum HostLeaseError {
@@ -709,7 +736,7 @@ impl HostLeaseStore {
             requested_at_ms: started_at_ms,
             recoverable: false,
         };
-        self.acquire_wait_ordered(request, wait_timeout, identity)
+        self.acquire_wait_ordered(request, wait_timeout, identity, None)
     }
 
     /// Resume the durable FIFO position owned by a supervised run receipt.
@@ -717,6 +744,28 @@ impl HostLeaseStore {
         &self,
         run_id: &str,
         owner_pid: u32,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        self.acquire_wait_for_run_observed(run_id, owner_pid, None)
+    }
+
+    /// Resume a supervised wait while projecting bounded typed progress.
+    ///
+    /// The store owns notification wakeups and report cadence. Callers receive
+    /// already-normalized receipts and need not poll or re-read lease state.
+    pub fn acquire_wait_for_run_with_progress(
+        &self,
+        run_id: &str,
+        owner_pid: u32,
+        on_progress: &mut dyn FnMut(&HostLeaseAcquireReceipt),
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        self.acquire_wait_for_run_observed(run_id, owner_pid, Some(on_progress))
+    }
+
+    fn acquire_wait_for_run_observed(
+        &self,
+        run_id: &str,
+        owner_pid: u32,
+        on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         let run = self.load_run(run_id)?;
         let HostLeaseRunState::Pending { requested_at_ms } = run.status else {
@@ -750,6 +799,7 @@ impl HostLeaseStore {
                 requested_at_ms,
                 recoverable: true,
             },
+            on_progress,
         )
     }
 
@@ -758,6 +808,7 @@ impl HostLeaseStore {
         request: HostLeaseRequest,
         wait_timeout: Duration,
         identity: WaiterIdentity,
+        mut on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         let started_at_ms = unix_now_ms()?;
         let started_at = Instant::now();
@@ -773,6 +824,7 @@ impl HostLeaseStore {
         watcher
             .watch(&self.wake_path, RecursiveMode::NonRecursive)
             .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
+        let mut progress_schedule = on_progress.as_ref().map(|_| WaitProgressSchedule::new());
 
         loop {
             let receipt = self.try_acquire_once(
@@ -781,6 +833,16 @@ impl HostLeaseStore {
                 Some(deadline_at_ms),
                 &identity,
             )?;
+            let elapsed = started_at.elapsed();
+            if receipt.status == HostLeaseAcquireStatus::Deferred
+                && progress_schedule
+                    .as_mut()
+                    .is_some_and(|schedule| schedule.should_report(elapsed))
+            {
+                if let Some(observer) = on_progress.as_deref_mut() {
+                    observer(&receipt);
+                }
+            }
             if receipt.status == HostLeaseAcquireStatus::Acquired || Instant::now() >= deadline {
                 if receipt.status == HostLeaseAcquireStatus::Deferred {
                     self.remove_waiter(&identity.waiter_id)?;
@@ -799,7 +861,11 @@ impl HostLeaseStore {
             if remaining.is_zero() {
                 return Ok(receipt);
             }
-            match rx.recv_timeout(wake_duration.min(remaining)) {
+            let mut wait_duration = wake_duration.min(remaining);
+            if let Some(schedule) = progress_schedule {
+                wait_duration = wait_duration.min(schedule.until_next(started_at.elapsed()));
+            }
+            match rx.recv_timeout(wait_duration) {
                 Ok(Ok(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Ok(Err(error)) => return Err(HostLeaseError::Watch(error.to_string())),
                 Err(mpsc::RecvTimeoutError::Disconnected) => {

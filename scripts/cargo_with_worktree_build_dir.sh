@@ -37,7 +37,10 @@ if [[ "${HARN_ALLOW_TOOLCHAIN_MISMATCH:-0}" != "1" ]]; then
 fi
 
 lease_runner_request="${HARN_CARGO_LEASE_RUNNER:-}"
-lease_owner="${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
+lease_owner="${HARN_CARGO_LEASE_OWNER:-}"
+if [[ -z "$lease_owner" ]]; then
+  lease_owner="$(basename "$workspace")"
+fi
 lease_host="${HARN_CARGO_LEASE_HOST:-}"
 lease_wait_ms="${HARN_CARGO_LEASE_WAIT_MS:-3600000}"
 lease_priority_class="${HARN_CARGO_LEASE_PRIORITY_CLASS:-interactive}"
