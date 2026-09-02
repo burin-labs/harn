@@ -544,7 +544,10 @@ impl McpServer {
                             result,
                             uses_result_envelope,
                         ),
-                        Err(error) => self.tasks.complete(&task.task_id, Err(error)),
+                        Err(error) => {
+                            self.tasks
+                                .complete(&task.task_id, Err(error), uses_result_envelope)
+                        }
                     }
                 }
                 Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
@@ -559,6 +562,7 @@ impl McpServer {
                 )) => self.tasks.complete(
                     &task.task_id,
                     Err("Tool requested client input, which a task cannot carry".to_string()),
+                    uses_result_envelope,
                 ),
                 Err(error) => self.tasks.complete_with_tool_result(
                     &task.task_id,

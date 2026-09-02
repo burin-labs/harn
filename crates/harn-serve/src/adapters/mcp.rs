@@ -749,7 +749,11 @@ impl McpServer {
                     result,
                     job.request_profile.uses_result_envelope(),
                 ),
-                Err(error) => self.tasks.complete(&task_id, Err(error)),
+                Err(error) => self.tasks.complete(
+                    &task_id,
+                    Err(error),
+                    job.request_profile.uses_result_envelope(),
+                ),
             }
             return;
         }

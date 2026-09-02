@@ -207,8 +207,15 @@ impl McpTaskStore {
     ///
     /// A cancelled task is left alone: the client has already been told the
     /// terminal status, and letting late work overwrite it would make cancel
-    /// mean "maybe".
-    pub fn complete(&self, task_id: &str, result: Result<JsonValue, String>) {
+    /// mean "maybe". `uses_result_envelope` must come from the request profile
+    /// that created the task, so a later poll cannot change the stored wire
+    /// contract.
+    pub fn complete(
+        &self,
+        task_id: &str,
+        result: Result<JsonValue, String>,
+        uses_result_envelope: bool,
+    ) {
         let Some(wake) = ({
             let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
             let Some(record) = tasks.get_mut(task_id) else {
@@ -224,12 +231,20 @@ impl McpTaskStore {
                     record.task.status = mcp_protocol::McpTaskStatus::Completed;
                     record.task.status_message =
                         Some("The task completed successfully.".to_string());
-                    record.result = Some(tool_call_result_json(value, false));
+                    let mut result = tool_call_result_json(value, false);
+                    if uses_result_envelope {
+                        mcp_protocol::apply_result_envelope(&mut result, None);
+                    }
+                    record.result = Some(result);
                 }
                 Err(error) => {
                     record.task.status = mcp_protocol::McpTaskStatus::Failed;
                     record.task.status_message = Some(format!("Tool execution failed: {error}"));
-                    record.result = Some(tool_call_result_json(json!(error), true));
+                    let mut result = tool_call_result_json(json!(error), true);
+                    if uses_result_envelope {
+                        mcp_protocol::apply_result_envelope(&mut result, None);
+                    }
+                    record.result = Some(result);
                 }
             }
             Some(wake)
@@ -250,6 +265,8 @@ impl McpTaskStore {
     /// where reconstructing a bare value from the blocks would not. `isError`
     /// belongs to the completed tool-call result; only failure to produce a
     /// result transitions the task itself to `failed`.
+    /// `uses_result_envelope` is the originating request profile's projection,
+    /// not a preference inferred from the eventual polling request.
     pub fn complete_with_tool_result(
         &self,
         task_id: &str,
@@ -452,7 +469,7 @@ mod tests {
     fn completing_a_task_publishes_its_result() {
         let store = McpTaskStore::new();
         let task = store.create(None);
-        store.complete(&task.task_id, Ok(json!({ "answer": 42 })));
+        store.complete(&task.task_id, Ok(json!({ "answer": 42 })), false);
 
         let read = store.handle_get(json!(1), &params(&task.task_id));
         assert_eq!(read["result"]["status"], json!("completed"));
@@ -487,24 +504,28 @@ mod tests {
         let store = McpTaskStore::new();
         let stable_task = store.create(None);
         let standard_task = store.create(None);
+        let stable_bare_task = store.create(None);
         let result = json!({
             "content": [{"type": "text", "text": "ok"}],
             "isError": false,
         });
         store.complete_with_tool_result(&stable_task.task_id, result.clone(), true);
         store.complete_with_tool_result(&standard_task.task_id, result, false);
+        store.complete(&stable_bare_task.task_id, Ok(json!({"value": "ok"})), true);
 
         let stable = store.handle_get(json!(1), &params(&stable_task.task_id));
         let standard = store.handle_get(json!(2), &params(&standard_task.task_id));
+        let stable_bare = store.handle_get(json!(3), &params(&stable_bare_task.task_id));
         assert_eq!(stable["result"]["result"]["resultType"], "complete");
         assert!(standard["result"]["result"].get("resultType").is_none());
+        assert_eq!(stable_bare["result"]["result"]["resultType"], "complete");
     }
 
     #[test]
     fn a_failed_task_reports_an_error_rather_than_an_empty_result() {
         let store = McpTaskStore::new();
         let task = store.create(None);
-        store.complete(&task.task_id, Err("boom".to_string()));
+        store.complete(&task.task_id, Err("boom".to_string()), false);
 
         let read = store.handle_get(json!(1), &params(&task.task_id));
         assert_eq!(read["result"]["status"], json!("failed"));
@@ -526,7 +547,7 @@ mod tests {
         // The work was already in flight and finishes after the cancel. If it
         // won, `tasks/cancel` would mean "maybe", and a client that cancelled a
         // destructive operation would still see it succeed.
-        store.complete(&task.task_id, Ok(json!({ "answer": 42 })));
+        store.complete(&task.task_id, Ok(json!({ "answer": 42 })), false);
         let read = store.handle_get(json!(2), &params(&task.task_id));
         assert_eq!(read["result"]["status"], json!("cancelled"));
 
