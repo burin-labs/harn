@@ -607,10 +607,7 @@ impl McpServer {
         }
     }
 
-    /// Who the current connection is, for task ownership.
-    ///
-    /// This server holds one connection at a time, so the identity is a
-    /// property of the session rather than of the request.
+    /// Self-reported client label used only for tracing and diagnostics.
     fn client_identity(&self) -> String {
         self.connection
             .lock()

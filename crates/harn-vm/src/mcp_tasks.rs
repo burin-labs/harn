@@ -369,10 +369,9 @@ impl McpTaskStore {
 pub fn task_created_response(id: JsonValue, task: &McpTaskState, note: &str) -> JsonValue {
     let mut result = task.to_json();
     result["resultType"] = json!("task");
-    result["_meta"] = json!({
-        crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY: {
-            "immediateResponse": note,
-        },
+    result["_meta"] = json!({});
+    result["_meta"][crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY] = json!({
+        "immediateResponse": note,
     });
     crate::jsonrpc::response(id, result)
 }
@@ -424,6 +423,21 @@ mod tests {
                 .get_version_num(),
             7
         );
+    }
+
+    #[test]
+    fn task_creation_note_uses_only_the_harn_vendor_namespace() {
+        let store = McpTaskStore::new();
+        let task = store.create(None);
+        let response = task_created_response(json!(1), &task, "working");
+        assert_eq!(
+            response["result"]["_meta"][crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
+                ["immediateResponse"],
+            json!("working")
+        );
+        assert!(response["result"]["_meta"]
+            .get("io.modelcontextprotocol/model-immediate-response")
+            .is_none());
     }
 
     #[test]

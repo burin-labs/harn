@@ -1215,6 +1215,22 @@ mod tests {
     }
 
     #[test]
+    fn protocol_validation_errors_require_http_bad_request() {
+        for code in [
+            -32602,
+            HEADER_MISMATCH_CODE,
+            MISSING_REQUIRED_CLIENT_CAPABILITY_CODE,
+            UNSUPPORTED_PROTOCOL_VERSION_CODE,
+        ] {
+            assert!(requires_http_bad_request(&json!({"error": {"code": code}})));
+        }
+        assert!(!requires_http_bad_request(
+            &json!({"error": {"code": -32601}})
+        ));
+        assert!(!requires_http_bad_request(&json!({"result": {}})));
+    }
+
+    #[test]
     fn stable_request_identity_never_leaks_from_a_previous_request() {
         let mut session = McpServerSession::default();
         let with_identity = json!({
