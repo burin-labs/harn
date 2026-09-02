@@ -13,7 +13,6 @@ import {
   completion_requirement_evidence_packet,
 } from "std/agent/completion_evidence"
 import {
-  CompletionRequirementContract,
   CompletionRequirementEvidencePacket,
   CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
@@ -53,7 +52,7 @@ import {
   completion_obligations_prompt,
 } from "std/agent/obligations"
 import { __normalize_judge_config } from "std/agent/options_formats"
-import { JudgeConfig } from "std/agent/options_types"
+import { CompletionRequirementContract, JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
