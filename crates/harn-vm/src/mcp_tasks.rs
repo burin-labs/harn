@@ -659,6 +659,16 @@ fn finish_task(store: &McpTaskStoreInner, task_id: &str, outcome: TaskOutcome) {
         if stored.record.task.status.is_terminal() {
             return;
         }
+        // `tasks/cancel` acknowledges the request while holding this same
+        // lock. Once it returns, a completion that was ready in the same
+        // scheduler turn must not overwrite the accepted cancellation. If
+        // completion acquired the lock first, the terminal-status check above
+        // preserves that already-linearized result.
+        let outcome = if stored.cancel_token.load(Ordering::Acquire) {
+            TaskOutcome::Cancelled
+        } else {
+            outcome
+        };
         stored.record.task.last_updated_at = harn_clock::now_rfc3339(store.clock.as_ref());
         match outcome {
             TaskOutcome::Value {
@@ -897,13 +907,27 @@ mod tests {
     }
 
     #[test]
-    fn successful_work_is_not_relabelled_when_cancel_loses_the_race() {
+    fn acknowledged_cancel_wins_over_same_turn_completion() {
         let store = McpTaskStore::new();
         let lease = begin(&store, None);
         let task_id = lease.task().task_id.clone();
 
         store.handle_cancel(&unscoped(), json!(1), &params(&task_id));
         lease.complete(Ok(json!({"committed": true})), false);
+
+        let read = store.handle_get(&unscoped(), json!(2), &params(&task_id));
+        assert_eq!(read["result"]["status"], "cancelled");
+        assert!(read["result"].get("result").is_none());
+    }
+
+    #[test]
+    fn completion_that_linearizes_before_cancel_stays_completed() {
+        let store = McpTaskStore::new();
+        let lease = begin(&store, None);
+        let task_id = lease.task().task_id.clone();
+
+        lease.complete(Ok(json!({"committed": true})), false);
+        store.handle_cancel(&unscoped(), json!(1), &params(&task_id));
 
         let read = store.handle_get(&unscoped(), json!(2), &params(&task_id));
         assert_eq!(read["result"]["status"], "completed");
