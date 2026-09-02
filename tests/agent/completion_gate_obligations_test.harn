@@ -43,36 +43,34 @@ fn __unsteered_facts(ctx: CompletionGateContext) -> CompletionFacts? {
 }
 
 pipeline test_gate_does_not_veto_a_judge_accepted_amended_target(harness: Harness, task: unknown) {
-  const messages = [
-    {role: "user", content: TASK},
-    {
-      role: "user",
-      content: "Do not change source; inspect and report instead.",
-      messageId: "steer-finish",
-      injectedMode: "finish_step",
-    },
-    {
-      role: "user",
-      content: "for the audit log only",
-      messageId: "steer-audit",
-      injectedMode: "audit_only",
-    },
-    {
-      role: "user",
-      content: "Report what you found and stop now.",
-      messageId: "steer-interrupt",
-      injectedMode: "interrupt_immediate",
-    },
-    {role: "assistant", content: "No typed implementation exists; stopping as requested."},
-  ]
+  // The canonical snapshot has accepted both steers, while its raw transcript
+  // projection is deliberately stale. Re-deriving here would erase both
+  // steers and make the two exit authorities disagree again.
+  const obligations = {
+    schema: "harn.completion_obligations.v1",
+    original_task: TASK,
+    steers: [
+      {
+        message_id: "steer-finish",
+        mode: "finish_step",
+        content: "Do not change source; inspect and report instead.",
+      },
+      {
+        message_id: "steer-interrupt",
+        mode: "interrupt_immediate",
+        content: "Report what you found and stop now.",
+      },
+    ],
+  }
   const gate = agent_completion_gate(harness.runtime, {facts: __steer_aware_facts, max_vetoes: 0})
   const verdict = gate.verify_completion(
     {
       session_id: "gate-steered",
       task: TASK,
+      obligations: obligations,
       stop_reason: "done_sentinel",
       text: "No typed implementation exists; stopping as requested.",
-      transcript: json_stringify(messages),
+      transcript: json_stringify([{role: "user", content: TASK}]),
     },
   )
   assert_eq(verdict.confirm, true)
