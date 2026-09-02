@@ -12,6 +12,9 @@ use harn_vm::llm::receipts::{
 use harn_vm::tool_annotations::{
     CompletionEvidenceRole, SideEffectLevel, ToolAnnotations, ToolKind,
 };
+use harn_vm::tool_registry::{
+    TOOL_CATALOG_SCHEMA_ARTIFACT, TOOL_CATALOG_SCHEMA_VERSION, TOOL_CATALOG_TYPESCRIPT_ARTIFACT,
+};
 use serde_json::json;
 use std::path::Path;
 
@@ -111,6 +114,15 @@ pub(super) fn generate_manifest_for_version(
             "schema_version": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,
         },
     }));
+    schemas.push(json!({
+        "protocol": "harn-tools",
+        "source": "crates/harn-vm/src/tool_registry/contract.rs",
+        "artifact": TOOL_CATALOG_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::tool_registry::contract",
+            "schemaVersion": TOOL_CATALOG_SCHEMA_VERSION,
+        },
+    }));
 
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
@@ -140,6 +152,12 @@ pub(super) fn generate_manifest_for_version(
             "go": {
                 "artifact": "go/harnprotocol/harnprotocol.go",
                 "modulePath": "github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol",
+                "stability": "stable",
+            },
+            "harnToolsTypescript": {
+                "artifact": TOOL_CATALOG_TYPESCRIPT_ARTIFACT,
+                "schema": TOOL_CATALOG_SCHEMA_ARTIFACT,
+                "schemaVersion": TOOL_CATALOG_SCHEMA_VERSION,
                 "stability": "stable",
             },
         },
@@ -313,6 +331,11 @@ pub(super) fn generate_readme() -> String {
            deterministic session recap availability and snapshot types.\n\
          - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative\n\
            plan-document schema with revisions, comments, and resolution receipts.\n\
+         - `schemas/harn-tools-v2.schema.json`: structural envelope schema for the\n\
+           transport-neutral `harn-tools/2.0` catalog. Harn's Rust parser performs\n\
+           the required second-stage Draft 2020-12 and reference-closure validation.\n\
+         - `harn-tools.ts`: strict TypeScript definitions generated from the same\n\
+           catalog DTOs as the JSON Schema.\n\
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
            tool lifecycle metadata, A2A task events, and MCP metadata.\n\
          - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.\n\

@@ -1,4 +1,10 @@
-import { ToolDefinitionSpec, ToolRegistry, tool_define_many, tool_registry_from } from "std/tools"
+import {
+  ToolCliArgumentSpec,
+  ToolDefinitionSpec,
+  ToolRegistry,
+  tool_define_many,
+  tool_registry_from,
+} from "std/tools"
 
 pipeline test(harness: Harness, task: unknown) {
   const specs: list<ToolDefinitionSpec> = [
@@ -26,8 +32,58 @@ pipeline test(harness: Harness, task: unknown) {
   )
   assert(tool_find(registry, "read_file").outputSchema.type == "string", "nested config works")
   const fresh: ToolRegistry = tool_registry_from(
-    [{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}],
+    [
+      {
+        name: "one",
+        desc: "One tool",
+        parameters: {
+          item_id: {type: "integer", description: "Item identifier"},
+          force: {type: "boolean"},
+        },
+        cli: {
+          command: ["items", "get"],
+          aliases: ["show"],
+          arguments: {
+            item_id: {position: 0, value_name: "ITEM", value_hint: "path", completions: ["1", "2"]},
+            force: {boolean_style: "set_true"},
+          },
+        },
+        handler: { args -> args.item_id },
+      },
+    ],
+    {
+      components: {schemas: {Receipt: {type: "object", required: ["ok"]}}},
+      cli: {
+        commands: [{command: ["items"], title: "Manage items", aliases: ["i"], display_order: 10}],
+      },
+    },
   )
   assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
+  const fresh_catalog = tool_schema(fresh)
+  assert(len((fresh_catalog.cli ?? {commands: []}).commands) == 1, "registry keeps CLI metadata")
+  const selected: ToolRegistry = tool_select(fresh, ["one"])
+  const components = tool_schema(selected).components ?? {schemas: {}}
+  assert(
+    components.schemas.Receipt.required == ["ok"],
+    "registry transforms preserve shared components",
+  )
+  const catalog = tool_schema(selected)
+  const cli = catalog.cli ?? {commands: []}
+  assert(len(cli.commands) == 1, "catalog preserves one CLI parent command")
+  assert(cli.commands[0].title == "Manage items", "catalog preserves CLI parent metadata")
+  assert(cli.commands[0].aliases == ["i"], "catalog preserves CLI parent aliases")
+  let arguments: dict<string, ToolCliArgumentSpec> = {}
+  let leaf_aliases: list<string> = []
+  for projected_tool in catalog.tools {
+    if projected_tool.name == "one" {
+      arguments = projected_tool.cli.arguments ?? {}
+      leaf_aliases = projected_tool.cli.aliases ?? []
+    }
+  }
+  assert(leaf_aliases == ["show"], "catalog preserves CLI leaf aliases")
+  assert(arguments.item_id.position == 0, "catalog preserves typed positional projection")
+  assert(arguments.item_id.value_hint == "path", "catalog preserves typed completion hint")
+  assert(arguments.item_id.completions == ["1", "2"], "catalog preserves static completions")
+  assert(arguments.force.boolean_style == "set_true", "catalog preserves boolean token style")
   harness.stdio.log("tool_define_many tests passed")
 }

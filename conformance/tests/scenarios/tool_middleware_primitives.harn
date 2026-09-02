@@ -87,7 +87,7 @@ pipeline default(harness: Harness) {
     "Edit a file",
     {
       handler: { _ -> "" },
-      parameters: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
+      input_schema: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
       returns: {type: "string"},
     },
   )
@@ -96,8 +96,8 @@ pipeline default(harness: Harness) {
     { entry -> tool_inject_param(entry, "reason", {type: "string"}, {required: true}) },
   )
   const edit_entry = added2.tools[0]
-  harness.stdio.println(contains(edit_entry.parameters.properties.keys(), "reason"))
-  harness.stdio.println(contains(edit_entry.parameters.required, "reason"))
+  harness.stdio.println(contains(edit_entry.inputSchema.properties.keys(), "reason"))
+  harness.stdio.println(contains(edit_entry.inputSchema.required, "reason"))
   // (5) Optional injected params must remain optional in both the full
   // JSON-schema shape and the bare shorthand shape. Provider-facing schema
   // projection reads the param fragment's `required` bit, so the injection
@@ -107,9 +107,9 @@ pipeline default(harness: Harness) {
     { entry -> tool_inject_param(entry, "note", {type: "string"}, {required: false}) },
   )
   const optional_full_entry = optional_full.tools[0]
-  harness.stdio.println(contains(optional_full_entry.parameters.properties.keys(), "note"))
-  harness.stdio.println(contains(optional_full_entry.parameters.required, "note"))
-  harness.stdio.println(optional_full_entry.parameters.properties.note.required)
+  harness.stdio.println(contains(optional_full_entry.inputSchema.properties.keys(), "note"))
+  harness.stdio.println(contains(optional_full_entry.inputSchema.required, "note"))
+  harness.stdio.println(optional_full_entry.inputSchema.properties.note.required)
   let tools3 = tool_registry()
   tools3 = tool_define(
     tools3,
