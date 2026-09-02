@@ -1,6 +1,9 @@
 // A completion judge is a gate: when it cannot run, an unverified completion
-// claim must not become `done`. The bounded invocation cap remains the escape
-// hatch, and terminates with an attributable unverified result.
+// claim must not become `done`. It also has to be able to END the run. A judge
+// whose reply cannot be read is re-asked once and then terminates on its own
+// reason, so the stop is attributed to the judge rather than to whichever
+// unrelated budget happened to run out first. The invocation cap is no longer
+// the escape hatch here, which is why `judge_cap_reached` is false.
 import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"

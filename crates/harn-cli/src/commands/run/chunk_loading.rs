@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use harn_parser::DiagnosticSeverity;
 
+use super::import_failure::{ImportFailureDetail, ImportLoadFailure};
 use super::ProjectContextMode;
 use crate::commands::time::RunTiming;
 use crate::package;
@@ -25,12 +26,15 @@ use crate::package;
 /// own content failing — and reporting both as "did not load" is what made a run
 /// that could not materialize its packages indistinguishable from a run whose
 /// program was broken.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ChunkLoadFailure {
     /// The entry file could not be read.
     EntryUnreadable,
     /// The run's locked dependencies could not be materialized.
     PackageMaterialization,
+    /// An import failed before the VM started. The typed facts are retained
+    /// here so every run-launch projection consumes the same value.
+    Import(ImportFailureDetail),
     /// The program did not parse, typecheck, or compile.
     Program,
 }
@@ -39,20 +43,36 @@ impl ChunkLoadFailure {
     /// The `--json` error event's `code`. Program failures keep reporting
     /// `compile_error`; the preparation codes are new because there was
     /// previously nothing to name.
-    pub(crate) fn diagnostic_code(self) -> &'static str {
+    pub(crate) fn diagnostic_code(&self) -> &'static str {
         match self {
             Self::EntryUnreadable => "entry_unreadable",
             Self::PackageMaterialization => "package_materialization",
+            Self::Import(_) => "compile_error",
             Self::Program => "compile_error",
         }
     }
 
-    pub(crate) fn classification(self) -> crate::exit::RunFailure {
+    pub(crate) fn classification(&self) -> crate::exit::RunFailure {
         match self {
             Self::EntryUnreadable | Self::PackageMaterialization => crate::exit::RunFailure::Setup,
-            Self::Program => crate::exit::RunFailure::Program,
+            Self::Import(_) | Self::Program => crate::exit::RunFailure::Program,
         }
     }
+
+    pub(crate) fn details(&self) -> serde_json::Value {
+        match self {
+            Self::Import(details) => serde_json::to_value(details)
+                .expect("the closed import failure detail must serialize"),
+            Self::EntryUnreadable | Self::PackageMaterialization | Self::Program => {
+                serde_json::Value::Null
+            }
+        }
+    }
+}
+
+pub(super) struct ImportTypecheck {
+    pub(super) diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(super) failure: Option<ImportLoadFailure>,
 }
 
 /// Result of [`compile_or_load_chunk_for_run`]. Failures propagate as
@@ -170,20 +190,24 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // Materializing the import graph's packages happens inside the type check,
     // so a dependency that could not be prepared surfaces here rather than as a
     // diagnostic about the program's own text.
-    let type_diagnostics =
+    let typecheck =
         match typecheck_with_imports(&program, Path::new(path), &source, project_context) {
-            Ok(diagnostics) => diagnostics,
+            Ok(typecheck) => typecheck,
             Err(error) => {
                 stderr.push_str(&format!("error: {error}\n"));
                 return Err(ChunkLoadFailure::PackageMaterialization);
             }
         };
-    for diag in &type_diagnostics {
+    for diag in &typecheck.diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
         }
         stderr.push_str(&rendered);
+    }
+    if let Some(failure) = typecheck.failure {
+        stderr.push_str(&failure.rendered);
+        return Err(ChunkLoadFailure::Import(failure.detail));
     }
     if let Some(t) = timing.as_deref_mut() {
         t.typecheck = typecheck_start.elapsed();
@@ -345,28 +369,26 @@ pub(super) fn typecheck_with_imports(
     path: &Path,
     source: &str,
     project_context: ProjectContextMode,
-) -> Result<Vec<harn_parser::TypeDiagnostic>, package::PackageError> {
-    let checker = match project_context {
+) -> Result<ImportTypecheck, package::PackageError> {
+    let graph = match project_context {
         ProjectContextMode::Project => {
             let mut graph = harn_modules::build(&[path.to_path_buf()]);
             if package::ensure_reachable_dependencies_materialized(path, &graph)? {
                 graph = harn_modules::build(&[path.to_path_buf()]);
             }
-            crate::typecheck_imports::checker_with_resolved_graph(
-                harn_parser::TypeChecker::new(),
-                path,
-                &graph,
-            )
+            graph
         }
-        ProjectContextMode::Standalone => {
-            crate::typecheck_imports::checker_with_standalone_imports(
-                harn_parser::TypeChecker::new(),
-                path,
-                source,
-            )
-        }
+        ProjectContextMode::Standalone => harn_modules::build_with_standalone_source(path, source),
     };
-    Ok(checker.check_with_source(program, source))
+    let checker = crate::typecheck_imports::checker_with_resolved_graph(
+        harn_parser::TypeChecker::new(),
+        path,
+        &graph,
+    );
+    Ok(ImportTypecheck {
+        diagnostics: checker.check_with_source(program, source),
+        failure: super::import_failure::for_run(program, path, source, &graph),
+    })
 }
 
 #[cfg(test)]

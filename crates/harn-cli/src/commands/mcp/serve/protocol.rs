@@ -56,6 +56,12 @@ impl McpOrchestratorService {
         {
             return response;
         }
+        if request_profile.uses_result_envelope()
+            && mcp_protocol::is_task_method(method)
+            && !mcp_protocol::client_supports_tasks(&params)
+        {
+            return mcp_protocol::missing_tasks_capability_response(id);
+        }
 
         let response = match method {
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
@@ -64,7 +70,15 @@ impl McpOrchestratorService {
             // can enter a child VM and agent machinery). Keep that state
             // machine behind one pointer instead of embedding it in the
             // already broad protocol dispatcher frame.
-            "tools/call" => Box::pin(self.handle_tools_call(id, session, &params)).await,
+            "tools/call" => {
+                Box::pin(self.handle_tools_call(
+                    id,
+                    session,
+                    &params,
+                    request_profile.uses_result_envelope(),
+                ))
+                .await
+            }
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
             mcp_protocol::METHOD_TASKS_UPDATE => self.handle_tasks_update(id, session, &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),

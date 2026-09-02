@@ -21,8 +21,14 @@ The generated contract includes:
   block enumerating the published TypeScript, Swift, Python, and Go modules
   with their stability tier and (for Go) the canonical module path.
 - `schemas/*.schema.json`: stable copies of the ACP, A2A, MCP, tool-receipt,
-  and collaborative plan-document contracts validated by generated drift and
-  protocol checks. MCP publishes only the stable `2026-07-28` profile.
+  collaborative plan-document, and `harn-tools/2.0` contracts covered by
+  generated drift and protocol checks. The Harn tools artifact validates the
+  catalog envelope; Harn's Rust parser validates embedded Draft 2020-12
+  schemas, reference closure, and cross-entry invariants. MCP publishes only
+  the stable `2026-07-28` profile.
+- `harn-tools.ts`: strict TypeScript types for the transport-neutral tool
+  catalog. The generator derives this file and
+  `schemas/harn-tools-v2.schema.json` from the same Rust contract types.
 - `harn-protocol.ts`: TypeScript bindings for JSON-RPC messages, ACP
   `session/update`, collaborative plan documents, Harn tool lifecycle metadata,
   A2A task events, and MCP tool/resource/prompt metadata.
@@ -55,6 +61,10 @@ The generated `MCPDiscoverResult` follows the released SDK shape: `ttlMs` and
 `cacheScope` are required, and server identity lives at
 `_meta["io.modelcontextprotocol/serverInfo"]`, not in a top-level
 `serverInfo` field.
+Harn's HTTP servers enforce those routing headers as well as authoring them.
+Missing or mismatched required headers, malformed stable request metadata, and
+missing required capabilities retain their JSON-RPC error body and use HTTP
+`400 Bad Request`.
 
 ## Stability
 
@@ -63,6 +73,16 @@ field names will not change without a Harn minor-version migration note plus a
 regenerated artifact diff. Hosts can pin to the artifact directory for the
 full surface or to the `manifest.json` `bindings` block when they only need to
 detect generator/runtime mismatch.
+
+This release publishes `harn-tools/2.0` as the first pre-launch contract that
+includes declared application errors. Its discriminator versions the tool
+catalog independently of the Harn crate. Version 1 catalogs are intentionally
+rejected; producers must regenerate the catalog and language bindings together.
+After version 2 ships, additive optional fields keep the discriminator.
+Removing a field, changing a field type, or tightening an owned closed record
+requires a new catalog discriminator and a migration note.
+JSON Schema documents, `source.binding`, and namespaced `_meta` values remain
+intentional open extension points.
 
 VM internals (the AST, code-index, scanner schemas under
 `crates/harn-hostlib/schemas/**` aside from the published wire profiles) are
@@ -99,6 +119,14 @@ import `spec/protocol-artifacts/python/harn_protocol.py` (e.g. by vendoring
 the file or pinning the artifact directory) and the
 `harnprotocol` Go module under `spec/protocol-artifacts/go/harnprotocol`
 respectively.
+
+TypeScript clients that consume a catalog should import `ToolCatalog` from
+`harn-tools.ts`. Other language generators should consume
+`schemas/harn-tools-v2.schema.json`; they should not infer catalog types from
+MCP `tools/list` or an OpenAPI source document. See
+[Tool registry adapters](./tool-registry-adapters.md) for the runtime and
+static catalog surfaces. The generated schema is a structural gate, not a
+substitute for Harn's semantic catalog parser.
 
 Cross-repo release jobs can run:
 

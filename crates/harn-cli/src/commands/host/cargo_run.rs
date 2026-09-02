@@ -1,5 +1,6 @@
 //! Supervised Cargo execution behind a durable machine-resource lease.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,6 +11,7 @@ use harn_vm::clock::{now_wall_ms, RealClock};
 use crate::cli::{
     HostLeaseRunArgs, HostLeaseRunCargoArgs, HostLeaseRunCargoWorkerArgs, HostLeaseRunCommand,
 };
+use crate::format::format_duration_ms;
 
 use super::{print_error, EX_TEMPFAIL};
 
@@ -81,12 +83,12 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     let worker_args = match cargo_worker_args(&args, &cargo, &run.run_id) {
         Ok(worker_args) => worker_args,
         Err(error) => {
-            record_start_failure(
+            return fail_run_start(
                 store,
                 &run.run_id,
                 harn_hostlib::HostLeaseRunStartFailure::WorkerArguments,
+                &error,
             );
-            return print_error("host_lease_run_cargo", &error, false);
         }
     };
     let worker = match harn_hostlib::process::spawn_process(harn_hostlib::process::SpawnSpec {
@@ -104,12 +106,12 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     }) {
         Ok(worker) => worker,
         Err(error) => {
-            record_start_failure(
+            return fail_run_start(
                 store,
                 &run.run_id,
                 harn_hostlib::HostLeaseRunStartFailure::WorkerSpawn,
+                &error.to_string(),
             );
-            return print_error("host_lease_run_cargo", &error.to_string(), false);
         }
     };
     let completion = match wait_for_worker(worker).await {
@@ -200,15 +202,19 @@ fn finalize_run(
     completion: WorkerCompletion,
 ) -> Result<i32, String> {
     let current = store.load_run(run_id).map_err(|error| error.to_string())?;
-    let exit_code = match &completion {
+    let worker_exit_code = match &completion {
         WorkerCompletion::Exited(status) => status_code(*status),
         WorkerCompletion::Cancelled => EX_CANCELLED,
     };
-    let next = match current.status {
+    let next = match current.status.clone() {
         harn_hostlib::HostLeaseRunState::Pending { .. } => Some(match completion {
-            WorkerCompletion::Exited(_) => harn_hostlib::HostLeaseRunState::StartFailed {
+            WorkerCompletion::Exited(status) => harn_hostlib::HostLeaseRunState::StartFailed {
                 observed_at_ms: unix_now_ms(),
                 error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
+                // The status is the only evidence of why the worker is gone.
+                // Discarding it is what collapsed an external kill, a startup
+                // failure, and a genuine early return into one opaque label.
+                worker_exit: Some(process_exit(&status)),
             },
             WorkerCompletion::Cancelled => harn_hostlib::HostLeaseRunState::CancelledBeforeStart {
                 finished_at_ms: unix_now_ms(),
@@ -250,16 +256,180 @@ fn finalize_run(
             return Err("run receipt was already finalized".to_string());
         }
     };
-    if let Some(next) = next {
+    let terminal = if let Some(next) = next {
         store
             .transition_run(run_id, next)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?
+    } else {
+        current
+    };
+    let projection = terminal_projection(&terminal.status, worker_exit_code, Some(&terminal))?;
+    report_terminal_run(store, run_id, projection)
+}
+
+struct TerminalProjection {
+    exit_code: i32,
+    diagnostic: Option<String>,
+}
+
+/// Render the worker's terminal status so a signalled death is legible.
+///
+/// A worker killed from outside and a worker that returned early are the same
+/// receipt without this. `unknown` is reserved for a platform that reported
+/// neither, and never stands in for a status that was simply not recorded.
+fn format_worker_exit(exit: Option<&harn_hostlib::HostLeaseProcessExit>) -> String {
+    match exit {
+        None => "unrecorded".to_string(),
+        Some(exit) => match (exit.code, exit.signal) {
+            (_, Some(signal)) => format!("signal:{signal}"),
+            (Some(code), None) => format!("code:{code}"),
+            (None, None) => "unknown".to_string(),
+        },
+    }
+}
+
+/// Render the wait facts that decide whether a failure was starvation.
+///
+/// Elapsed, configured limit, and queue position travel with the terminal
+/// reason so a reader never has to infer starvation from the reason alone.
+fn format_wait_context(receipt: Option<&harn_hostlib::HostLeaseRunReceipt>) -> String {
+    let Some(receipt) = receipt else {
+        return " waited=unrecorded limit=unrecorded queue_position=unrecorded".to_string();
+    };
+    let observed_at_ms = terminal_observed_at_ms(&receipt.status);
+    let waited = match (receipt.queue.as_ref(), observed_at_ms) {
+        (Some(queue), Some(observed)) => {
+            format_duration_ms(observed.saturating_sub(queue.requested_at_ms).max(0) as u64)
+        }
+        _ => "unrecorded".to_string(),
+    };
+    let position = receipt
+        .queue
+        .as_ref()
+        .map(|queue| queue.position.to_string())
+        .unwrap_or_else(|| "never-queued".to_string());
+    format!(
+        " waited={waited} limit={} queue_position={position}",
+        format_duration_ms(receipt.wait_limit_ms)
+    )
+}
+
+fn terminal_observed_at_ms(state: &harn_hostlib::HostLeaseRunState) -> Option<i64> {
+    match state {
+        harn_hostlib::HostLeaseRunState::StartFailed {
+            observed_at_ms: observed,
+            ..
+        }
+        | harn_hostlib::HostLeaseRunState::Deferred {
+            observed_at_ms: observed,
+            ..
+        }
+        | harn_hostlib::HostLeaseRunState::LaunchFailed {
+            observed_at_ms: observed,
+            ..
+        } => Some(*observed),
+        harn_hostlib::HostLeaseRunState::CancelledBeforeStart { finished_at_ms } => {
+            Some(*finished_at_ms)
+        }
+        _ => None,
+    }
+}
+
+fn terminal_projection(
+    state: &harn_hostlib::HostLeaseRunState,
+    worker_exit_code: i32,
+    receipt: Option<&harn_hostlib::HostLeaseRunReceipt>,
+) -> Result<TerminalProjection, String> {
+    let projection = match state {
+        harn_hostlib::HostLeaseRunState::StartFailed {
+            error, worker_exit, ..
+        } => TerminalProjection {
+            exit_code: EX_TEMPFAIL,
+            diagnostic: Some(format!(
+                "error: Cargo workload did not start (state=start-failed error={} worker_exit={}{})",
+                error.as_str(),
+                format_worker_exit(worker_exit.as_ref()),
+                format_wait_context(receipt)
+            )),
+        },
+        // A lease that was never granted is not a build result either. Saying
+        // so distinguishes an expired wait from a worker that died during one.
+        harn_hostlib::HostLeaseRunState::Deferred { waited_ms, .. } => TerminalProjection {
+            exit_code: EX_TEMPFAIL,
+            diagnostic: Some(format!(
+                "error: Cargo workload never acquired its lease (state=deferred waited={}{})",
+                format_duration_ms(*waited_ms),
+                format_wait_context(receipt)
+            )),
+        },
+        harn_hostlib::HostLeaseRunState::CancelledBeforeStart { .. }
+        | harn_hostlib::HostLeaseRunState::Cancelled { .. } => TerminalProjection {
+            exit_code: EX_CANCELLED,
+            diagnostic: None,
+        },
+        harn_hostlib::HostLeaseRunState::Completed { exit, .. } => TerminalProjection {
+            exit_code: exit.code.unwrap_or(worker_exit_code),
+            diagnostic: None,
+        },
+        harn_hostlib::HostLeaseRunState::LaunchFailed { error, .. } => TerminalProjection {
+            exit_code: EX_TEMPFAIL,
+            diagnostic: Some(format!(
+                "error: Cargo workload did not start (state=launch-failed error={}{})",
+                error.as_str(),
+                format_wait_context(receipt)
+            )),
+        },
+        harn_hostlib::HostLeaseRunState::Pending { .. }
+        | harn_hostlib::HostLeaseRunState::Running { .. } => {
+            return Err("run receipt remained non-terminal after worker exit".to_string());
+        }
+    };
+    Ok(projection)
+}
+
+fn report_terminal_run(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    projection: TerminalProjection,
+) -> Result<i32, String> {
+    if let Some(diagnostic) = projection.diagnostic {
+        eprintln!("{diagnostic}");
     }
     let path = store
         .run_receipt_path(run_id)
         .map_err(|error| error.to_string())?;
     eprintln!("Cargo lease receipt: {}", path.display());
-    Ok(exit_code)
+    Ok(projection.exit_code)
+}
+
+fn fail_run_start(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    error: harn_hostlib::HostLeaseRunStartFailure,
+    message: &str,
+) -> i32 {
+    eprintln!("error: {message}");
+    let terminal = harn_hostlib::HostLeaseRunState::StartFailed {
+        observed_at_ms: unix_now_ms(),
+        error,
+        worker_exit: None,
+    };
+    let recorded = match store.transition_run(run_id, terminal.clone()) {
+        Ok(receipt) => Some(receipt),
+        Err(transition_error) => {
+            eprintln!("error: failed to record Cargo start failure: {transition_error}");
+            None
+        }
+    };
+    match terminal_projection(&terminal, EX_TEMPFAIL, recorded.as_ref())
+        .and_then(|projection| report_terminal_run(store, run_id, projection))
+    {
+        Ok(exit_code) => exit_code,
+        Err(report_error) => {
+            eprintln!("error: failed to report Cargo start failure: {report_error}");
+            EX_TEMPFAIL
+        }
+    }
 }
 
 fn completed_release_outcome(
@@ -331,11 +501,28 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             harn_hostlib::HostLeaseRunStartFailure::WorkerContextMismatch,
         );
         eprintln!("error: worker context does not match its durable run receipt");
-        return 1;
+        return EX_TEMPFAIL;
     }
-    let acquisition = store.acquire_wait_for_run(&args.run_id, std::process::id());
+    let saw_wait = Cell::new(false);
+    let mut report_wait = |receipt: &harn_hostlib::HostLeaseAcquireReceipt| {
+        saw_wait.set(true);
+        eprintln!("{}", format_lease_wait(receipt));
+    };
+    let acquisition = store.acquire_wait_for_run_with_progress(
+        &args.run_id,
+        std::process::id(),
+        &mut report_wait,
+    );
     let acquisition = match acquisition {
-        Ok(receipt) if receipt.status == harn_hostlib::HostLeaseAcquireStatus::Acquired => receipt,
+        Ok(receipt) if receipt.status == harn_hostlib::HostLeaseAcquireStatus::Acquired => {
+            if saw_wait.get() {
+                eprintln!(
+                    "Acquired rust-heavy lease after {}",
+                    format_duration_ms(receipt.waited_ms)
+                );
+            }
+            receipt
+        }
         Ok(receipt) => {
             let deferred = receipt
                 .defer
@@ -360,10 +547,11 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
                 harn_hostlib::HostLeaseRunState::StartFailed {
                     observed_at_ms: unix_now_ms(),
                     error: harn_hostlib::HostLeaseRunStartFailure::ResourceAcquire,
+                    worker_exit: None,
                 },
             );
             eprintln!("error: {error}");
-            return 1;
+            return EX_TEMPFAIL;
         }
     };
     let Some(handle) = acquisition.handle.as_ref() else {
@@ -374,7 +562,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             harn_hostlib::HostLeaseRunStartFailure::WorkerContract,
         );
         eprintln!("error: acquired lease omitted its handle");
-        return 1;
+        return EX_TEMPFAIL;
     };
     let Some(worker_pid) = handle.owner_pid else {
         fail_acquired_before_running(
@@ -384,7 +572,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             harn_hostlib::HostLeaseRunStartFailure::WorkerContract,
         );
         eprintln!("error: acquired lease omitted its worker PID");
-        return 1;
+        return EX_TEMPFAIL;
     };
     if let Err(error) = store.transition_run(
         &args.run_id,
@@ -402,7 +590,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
             harn_hostlib::HostLeaseRunStartFailure::ReceiptTransition,
         );
         eprintln!("error: {error}");
-        return 1;
+        return EX_TEMPFAIL;
     }
     run_cargo_workload(
         &cargo,
@@ -412,6 +600,41 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
         &args.run_id,
         &acquisition,
     )
+}
+
+fn format_lease_wait(receipt: &harn_hostlib::HostLeaseAcquireReceipt) -> String {
+    let queue_position = receipt
+        .queue
+        .as_ref()
+        .map(|queue| queue.position.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let elapsed = format_duration_ms(receipt.waited_ms);
+    match receipt.defer.as_ref().map(|defer| defer.deferred_reason) {
+        Some(harn_hostlib::HostLeaseDeferReason::Contended) => receipt
+            .defer
+            .as_ref()
+            .and_then(|defer| defer.active.as_ref())
+            .map(|active| {
+                format!(
+                    "Waiting for rust-heavy lease held by {} (queue position {queue_position}, elapsed {elapsed})",
+                    active.owner
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "Waiting for contended rust-heavy lease (queue position {queue_position}, elapsed {elapsed})"
+                )
+            }),
+        Some(harn_hostlib::HostLeaseDeferReason::Queued) => format!(
+            "Waiting for rust-heavy lease admission (queue position {queue_position}, elapsed {elapsed})"
+        ),
+        Some(harn_hostlib::HostLeaseDeferReason::RegistryBusy) => format!(
+            "Waiting for rust-heavy lease registry (queue position {queue_position}, elapsed {elapsed})"
+        ),
+        None => format!(
+            "Waiting for rust-heavy lease (queue position {queue_position}, elapsed {elapsed})"
+        ),
+    }
 }
 
 struct NormalizedCargoPaths {
@@ -830,7 +1053,7 @@ fn fail_cargo_launch(
         Err(error) => eprintln!("error: failed to release launch lease: {error}"),
     }
     eprintln!("error: {message}");
-    1
+    EX_TEMPFAIL
 }
 
 fn fail_acquired_before_running(
@@ -852,6 +1075,7 @@ fn fail_acquired_before_running(
         harn_hostlib::HostLeaseRunState::StartFailed {
             observed_at_ms: unix_now_ms(),
             error,
+            worker_exit: None,
         },
     );
 }
@@ -866,6 +1090,7 @@ fn record_start_failure(
         harn_hostlib::HostLeaseRunState::StartFailed {
             observed_at_ms: unix_now_ms(),
             error,
+            worker_exit: None,
         },
     );
 }
@@ -891,13 +1116,252 @@ fn status_code(status: harn_hostlib::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{path_argument, wait_for_cargo_workload, EX_TIMEOUT};
+    use super::{
+        finalize_run, format_lease_wait, path_argument, terminal_projection,
+        wait_for_cargo_workload, WorkerCompletion, EX_TEMPFAIL, EX_TIMEOUT,
+    };
     use harn_hostlib::process::{
         EnvMode, MockProcessConfig, MockSpawner, OutputCapture, OwnerDeathPolicy, ProcessSpawner,
         SpawnSpec,
     };
     use std::collections::BTreeMap;
     use std::path::Path;
+    use tempfile::TempDir;
+
+    #[test]
+    fn pending_worker_exit_is_persisted_as_start_failed_not_cargo_failure() {
+        let temp = TempDir::new().unwrap();
+        let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+        let run = store
+            .begin_run(
+                "waiting-lane",
+                harn_hostlib::HostLeasePriorityClass::Measurement,
+                harn_hostlib::HostLeaseResourceKey {
+                    machine: "fixture".to_string(),
+                    resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
+                    domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
+                },
+                harn_hostlib::HostLeaseExecutionContext::cargo(
+                    Path::new("/workspace/project"),
+                    Path::new("/tmp/target"),
+                    None,
+                ),
+                5_000,
+            )
+            .unwrap();
+
+        let exit = finalize_run(
+            &store,
+            &run.run_id,
+            WorkerCompletion::Exited(harn_hostlib::process::ExitStatus::from_code(101)),
+        )
+        .unwrap();
+
+        assert_eq!(exit, EX_TEMPFAIL);
+        // The durable half of the #7829 falsifier: the receipt itself must
+        // carry the worker's status, so a later reader can tell an external
+        // kill from an early return without the process still being alive.
+        let status = store.load_run(&run.run_id).unwrap().status;
+        let harn_hostlib::HostLeaseRunState::StartFailed {
+            error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
+            worker_exit,
+            ..
+        } = status
+        else {
+            panic!("pending worker exit was not persisted as a start failure: {status:?}");
+        };
+        assert_eq!(
+            worker_exit,
+            Some(harn_hostlib::HostLeaseProcessExit {
+                code: Some(101),
+                signal: None,
+            }),
+            "the receipt discarded the only evidence of why the worker is gone"
+        );
+    }
+
+    #[test]
+    fn start_failed_uses_a_reserved_supervisor_status_and_stable_diagnostic() {
+        let projection = terminal_projection(
+            &harn_hostlib::HostLeaseRunState::StartFailed {
+                observed_at_ms: 1,
+                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
+                worker_exit: None,
+            },
+            101,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(projection.exit_code, EX_TEMPFAIL);
+        assert_eq!(
+            projection.diagnostic.as_deref(),
+            Some(
+                "error: Cargo workload did not start (state=start-failed error=worker-exited-before-acquire worker_exit=unrecorded waited=unrecorded limit=unrecorded queue_position=unrecorded)"
+            )
+        );
+    }
+
+    /// The falsifier for #7829: a signalled worker and one that returned early
+    /// must not produce the same receipt or the same operator-facing line.
+    #[test]
+    fn a_signalled_pre_acquire_worker_is_distinguishable_from_an_early_return() {
+        let signalled = terminal_projection(
+            &harn_hostlib::HostLeaseRunState::StartFailed {
+                observed_at_ms: 1,
+                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
+                worker_exit: Some(harn_hostlib::HostLeaseProcessExit {
+                    code: None,
+                    signal: Some(9),
+                }),
+            },
+            0,
+            None,
+        )
+        .unwrap();
+        let returned = terminal_projection(
+            &harn_hostlib::HostLeaseRunState::StartFailed {
+                observed_at_ms: 1,
+                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
+                worker_exit: Some(harn_hostlib::HostLeaseProcessExit {
+                    code: Some(75),
+                    signal: None,
+                }),
+            },
+            0,
+            None,
+        )
+        .unwrap();
+
+        let signalled = signalled.diagnostic.expect("signalled death is diagnosed");
+        let returned = returned.diagnostic.expect("early return is diagnosed");
+        assert!(
+            signalled.contains("worker_exit=signal:9"),
+            "signalled worker did not name its signal: {signalled}"
+        );
+        assert!(
+            returned.contains("worker_exit=code:75"),
+            "returning worker did not name its code: {returned}"
+        );
+        assert_ne!(
+            signalled, returned,
+            "two different pre-acquire deaths still read identically"
+        );
+    }
+
+    /// An expired wait is a lease outcome, not a silent one. Before #7829 a
+    /// deferred run printed only a receipt path, so starvation and success
+    /// were the same terminal output.
+    #[test]
+    fn an_expired_wait_names_itself_instead_of_printing_nothing() {
+        let projection = terminal_projection(
+            &harn_hostlib::HostLeaseRunState::Deferred {
+                observed_at_ms: 2,
+                waited_ms: 3_600_000,
+            },
+            0,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(projection.exit_code, EX_TEMPFAIL);
+        let diagnostic = projection.diagnostic.expect("an expired wait is diagnosed");
+        assert!(
+            diagnostic.contains("state=deferred"),
+            "expired wait did not name its terminal state: {diagnostic}"
+        );
+    }
+
+    #[test]
+    fn completed_workload_preserves_the_real_cargo_status() {
+        let projection = terminal_projection(
+            &harn_hostlib::HostLeaseRunState::Completed {
+                lease_id: "lease".to_string(),
+                acquire_wait_ms: 0,
+                hold_ms: 1,
+                worker_pid: 7,
+                exit: harn_hostlib::HostLeaseProcessExit {
+                    code: Some(101),
+                    signal: None,
+                },
+                release: harn_hostlib::HostLeaseRunReleaseOutcome::Released,
+                finished_at_ms: 2,
+            },
+            101,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(projection.exit_code, 101);
+        assert!(projection.diagnostic.is_none());
+    }
+
+    #[test]
+    fn wait_progress_projects_holder_queue_and_elapsed_time() {
+        let receipt = harn_hostlib::HostLeaseAcquireReceipt {
+            schema_version: 4,
+            status: harn_hostlib::HostLeaseAcquireStatus::Deferred,
+            observed_at_ms: 31_000,
+            waited_ms: 31_000,
+            handle: None,
+            defer: Some(harn_hostlib::HostLeaseDeferReceipt {
+                host: "fixture".to_string(),
+                resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
+                domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
+                deferred_reason: harn_hostlib::HostLeaseDeferReason::Contended,
+                observed_at_ms: 31_000,
+                next_wake_at_ms: None,
+                deadline_at_ms: Some(90_000),
+                active: Some(harn_hostlib::HostLeaseHandle {
+                    schema_version: 4,
+                    host: "fixture".to_string(),
+                    resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
+                    domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
+                    execution_context: None,
+                    lease_id: "opaque".to_string(),
+                    owner: "compile-lane".to_string(),
+                    priority_class: harn_hostlib::HostLeasePriorityClass::Measurement,
+                    acquired_at_ms: 0,
+                    updated_at_ms: 0,
+                    expires_at_ms: None,
+                    owner_pid: None,
+                    owner_process_identity: None,
+                    reason: None,
+                    metadata: BTreeMap::new(),
+                }),
+            }),
+            recovered_stale_lease: false,
+            recovered: None,
+            queue: Some(harn_hostlib::HostLeaseQueueEvidence {
+                waiter_id: "waiter".to_string(),
+                requested_at_ms: 0,
+                position: 2,
+                predecessor_waiter_id: Some("first".to_string()),
+            }),
+        };
+
+        assert_eq!(
+            format_lease_wait(&receipt),
+            "Waiting for rust-heavy lease held by compile-lane (queue position 2, elapsed 31.0s)"
+        );
+
+        let mut queued = receipt;
+        let queued_defer = queued.defer.as_mut().unwrap();
+        queued_defer.deferred_reason = harn_hostlib::HostLeaseDeferReason::Queued;
+        queued_defer.active = None;
+        assert_eq!(
+            format_lease_wait(&queued),
+            "Waiting for rust-heavy lease admission (queue position 2, elapsed 31.0s)"
+        );
+
+        let mut registry_busy = queued;
+        registry_busy.defer.as_mut().unwrap().deferred_reason =
+            harn_hostlib::HostLeaseDeferReason::RegistryBusy;
+        assert_eq!(
+            format_lease_wait(&registry_busy),
+            "Waiting for rust-heavy lease registry (queue position 2, elapsed 31.0s)"
+        );
+    }
 
     #[test]
     fn child_process_paths_strip_windows_drive_verbatim_prefixes() {

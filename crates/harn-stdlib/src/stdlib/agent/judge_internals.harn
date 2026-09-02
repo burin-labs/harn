@@ -921,3 +921,64 @@ pub fn __completion_gate_apply_budget(verdict: dict, vetoes_used: int, max_vetoe
   }
   return {verdict: verdict, charge: true}
 }
+
+// A judge that cannot be STARTED is a scheduling fact the caller already
+// terminates on. A judge that ran and could not be READ is different, and it is
+// the one this bound exists for: its reply may be malformed for a turn and
+// well-formed on the next attempt.
+//
+// One re-ask, not more. The sibling deadline path retries zero times, and a
+// judge whose reply does not parse is usually broken the same way every time,
+// so further attempts buy a recovery that rarely happens at the price of real
+// provider calls on every run that is already failing.
+const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
+
+/**
+ * True when the judge never produced a reading because it could not run inside
+ * its deadline, as opposed to running and returning something unreadable.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_checkpoint_unavailable(checkpoint)
+ */
+pub fn __judge_checkpoint_unavailable(checkpoint: dict) -> bool {
+  return checkpoint?.status == "admission_refused"
+    || checkpoint?.status == "timeout"
+    || checkpoint?.error_category == "timeout"
+    || checkpoint?.error?.status == "timeout"
+}
+
+/**
+ * Run a judge checkpoint, retrying a reply that could not be read up to a fixed
+ * bound.
+ *
+ * An exit authority that cannot answer must still be able to end a run. Before
+ * this bound existed, an unreadable reply was recorded and then read as
+ * `continue`, so a judge that never parsed could veto forever and the run could
+ * only stop by exhausting an unrelated budget. Retrying is bounded and the
+ * caller turns exhaustion into a typed terminal.
+ *
+ * A checkpoint that succeeded, or that could not be started at all, returns on
+ * the first attempt: neither is retryable here.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_run_checkpoint_bounded(harness, request)
+ */
+pub fn __judge_run_checkpoint_bounded(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+) -> JudgeCheckpointRun {
+  let ran = __judge_run_checkpoint(harness, request)
+  let attempt = 1
+  while attempt < __COMPLETION_JUDGE_ERROR_ATTEMPTS {
+    if (ran.checkpoint?.ok ?? false) || __judge_checkpoint_unavailable(ran.checkpoint) {
+      return ran
+    }
+    ran = __judge_run_checkpoint(harness, request)
+    attempt = attempt + 1
+  }
+  return ran
+}

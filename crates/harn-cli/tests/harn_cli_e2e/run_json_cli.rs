@@ -761,6 +761,128 @@ pipeline main(_task: unknown) {
     );
 }
 
+fn run_json_launch_error(script: &std::path::Path) -> (i32, Value) {
+    let output = Command::new(binary_path())
+        .arg("run")
+        .arg("--json")
+        .arg(script)
+        .env("HARN_EVENT_LOG_BACKEND", "memory")
+        .output()
+        .expect("spawn failing harn run --json");
+    let exit_code = output.status.code().expect("run must exit normally");
+    let lines = parse_ndjson(&output.stdout);
+    let event = lines
+        .into_iter()
+        .find(|line| line["data"]["event_type"] == "error")
+        .unwrap_or_else(|| panic!("missing terminal error event, stderr={:?}", output.stderr));
+    (exit_code, event)
+}
+
+fn structured_import_class(event: &Value) -> &str {
+    assert_eq!(event["data"]["error"]["code"], "compile_error");
+    let details = &event["data"]["error"]["details"];
+    assert_eq!(details["kind"], "import_failure");
+    details["failure_class"]
+        .as_str()
+        .expect("typed failure_class")
+}
+
+fn assert_harn_build_identity(details: &Value) {
+    assert_eq!(details["harn_version"], env!("CARGO_PKG_VERSION"));
+    let revision = env!("HARN_BUILD_REVISION");
+    if revision.is_empty() {
+        assert!(details["harn_revision"].is_null());
+    } else {
+        assert_eq!(details["harn_revision"], revision);
+    }
+}
+
+#[test]
+fn run_json_projects_typed_import_failures_without_message_parsing() {
+    let missing_symbol = tempfile::TempDir::new().expect("missing-symbol project");
+    write_script(
+        missing_symbol.path(),
+        "lib.harn",
+        "pub fn present() -> int { return 1 }\n",
+    );
+    let entry = write_script(
+        missing_symbol.path(),
+        "main.harn",
+        "import { absent } from \"./lib\"\npipeline main() { return 0 }\n",
+    );
+    let (exit_code, event) = run_json_launch_error(&entry);
+    assert_eq!(exit_code, 1);
+    assert_eq!(structured_import_class(&event), "missing_imported_symbol");
+    let details = &event["data"]["error"]["details"];
+    assert_eq!(details["module"], "./lib");
+    assert_eq!(details["symbol"], "absent");
+    assert_eq!(details["source"], "lib.harn");
+    assert_harn_build_identity(details);
+
+    let broken_module = tempfile::TempDir::new().expect("broken-module project");
+    write_script(
+        broken_module.path(),
+        "lib.harn",
+        "pub fn broken( {\n  return 1\n}\n",
+    );
+    let entry = write_script(
+        broken_module.path(),
+        "main.harn",
+        "import { broken } from \"./lib\"\npipeline main() { return 0 }\n",
+    );
+    let (exit_code, event) = run_json_launch_error(&entry);
+    assert_eq!(exit_code, 1);
+    assert_eq!(
+        structured_import_class(&event),
+        "imported_module_compile_failure"
+    );
+    let details = &event["data"]["error"]["details"];
+    assert_eq!(details["module"], "./lib");
+    assert!(details["symbol"].is_null());
+    assert_eq!(details["source"], "lib.harn");
+    assert_harn_build_identity(details);
+
+    let unresolved_module = tempfile::TempDir::new().expect("unresolved-module project");
+    let entry = write_script(
+        unresolved_module.path(),
+        "main.harn",
+        "import { absent } from \"./missing\"\npipeline main() { return 0 }\n",
+    );
+    let (exit_code, event) = run_json_launch_error(&entry);
+    assert_eq!(exit_code, 1);
+    assert_eq!(structured_import_class(&event), "unresolved_module");
+    let details = &event["data"]["error"]["details"];
+    assert_eq!(details["module"], "./missing");
+    assert_eq!(details["symbol"], "absent");
+    assert_eq!(details["source"], "main.harn");
+    assert_harn_build_identity(details);
+}
+
+#[test]
+fn run_json_keeps_non_import_launch_failures_out_of_import_classes() {
+    let entry_parse = tempfile::TempDir::new().expect("entry-parse project");
+    let entry = write_script(
+        entry_parse.path(),
+        "main.harn",
+        "pipeline main( {\n  return 0\n}\n",
+    );
+    let (exit_code, event) = run_json_launch_error(&entry);
+    assert_eq!(exit_code, 1);
+    assert_eq!(event["data"]["error"]["code"], "compile_error");
+    assert!(event["data"]["error"]["details"].is_null());
+
+    let package_failure = tempfile::TempDir::new().expect("package-failure project");
+    let entry = write_script(
+        package_failure.path(),
+        "main.harn",
+        "import { absent } from \"does_not_exist/value\"\npipeline main() { return 0 }\n",
+    );
+    let (exit_code, event) = run_json_launch_error(&entry);
+    assert_eq!(exit_code, harn_cli::exit::RUN_SETUP_FAILURE);
+    assert_eq!(event["data"]["error"]["code"], "package_materialization");
+    assert!(event["data"]["error"]["details"].is_null());
+}
+
 #[test]
 fn json_schemas_includes_run_command() {
     // E2.2 exit criterion: the `run` schema must register in the

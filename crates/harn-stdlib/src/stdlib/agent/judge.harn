@@ -42,9 +42,10 @@ import {
   __completion_arbitration_converts,
   __completion_judge_gap_class,
   __completion_verification_state_read,
+  __judge_checkpoint_unavailable,
   __judge_emit_decision,
   __judge_emit_started,
-  __judge_run_checkpoint,
+  __judge_run_checkpoint_bounded,
 } from "std/agent/judge_internals"
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
 pub import {
@@ -813,7 +814,7 @@ fn __judge_invoke_structured(
   )
   const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
   const user = completion_judge_user_prompt(harness.fs, payload)
-  const ran = __judge_run_checkpoint(
+  const ran = __judge_run_checkpoint_bounded(
     harness,
     {
       judge_cfg: judge_cfg,
@@ -828,10 +829,7 @@ fn __judge_invoke_structured(
   const checkpoint = ran.checkpoint
   const duration_ms = ran.duration_ms
   if !checkpoint.ok {
-    const unavailable = checkpoint?.status == "admission_refused"
-      || checkpoint?.status == "timeout"
-      || checkpoint?.error_category == "timeout"
-      || checkpoint?.error?.status == "timeout"
+    const unavailable = __judge_checkpoint_unavailable(checkpoint)
     if unavailable {
       const judge_outcome = if checkpoint?.status == "admission_refused" {
         "admission_refused"
@@ -861,16 +859,26 @@ fn __judge_invoke_structured(
     }
     // A completion judge is an authority gate, not an advisory reviewer. If it
     // cannot decide, the claim remains unverified.
+    //
+    // The reply was retried to its bound and still could not be read, so this
+    // authority is spent. It terminates on its own reason rather than vetoing:
+    // a `continue` here is a veto no turn can answer, which leaves the run to
+    // die on an unrelated budget with an unrelated reason. `terminal_judge_reason`
+    // is the same field the deadline path above already sets, so both exit
+    // authorities read this stop through the vocabulary they already share.
     return {
-      vetoed: true,
+      vetoed: false,
+      confirm: false,
       feedback: to_string(checkpoint.error),
-      verdict: "continue",
+      verdict: "unavailable",
       reasoning: to_string(checkpoint.error),
-      next_step: to_string(checkpoint.error),
+      next_step: "",
       judge_duration_ms: duration_ms,
       source: "llm",
       judge_outcome: "error",
       reason: "completion_judge_error",
+      terminal_judge_reason: "completion_judge_error",
+      terminal_evidence_preserved: true,
       admission: ran.admission,
       typed_checkpoint: checkpoint,
     }

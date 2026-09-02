@@ -48,10 +48,16 @@ HARN_CHROMEDRIVER ?=
 #        make all           (sequential, also works)
 all: fmt
 	@$(HARN_BIN_ASSIGN); \
+	build_freshness_id="$${HARN_BUILD_FRESHNESS_ID:-}"; \
+	if [ -z "$$build_freshness_id" ] && [ -z "$(strip $(HARN_BIN))" ]; then \
+		build_freshness_id="$$(HARN_BIN="$$harn_bin" ./scripts/harn_bin.sh --print-build-freshness)" || exit 1; \
+	fi; \
+	if [ -n "$$build_freshness_id" ]; then export HARN_BUILD_FRESHNESS_ID="$$build_freshness_id"; else unset HARN_BUILD_FRESHNESS_ID; fi; \
 	stable_root="$$(mktemp -d "$${TMPDIR:-/tmp}/harn-all-bin.XXXXXX")" || exit 1; \
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
-	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-vm-exposures portal-check
+	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-vm-exposures portal-check || exit 1; \
+	if [ -z "$(strip $(HARN_BIN))" ]; then HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt; fi
 
 check: all
 
@@ -852,8 +858,9 @@ check-typescript-protocol-binding:
 	@set -eu; \
 		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-ts-binding.XXXXXX"); \
 		trap 'rm -rf "$$tmp"' EXIT; \
-		./node_modules/.bin/tsc --strict --module node16 --moduleResolution node16 --target es2022 --rootDir . --outDir "$$tmp" spec/protocol-artifacts/harn-protocol.ts scripts/tests/protocol_binding_session_recap.ts; \
-		node "$$tmp/scripts/tests/protocol_binding_session_recap.js" spec/protocol-artifacts/fixtures/round_trip.json
+		./node_modules/.bin/tsc --strict --module node16 --moduleResolution node16 --target es2022 --rootDir . --outDir "$$tmp" spec/protocol-artifacts/harn-protocol.ts spec/protocol-artifacts/harn-tools.ts scripts/tests/protocol_binding_session_recap.ts scripts/tests/tool_catalog_contract.ts; \
+		node "$$tmp/scripts/tests/protocol_binding_session_recap.js" spec/protocol-artifacts/fixtures/round_trip.json; \
+		node "$$tmp/scripts/tests/tool_catalog_contract.js"
 
 check-swift-protocol-binding:
 	@set -eu; \

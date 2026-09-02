@@ -135,6 +135,21 @@ pub enum HostLeaseRunStartFailure {
     ReceiptTransition,
 }
 
+impl HostLeaseRunStartFailure {
+    /// Stable diagnostic spelling shared by CLI and receipt projections.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkerArguments => "worker-arguments",
+            Self::WorkerSpawn => "worker-spawn",
+            Self::WorkerExitedBeforeAcquire => "worker-exited-before-acquire",
+            Self::WorkerContextMismatch => "worker-context-mismatch",
+            Self::ResourceAcquire => "resource-acquire",
+            Self::WorkerContract => "worker-contract",
+            Self::ReceiptTransition => "receipt-transition",
+        }
+    }
+}
+
 /// Stable category for a failure after acquisition but before execution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -149,6 +164,19 @@ pub enum HostLeaseRunLaunchFailure {
     ProcessSupervision,
     /// The platform has no proven supervised-workload implementation.
     UnsupportedPlatform,
+}
+
+impl HostLeaseRunLaunchFailure {
+    /// Stable diagnostic spelling shared by CLI and receipt projections.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ArgumentEncoding => "argument-encoding",
+            Self::ProcessReplace => "process-replace",
+            Self::ProcessSpawn => "process-spawn",
+            Self::ProcessSupervision => "process-supervision",
+            Self::UnsupportedPlatform => "unsupported-platform",
+        }
+    }
 }
 
 /// Lifecycle state for one supervised workload.
@@ -184,6 +212,14 @@ pub enum HostLeaseRunState {
         observed_at_ms: i64,
         /// Stable failure category without raw command or path text.
         error: HostLeaseRunStartFailure,
+        /// Worker process status when the supervisor observed its death.
+        ///
+        /// Present only for [`HostLeaseRunStartFailure::WorkerExitedBeforeAcquire`],
+        /// where the supervisor reaped a worker that wrote no terminal state of
+        /// its own. Without it a signalled worker is indistinguishable from one
+        /// that returned early, and every cause collapses into one label.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worker_exit: Option<HostLeaseProcessExit>,
     },
     /// The supervisor cancelled the worker before it acquired the resource.
     CancelledBeforeStart {

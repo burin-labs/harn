@@ -90,3 +90,75 @@ pipeline test_positive_harn_files_skips_error_fixtures_and_other_roots(
     },
   )
 }
+
+@test
+pipeline test_parse_gate_builds_and_consumes_library_only_in_owned_temp(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const grammar = path_join(root, "tree-sitter-harn")
+      const wrapper = path_join(grammar, "scripts/tree-sitter-cli.sh")
+      write_file(harness.fs, root, "tree-sitter-harn/grammar.js", "module.exports = {}\n")
+      write_file(harness.fs, root, "tree-sitter-harn/grammar/keywords.js", "module.exports = []\n")
+      write_file(harness.fs, root, "tree-sitter-harn/src/parser.c", "/* generated */\n")
+      write_file(harness.fs, root, "tree-sitter-harn/src/scanner.c", "/* scanner */\n")
+      write_file(harness.fs, root, "conformance/tests/good.harn", "let x = 1\n")
+      write_file(
+        harness.fs,
+        root,
+        "tree-sitter-harn/scripts/tree-sitter-cli.sh",
+        """
+#!/usr/bin/env bash
+set -euo pipefail
+command="$1"
+shift
+case "$command" in
+  generate)
+    printf '/* regenerated */\n' > src/parser.c
+    ;;
+  build)
+    output=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--output" ]; then
+        shift
+        output="$1"
+      fi
+      shift
+    done
+    [ -n "$output" ]
+    mkdir -p "$(dirname "$output")"
+    printf 'compiled\n' > "$output"
+    printf '%s\n' "$output" > build-output.txt
+    ;;
+  parse)
+    library=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--lib-path" ]; then
+        shift
+        library="$1"
+      fi
+      shift
+    done
+    test -f "$library"
+    printf '%s\n' "$library" > parse-library.txt
+    ;;
+  *)
+    exit 97
+    ;;
+esac
+""",
+      )
+      const chmod = harness.process.run({program: "chmod", args: ["+x", wrapper]})
+      assert_eq(chmod.success, true)
+      assert_eq(verify_tree_sitter_parse(harness, root, true), 0)
+      const built = harness.fs.read_text(path_join(grammar, "build-output.txt")).trim()
+      const parsed = harness.fs.read_text(path_join(grammar, "parse-library.txt")).trim()
+      assert_eq(parsed, built)
+      assert_eq(built.starts_with(grammar), false)
+      assert_eq(harness.fs.exists(built), false)
+    },
+  )
+}

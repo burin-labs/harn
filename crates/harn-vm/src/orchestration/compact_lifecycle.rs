@@ -45,7 +45,7 @@ use super::{
     compaction_policy_metadata_fields, estimate_message_tokens, new_compaction_receipt_id,
     parse_compact_strategy, run_lifecycle_hooks_with_control_with_ctx,
     run_lifecycle_hooks_with_ctx, AutoCompactConfig, CompactStrategy, CompactionReceipt,
-    HookControl, HookEvent, COMPACTION_RECEIPT_SCHEMA_VERSION,
+    CompactionThresholdSource, HookControl, HookEvent, COMPACTION_RECEIPT_SCHEMA_VERSION,
 };
 
 /// Identifies the call-site that initiated compaction. The string form is
@@ -329,6 +329,18 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
 
     let estimated_tokens_before = estimate_message_tokens(messages);
     let original_message_count = messages.len();
+    // Request intent must be captured before a lifecycle hook mutates the
+    // effective config. Otherwise a successful Modify makes the receipt claim
+    // that the applied strategy was also the original request.
+    let requested_strategy = config
+        .request_provenance
+        .requested_strategy
+        .clone()
+        .unwrap_or_else(|| config.policy_strategy.clone());
+    let mut threshold_source = config.request_provenance.threshold_source.or_else(|| {
+        (lifecycle.trigger == CompactionTrigger::Threshold)
+            .then_some(CompactionThresholdSource::RuntimeConfig)
+    });
 
     let fires_hooks = lifecycle.fire_hooks;
 
@@ -346,7 +358,11 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
             .await?
         {
             HookControl::Block { .. } => return Ok(None),
-            HookControl::Modify { payload } => apply_pre_modify_overrides(config, &payload)?,
+            HookControl::Modify { payload } => {
+                if apply_pre_modify_overrides(config, &payload)? {
+                    threshold_source = Some(CompactionThresholdSource::PreCompactModify);
+                }
+            }
             HookControl::Allow | HookControl::Decision { .. } => {}
         }
     }
@@ -402,6 +418,10 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         reason: lifecycle.trigger.as_str().to_string(),
         strategy: config.policy_strategy.clone(),
         engine_strategy: compact_strategy_name(&engine_strategy).to_string(),
+        requested_strategy: Some(requested_strategy),
+        resolved_threshold_tokens: threshold_source.map(|_| config.token_threshold),
+        threshold_source: threshold_source.map(|source| source.as_str().to_string()),
+        hard_limit_tokens: config.hard_limit_tokens,
         archived_messages,
         estimated_tokens_before,
         estimated_tokens_after,
@@ -628,16 +648,18 @@ fn build_hook_payload(
 fn apply_pre_modify_overrides(
     config: &mut AutoCompactConfig,
     payload: &JsonValue,
-) -> Result<(), VmError> {
+) -> Result<bool, VmError> {
     let Some(map) = payload.as_object() else {
-        return Ok(());
+        return Ok(false);
     };
+    let mut threshold_modified = false;
     if let Some(value) = map.get("keep_last").and_then(JsonValue::as_u64) {
         config.keep_last = value as usize;
     }
     if let Some(value) = map.get("target_tokens").and_then(JsonValue::as_u64) {
         config.token_threshold = value as usize;
         config.hard_limit_tokens = Some(value as usize);
+        threshold_modified = true;
     }
     if let Some(value) = map.get("strategy").or_else(|| map.get("engine_strategy")) {
         if let Some(name) = value.as_str() {
@@ -646,7 +668,7 @@ fn apply_pre_modify_overrides(
             config.compact_strategy = strategy;
         }
     }
-    Ok(())
+    Ok(threshold_modified)
 }
 
 fn build_event_metadata(

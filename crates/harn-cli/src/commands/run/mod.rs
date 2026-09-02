@@ -18,9 +18,9 @@ use harn_parser::DiagnosticSeverity;
 mod chunk_loading;
 pub(crate) mod environment;
 mod eval_source;
-mod evidence;
 mod explain_cost;
 pub mod harnpack;
+mod import_failure;
 mod interrupts;
 pub mod json_events;
 mod lifecycle;
@@ -33,7 +33,7 @@ mod watch;
 
 use outcome::{
     finalize_harnpack_dry_run, finalize_harnpack_error, finalize_run_error,
-    render_return_value_error, JsonRunSession,
+    finalize_run_error_with_details, render_return_value_error, JsonRunSession,
 };
 pub(crate) mod sandbox;
 
@@ -46,7 +46,6 @@ use self::eval_source::create_eval_temp_file;
 pub(crate) use self::eval_source::prepare_eval_temp_file;
 #[cfg(test)]
 use self::eval_source::{eval_source_for_code, split_eval_header};
-use self::evidence::persist_execution_evidence;
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::interrupts::{
     install_signal_shutdown_handler, start_run_deadline_watchdog, RunDeadlineGuard,
@@ -428,13 +427,13 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
     };
 
     let mut had_type_error = false;
-    let type_diagnostics = match typecheck_with_imports(
+    let typecheck = match typecheck_with_imports(
         &program,
         Path::new(path),
         &source,
         ProjectContextMode::Project,
     ) {
-        Ok(diagnostics) => diagnostics,
+        Ok(typecheck) => typecheck,
         Err(error) => {
             stderr.push_str(&format!("error: {error}\n"));
             return RunOutcome {
@@ -444,12 +443,20 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
             };
         }
     };
-    for diag in &type_diagnostics {
+    for diag in &typecheck.diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
             had_type_error = true;
         }
         stderr.push_str(&rendered);
+    }
+    if let Some(failure) = typecheck.failure {
+        stderr.push_str(&failure.rendered);
+        return RunOutcome {
+            stdout,
+            stderr,
+            exit_code: crate::exit::PROGRAM_FAILURE,
+        };
     }
     if had_type_error {
         return RunOutcome {
@@ -931,7 +938,8 @@ async fn execute_run_inner_scoped(
         Ok(loaded) => loaded,
         Err(failure) => {
             let message = stderr.clone();
-            return finalize_run_error(
+            let details = failure.details();
+            return finalize_run_error_with_details(
                 stdout,
                 stderr,
                 json_session,
@@ -946,6 +954,7 @@ async fn execute_run_inner_scoped(
                 failure.classification(),
                 failure.diagnostic_code(),
                 message,
+                details,
             );
         }
     };
@@ -1232,21 +1241,42 @@ async fn execute_run_inner_scoped(
         .await;
     let execution_finished_at = harn_vm::clock::system_now_rfc3339();
     let evidence_status = match &execution {
-        RunExecution::Terminal(terminal) if terminal.exit_code() == 0 => "completed",
-        RunExecution::Terminal(_) | RunExecution::Failed(_) => "failed",
+        RunExecution::Terminal(terminal) if terminal.exit_code() == 0 => {
+            harn_vm::orchestration::ExecutionRecordStatus::Completed
+        }
+        RunExecution::Terminal(_) | RunExecution::Failed(_) => {
+            harn_vm::orchestration::ExecutionRecordStatus::Failed
+        }
     };
-    let persisted_evidence = match persist_execution_evidence(
+    let flight_recording = flight_recorder.enabled.then(|| {
+        flight_recorder.out.as_deref().map_or(
+            harn_vm::orchestration::FlightRecordingStorage::Managed {
+                retain_files: flight_recorder.retain_files,
+            },
+            |output| harn_vm::orchestration::FlightRecordingStorage::Custom { output },
+        )
+    });
+    let persisted_evidence = match harn_vm::orchestration::persist_execution_record(
         &vm,
-        &flight_recorder,
-        path,
-        store_base,
-        evidence_status,
-        execution_started_at,
-        execution_finished_at,
+        harn_vm::orchestration::ExecutionRecordRequest {
+            source_path: Path::new(path),
+            store_base,
+            adapter: "harn_cli",
+            status: evidence_status,
+            started_at: &execution_started_at,
+            finished_at: &execution_finished_at,
+            flight_recording,
+        },
     ) {
-        Ok(evidence) => evidence,
+        Ok(evidence) => evidence.flight_recording,
         Err(error) => {
-            for diagnostic in &error.diagnostics {
+            if let Some(path) = error
+                .flight_recording()
+                .and_then(|recording| recording.path.as_deref())
+            {
+                stderr.push_str(&format!("[harn] flight recording: {path}\n"));
+            }
+            for diagnostic in error.diagnostics() {
                 stderr.push_str(&format!("error: {diagnostic}\n"));
             }
             return finalize_run_error(
@@ -1262,8 +1292,8 @@ async fn execute_run_inner_scoped(
                 harn_vm::tracing::peek_spans().len() as u64,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
                 crate::exit::RunFailure::Program,
-                error.stage,
-                error.summary,
+                error.stage().code(),
+                error.summary(),
             );
         }
     };

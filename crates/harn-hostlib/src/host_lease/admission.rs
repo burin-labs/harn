@@ -1,5 +1,32 @@
 use super::*;
 
+const WAIT_PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct WaitProgressSchedule {
+    next_due: Duration,
+}
+
+impl WaitProgressSchedule {
+    pub(super) fn new() -> Self {
+        Self {
+            next_due: Duration::ZERO,
+        }
+    }
+
+    pub(super) fn should_report(&mut self, elapsed: Duration) -> bool {
+        if elapsed < self.next_due {
+            return false;
+        }
+        self.next_due = elapsed.saturating_add(WAIT_PROGRESS_INTERVAL);
+        true
+    }
+
+    pub(super) fn until_next(self, elapsed: Duration) -> Duration {
+        self.next_due.saturating_sub(elapsed)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct WaiterIdentity {
     pub(super) waiter_id: String,
