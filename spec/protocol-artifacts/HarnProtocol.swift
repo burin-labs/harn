@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static let artifactVersion = "0.10.127-dev"
+    public static let artifactVersion = "0.10.128-dev"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let toolPermissionDecisionSchema = "harn.tool_permission_decision.v1"
     public static let toolPermissionActivitySchema = "harn.tool_permission_activity.v1"
