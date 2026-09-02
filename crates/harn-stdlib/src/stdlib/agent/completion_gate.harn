@@ -48,7 +48,7 @@ pub type CompletionFacts = {
 pub type CompletionGateContext = {
   session_id: string,
   task: string,
-  obligations?: CompletionObligations?,
+  obligations: CompletionObligations,
   stop_reason: string,
   text: string,
   messages: list,
@@ -82,7 +82,8 @@ pub type CompletionVetoCombiner = fn(list<CompletionVerifyVerdict>) -> Completio
  * Host-fact callbacks (all optional):
  * - `facts(ctx) -> CompletionFacts` — the primary fact supplier. `ctx` carries
  *   `{session_id, task, obligations, stop_reason, text, messages}`. `task` is
- *   the original task; `obligations` adds accepted mid-run user steering.
+ *   the original task; the always-present `obligations` record adds accepted
+ *   mid-run user steering and has an empty `steers` list when none was accepted.
  * - `classify_write(path, diff?) -> WriteKind` — classifies a single write when
  *   `facts` returns a `writes` list without counts.
  * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when

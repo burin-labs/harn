@@ -14,26 +14,28 @@ import {
 const TASK = "Implement one bounded improvement and verify it."
 
 fn __steer_aware_facts(ctx: CompletionGateContext) -> CompletionFacts? {
-  const obligations = ctx.obligations ?? {original_task: "", steers: []}
-  assert(ctx.obligations != nil, "the gate supplies typed completion obligations")
+  const obligations = ctx.obligations
   assert_eq(obligations.schema, "harn.completion_obligations.v1")
   assert_eq(obligations.original_task, TASK)
   assert_eq(ctx.task, TASK)
   assert_eq(len(obligations.steers), 2)
-  assert_eq(obligations.steers[0].message_id, "steer-finish")
-  assert_eq(obligations.steers[0].mode, "finish_step")
-  assert_eq(obligations.steers[0].content, "Do not change source; inspect and report instead.")
-  assert_eq(obligations.steers[1].message_id, "steer-interrupt")
-  assert_eq(obligations.steers[1].mode, "interrupt_immediate")
-  assert_eq(obligations.steers[1].content, "Report what you found and stop now.")
+  const first_steer = obligations.steers[0]
+  const second_steer = obligations.steers[1]
+  assert(first_steer != nil)
+  assert(second_steer != nil)
+  assert_eq(first_steer.message_id, "steer-finish")
+  assert_eq(first_steer.mode, "finish_step")
+  assert_eq(first_steer.content, "Do not change source; inspect and report instead.")
+  assert_eq(second_steer.message_id, "steer-interrupt")
+  assert_eq(second_steer.mode, "interrupt_immediate")
+  assert_eq(second_steer.content, "Report what you found and stop now.")
   // The accepted steers withdrew the original write requirement. The host
   // supplies domain facts; the gate owns delivering the amended target.
   return {requires_write: false, source_write_count: 0}
 }
 
 fn __unsteered_facts(ctx: CompletionGateContext) -> CompletionFacts? {
-  const obligations = ctx.obligations ?? {original_task: "", steers: []}
-  assert(ctx.obligations != nil, "even a steer-free run has an explicit obligation record")
+  const obligations = ctx.obligations
   assert_eq(obligations.schema, "harn.completion_obligations.v1")
   assert_eq(obligations.original_task, TASK)
   assert_eq(len(obligations.steers), 0)
