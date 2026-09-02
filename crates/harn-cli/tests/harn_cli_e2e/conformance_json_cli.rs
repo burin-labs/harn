@@ -378,7 +378,7 @@ fn conformance_still_exits_zero_when_at_least_one_test_runs() {
     write_fixture(temp.path(), "pass.harn", PASSING_SOURCE, "true\n");
     // A library module alongside it: having no sibling is normal and must not
     // fail a run that did execute something.
-    write_source_without_expectation(temp.path(), "_common.harn", PASSING_SOURCE);
+    write_source_without_expectation(temp.path(), "_common.harn", "fn helper() { return nil }\n");
 
     let output = run_conformance(temp.path(), &[]);
 
@@ -389,6 +389,38 @@ fn conformance_still_exits_zero_when_at_least_one_test_runs() {
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed, 0 failed"));
+}
+
+/// A live sibling used to hide an unasserted entry fixture: the suite exited
+/// zero, reported one pass and zero skips, and never named the omitted file.
+#[test]
+fn conformance_fails_when_a_mixed_selection_contains_an_unasserted_entry_fixture() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    write_fixture(temp.path(), "tests/pass.harn", PASSING_SOURCE, "true\n");
+    write_source_without_expectation(
+        temp.path(),
+        "tests/_common.harn",
+        "fn helper() { return nil }\n",
+    );
+    write_source_without_expectation(temp.path(), "tests/orphan.harn", PASSING_SOURCE);
+
+    for args in [&[][..], &["--parallel", "--jobs", "2"][..]] {
+        let output = run_conformance(temp.path(), args);
+
+        assert!(
+            !output.status.success(),
+            "an unasserted entry fixture must fail beside a passing case; stdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("tests/orphan.harn: missing .expected, .error, or .lint file"));
+        assert!(
+            !stdout.contains("tests/_common.harn"),
+            "library modules remain inert: {stdout}"
+        );
+        assert!(stdout.contains("1 passed, 1 failed, 0 skipped, 2 total"));
+    }
 }
 
 /// An over-narrow filter is the other way a run goes vacuous, and the one the

@@ -55,15 +55,14 @@ jobs:
     name: Public metadata privacy
     runs-on: ubuntu-latest
     steps:
-      - name: Skip merge-group replay
-        if: github.event_name == 'merge_group'
-        run: echo "::notice title=Public metadata privacy::merge_group event is a no-op pass."
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
+        with:
+          # Commit messages are public PR metadata. The scanner fails closed if
+          # either range endpoint is absent; keep the exact range available for
+          # pull-request and merge-group events.
+          fetch-depth: 0
 
-      - name: Scan pull-request title and body
-        if: github.event_name == 'pull_request'
+      - name: Scan public metadata
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: ./scripts/check_pr_metadata_privacy.sh

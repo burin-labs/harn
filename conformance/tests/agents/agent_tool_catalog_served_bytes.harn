@@ -1,0 +1,215 @@
+// The falsifier for #7767 and #7768: the tool catalog the model is actually
+// served has to get smaller when a tool declares `compact`, and a deferred
+// tool has to stop counting as resident.
+//
+// Both issues were opened *because* a unit test of a helper would have passed
+// while the product served the full text: `compact` was collected, documented,
+// and read by no renderer, and the reporter's measurement of a consumer's
+// served bytes moved by exactly zero when all 32 flags were flipped. So this
+// asserts the same receipt that measurement read —
+// `served_context.system_prompt_bytes` and `context_token_breakdown` off a
+// real `provider_call_request` in a real agent transcript — rather than
+// calling a summarizer and checking its return value.
+//
+// Every comparison here is a before/after through one assembly path, with the
+// other run as its own control: the two registries differ only in the flag.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { read_jsonl } from "std/jsonl"
+import { llm_text, with_llm_script } from "std/testing"
+
+// Long enough that dropping the tail is unmistakable, and carried by every
+// tool so the saving is larger than any single-token estimator wobble.
+const TAIL = "This second paragraph is deliberately verbose so a served-bytes "
+  + "measurement has something to lose. It repeats the tool's contract at "
+  + "length, describes when not to call it, and lists caveats that a compact "
+  + "listing has no room for."
+
+fn describe(name: string) -> string {
+  return "Return a deterministic " + name + " result for this turn. " + TAIL
+}
+
+/**
+ * Three tools that differ only in the flags under test.
+ *
+ * `deferred` marks two of the three: an all-deferred list is rejected
+ * upstream, and a resident sibling is what makes the deferred split legible
+ * as a split rather than a whole-array move.
+ */
+fn registry_with(compact: bool, deferred: bool) {
+  let tools = tool_registry()
+  const names = ["alpha_tool", "beta_tool", "gamma_tool"]
+  for name in names {
+    tools = tool_define(
+      tools,
+      name,
+      describe(name),
+      {
+        compact: compact,
+        defer_loading: deferred && name != "gamma_tool",
+        handler: { _args -> return "ok" },
+        parameters: {},
+        returns: {type: "string"},
+        annotations: {kind: "read"},
+      },
+    )
+  }
+  return tools
+}
+
+/** The `provider_call_request` receipt from one real agent turn. */
+fn served_request(
+  harness: Harness,
+  tools: ToolRegistry,
+  tool_format: string,
+  provider: string,
+  model: string,
+) -> dict {
+  const dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-tool-catalog-bytes-" + harness.random.uuid(),
+  )
+  const opts: AgentSpec = {
+    provider: provider,
+    model: model,
+    tools: tools,
+    tool_format: tool_format,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 1,
+    session_id: "tool-catalog-bytes-" + harness.random.uuid(),
+    llm_transcript_dir: dir,
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("done ##DONE##")],
+    { -> agent_loop(harness, "Report the catalog.", "You are an agent.", opts) },
+  )
+  const records = read_jsonl(harness.fs, path_join(dir, "llm_transcript.jsonl"), {strict: true})
+  const requests = records.filter({ record -> record.type == "provider_call_request" })
+  // A run that sent nothing would let every comparison below pass vacuously.
+  require len(requests) >= 1, "the turn must have produced a provider_call_request receipt"
+  harness.fs.delete(dir)
+  return requests[0]
+}
+
+/**
+ * One segment's token count, or a failure.
+ *
+ * Returning a sentinel for a missing segment is how a renamed segment turns
+ * into a passing comparison of two absences, so a missing id fails here.
+ */
+fn segment_tokens(request: dict, id: string) -> int {
+  const found = request.context_token_breakdown.segments.filter({ segment -> segment.id == id })
+  require len(found) == 1,
+    "exactly one `" + id + "` segment must exist, saw "
+    + to_string(len(found))
+  return found[0].tokens
+}
+
+pipeline main(harness: Harness) {
+  // ---------------------------------------------------------------- #7767
+  // Text format: the catalog is rendered into the system prompt, so the
+  // saving lands in the bytes the reporter measured.
+  const text_full = served_request(harness, registry_with(false, false), "text", "mock", "mock")
+  const text_compact = served_request(harness, registry_with(true, false), "text", "mock", "mock")
+  const full_bytes = text_full.served_context.system_prompt_bytes
+  const compact_bytes = text_compact.served_context.system_prompt_bytes
+  // A measured zero on either side is a broken probe, not a saving.
+  require full_bytes > 0 && compact_bytes > 0,
+    "both runs must have served a non-empty system prompt"
+  require compact_bytes < full_bytes,
+    "declaring `compact` must shrink the served system prompt, the exact "
+    + "comparison that measured zero in #7767: full="
+    + to_string(full_bytes)
+    + " compact="
+    + to_string(compact_bytes)
+  // The saving is a dropped description tail, not a rounding difference.
+  require full_bytes - compact_bytes > len(TAIL),
+    "the compact listing must drop at least one tool's description tail, saved "
+    + to_string(full_bytes - compact_bytes)
+    + " bytes"
+  // Native format: the catalog ships in the tool array instead, a different
+  // renderer. #7767's fix has to reach both or the flag stays half honored.
+  harness.llm.provider_capabilities_install(
+    """
+[[provider.testcatalog]]
+model_match = "catalog-fixture-*"
+native_tools = true
+preferred_tool_format = "native"
+""",
+  )
+  defer {
+    harness.llm.provider_capabilities_clear()
+  }
+  const native_full = served_request(
+    harness,
+    registry_with(false, false),
+    "native",
+    "testcatalog",
+    "catalog-fixture-route",
+  )
+  const native_compact = served_request(
+    harness,
+    registry_with(true, false),
+    "native",
+    "testcatalog",
+    "catalog-fixture-route",
+  )
+  const full_tool_tokens = segment_tokens(native_full, "native_tool_schemas")
+  const compact_tool_tokens = segment_tokens(native_compact, "native_tool_schemas")
+  // Without a non-null read the comparison below cannot fail.
+  require full_tool_tokens > 0, "the native run must have sent tool schemas"
+  require compact_tool_tokens < full_tool_tokens,
+    "declaring `compact` must shrink the native tool schemas the model reads: "
+    + "full="
+    + to_string(full_tool_tokens)
+    + " compact="
+    + to_string(compact_tool_tokens)
+  // ---------------------------------------------------------------- #7768
+  // A deferred tool must leave the resident segment. Before the fix this
+  // moved zero, which reads identically to a change that never fired.
+  const native_deferred = served_request(
+    harness,
+    registry_with(false, true),
+    "native",
+    "testcatalog",
+    "catalog-fixture-route",
+  )
+  const deferred_tokens = segment_tokens(native_deferred, "deferred_tool_schemas")
+  const deferred_resident = segment_tokens(native_deferred, "native_tool_schemas")
+  require deferred_tokens > 0, "deferring two tools must put tokens in `deferred_tool_schemas`"
+  // The measured zero, meaningful only because the line above proved the same
+  // read can return non-zero through the same path.
+  require segment_tokens(native_full, "deferred_tool_schemas") == 0,
+    "a run that deferred nothing must report zero deferred tokens"
+  require deferred_resident < full_tool_tokens,
+    "the resident segment must lose what the deferred segment gained"
+  // Conservation belongs to the partition, not to two different requests.
+  // These are separate runs, and `defer_loading` travels on the wire, so the
+  // deferred run serializes to slightly more than the run that deferred
+  // nothing: 574 against 562 when this was written. Asserting those totals
+  // equal is unprovable, and the split it was meant to protect is already
+  // covered above by the resident segment shrinking and the deferred segment
+  // going non-zero against its own measured zero.
+  //
+  // What holds exactly is that every tool lands on one side of the split.
+  // Stated as a difference rather than as two literals, because the request
+  // also carries the injected completion tool, and pinning its presence here
+  // would make this case fail the day that injection changes for unrelated
+  // reasons.
+  const deferred_breakdown = native_deferred.context_token_breakdown
+  require deferred_breakdown.native_tool_count - deferred_breakdown.resident_tool_count == 2,
+    "exactly the two deferred tools must leave the resident set, saw "
+    + to_string(deferred_breakdown.native_tool_count)
+    + " sent and "
+    + to_string(deferred_breakdown.resident_tool_count)
+    + " resident"
+  require deferred_breakdown.resident_tool_count > 0,
+    "a run with every tool deferred is rejected upstream, so some tool must "
+    + "stay resident"
+  const full_breakdown = native_full.context_token_breakdown
+  require full_breakdown.resident_tool_count == full_breakdown.native_tool_count,
+    "with nothing deferred the two counts must agree"
+  harness.stdio.log("agent tool catalog served bytes test passed")
+}

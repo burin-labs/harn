@@ -531,6 +531,8 @@ run_lane_cpu_case() {
   local label="$1"
   local cpus="$2"
   local plan="${3:-parallel}"
+  local cargo_jobs="${4:-}"
+  local conformance_jobs="${5:-}"
   local state="$tmp_root/state-lanecpu-$label"
   local target="$tmp_root/target lanecpu $label"
   local build="$tmp_root/build lanecpu $label"
@@ -540,21 +542,28 @@ run_lane_cpu_case() {
   : > "$state/event-record"
   : > "$state/lane-env-record"
   set +e
-  HARN_RELEASE_ROOT="$release_root" \
-    HARN_BIN="$fake_harn" \
-    CARGO_TARGET_DIR="$target" \
-    CARGO_BUILD_BUILD_DIR="$build" \
-    FAKE_AUDIT_LANE="$plan" \
-    HARN_RELEASE_GATE_LANE_CPUS="$cpus" \
-    FAKE_CARGO_MODE=success \
-    FAKE_CARGO_RECORD="$state/cargo-record" \
-    FAKE_CARGO_STATE="$state" \
-    FAKE_EVENT_RECORD="$state/event-record" \
-    FAKE_LANE_ENV_RECORD="$state/lane-env-record" \
-    FAKE_MAKE_MODE=success \
-    FAKE_MAKE_RECORD="$state/make-record" \
-    PATH="$fake_bin:$PATH" \
-    "$release_tools/release_gate.sh" audit --source-only > "$state/output" 2>&1
+  (
+    unset CARGO_BUILD_JOBS HARN_CONFORMANCE_JOBS
+    if [[ -n "$cargo_jobs" ]]; then export CARGO_BUILD_JOBS="$cargo_jobs"; fi
+    if [[ -n "$conformance_jobs" ]]; then
+      export HARN_CONFORMANCE_JOBS="$conformance_jobs"
+    fi
+    HARN_RELEASE_ROOT="$release_root" \
+      HARN_BIN="$fake_harn" \
+      CARGO_TARGET_DIR="$target" \
+      CARGO_BUILD_BUILD_DIR="$build" \
+      FAKE_AUDIT_LANE="$plan" \
+      HARN_RELEASE_GATE_LANE_CPUS="$cpus" \
+      FAKE_CARGO_MODE=success \
+      FAKE_CARGO_RECORD="$state/cargo-record" \
+      FAKE_CARGO_STATE="$state" \
+      FAKE_EVENT_RECORD="$state/event-record" \
+      FAKE_LANE_ENV_RECORD="$state/lane-env-record" \
+      FAKE_MAKE_MODE=success \
+      FAKE_MAKE_RECORD="$state/make-record" \
+      PATH="$fake_bin:$PATH" \
+      "$release_tools/release_gate.sh" audit --source-only
+  ) > "$state/output" 2>&1
   local status=$?
   set -e
   printf '%s\n' "$status" > "$state/status"
@@ -620,6 +629,26 @@ fi
 if ! grep -Eq $'^make\tconformance\t\t4$' "$budgeted_state/lane-env-record"; then
   echo "harn audit did not receive its bounded conformance worker pool" >&2
   cat "$budgeted_state/lane-env-record" >&2
+  exit 1
+fi
+
+# The fixture isolation above must not weaken the product contract: an
+# operator-supplied worker count still takes precedence over the scheduler's
+# derived partition in each owning lane.
+override_state=$(run_lane_cpu_case explicit-override 18 constrained 12 3)
+if [[ "$(<"$override_state/status")" -ne 0 ]]; then
+  echo "explicit worker overrides should pass" >&2
+  cat "$override_state/output" >&2
+  exit 1
+fi
+if ! grep -Eq $'^make\tfmt-check\t12\t3$' "$override_state/lane-env-record"; then
+  echo "rust audit did not preserve its explicit Cargo worker override" >&2
+  cat "$override_state/lane-env-record" >&2
+  exit 1
+fi
+if ! grep -Eq $'^make\tconformance\t12\t3$' "$override_state/lane-env-record"; then
+  echo "harn audit did not preserve its explicit conformance worker override" >&2
+  cat "$override_state/lane-env-record" >&2
   exit 1
 fi
 constrained_state=$(run_lane_cpu_case constrained 6 constrained)

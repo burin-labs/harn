@@ -231,13 +231,13 @@ mod tests {
                 name: "look".to_string(),
                 description: String::new(),
                 params: Vec::new(),
-                compact: false,
+                summary_only: false,
             },
             crate::llm::tools::ToolSchema {
                 name: "dispatch".to_string(),
                 description: String::new(),
                 params: Vec::new(),
-                compact: false,
+                summary_only: false,
             },
         ];
         let native = serde_json::json!([
