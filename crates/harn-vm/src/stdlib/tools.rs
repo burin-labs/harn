@@ -8,6 +8,7 @@ use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use crate::vm::Vm;
 
 mod registry;
+use registry::TOOL_REGISTRY_IMPL_DEF;
 
 thread_local! {
     /// Execution-scoped registry read by agent loops, `tool_bind`, `tool_ref`, and `tool_def`.
