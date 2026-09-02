@@ -367,57 +367,76 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(
     ),
   )
   const policy = unwrap(result)
+  // The live file's VALUES are refreshed by the release tail at every cut. This
+  // test used to pin the version, the source sha, the byte count, the fuse, and
+  // both percent boundaries, so an ordinary refresh broke a test nothing
+  // updated and the refresh pull request was born red. It asserts the SHAPE the
+  // schema and the validator require, and it derives every threshold from the
+  // policy it just read, so a legitimate refresh passes and a malformed one
+  // does not.
   assert_eq(release_binary_size_policy_errors(policy), [])
+  assert_eq(policy.schema_version, RELEASE_BINARY_SIZE_SCHEMA_VERSION)
   assert_eq(policy.default_target, "x86_64-unknown-linux-gnu")
   assert_eq(policy.targets.count, 1)
   const target = unwrap(policy.targets[0])
-  assert_eq(target.distribution_fuse_bytes, 285212672)
-  assert_eq(target.baseline.version, "0.10.127")
-  assert_eq(target.baseline.source_sha, "cd682579d07b1fbd3eacd8decb83c6ef8c04c76b")
-  assert_eq(target.baseline.bytes, 248725912)
-  assert_eq(target.baseline.observed_at, "2026-09-02T16:12:17Z")
-  // The fuse is a fuse, not a ratchet: ~14.7% of headroom above the released
-  // baseline, inside the validator's 10-15% band. The schema-1 policy this
-  // replaced allowed at most 4 MiB (1.8%) and turned every real change into a
-  // release-day cliff; the stale 0.10.118 baseline plus a one-off allowance did
-  // the same to the v0.10.126 cut.
-  assert_eq(target.distribution_fuse_bytes - target.baseline.bytes, 36486760)
-  assert_eq(target.growth.warn_bytes, 4194304)
-  assert_eq(target.growth.warn_percent_hundredths, 200)
-  assert_eq(target.baseline.build_identity.codegen_units, 8)
-  assert_eq(target.baseline.build_identity.rustc, "1.95.0")
+  assert_eq(target.target, policy.default_target)
+  assert(target.baseline.bytes > 0)
+  assert(
+    len(regex_captures("^[0-9]+[.][0-9]+[.][0-9]+$", target.baseline.version)) == 1,
+    "baseline.version must be a semantic release version, got '${target.baseline.version}'",
+  )
+  assert(
+    len(regex_captures(OBSERVED_AT_PATTERN, target.baseline.observed_at)) == 1,
+    "baseline.observed_at must be UTC second resolution, got '${target.baseline.observed_at}'",
+  )
+  assert(target.baseline.build_identity.codegen_units > 0)
+  assert(target.baseline.build_identity.rustc != "")
+  // The fuse is a fuse, not a ratchet. The band is the contract; the exact
+  // headroom moves with every refresh and is not this test's business.
+  const headroom = target.distribution_fuse_bytes - target.baseline.bytes
+  assert(headroom * 100 >= target.baseline.bytes * MIN_FUSE_HEADROOM_PERCENT)
+  assert(headroom * 100 <= target.baseline.bytes * MAX_FUSE_HEADROOM_PERCENT)
+  assert(target.growth.warn_bytes > 0)
+  assert(target.growth.warn_percent_hundredths > 0)
   // No standing allowance: growth is measured against the released baseline.
   assert_eq(target.accepted_growth.count, 0)
-  const baseline = evaluate_release_binary_size(target, measurement(248725912))
+  // The verdicts, derived from the live baseline rather than from a byte count
+  // that a refresh invalidates. The baseline itself is always ok; the fuse is
+  // the only thing that populates `failures`; and the percent boundary is
+  // computed from the policy's own threshold.
+  const baseline = evaluate_release_binary_size(target, measurement(target.baseline.bytes))
   assert_eq(baseline.growth, "ok")
   assert_eq(baseline.failures, [])
-  // The exact candidate the stale policy refused (v0.10.126 cut, +662,400 bytes).
-  const measured_candidate = evaluate_release_binary_size(target, measurement(250388632))
-  assert_eq(measured_candidate.growth, "ok")
-  assert_eq(measured_candidate.failures, [])
-  // The decision is bounded, and it reports rather than refuses: crossing both
-  // warn thresholds with no allowance warns and leaves `failures` empty, so
-  // growth cannot stop a release. Only the fuse populates `failures`.
-  const beyond_thresholds = evaluate_release_binary_size(target, measurement(255726232))
-  assert_eq(beyond_thresholds.growth, "warn")
-  assert_eq(beyond_thresholds.failures, [])
-  assert_eq(beyond_thresholds.warnings.count, 1)
-  assert(beyond_thresholds.warnings[0]?.starts_with("growth signal:"))
-  assert_eq(beyond_thresholds.fuse, "ok")
-  // The boundary against the released baseline, exactly. The percent axis binds
-  // first here: 2.00% of 248,725,912 is 4,974,519 bytes, well above the 4 MiB
-  // floor, so 253,700,431 is the first measurement that crosses both and
-  // 253,700,430 is the last that crosses neither.
-  const at_boundary = evaluate_release_binary_size(target, measurement(253700431))
-  assert_eq(at_boundary.delta_percent_hundredths, 200)
+  // Ceiling, not floor: the boundary is the FIRST measurement that reaches the
+  // threshold, and integer truncation lands one hundredth below it.
+  const warn_step = max(
+    target.growth.warn_bytes,
+    (target.baseline.bytes * target.growth.warn_percent_hundredths + 9999) / 10000,
+  )
+  const at_boundary = evaluate_release_binary_size(
+    target,
+    measurement(target.baseline.bytes + warn_step),
+  )
+  assert_eq(at_boundary.delta_percent_hundredths, target.growth.warn_percent_hundredths)
   assert_eq(at_boundary.growth, "warn")
   assert_eq(at_boundary.failures, [])
   assert_eq(at_boundary.warnings.count, 1)
-  const below_boundary = evaluate_release_binary_size(target, measurement(253700430))
-  assert_eq(below_boundary.delta_percent_hundredths, 199)
+  assert(at_boundary.warnings[0]?.starts_with("growth signal:"))
+  assert_eq(at_boundary.fuse, "ok")
+  const below_boundary = evaluate_release_binary_size(
+    target,
+    measurement(target.baseline.bytes + warn_step - 1),
+  )
   assert_eq(below_boundary.growth, "ok")
   assert_eq(below_boundary.failures, [])
   assert_eq(below_boundary.warnings, [])
+  // Only the fuse refuses.
+  const over_fuse = evaluate_release_binary_size(
+    target,
+    measurement(target.distribution_fuse_bytes + 1),
+  )
+  assert_eq(over_fuse.fuse, "breached")
+  assert_eq(over_fuse.failures.count, 1)
   assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
 }
 
