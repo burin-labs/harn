@@ -364,7 +364,12 @@ pub type AgentLoopRunExitState = {
   audit_background_tasks: list,
 }
 
-/** Return a completed loop run or surface one normalized exceptional terminal. */
+/**
+ * Return a completed loop run or surface one normalized exceptional terminal.
+ *
+ * @effects: [agent]
+ * @errors: [runtime]
+ */
 pub fn __agent_loop_finish_run(
   agent: HarnessAgent,
   session: dict,
