@@ -41,16 +41,16 @@ pipeline test(harness: Harness, task: unknown) {
   )
   // Order is broadest to most specific, so the most specific text is read last.
   assert(resolved.sources.count() == 3, "user, root, and scoped sources load")
-  assert(resolved.sources[0].scope == "user", "user scope comes first")
+  assert(resolved.sources[0]?.scope == "user", "user scope comes first")
   assert(
-    resolved.sources[0].path == path_join(home, ".claude/CLAUDE.md"),
+    resolved.sources[0]?.path == path_join(home, ".claude/CLAUDE.md"),
     "the user scope file is ~/.claude/CLAUDE.md",
   )
-  assert(resolved.sources[1].scope == "workspace", "the workspace root comes second")
-  assert(resolved.sources[1].path == path_join(root, "AGENTS.md"), "AGENTS.md wins its directory")
-  assert(resolved.sources[2].scope == "scoped", "the subtree file comes last")
+  assert(resolved.sources[1]?.scope == "workspace", "the workspace root comes second")
+  assert(resolved.sources[1]?.path == path_join(root, "AGENTS.md"), "AGENTS.md wins its directory")
+  assert(resolved.sources[2]?.scope == "scoped", "the subtree file comes last")
   assert(
-    resolved.sources[2].path == path_join(scoped, "AGENTS.md"),
+    resolved.sources[2]?.path == path_join(scoped, "AGENTS.md"),
     "the scoped package file loads",
   )
   // The symlink convention is not paid for twice, and the drop is recorded
@@ -68,7 +68,7 @@ pipeline test(harness: Harness, task: unknown) {
   const fragments = guidance_prompt_fragments(resolved)
   assert(fragments.count() == 3, "one prompt fragment per resolved source")
   assert(
-    fragments[0].id == "guidance:" + path_join(home, ".claude/CLAUDE.md"),
+    fragments[0]?.id == "guidance:" + path_join(home, ".claude/CLAUDE.md"),
     "a fragment id carries its source path",
   )
   // A budget that fits only the first source drops the rest by name.
