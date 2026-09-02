@@ -100,7 +100,7 @@
 2	scenarios/agent_loop_internal_error_propagates.harn	HARN-LNT-016
 1	scenarios/agent_loop_llm_caller_middleware.harn	HARN-LNT-018
 1	scenarios/agent_loop_parallel_dispatch.harn	HARN-LNT-018
-9	scenarios/agent_loop_profiles.harn	HARN-LNT-025
+10	scenarios/agent_loop_profiles.harn	HARN-LNT-025
 5	scenarios/agent_loop_tool_lifecycle_events.harn	HARN-LNT-025
 1	scenarios/agent_loop_uses_custom_llm_caller.harn	HARN-LNT-018
 1	scenarios/agent_progress_entries.harn	HARN-LNT-018
