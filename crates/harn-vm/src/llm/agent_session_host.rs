@@ -107,6 +107,8 @@ use tool_result_messages::{
 struct AgentHostSession {
     session_id: String,
     run_id: String,
+    task_id: String,
+    owns_session: bool,
     task: String,
     tokens_used: i64,
     /// Sum of calls whose price is known. This remains useful as a lower bound
@@ -260,6 +262,8 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
     let session = AgentHostSession {
         session_id: session_id.to_string(),
         run_id: format!("agent_run_{}", uuid::Uuid::now_v7()),
+        task_id: String::new(),
+        owns_session: false,
         task: String::new(),
         tokens_used: 0,
         cost_used: 0.0,

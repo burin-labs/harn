@@ -61,6 +61,53 @@ pub(crate) fn clear_journal(id: &str) {
     });
 }
 
+pub(crate) fn claim_journal_task(
+    id: &str,
+    task_id: String,
+    owns_session: bool,
+) -> Result<(), VmError> {
+    super::SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let journal = sessions
+            .get_mut(id)
+            .and_then(|state| state.transcript_journal.as_mut())
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "agent transcript journal: session `{id}` has no active journal"
+                ))
+            })?;
+        journal.claim_task(task_id, owns_session);
+        Ok(())
+    })
+}
+
+pub(crate) fn journal_sessions_for_task(task_id: &str) -> Vec<String> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .iter()
+            .filter(|(_, state)| {
+                state
+                    .transcript_journal
+                    .as_ref()
+                    .and_then(crate::agent_session_journal::JournalState::task_id)
+                    == Some(task_id)
+            })
+            .map(|(session_id, _)| session_id.clone())
+            .collect()
+    })
+}
+
+pub(crate) fn journal_owns_session(id: &str) -> bool {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .is_some_and(crate::agent_session_journal::JournalState::owns_session)
+    })
+}
+
 pub(crate) fn has_journal(id: &str) -> bool {
     super::SESSIONS.with(|sessions| {
         sessions

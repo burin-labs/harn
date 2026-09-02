@@ -19,39 +19,31 @@ pub(super) struct InitializedSession {
 /// Synchronous cancellation fallback for the await between journal install
 /// and returning the acquisition receipt to the outer lifecycle owner.
 struct JournalInitializationRollback {
-    session_id: String,
-    owns_session: bool,
     armed: bool,
 }
 
 impl JournalInitializationRollback {
-    fn new(session_id: String, owns_session: bool) -> Self {
-        Self {
-            session_id,
-            owns_session,
-            armed: true,
-        }
+    fn new() -> Self {
+        Self { armed: true }
     }
 
     fn disarm(&mut self) {
         self.armed = false;
     }
 
-    fn rollback(&mut self) {
+    fn preserve_for_task_cleanup(&mut self) {
         if !self.armed {
             return;
         }
         self.armed = false;
-        crate::agent_sessions::clear_journal(&self.session_id);
-        if self.owns_session {
-            crate::agent_sessions::close(&self.session_id);
-        }
     }
 }
 
 impl Drop for JournalInitializationRollback {
     fn drop(&mut self) {
-        self.rollback();
+        // Hard cancellation cannot await SQLite. The journal's task claim and
+        // writer lease remain live for the cancelling VM task to terminalize.
+        self.preserve_for_task_cleanup();
     }
 }
 
@@ -62,6 +54,7 @@ pub(super) async fn initialize(
     session_id: &str,
     options: &DictMap,
     system_prompt: Option<String>,
+    task_id: String,
 ) -> Result<InitializedSession, VmError> {
     let has_live_session = crate::agent_sessions::exists(session_id);
     let run_id = options
@@ -101,11 +94,34 @@ pub(super) async fn initialize(
     };
     let owns_session = !has_live_session;
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
+    if let Err(error) =
+        crate::agent_sessions::claim_journal_task(&session_id, task_id, owns_session)
+    {
+        crate::agent_sessions::clear_journal(&session_id);
+        if owns_session {
+            crate::agent_sessions::close(&session_id);
+        }
+        return Err(error);
+    }
     // Installation is synchronous, so the ownership guard can begin here
     // without a cancellation gap. Starting it before install would let an
     // "already active" error clear a journal owned by the caller.
-    let mut rollback = JournalInitializationRollback::new(session_id.clone(), owns_session);
-    stamp_run_started(&session_id).await?;
+    let mut rollback = JournalInitializationRollback::new();
+    if let Err(error) = stamp_run_started(&session_id).await {
+        // This is an ordinary returned error, so complete the terminal write
+        // here. If that write also fails, preserve the claimed journal and
+        // lease for an explicit cancellation/shutdown retry.
+        if flush_init_terminal(&session_id, "failed", "session_initialization_failed")
+            .await
+            .is_ok()
+        {
+            rollback.disarm();
+            if owns_session {
+                crate::agent_sessions::close(&session_id);
+            }
+        }
+        return Err(error);
+    }
     rollback.disarm();
     Ok(InitializedSession {
         session_id,
@@ -157,9 +173,11 @@ pub(super) async fn flush_init_terminal(
             "final_status": final_status,
             "stop_reason": stop_reason,
             "terminal": terminal,
+            "provider_call_count": 0,
         })),
     );
-    crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
+    crate::agent_sessions::append_terminal_event_once(session_id, event)
+        .map_err(VmError::Runtime)?;
     crate::agent_session_journal::flush(session_id).await?;
     crate::agent_sessions::clear_journal(session_id);
     Ok(())
@@ -172,6 +190,7 @@ pub(super) async fn flush_terminal(
     terminal_class: Option<&str>,
     terminal_error: Option<&serde_json::Value>,
     terminal: &crate::agent_events::AgentTerminalOutcome,
+    provider_call_count: i64,
 ) -> Result<(), VmError> {
     let event = super::super::helpers::transcript_event(
         "agent_run_terminal",
@@ -184,11 +203,12 @@ pub(super) async fn flush_terminal(
             "terminal_class": terminal_class,
             "error": terminal_error,
             "terminal": terminal,
+            "provider_call_count": provider_call_count,
         })),
     );
-    crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
+    crate::agent_sessions::append_terminal_event_once(session_id, event)
+        .map_err(VmError::Runtime)?;
     crate::agent_session_journal::flush(session_id).await?;
-    crate::agent_sessions::clear_journal(session_id);
     Ok(())
 }
 

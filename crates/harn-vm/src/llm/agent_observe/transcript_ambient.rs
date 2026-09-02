@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 thread_local! {
     /// Last-emitted hashes for the current transcript. These avoid writing
@@ -23,11 +24,31 @@ static NEXT_TRANSCRIPT_DIR_FRAME_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
 /// Opaque ownership receipt for one ambient transcript-directory push.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct TranscriptDirFrame {
     frame_id: u64,
     dir: String,
+    active: Arc<std::sync::atomic::AtomicBool>,
 }
+
+impl TranscriptDirFrame {
+    fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn revoke(&self) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+impl PartialEq for TranscriptDirFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.frame_id == other.frame_id
+    }
+}
+
+impl Eq for TranscriptDirFrame {}
 
 /// Per-agent transcript routing and deduplication state. It is swapped with
 /// the rest of the ambient execution scope so cancellation or sibling tasks
@@ -147,6 +168,7 @@ pub(crate) fn push_llm_transcript_dir(dir: &str) -> Option<TranscriptDirFrame> {
     let frame = TranscriptDirFrame {
         frame_id: NEXT_TRANSCRIPT_DIR_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         dir: dir.to_string(),
+        active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
     };
     TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(frame.clone()));
     reset_deduplication();
@@ -156,12 +178,15 @@ pub(crate) fn push_llm_transcript_dir(dir: &str) -> Option<TranscriptDirFrame> {
 #[cfg(test)]
 pub(crate) fn pop_llm_transcript_dir() {
     TRANSCRIPT_DIR_STACK.with(|stack| {
-        stack.borrow_mut().pop();
+        if let Some(frame) = stack.borrow_mut().pop() {
+            frame.revoke();
+        }
     });
     reset_deduplication();
 }
 
 pub(crate) fn remove_llm_transcript_dir(frame: TranscriptDirFrame) -> bool {
+    frame.revoke();
     let removed = TRANSCRIPT_DIR_STACK.with(|stack| {
         let mut stack = stack.borrow_mut();
         let Some(index) = stack
@@ -180,8 +205,14 @@ pub(crate) fn remove_llm_transcript_dir(frame: TranscriptDirFrame) -> bool {
 }
 
 pub(crate) fn current_transcript_dir() -> Option<String> {
-    let stacked =
-        TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().map(|frame| frame.dir.clone()));
+    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .rev()
+            .find(|frame| frame.is_active())
+            .map(|frame| frame.dir.clone())
+    });
     stacked.or_else(|| {
         std::env::var("HARN_LLM_TRANSCRIPT_DIR")
             .ok()
@@ -245,6 +276,27 @@ mod tests {
         assert!(remove_llm_transcript_dir(inner));
         assert_eq!(current_transcript_dir(), None);
 
+        let _ = swap_llm_transcript_ambient(saved);
+    }
+
+    #[test]
+    fn removed_transcript_frame_is_revoked_in_cloned_ambient_scope() {
+        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        let frame =
+            push_llm_transcript_dir("/tmp/harn-transcript-revoked").expect("transcript frame");
+        let inherited = LlmTranscriptAmbient {
+            transcript_dirs: TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().clone()),
+            ..LlmTranscriptAmbient::default()
+        };
+
+        assert!(remove_llm_transcript_dir(frame));
+        let previous = swap_llm_transcript_ambient(inherited);
+        assert_ne!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-revoked"),
+            "a cloned async scope must not resurrect a terminal transcript owner"
+        );
+        let _ = swap_llm_transcript_ambient(previous);
         let _ = swap_llm_transcript_ambient(saved);
     }
 

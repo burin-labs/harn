@@ -14,6 +14,16 @@ use super::call_support::{AwaitingTask, StepPreHookAction};
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
 
 impl super::super::Vm {
+    async fn retry_pending_task_cleanup(&mut self, public_task_id: &str) -> Result<bool, VmError> {
+        let Some(runtime_task_id) = self.pending_task_cleanups.get(public_task_id).cloned() else {
+            return Ok(false);
+        };
+        crate::llm::agent_session_host::cancellation::abandon_task_sessions(&runtime_task_id)
+            .await?;
+        self.pending_task_cleanups.remove(public_task_id);
+        Ok(true)
+    }
+
     fn step_domain_args(args: &[VmValue]) -> &[VmValue] {
         match args.first() {
             Some(VmValue::Harness(handle))
@@ -412,7 +422,7 @@ impl super::super::Vm {
                     // Explicitly awaited: drop it from any enclosing nursery so
                     // `scope {}` exit neither double-joins nor cancels it.
                     self.deregister_task_from_scopes(&id);
-                    let mut awaiting = AwaitingTask::new(handle);
+                    let mut awaiting = AwaitingTask::new(handle, self.pool_registry.clone());
                     let joined = awaiting
                         .handle_mut()
                         .await
@@ -435,7 +445,14 @@ impl super::super::Vm {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             if let Some(VmValue::TaskHandle(id)) = args.first() {
                 if let Some(task) = self.spawned_tasks.remove(id.as_str()) {
-                    super::call_support::abort_task_and_wait(task).await;
+                    let runtime_task_id = task.wait_task_id.clone();
+                    if let Err(error) = super::call_support::abort_task_and_wait(task).await {
+                        self.pending_task_cleanups
+                            .insert(id.to_string(), runtime_task_id);
+                        return Err(error);
+                    }
+                } else {
+                    self.retry_pending_task_cleanup(id.as_str()).await?;
                 }
             }
             self.stack.push(VmValue::Nil);
@@ -458,6 +475,7 @@ impl super::super::Vm {
                 .unwrap_or(5000);
             if let Some(id) = task_id {
                 if let Some(task) = self.spawned_tasks.remove(&id) {
+                    let task_runtime_id = task.wait_task_id.clone();
                     task.cancel_token
                         .store(true, std::sync::atomic::Ordering::SeqCst);
                     let mut handle = task.handle;
@@ -489,6 +507,12 @@ impl super::super::Vm {
                         }
                         _ = &mut timeout => {
                             super::call_support::abort_join_and_wait(&mut handle).await;
+                            if let Err(error) = crate::llm::agent_session_host::cancellation::abandon_task_sessions(
+                                &task_runtime_id,
+                            ).await {
+                                self.pending_task_cleanups.insert(id.clone(), task_runtime_id);
+                                return Err(error);
+                            }
                             self.stack.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
@@ -498,6 +522,9 @@ impl super::super::Vm {
                             ));
                         }
                     }
+                } else if self.retry_pending_task_cleanup(&id).await? {
+                    self.stack
+                        .push(VmValue::enum_variant("Result", "Ok", vec![VmValue::Nil]));
                 } else {
                     self.stack
                         .push(VmValue::enum_variant("Result", "Ok", vec![VmValue::Nil]));

@@ -54,6 +54,9 @@ pub(crate) struct JournalState {
     config: JournalConfig,
     pending: VecDeque<TranscriptMutation>,
     first_event_id: Option<u64>,
+    terminal_queued: bool,
+    task_id: Option<String>,
+    owns_session: bool,
     _writer_lease: RunWriterLease,
 }
 
@@ -68,6 +71,27 @@ impl JournalState {
 
     pub(crate) fn first_event_id(&self) -> Option<u64> {
         self.first_event_id
+    }
+
+    pub(crate) fn terminal_queued(&self) -> bool {
+        self.terminal_queued
+    }
+
+    pub(crate) fn mark_terminal_queued(&mut self) {
+        self.terminal_queued = true;
+    }
+
+    pub(crate) fn claim_task(&mut self, task_id: String, owns_session: bool) {
+        self.task_id = Some(task_id);
+        self.owns_session = owns_session;
+    }
+
+    pub(crate) fn task_id(&self) -> Option<&str> {
+        self.task_id.as_deref()
+    }
+
+    pub(crate) fn owns_session(&self) -> bool {
+        self.owns_session
     }
 
     pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
@@ -210,6 +234,9 @@ pub(crate) async fn prepare(
             },
             pending: VecDeque::new(),
             first_event_id: None,
+            terminal_queued: false,
+            task_id: None,
+            owns_session: false,
             _writer_lease: writer_lease,
         },
     })

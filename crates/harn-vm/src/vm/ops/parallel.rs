@@ -685,10 +685,14 @@ impl super::super::Vm {
                 continue; // already awaited / cancelled
             };
             if first_error.is_some() {
-                // A sibling already failed: cancel the rest without awaiting.
-                task.cancel_token
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                task.handle.abort();
+                // A sibling already failed: stop and durably terminalize every
+                // remaining task before the nursery exits.
+                if let Err(error) = super::call_support::abort_task_and_wait(task).await {
+                    crate::events::log_warn(
+                        "task_scope.cancel_cleanup",
+                        &format!("durable sibling cleanup remains pending: {error}"),
+                    );
+                }
                 continue;
             }
             match task.handle.await {

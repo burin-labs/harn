@@ -20,7 +20,6 @@
     "crates/harn-serve/src/adapters/api/mod.rs",
     "crates/harn-serve/src/core.rs",
     "crates/harn-serve/src/exports.rs",
-    "crates/harn-vm/src/agent_sessions_tests.rs",
     "crates/harn-vm/src/bridge.rs",
     "crates/harn-vm/src/channels/mod.rs",
     "crates/harn-vm/src/config.rs",

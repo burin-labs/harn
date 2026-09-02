@@ -27,7 +27,8 @@ async fn host_agent_session_init(
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
 
     let initialized =
-        live_transcript_journal::initialize(&session_id, &opts_map, system.clone()).await?;
+        live_transcript_journal::initialize(&session_id, &opts_map, system.clone(), ctx.task_id())
+            .await?;
     let has_canonical_history = initialized.has_canonical_history;
     let run_id = initialized.run_id;
     let prompt_session_id = initialized.session_id;
@@ -63,13 +64,13 @@ async fn host_agent_session_init(
             )
             .await?;
             let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
-            return Ok(agent_init_control_done(
+            return Ok(SessionInitOutcome::Admission(agent_init_control_done(
                 &prompt_session_id,
                 &run_id,
                 &message,
                 system.as_deref(),
                 blocked,
-            ));
+            )));
         }
 
         let autonomy_budget = match check_autonomy_budget(&opts_map, &prompt_session_id).await? {
@@ -82,13 +83,13 @@ async fn host_agent_session_init(
                     "autonomy_budget_denied",
                 )
                 .await?;
-                return Ok(agent_init_control_done(
+                return Ok(SessionInitOutcome::Admission(agent_init_control_done(
                     &prompt_session_id,
                     &run_id,
                     &message,
                     system.as_deref(),
                     result,
-                ));
+                )));
             }
         };
 
@@ -155,13 +156,13 @@ async fn host_agent_session_init(
                     "nested_policy_denied",
                 )
                 .await?;
-                return Ok(agent_init_control_done(
+                return Ok(SessionInitOutcome::Admission(agent_init_control_done(
                     &resolved,
                     &run_id,
                     &message,
                     system.as_deref(),
                     denial,
-                ));
+                )));
             }
         };
 
@@ -173,6 +174,8 @@ async fn host_agent_session_init(
         let session = AgentHostSession {
             session_id: resolved.clone(),
             run_id: run_id.clone(),
+            task_id: ctx.task_id(),
+            owns_session,
             task: message.clone(),
             tokens_used: 0,
             cost_used: 0.0,
@@ -239,7 +242,7 @@ async fn host_agent_session_init(
         .await?;
         crate::agent_session_journal::flush(&resolved).await?;
 
-        Ok(agent_init_control(
+        Ok(SessionInitOutcome::Ready(agent_init_control(
             &resolved,
             &run_id,
             &message,
@@ -248,13 +251,20 @@ async fn host_agent_session_init(
             max_verify_attempts,
             false,
             None,
-        ))
+        )))
     }
     .await;
 
     match initialized_result {
-        Ok(result) => {
+        Ok(SessionInitOutcome::Ready(result)) => {
             init_rollback.disarm();
+            Ok(result)
+        }
+        Ok(SessionInitOutcome::Admission(result)) => {
+            init_rollback.disarm();
+            if owns_session {
+                crate::agent_sessions::close(&prompt_session_id);
+            }
             Ok(result)
         }
         Err(error) => {
@@ -262,6 +272,11 @@ async fn host_agent_session_init(
             Err(error)
         }
     }
+}
+
+enum SessionInitOutcome {
+    Ready(VmValue),
+    Admission(VmValue),
 }
 
 enum AutonomyCheck {
@@ -351,15 +366,8 @@ async fn host_agent_session_finalize(
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
 
-    let mut session = AGENT_HOST_SESSIONS
-        .with(|sessions| sessions.borrow_mut().remove(&session_id))
-        .ok_or_else(|| {
-            VmError::Runtime(format!(
-                "{HOST_SESSION_FINALIZE}: unknown session `{session_id}`"
-            ))
-        })?;
-    permissions::clear_session_grants(&session_id);
-    crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
+    let mut finalization = cancellation::AgentSessionFinalization::take(&session_id)?;
+    let session = finalization.session_mut();
 
     // Promote model-less success before the terminal marker so the durable
     // descriptor matches the returned terminal result.
@@ -396,9 +404,6 @@ async fn host_agent_session_finalize(
             &stop_reason,
             iterations,
         );
-        if let Some(frame) = session.transcript_dir_frame.take() {
-            crate::llm::agent_observe::remove_llm_transcript_dir(frame);
-        }
     }
     if terminal_error.is_some() || session_status_indicates_error(&final_status) {
         let error_payload = serde_json::json!({
@@ -444,10 +449,6 @@ async fn host_agent_session_finalize(
         );
     }
 
-    // Pair with the push in init so subsequent loops see the right stack.
-    if let Some(frame) = session.current_session_frame.take() {
-        crate::agent_sessions::remove_current_session(frame);
-    }
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or_else(|| session.tool_mode.clone());
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,
@@ -493,6 +494,7 @@ async fn host_agent_session_finalize(
         terminal_class.map(crate::llm::agent_terminal_class::AgentTerminalClass::as_str),
         terminal_error.as_ref(),
         &terminal_outcome,
+        session.provider_call_count,
     )
     .await?;
     let recap = if let Some(store) = recap_store {
@@ -527,7 +529,21 @@ async fn host_agent_session_finalize(
             crate::session_recap::SessionRecapUnavailableReason::JournalUnavailable,
         )
     };
+    let mut session = finalization.commit();
+    permissions::clear_session_grants(&session_id);
+    crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
+    if let Some(frame) = session.transcript_dir_frame.take() {
+        crate::llm::agent_observe::remove_llm_transcript_dir(frame);
+    }
+    // Pair with the push in init only after every fallible terminal write.
+    if let Some(frame) = session.current_session_frame.take() {
+        crate::agent_sessions::remove_current_session(frame);
+    }
     cancellation::finish_agent_session(&mut session, &session_id, canonical_status != "suspended");
+    // Release same-session admission only after every session-id cleanup has
+    // completed. In particular, the awaited recap above must not overlap a
+    // successor run that old cleanup could otherwise erase.
+    crate::agent_sessions::clear_journal(&session_id);
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
         .as_ref()

@@ -49,7 +49,8 @@ pub use changed_paths::{
 mod journal;
 pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
 pub(crate) use journal::{
-    clear_journal, install_journal, next_journal_event, record_persisted_journal_event,
+    claim_journal_task, clear_journal, install_journal, journal_owns_session,
+    journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
 };
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
 const LIVE_CLIENT_PERMISSION_EVENT_KIND: &str = "live_session_permission_route";
@@ -281,6 +282,7 @@ pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
 mod metadata;
+mod scratchpad;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
 mod types;
@@ -297,6 +299,7 @@ use metadata::{
     branch_event_index, clone_transcript_with_id, empty_transcript, session_snapshot,
     transcript_with_session_metadata, update_lineage,
 };
+pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
 pub use transcript_lifecycle::*;
 pub use types::*;
@@ -364,17 +367,35 @@ static NEXT_CURRENT_SESSION_FRAME_ID: std::sync::atomic::AtomicU64 =
 /// Session ids are deliberately reusable by nested and resumed loops. Cleanup
 /// therefore consumes this unique frame receipt rather than searching by the
 /// duplicate-capable public id and accidentally removing a sibling owner.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct CurrentSessionFrame {
     frame_id: u64,
     session_id: String,
+    active: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CurrentSessionFrame {
     pub(crate) fn session_id(&self) -> &str {
         &self.session_id
     }
+
+    fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn revoke(&self) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
 }
+
+impl PartialEq for CurrentSessionFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.frame_id == other.frame_id
+    }
+}
+
+impl Eq for CurrentSessionFrame {}
 
 pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
     Arc::new(AgentSessionRuntime::default())
@@ -552,6 +573,7 @@ pub(crate) fn new_current_session_frame(id: String) -> Option<CurrentSessionFram
     Some(CurrentSessionFrame {
         frame_id: NEXT_CURRENT_SESSION_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         session_id: id,
+        active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
     })
 }
 
@@ -570,7 +592,9 @@ pub(crate) fn swap_current_session_stack(
 #[cfg(test)]
 pub(crate) fn pop_current_session() {
     CURRENT_SESSION_STACK.with(|stack| {
-        let _ = stack.borrow_mut().pop();
+        if let Some(frame) = stack.borrow_mut().pop() {
+            frame.revoke();
+        }
     });
 }
 
@@ -581,6 +605,7 @@ pub(crate) fn pop_current_session() {
 /// owner. Exact removal makes rollback and finalization idempotent and preserves
 /// unrelated ambient state.
 pub(crate) fn remove_current_session(frame: CurrentSessionFrame) -> bool {
+    frame.revoke();
     CURRENT_SESSION_STACK.with(|stack| {
         let mut stack = stack.borrow_mut();
         let Some(index) = stack
@@ -595,7 +620,14 @@ pub(crate) fn remove_current_session(frame: CurrentSessionFrame) -> bool {
 }
 
 pub fn current_session_id() -> Option<String> {
-    CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().map(|frame| frame.session_id.clone()))
+    CURRENT_SESSION_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .rev()
+            .find(|frame| frame.is_active())
+            .map(|frame| frame.session_id.clone())
+    })
 }
 
 pub fn current_actor_chain() -> Option<ActorChain> {
@@ -704,147 +736,6 @@ pub fn length(id: &str) -> Option<usize> {
                 .unwrap_or(0)
         })
     })
-}
-
-pub fn scratchpad(id: &str) -> Option<VmValue> {
-    SESSIONS.with(|s| {
-        s.borrow()
-            .get(id)
-            .and_then(|state| state.scratchpad.clone())
-    })
-}
-
-pub fn scratchpad_version(id: &str) -> Option<u64> {
-    SESSIONS.with(|s| s.borrow().get(id).map(|state| state.scratchpad_version))
-}
-
-pub fn set_scratchpad(
-    id: &str,
-    scratchpad: VmValue,
-    source: impl Into<String>,
-    reason: Option<String>,
-    metadata: serde_json::Value,
-) -> Result<u64, String> {
-    validate_scratchpad_value(&scratchpad)?;
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(id) else {
-            return Err(format!("agent session '{id}' does not exist"));
-        };
-        let version = state.scratchpad_version.saturating_add(1);
-        let event = scratchpad_transcript_event(
-            "set",
-            version,
-            Some(&scratchpad),
-            source.into(),
-            reason,
-            metadata,
-        );
-        append_event_to_state(state, event, "set_scratchpad")?;
-        state.scratchpad = Some(scratchpad);
-        state.scratchpad_version = version;
-        state.touch();
-        Ok(version)
-    })
-}
-
-pub fn clear_scratchpad(
-    id: &str,
-    source: impl Into<String>,
-    reason: Option<String>,
-    metadata: serde_json::Value,
-) -> Result<u64, String> {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(id) else {
-            return Err(format!("agent session '{id}' does not exist"));
-        };
-        let version = state.scratchpad_version.saturating_add(1);
-        let event =
-            scratchpad_transcript_event("clear", version, None, source.into(), reason, metadata);
-        append_event_to_state(state, event, "clear_scratchpad")?;
-        state.scratchpad = None;
-        state.scratchpad_version = version;
-        state.touch();
-        Ok(version)
-    })
-}
-
-fn validate_scratchpad_value(value: &VmValue) -> Result<(), String> {
-    if !matches!(value, VmValue::Dict(_)) {
-        return Err("agent session scratchpad must be a dict".to_string());
-    }
-    let json = crate::llm::helpers::vm_value_to_json(value);
-    let approx_bytes = serde_json::to_vec(&json)
-        .map(|bytes| bytes.len())
-        .unwrap_or(usize::MAX);
-    if approx_bytes > MAX_SCRATCHPAD_BYTES {
-        return Err(format!(
-            "agent session scratchpad is {approx_bytes} bytes; max is {MAX_SCRATCHPAD_BYTES}"
-        ));
-    }
-    Ok(())
-}
-
-fn scratchpad_transcript_event(
-    action: &str,
-    version: u64,
-    scratchpad: Option<&VmValue>,
-    source: String,
-    reason: Option<String>,
-    metadata: serde_json::Value,
-) -> VmValue {
-    let scratchpad_json = scratchpad.map(crate::llm::helpers::vm_value_to_json);
-    let approx_bytes = scratchpad_json
-        .as_ref()
-        .and_then(|value| serde_json::to_vec(value).ok().map(|bytes| bytes.len()))
-        .unwrap_or(0);
-    let event_metadata = serde_json::json!({
-        "action": action,
-        "version": version,
-        "source": normalize_scratchpad_source(source),
-        "reason": reason.unwrap_or_default(),
-        "approx_bytes": approx_bytes,
-        "counts": scratchpad_json
-            .as_ref()
-            .map(scratchpad_counts_json)
-            .unwrap_or_else(|| serde_json::json!({})),
-        "metadata": metadata,
-    });
-    let content = format!("Agent scratchpad {action}");
-    crate::llm::helpers::transcript_event(
-        "agent_scratchpad",
-        "system",
-        "internal",
-        &content,
-        Some(event_metadata),
-    )
-}
-
-fn normalize_scratchpad_source(source: String) -> String {
-    let trimmed = source.trim();
-    if trimmed.is_empty() {
-        "harn.agent_scratchpad".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn scratchpad_counts_json(value: &serde_json::Value) -> serde_json::Value {
-    serde_json::json!({
-        "goals": scratchpad_array_len(value, "goals"),
-        "open_items": scratchpad_array_len(value, "open_items"),
-        "facts": scratchpad_array_len(value, "facts"),
-        "refs": scratchpad_array_len(value, "refs"),
-    })
-}
-
-fn scratchpad_array_len(value: &serde_json::Value, key: &str) -> usize {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0)
 }
 
 pub fn snapshot(id: &str) -> Option<VmValue> {

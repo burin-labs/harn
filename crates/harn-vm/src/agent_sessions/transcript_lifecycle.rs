@@ -17,6 +17,36 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
     })
 }
 
+/// Queue one terminal boundary for the active durable run.
+///
+/// Persistence can fail after the mutation has entered the journal. A retry
+/// must flush that exact queued mutation rather than append a second terminal
+/// record for the same run.
+pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<(), String> {
+    validate_session_event(&event, "agent_session_append_terminal_event")?;
+    SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        let state = sessions.get_mut(id).ok_or_else(|| {
+            format!("agent_session_append_terminal_event: unknown session id '{id}'")
+        })?;
+        let Some(journal) = state.transcript_journal.as_ref() else {
+            return Err(format!(
+                "agent_session_append_terminal_event: session '{id}' has no active journal"
+            ));
+        };
+        if journal.terminal_queued() {
+            return Ok(());
+        }
+        append_event_to_state(state, event, "append_terminal_event")?;
+        state
+            .transcript_journal
+            .as_mut()
+            .expect("terminal append keeps the active journal installed")
+            .mark_terminal_queued();
+        Ok(())
+    })
+}
+
 /// Queue an orchestration fact for durable session storage without projecting
 /// it into the caller-visible transcript.
 ///
