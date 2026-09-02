@@ -201,7 +201,7 @@ pipeline test_job_observation_splits_wait_queue_and_execution_and_preserves_reje
     {
       jobs: [
         {
-          name: "BurinApp macOS build & tests",
+          name: "Native app macOS build & tests",
           conclusion: "success",
           created_at: "2026-08-01T00:03:00Z",
           started_at: "2026-08-01T00:03:30Z",
@@ -242,7 +242,7 @@ pipeline test_job_observation_splits_wait_queue_and_execution_and_preserves_reje
     observed.samples[0],
     {
       run_id: 7,
-      name: "BurinApp macOS build & tests",
+      name: "Native app macOS build & tests",
       conclusion: "success",
       duration_ms: 600000,
       dependency_wait_ms: 180000,
@@ -285,7 +285,7 @@ pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
     json_stringify(
       {
         schema_version: 1,
-        repository: "burin-labs/burin-code",
+        repository: "example-org/downstream-host",
         workflow: "ci.yml",
         event: "push",
         topology_epoch: "2026-08-01T00:00:00Z",
@@ -315,7 +315,7 @@ pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
       samples: [
         {
           ...common,
-          name: "BurinApp macOS build & tests",
+          name: "Native app macOS build & tests",
           duration_ms: 600000,
           dependency_wait_ms: 120000,
           runner_queue_ms: 30000,
@@ -365,7 +365,7 @@ pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
         execution_ms: 10000,
         completion_offset_ms: 775000,
         tail_ms: 125000,
-        last_completed_before_queue: "BurinApp macOS build & tests",
+        last_completed_before_queue: "Native app macOS build & tests",
         last_completed_runner: "github-hosted",
         last_completion_offset_ms: 750000,
       },
