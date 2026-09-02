@@ -1,3 +1,4 @@
+import { completion_obligations_from_messages } from "std/agent/obligations"
 import { JudgeConfig } from "std/agent/options_types"
 // Goal object: a typed, long-running objective the agent converges on. A goal
 // bundles an `objective`, machine-checkable `success_criteria`, `constraints`,
@@ -10,7 +11,8 @@ import { JudgeConfig } from "std/agent/options_types"
 // `goal-judge`
 // (design-only there; built here).
 import { pin } from "std/agent/pins"
-import { __with_prompt_fragment } from "std/agent/preflight"
+import { __replace_prompt_fragment } from "std/agent/preflight"
+import { agent_emit_event, agent_session_events, agent_session_messages } from "std/agent/state"
 import { system_prompt_part } from "std/llm/prompts"
 
 // Bounded re-loop cap: if the goal is not met at loop end, re-enter with
@@ -55,6 +57,14 @@ pub type GoalJudgeOptions = {
   max_invocations?: int,
   feedback_fallback?: string,
 }
+
+pub type GoalTransitionState = {
+  initialized: bool,
+  current: GoalSpec,
+  applied_message_ids: list<string>,
+}
+
+pub type GoalTransitionSync = {options: dict, applied: int}
 
 fn __string_list(value: list?) {
   if type_of(value) != "list" {
@@ -202,7 +212,126 @@ pub fn goal_context_fragment(g: dict) {
  * @example: agent_loop(harness, task, nil, with_goal({provider: "anthropic"}, g))
  */
 pub fn with_goal(agent_options: any, g: GoalSpec) {
-  return __with_prompt_fragment(agent_options, goal_context_fragment(g))
+  const normalized = goal(g)
+  const options = __replace_prompt_fragment(agent_options, goal_context_fragment(normalized))
+  return options
+    + {_goal_transition: {initialized: false, current: normalized, applied_message_ids: []}}
+}
+
+fn __goal_receipt_spec(g: GoalSpec) -> dict {
+  return {
+    objective: g.objective,
+    success_criteria: (g.success_criteria ?? []).map(
+      { criterion -> {id: criterion?.id ?? "", description: criterion.description} },
+    ),
+    constraints: g.constraints ?? [],
+    budget: g.budget ?? {},
+  }
+}
+
+/**
+ * Synchronize delivered user steering into the typed goal carried by agent
+ * options. It reconciles durable transition receipts before applying each
+ * unseen identified steer oldest-first, replacing the model-facing goal and
+ * retiring criteria and constraints that belonged to the previous objective.
+ * A delivered steer missing its receipt (for example after interruption
+ * between delivery and synchronization) is repaired exactly once.
+ *
+ * `applied` is the exact number of newly receipted transitions on this call.
+ * Each such transition emits one replay-visible typed checkpoint.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_goal_sync_delivered_steers(
+  agent: HarnessAgent,
+  session_id: string,
+  agent_options: any,
+  iteration: int,
+) -> GoalTransitionSync {
+  let options = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  if type_of(options?._goal_transition) != "dict" {
+    return {options: options, applied: 0}
+  }
+  const raw_state = options._goal_transition
+  let current = goal(raw_state.current)
+  let applied_message_ids: list<string> = []
+  for raw_id in raw_state?.applied_message_ids ?? [] {
+    applied_message_ids = applied_message_ids.appending(to_string(raw_id))
+  }
+  const initialized = raw_state?.initialized == true
+  // The in-memory state and durable receipts advance together. Only a fresh
+  // invocation needs to reconcile the event journal; later checkpoints trust
+  // the typed state instead of repeatedly scanning every historical event.
+  let receipted_message_ids: list<string> = applied_message_ids
+  if !initialized {
+    for event in agent_session_events(agent, session_id) {
+      if event?.metadata?.schema == "harn.goal_transition.v1" {
+        const receipted_id = to_string(event?.metadata?.message_id ?? "")
+        if receipted_id != "" && !contains(receipted_message_ids, receipted_id) {
+          receipted_message_ids = receipted_message_ids.appending(receipted_id)
+        }
+        if receipted_id != "" && !contains(applied_message_ids, receipted_id) {
+          applied_message_ids = applied_message_ids.appending(receipted_id)
+        }
+      }
+    }
+  }
+  const messages = try {
+    agent_session_messages(agent, session_id)
+  } catch (e) {
+    []
+  }
+  const steers = completion_obligations_from_messages(messages, current.objective).steers
+  let applied = 0
+  for steer in steers {
+    const already_applied = contains(applied_message_ids, steer.message_id)
+    if initialized && already_applied {
+      continue
+    }
+    const previous = current
+    current = goal(
+      {objective: steer.content, success_criteria: [], constraints: [], budget: previous.budget},
+    )
+    options = __replace_prompt_fragment(options, goal_context_fragment(current))
+    if !already_applied {
+      applied_message_ids = applied_message_ids.appending(steer.message_id)
+    }
+    if !contains(receipted_message_ids, steer.message_id) {
+      agent_emit_event(
+        agent,
+        session_id,
+        "typed_checkpoint",
+        {
+          schema: "harn.goal_transition.v1",
+          kind: "goal_retargeted",
+          iteration: iteration,
+          message_id: steer.message_id,
+          delivery_mode: steer.mode,
+          previous_goal: __goal_receipt_spec(previous),
+          next_goal: __goal_receipt_spec(current),
+          retired_criteria: __goal_receipt_spec(previous).success_criteria,
+          retired_constraint_count: len(previous.constraints),
+        },
+      )
+      receipted_message_ids = receipted_message_ids.appending(steer.message_id)
+      applied = applied + 1
+    }
+  }
+  options = options
+    + {
+      _goal_transition: {
+        initialized: true,
+        current: current,
+        applied_message_ids: applied_message_ids,
+      },
+    }
+  return {options: options, applied: applied}
 }
 
 /**
@@ -353,6 +482,12 @@ pub fn goal_reloop(g: any, opts: any = nil) {
     throw "goal_reloop: `facts_fn` must be a callable or nil; got " + type_of(facts_fn)
   }
   const verify_completion = { payload ->
+    // An accepted steer retires the checks captured by this closure. The typed
+    // goal transition installs the replacement objective; stale callbacks must
+    // not veto it before the next turn can observe that goal.
+    if len(payload?.obligations?.steers ?? []) > 0 {
+      return {confirm: true}
+    }
     const facts = if __goal_callable(facts_fn) {
       facts_fn(payload)
     } else {

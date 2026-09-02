@@ -35,9 +35,10 @@ pub type CompletionObligations = {
 // model never saw them, so they cannot have changed what it was asked to do.
 const __OBLIGATION_DELIVERED_MODES = ["finish_step", "interrupt_immediate"]
 
-// A steer rides in an exit authority's prompt, so it is bounded like every other
-// evidence field. Clipping keeps the head and tail: a steer's operative clause
-// is usually its first or its last sentence.
+// Only a steer's model-facing prompt projection is bounded like other evidence
+// fields. The typed obligation retains the full content for goal transitions,
+// digests, and replay. Clipping keeps the head and tail: a steer's operative
+// clause is usually its first or its last sentence.
 const __OBLIGATION_STEER_CHAR_LIMIT: int = 1200
 
 // Rendered newest-last. Older steers are summarized as a count rather than
@@ -77,11 +78,12 @@ fn __obligation_steer(message: unknown) -> CompletionSteer? {
   if !contains(__OBLIGATION_DELIVERED_MODES, mode) {
     return nil
   }
-  const content = __obligation_clip(__obligation_text(message?.content))
-  if content == "" {
+  const content = __obligation_text(message?.injectedText ?? message?.content)
+  const message_id = to_string(message?.messageId ?? "")
+  if content == "" || message_id == "" {
     return nil
   }
-  return {message_id: to_string(message?.messageId ?? ""), mode: mode, content: content}
+  return {message_id: message_id, mode: mode, content: content}
 }
 
 /**
@@ -175,7 +177,7 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
   let lines: list<string> = []
   let index = omitted + 1
   for steer in rendered {
-    lines = lines.appending(to_string(index) + ". " + steer.content)
+    lines = lines.appending(to_string(index) + ". " + __obligation_clip(steer.content))
     index = index + 1
   }
   const omission_note = if omitted == 0 {

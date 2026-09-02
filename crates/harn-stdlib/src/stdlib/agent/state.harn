@@ -78,6 +78,17 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
 }
 
 /**
+ * Return the durable event list for an agent session.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_events(agent: HarnessAgent, session_id: any) {
+  return agent.session_events(session_id)
+}
+
+/**
  * Project the session through the provider-visible directive slot.
  *
  * @effects: [host]

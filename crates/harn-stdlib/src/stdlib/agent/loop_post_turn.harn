@@ -72,6 +72,7 @@ pub type AgentLoopCommandHoldResult = {
 pub type AgentLoopPostTurnContext = {
   budget: AgentLoopBudget,
   bridge_step_delivered: int,
+  goal_transitions_applied: int,
   completed_no_information_gain: bool,
   consecutive_failure_count: int,
   dispatch: AgentToolDispatch,
@@ -346,7 +347,13 @@ pub fn agent_loop_post_turn_transition(
   let should_continue = outcome.kind == "continue" || context.bridge_step_delivered > 0
   let verdict_record = nil
   let post_edit_reverify_confirmed = false
-  if should_continue && reverify_mandated && next.verify_attempts < max_verify_attempts {
+  // A completion verdict produced before an accepted goal transition is stale
+  // by construction. Re-enter the model under the replacement objective;
+  // reminders and other bridge traffic do not bypass the ordinary reverify.
+  if should_continue
+    && context.goal_transitions_applied == 0
+    && reverify_mandated
+    && next.verify_attempts < max_verify_attempts {
     const reverdict = agent_evaluate_completion(
       harness,
       session,

@@ -5,8 +5,15 @@
 // dropping the deterministic floor: a criterion `check` that is set but not
 // callable, and a `goal_reloop` `facts_fn` that is set but not callable. Also
 // pins the behavior-identical swap of `__goal_without_control_keys` onto the
-// `__dict_omit` builtin. Everything here is PURE — no LLM, no host.
-import { goal, goal_check, goal_reloop } from "std/agent/goal"
+// `__dict_omit` builtin. Everything here is deterministic and provider-free.
+import { agent_capture_events } from "std/agent/events"
+import {
+  agent_goal_sync_delivered_steers,
+  goal,
+  goal_check,
+  goal_reloop,
+  with_goal,
+} from "std/agent/goal"
 import { agent_loop_options } from "std/agent/options"
 
 fn __manual_omit(o: dict, drop: any) {
@@ -91,4 +98,233 @@ pipeline test_goal_reloop_judge_passes_agent_loop_validation(harness: Harness, t
   const options = agent_loop_options(harness, goal_reloop(g, {judge: true, provider: "mock"}))
   assert_eq(type_of(options.turn_end_condition), "dict")
   assert(!contains(options.turn_end_condition.keys(), "enabled"))
+}
+
+pipeline test_with_goal_replaces_typed_fragment_without_disturbing_profile(
+  harness: Harness,
+  task: unknown,
+) {
+  const original = goal({objective: "old objective"})
+  const replacement = goal({objective: "new objective"})
+  const base = {
+    context_profile: {
+      budget_tokens: 900,
+      prompt_fragments: [
+        {source: "other", id: "before", body: "before"},
+        {source: "goal", id: "goal", body: "stale one"},
+        {source: "other", id: "goal", body: "same id, different owner"},
+        {source: "goal", id: "goal", body: "stale duplicate"},
+        {source: "other", id: "after", body: "after"},
+      ],
+    },
+  }
+  const options = with_goal(with_goal(base, original), replacement)
+  const fragments = options.context_profile.prompt_fragments
+  const goals = fragments.filter(
+    { fragment -> fragment?.source == "goal" && fragment?.id == "goal" },
+  )
+    .to_list()
+  assert_eq(options.context_profile.budget_tokens, 900)
+  assert_eq(len(goals), 1, "replacement collapses stale goal duplicates")
+  assert(contains(goals[0].body, "new objective"))
+  assert(!contains(goals[0].body, "old objective"))
+  assert_eq(fragments[0].body, "before")
+  assert_eq(fragments[2].body, "same id, different owner")
+  assert_eq(fragments[3].body, "after")
+}
+
+pipeline test_goal_sync_retargets_once_and_emits_one_callback_free_receipt(
+  harness: Harness,
+  task: unknown,
+) {
+  const session_id = "goal-transition-" + harness.random.uuid()
+  harness.agent.open(session_id)
+  let options = with_goal(
+    {},
+    goal(
+      {
+        objective: "old objective",
+        success_criteria: [{description: "old criterion", check: { _facts -> false }}],
+        constraints: ["old constraint"],
+        budget: {max_iterations: 7},
+      },
+    ),
+  )
+  const baseline = agent_goal_sync_delivered_steers(harness.agent, session_id, options, 0)
+  assert_eq(baseline.applied, 0)
+  options = baseline.options
+  harness.agent.inject(
+    session_id,
+    {
+      role: "user",
+      content: [{type: "text", text: "new objective"}],
+      injectedText: "new objective",
+      messageId: "msg_goal_1",
+      injectedMode: "finish_step",
+    },
+  )
+  const captured = agent_capture_events(
+    harness.agent,
+    session_id,
+    { -> return agent_goal_sync_delivered_steers(harness.agent, session_id, options, 1) },
+  )
+  assert_eq(captured.result.applied, 1)
+  options = captured.result.options
+  assert_eq(options._goal_transition.current.objective, "new objective")
+  assert_eq(len(options._goal_transition.current.success_criteria), 0)
+  assert_eq(len(options._goal_transition.current.constraints), 0)
+  assert_eq(options._goal_transition.current.budget.max_iterations, 7)
+  assert(contains(options.context_profile.prompt_fragments[0].body, "new objective"))
+  assert(!contains(options.context_profile.prompt_fragments[0].body, "old objective"))
+  const receipts = captured.events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.goal_transition.v1"
+    },
+  )
+    .to_list()
+  assert_eq(len(receipts), 1)
+  assert_eq(receipts[0].checkpoint.message_id, "msg_goal_1")
+  assert_eq(receipts[0].checkpoint.previous_goal.success_criteria[0].description, "old criterion")
+  assert_eq(receipts[0].checkpoint.next_goal.success_criteria, [])
+  assert_eq(receipts[0].checkpoint.retired_constraint_count, 1)
+  assert(
+    !contains(json_stringify(receipts[0].checkpoint), "closure"),
+    "transition receipt cannot serialize frozen callbacks",
+  )
+  const duplicate = agent_goal_sync_delivered_steers(harness.agent, session_id, options, 2)
+  assert_eq(duplicate.applied, 0, "a delivered message id transitions exactly once")
+  harness.agent.close(session_id)
+}
+
+pipeline test_goal_reloop_retired_callback_cannot_veto_accepted_steer(
+  harness: Harness,
+  task: unknown,
+) {
+  const g = goal(
+    {
+      objective: "old objective",
+      success_criteria: [{description: "old criterion", check: { _facts -> false }}],
+    },
+  )
+  const options = goal_reloop(
+    g,
+    {
+      facts_fn: { _payload ->
+        throw "retired facts callback ran"
+      },
+    },
+  )
+  const verdict = options.verify_completion(
+    {
+      obligations: {
+        steers: [{message_id: "msg_goal_2", mode: "finish_step", content: "new objective"}],
+      },
+    },
+  )
+  assert_eq(verdict.confirm, true)
+}
+
+pipeline test_goal_sync_filters_unidentified_and_audit_messages_then_folds_sequential_steers(
+  harness: Harness,
+  task: unknown,
+) {
+  const session_id = "goal-transition-sequence-" + harness.random.uuid()
+  harness.agent.open(session_id)
+  const original = goal({objective: "ALPHA", budget: {max_iterations: 9}})
+  let options = agent_goal_sync_delivered_steers(
+    harness.agent,
+    session_id,
+    with_goal({}, original),
+    0,
+  ).options
+  harness.agent.inject(
+    session_id,
+    {role: "user", content: "audit", messageId: "audit_1", injectedMode: "audit_only"},
+  )
+  harness.agent.inject(
+    session_id,
+    {role: "user", content: "missing id", messageId: "", injectedMode: "finish_step"},
+  )
+  const ignored = agent_goal_sync_delivered_steers(harness.agent, session_id, options, 1)
+  assert_eq(ignored.applied, 0)
+  assert_eq(ignored.options._goal_transition.current.objective, "ALPHA")
+  options = ignored.options
+  harness.agent.inject(
+    session_id,
+    {role: "user", content: "BRAVO", messageId: "goal_b", injectedMode: "finish_step"},
+  )
+  harness.agent.inject(
+    session_id,
+    {role: "user", content: "CHARLIE", messageId: "goal_c", injectedMode: "interrupt_immediate"},
+  )
+  const captured = agent_capture_events(
+    harness.agent,
+    session_id,
+    { -> return agent_goal_sync_delivered_steers(harness.agent, session_id, options, 2) },
+  )
+  assert_eq(captured.result.applied, 2)
+  assert_eq(captured.result.options._goal_transition.current.objective, "CHARLIE")
+  assert_eq(captured.result.options._goal_transition.current.budget.max_iterations, 9)
+  const receipts = captured.events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.goal_transition.v1"
+    },
+  )
+    .to_list()
+  assert_eq(len(receipts), 2)
+  assert_eq(receipts[0].checkpoint.next_goal.objective, "BRAVO")
+  assert_eq(receipts[1].checkpoint.next_goal.objective, "CHARLIE")
+  // Simulate interruption after delivery but before goal synchronization: the
+  // next run sees two already-receipted steers plus one receipt gap.
+  harness.agent.inject(
+    session_id,
+    {role: "user", content: "DELTA", messageId: "goal_d", injectedMode: "finish_step"},
+  )
+  const rehydrated = agent_capture_events(
+    harness.agent,
+    session_id,
+    { ->
+      return agent_goal_sync_delivered_steers(harness.agent, session_id, with_goal({}, original), 3)
+    },
+  )
+  assert_eq(rehydrated.result.applied, 1)
+  assert_eq(rehydrated.result.options._goal_transition.current.objective, "DELTA")
+  const repaired = rehydrated.events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.goal_transition.v1"
+    },
+  )
+    .to_list()
+  assert_eq(len(repaired), 1, "only the missing receipt is repaired")
+  assert_eq(repaired[0].checkpoint.message_id, "goal_d")
+  const replayed = agent_capture_events(
+    harness.agent,
+    session_id,
+    { ->
+      return agent_goal_sync_delivered_steers(
+        harness.agent,
+        session_id,
+        with_goal({}, original),
+        4,
+      )
+    },
+  )
+  assert_eq(replayed.result.applied, 0)
+  assert_eq(replayed.result.options._goal_transition.current.objective, "DELTA")
+  assert_eq(
+    len(replayed.events.filter({ event -> event.type == "typed_checkpoint" }).to_list()),
+    0,
+    "receipt reconciliation emits no replay duplicate",
+  )
+  harness.agent.close(session_id)
+}
+
+pipeline test_goal_sync_without_goal_state_is_a_no_io_noop(harness: Harness, task: unknown) {
+  const options = {provider: "mock", marker: "unchanged"}
+  const sync = agent_goal_sync_delivered_steers(harness.agent, "session-does-not-exist", options, 0)
+  assert_eq(sync.applied, 0)
+  assert_eq(sync.options, options)
 }

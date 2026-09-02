@@ -24,6 +24,28 @@ fn host_agent_session_messages_builtin(
     Ok(messages)
 }
 
+/// Return the durable event list for an agent session.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_agent_session_events(session_id: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_session_events_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let snapshot = crate::agent_sessions::transcript(&session_id);
+    let events = snapshot
+        .as_ref()
+        .and_then(|v| dict_get(v, "events"))
+        .cloned()
+        .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+    Ok(events)
+}
+
 pub(super) fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
     let text = dict_get(llm_result, "text")
         .map(|v| v.display())
@@ -294,6 +316,7 @@ fn host_agent_session_pair_orphaned_tool_use_builtin(
 
 const MESSAGE_HISTORY_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_SESSION_MESSAGES_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_EVENTS_BUILTIN_DEF,
     &HOST_AGENT_SESSION_RECORD_ASSISTANT_BUILTIN_DEF,
     &HOST_AGENT_SESSION_POP_LAST_ASSISTANT_BUILTIN_DEF,
     &HOST_AGENT_SESSION_PAIR_ORPHANED_TOOL_USE_BUILTIN_DEF,

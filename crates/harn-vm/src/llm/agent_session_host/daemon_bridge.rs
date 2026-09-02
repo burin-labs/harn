@@ -152,6 +152,11 @@ async fn drain_bridge_injections_for_checkpoint(
                     json_to_vm(&serde_json::json!({
                         "role": "user",
                         "content": message.transcript_content,
+                        // Keep the host-normalized text beside the lossless
+                        // transcript payload. Goal retargeting consumes this
+                        // field so ACP content blocks never become serialized
+                        // JSON in the replacement objective.
+                        "injectedText": message.content,
                         "messageId": message.message_id,
                         // The delivery mode is what separates a mid-run user
                         // directive the model actually saw from an audit-only
@@ -534,4 +539,73 @@ const DAEMON_BRIDGE_BUILTINS: &[&VmBuiltinDef] = &[
 
 pub(super) fn register_daemon_bridge_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, DAEMON_BRIDGE_BUILTINS);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    #[test]
+    fn structured_bridge_injection_keeps_normalized_text_for_goal_retargeting() {
+        crate::reset_thread_local_state();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let session_id = crate::agent_sessions::open_or_create(Some(
+                "structured-bridge-injected-text".to_string(),
+            ));
+            let bridge = crate::bridge::HostBridge::from_parts(
+                Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Mutex::new(())),
+                1,
+            );
+            let transcript_content = serde_json::json!([
+                {"type": "text", "text": "Retarget to the normalized objective"},
+            ]);
+            bridge
+                .push_pending_user_message(
+                    "Retarget to the normalized objective".to_string(),
+                    transcript_content.clone(),
+                    "finish_step",
+                )
+                .await;
+
+            let (delivered, reason) = drain_bridge_injections_for_checkpoint(
+                &session_id,
+                &bridge,
+                crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+            )
+            .await
+            .expect("drain structured steer");
+            assert_eq!(delivered, 1);
+            assert_eq!(reason, Some("message"));
+
+            let transcript = crate::agent_sessions::transcript(&session_id)
+                .map(|value| vm_to_json(&value))
+                .expect("session transcript");
+            let message = transcript["messages"]
+                .as_array()
+                .and_then(|messages| messages.last())
+                .expect("injected message");
+            assert_eq!(message["content"], transcript_content);
+            assert_eq!(
+                message["injectedText"],
+                "Retarget to the normalized objective"
+            );
+            assert_eq!(message["injectedMode"], "finish_step");
+            assert!(
+                message["messageId"]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty()),
+                "delivered steering needs a stable id for goal-transition dedupe"
+            );
+        });
+        crate::reset_thread_local_state();
+    }
 }

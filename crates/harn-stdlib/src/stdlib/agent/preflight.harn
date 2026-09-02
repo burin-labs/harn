@@ -584,6 +584,54 @@ pub fn __with_prompt_fragment(agent_options: any, fragment: any) {
   return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
 }
 
+/**
+ * __replace_prompt_fragment(agent_options, fragment) replaces every existing
+ * fragment with the same typed `{source, id}` identity. The replacement keeps
+ * the first matching slot, removes stale duplicates, and appends only when no
+ * match exists. Other profile fields and fragment order are preserved.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __replace_prompt_fragment(agent_options: any, fragment: any) {
+  const opts = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  if fragment == nil {
+    return opts
+  }
+  const profile = if type_of(opts?.context_profile) == "dict" {
+    opts.context_profile
+  } else {
+    {}
+  }
+  const existing = if type_of(profile?.prompt_fragments) == "list" {
+    profile.prompt_fragments
+  } else {
+    []
+  }
+  let replaced = false
+  let fragments = []
+  for candidate in existing {
+    const matches = candidate?.source == fragment?.source && candidate?.id == fragment?.id
+    if matches {
+      if !replaced {
+        fragments = fragments.appending(fragment)
+        replaced = true
+      }
+    } else {
+      fragments = fragments.appending(candidate)
+    }
+  }
+  if !replaced {
+    fragments = fragments.appending(fragment)
+  }
+  return opts + {context_profile: profile + {prompt_fragments: fragments}}
+}
+
 fn __agent_context_profile_fragments(opts: dict) {
   let fragments = []
   const profile = opts?.context_profile ?? opts?.project_context_profile ?? {}

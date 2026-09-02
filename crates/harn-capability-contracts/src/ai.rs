@@ -597,6 +597,15 @@ capability_method!(
     "Read an agent session's messages."
 );
 capability_method!(
+    agent_session_events,
+    "harness.agent.session_events",
+    // Match the corresponding `__host_agent_*` runtime_internal builtin:
+    // reading the live transcript journal is runtime-owned state projection.
+    [],
+    "__cap_agent_session_events(session_id: string) -> list",
+    "Read an agent session's durable events."
+);
+capability_method!(
     agent_session_visible_messages,
     "harness.agent.session_visible_messages",
     // Match the corresponding `__host_agent_*` runtime_internal builtin

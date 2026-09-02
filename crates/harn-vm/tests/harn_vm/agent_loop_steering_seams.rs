@@ -868,3 +868,262 @@ fn unsteered_run_renders_no_steering_block() {
         "control must derive zero steers; lines: {lines:?}"
     );
 }
+
+/// Provider-free real-loop coverage for goal retargeting. The first model call
+/// runs under ALPHA. After that call, the loop callback optionally queues a
+/// bridge message; the next loop checkpoint drains it before call two. The
+/// caller records the actual system prompt it received on both calls, while
+/// the result transcript supplies the replay-visible transition receipt.
+#[derive(Clone, Copy)]
+enum GoalRetargetInjection {
+    None,
+    Steer,
+    AuditOnly,
+    RepeatedId,
+}
+
+fn goal_retarget_pipeline(session_id: &str, injection: GoalRetargetInjection) -> String {
+    let injection_block = match injection {
+        GoalRetargetInjection::None => String::new(),
+        GoalRetargetInjection::Steer => r#"          agent_session_push_user_message(
+            harness.agent,
+            session,
+            {content: BRAVO, mode: "steer"},
+          )"#
+        .to_string(),
+        GoalRetargetInjection::AuditOnly => r#"          agent_session_push_user_message(
+            harness.agent,
+            session,
+            {content: BRAVO, mode: "audit_only"},
+          )"#
+        .to_string(),
+        GoalRetargetInjection::RepeatedId => {
+            r#"          const repeated_id = agent_session_push_user_message(
+            harness.agent,
+            session,
+            {content: BRAVO, mode: "steer"},
+          )
+          // Reproduce replay/import duplication without inventing a second
+          // goal-sync path: both delivered turns carry the bridge's real id.
+          harness.agent.inject(
+            session,
+            {
+              role: "user",
+              content: BRAVO,
+              messageId: repeated_id,
+              injectedMode: "finish_step",
+            },
+          )"#
+            .to_string()
+        }
+    };
+    format!(
+        r###"
+import {{ goal, with_goal }} from "std/agent/goal"
+import {{ agent_session_push_user_message }} from "std/agent/state"
+
+const ALPHA = "ALPHA_GOAL_ONLY_7580"
+const BRAVO = "BRAVO_GOAL_ONLY_7580"
+const STABLE = "STABLE_SYSTEM_ONLY_7580"
+
+pipeline main(harness: Harness, task: unknown) {{
+  harness.tools.clear_hooks()
+  const session = "{session_id}"
+  const calls = harness.runtime.shared_cell(
+    {{scope: "task_group", key: "goal-retarget-calls-{session_id}", initial: 0}},
+  )
+  const first_system = harness.runtime.shared_cell(
+    {{scope: "task_group", key: "goal-retarget-first-{session_id}", initial: ""}},
+  )
+  const second_system = harness.runtime.shared_cell(
+    {{scope: "task_group", key: "goal-retarget-second-{session_id}", initial: ""}},
+  )
+  const mock_llm = {{ call ->
+    const snap = harness.runtime.shared_snapshot(calls)
+    const n = snap.value
+    harness.runtime.shared_cas(calls, snap, n + 1)
+    const system = to_string(call?.system ?? "")
+    if n == 0 {{
+      harness.runtime.shared_set(first_system, system)
+      return {{
+        ok: true,
+        value: {{text: "Still working.", tool_calls: [], provider: "mock", model: "mock"}},
+      }}
+    }}
+    harness.runtime.shared_set(second_system, system)
+    return {{
+      ok: true,
+      value: {{text: "Retargeted work complete. ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
+    }}
+  }}
+  const options = with_goal(
+    {{
+      provider: "mock",
+      session_id: session,
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
+      loop_until_done: true,
+      done_sentinel: "##DONE##",
+      max_iterations: 3,
+      llm_caller: mock_llm,
+      post_turn_callback: {{ info ->
+        if info.iteration == 0 {{
+{injection_block}
+        }}
+        return nil
+      }},
+    }},
+    goal({{
+      objective: ALPHA,
+      success_criteria: [{{id: "alpha", description: "Finish ALPHA"}}],
+      constraints: ["Stay on ALPHA"],
+    }}),
+  )
+  const result = agent_loop(harness, "Follow the current typed goal.", STABLE, options)
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(calls))
+
+  const first = harness.runtime.shared_get(first_system)
+  const second = harness.runtime.shared_get(second_system)
+  harness.stdio.log(
+    if contains(first, STABLE) && contains(first, ALPHA) && !contains(first, BRAVO) {{
+      "alpha_only"
+    }} else {{
+      "wrong"
+    }},
+  )
+  harness.stdio.log(
+    if contains(second, STABLE) && contains(second, BRAVO) && !contains(second, ALPHA) {{
+      "bravo_only"
+    }} else {{
+      if contains(second, ALPHA) && !contains(second, BRAVO) {{
+        "alpha_only"
+      }} else {{
+        if contains(second, ALPHA) && contains(second, BRAVO) {{ "both" }} else {{ "neither" }}
+      }}
+    }},
+  )
+
+  const receipts = transcript_events_by_kind(result.transcript, "typed_checkpoint")
+    .filter({{ event -> event?.metadata?.schema == "harn.goal_transition.v1" }})
+    .to_list()
+  harness.stdio.log(len(receipts))
+  if len(receipts) == 0 {{
+    harness.stdio.log("none")
+    harness.stdio.log("none")
+  }} else {{
+    harness.stdio.log(receipts[0].metadata.previous_goal.objective)
+    harness.stdio.log(receipts[0].metadata.next_goal.objective)
+  }}
+
+  let bravo_user_messages = 0
+  for message in transcript_messages(result.transcript) {{
+    if message?.role == "user" && message?.content == BRAVO {{
+      bravo_user_messages = bravo_user_messages + 1
+    }}
+  }}
+  harness.stdio.log(bravo_user_messages)
+}}
+"###
+    )
+}
+
+#[test]
+fn accepted_steer_retargets_the_next_real_loop_model_call_once() {
+    let raw = run_with_bridge(&goal_retarget_pipeline(
+        &fresh_session_id("goal-retarget-steer"),
+        GoalRetargetInjection::Steer,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "2", "expected two model calls; lines: {lines:?}");
+    assert_eq!(
+        lines[2], "alpha_only",
+        "call one must see only the original goal; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "bravo_only",
+        "the very next call must see BRAVO with stale ALPHA retired; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "1",
+        "one accepted steer must emit exactly one goal transition; lines: {lines:?}"
+    );
+    assert_eq!(lines[5], "ALPHA_GOAL_ONLY_7580", "lines: {lines:?}");
+    assert_eq!(lines[6], "BRAVO_GOAL_ONLY_7580", "lines: {lines:?}");
+    assert_eq!(
+        lines[7], "1",
+        "the bridge steer must land as exactly one user turn; lines: {lines:?}"
+    );
+}
+
+#[test]
+fn no_steer_keeps_the_original_goal_and_emits_no_transition() {
+    let raw = run_with_bridge(&goal_retarget_pipeline(
+        &fresh_session_id("goal-retarget-control"),
+        GoalRetargetInjection::None,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "2", "expected two model calls; lines: {lines:?}");
+    assert_eq!(lines[2], "alpha_only", "lines: {lines:?}");
+    assert_eq!(lines[3], "alpha_only", "lines: {lines:?}");
+    assert_eq!(lines[4], "0", "lines: {lines:?}");
+    assert_eq!(lines[5], "none", "lines: {lines:?}");
+    assert_eq!(lines[6], "none", "lines: {lines:?}");
+    assert_eq!(lines[7], "0", "lines: {lines:?}");
+}
+
+#[test]
+fn audit_only_message_never_retargets_a_model_call() {
+    let raw = run_with_bridge(&goal_retarget_pipeline(
+        &fresh_session_id("goal-retarget-audit-only"),
+        GoalRetargetInjection::AuditOnly,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "2", "expected two model calls; lines: {lines:?}");
+    assert_eq!(lines[2], "alpha_only", "lines: {lines:?}");
+    assert_eq!(
+        lines[3], "alpha_only",
+        "audit-only input must not alter the next model goal; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "0",
+        "audit-only input must not emit a goal transition; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[7], "1",
+        "the control must prove the audit-only user turn landed; lines: {lines:?}"
+    );
+}
+
+#[test]
+fn repeated_message_id_emits_one_transition_and_one_retarget() {
+    let raw = run_with_bridge(&goal_retarget_pipeline(
+        &fresh_session_id("goal-retarget-repeated-id"),
+        GoalRetargetInjection::RepeatedId,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "2", "expected two model calls; lines: {lines:?}");
+    assert_eq!(lines[2], "alpha_only", "lines: {lines:?}");
+    assert_eq!(lines[3], "bravo_only", "lines: {lines:?}");
+    assert_eq!(
+        lines[4], "1",
+        "a repeated delivered message id must transition exactly once; lines: {lines:?}"
+    );
+    assert_eq!(lines[5], "ALPHA_GOAL_ONLY_7580", "lines: {lines:?}");
+    assert_eq!(lines[6], "BRAVO_GOAL_ONLY_7580", "lines: {lines:?}");
+    assert_eq!(
+        lines[7], "2",
+        "the duplicate-id control must actually carry two delivered turns; lines: {lines:?}"
+    );
+}

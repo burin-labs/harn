@@ -82,8 +82,18 @@ async fn host_agent_session_init(
         }
     };
 
+    // Persist only the stable system channel: the caller's primary text plus
+    // typed `options.system` fragments. Context-profile fragments are assembled
+    // from live options on every model turn; persisting them here would freeze
+    // the initial projection beside later replacements (for example, a
+    // retargeted goal). Keeping `options.system` preserves the durable resume
+    // contract for explicit before/after fragments.
+    let mut durable_prompt_options = crate::value::DictMap::new();
+    if let Some(system_fragments) = opts_map.get("system") {
+        durable_prompt_options.insert(crate::value::intern_key("system"), system_fragments.clone());
+    }
     let session_system_prompt =
-        crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
+        crate::llm::helpers::compose_system_prompt(system.clone(), Some(&durable_prompt_options))?;
     let resolved = crate::agent_sessions::open_or_create(Some(session_id));
     if let Some(system_prompt) = session_system_prompt.as_deref() {
         crate::agent_sessions::record_system_prompt(&resolved, system_prompt)

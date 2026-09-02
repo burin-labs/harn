@@ -4,6 +4,7 @@ import {
   command_ledger_new,
   command_wait_normalize,
 } from "std/agent/command_ledger"
+import { agent_goal_sync_delivered_steers } from "std/agent/goal"
 import "std/agent/loop_call_budget"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
@@ -30,6 +31,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
   let session_finalized = false
   let audit_background_tasks = []
   const run = try {
+    // Rehydrate the current goal from already-delivered steering before any
+    // new bridge drain. Baseline sync emits no duplicate transition receipts.
+    const goal_baseline = agent_goal_sync_delivered_steers(
+      harness.agent,
+      session.session_id,
+      opts,
+      0,
+    )
+    opts = goal_baseline.options
     opts = agent_mcp_bootstrap_if_needed(harness.tools, session, opts)
     const primary_llm_opts = __agent_loop_effective_llm_options(harness.llm, opts)
     const primary_provider = to_string(primary_llm_opts?.provider ?? "")
@@ -143,7 +153,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
         const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
         opts = pending_prefill.options
-        const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
+        let iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
         agent_emit_event(
           harness.agent,
           session.session_id,
@@ -165,6 +175,16 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           "iteration_start",
           {iteration: iteration_index + 1},
         )
+        const iteration_goal_sync = agent_goal_sync_delivered_steers(
+          harness.agent,
+          session.session_id,
+          opts,
+          iteration_index + 1,
+        )
+        opts = iteration_goal_sync.options
+        if iteration_goal_sync.applied > 0 {
+          iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
+        }
         let turn_opts = agent_skills_match(harness.agent, session, iteration_opts, iteration_index)
         if turn_opts?._skill_activated_this_turn ?? false {
           opts = agent_reset_tool_surface_narrowing(opts)
@@ -218,6 +238,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             input_guardrail_verdict,
             iteration_index,
           )
+          const guardrail_goal_sync = agent_goal_sync_delivered_steers(
+            harness.agent,
+            session.session_id,
+            opts,
+            iteration_index + 1,
+          )
+          opts = guardrail_goal_sync.options
           iteration = iteration + 1
           final_status = "input_guardrail"
           stop_reason = "input_guardrail_tripwire"
@@ -239,6 +266,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             scope_verdict,
             iteration_index,
           )
+          const scope_goal_sync = agent_goal_sync_delivered_steers(
+            harness.agent,
+            session.session_id,
+            opts,
+            iteration_index + 1,
+          )
+          opts = scope_goal_sync.options
           iteration = iteration + 1
           final_status = "scope_alert"
           stop_reason = "out_of_scope"
@@ -774,6 +808,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
               "iteration_end",
               {iteration: iteration_index + 1, mock_queue: harness.llm.mock_snapshot()},
             )
+            const stalled_goal_sync = agent_goal_sync_delivered_steers(
+              harness.agent,
+              session.session_id,
+              opts,
+              iteration_index + 1,
+            )
+            opts = stalled_goal_sync.options
             if stalled_done_checkpoint.delivered > 0 {
               continue
             }
@@ -1113,6 +1154,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           "pre_tool_dispatch",
           {iteration: iteration_index + 1},
         )
+        const pre_dispatch_goal_sync = agent_goal_sync_delivered_steers(
+          harness.agent,
+          session.session_id,
+          opts,
+          iteration_index + 1,
+        )
+        opts = pre_dispatch_goal_sync.options
         if pre_dispatch_checkpoint.dispatch_skipped {
           agent_session_record_undispatched_tool_results(
             harness.agent,
@@ -1251,6 +1299,14 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         const totals = post_dispatch.totals
         const tool_count = len(tool_calls)
         const bridge_step_delivered = post_dispatch.bridge_step_delivered
+        const post_dispatch_goal_sync = agent_goal_sync_delivered_steers(
+          harness.agent,
+          session.session_id,
+          opts,
+          iteration_index + 1,
+        )
+        opts = post_dispatch_goal_sync.options
+        const goal_transitions_applied = post_dispatch_goal_sync.applied
         if post_dispatch.terminal != nil {
           final_status = "error"
           stop_reason = post_dispatch.terminal.reason
@@ -1315,6 +1371,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           {
             budget: budget,
             bridge_step_delivered: bridge_step_delivered,
+            goal_transitions_applied: goal_transitions_applied,
             completed_no_information_gain: completed_observation.no_information_gain,
             consecutive_failure_count: consecutive_failure_count,
             dispatch: dispatch,

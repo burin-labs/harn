@@ -137,6 +137,83 @@ pipeline test_steering_changes_the_terminal_evidence_identity(harness: Harness, 
   assert(steered != unsteered, "the digests differ")
 }
 
+pipeline test_full_steer_is_typed_and_only_prompt_rendering_is_clipped(
+  harness: Harness,
+  task: unknown,
+) {
+  const head_block =
+    "HEAD-01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234"
+  const middle_a =
+    "MIDDLE-A-1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901"
+  const middle_b =
+    "MIDDLE-B-1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901"
+  const tail_block =
+    "TAIL-01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234"
+  const head = join(
+    [
+      head_block,
+      head_block,
+      head_block,
+      head_block,
+      head_block,
+      head_block,
+      head_block,
+      head_block,
+    ],
+    "",
+  )
+  const tail = join([tail_block, tail_block, tail_block, tail_block], "")
+  const content_a = head + join([middle_a, middle_a, middle_a, middle_a], "") + tail
+  const content_b = head + join([middle_b, middle_b, middle_b, middle_b], "") + tail
+  const obligations_a = completion_obligations_from_messages(
+    [{role: "user", content: content_a, messageId: "msg_long_a", injectedMode: "finish_step"}],
+    TASK,
+  )
+  const obligations_b = completion_obligations_from_messages(
+    [{role: "user", content: content_b, messageId: "msg_long_a", injectedMode: "finish_step"}],
+    TASK,
+  )
+  assert_eq(obligations_a.steers[0]?.content, content_a)
+  assert(
+    contains(completion_obligations_prompt(obligations_a), "chars elided"),
+    "only the model-facing rendering is bounded",
+  )
+  assert(
+    completion_obligations_digest(obligations_a) != completion_obligations_digest(obligations_b),
+    "the digest binds the full typed content, including the clipped middle",
+  )
+}
+
+pipeline test_host_normalized_injected_text_owns_typed_steer_content(
+  harness: Harness,
+  task: unknown,
+) {
+  const obligations = completion_obligations_from_messages(
+    [
+      {
+        role: "user",
+        content: [{type: "text", text: "normalized objective"}],
+        injectedText: "normalized objective",
+        messageId: "msg_structured",
+        injectedMode: "interrupt_immediate",
+      },
+    ],
+    TASK,
+  )
+  assert_eq(obligations.steers[0]?.content, "normalized objective")
+}
+
+pipeline test_unidentified_delivered_message_cannot_retire_completion_authority(
+  harness: Harness,
+  task: unknown,
+) {
+  const obligations = completion_obligations_from_messages(
+    [{role: "user", content: "new objective", messageId: "", injectedMode: "finish_step"}],
+    TASK,
+  )
+  assert_eq(obligations.steers, [])
+}
+
 pipeline test_unsteered_run_prompt_is_unchanged_and_still_vetoed(harness: Harness, task: unknown) {
   // Blast radius: the judge keeps its authority over a lazy stop, and its
   // prompt is byte-identical to what it was before this seam existed.
