@@ -4,6 +4,7 @@ import {
   command_ledger_new,
   command_wait_normalize,
 } from "std/agent/command_ledger"
+import { __agent_loop_await_turn } from "std/agent/loop_await_turn"
 import "std/agent/loop_call_budget"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
