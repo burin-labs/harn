@@ -39,7 +39,12 @@ fi
 lease_runner_request="${HARN_CARGO_LEASE_RUNNER:-}"
 lease_owner="${HARN_CARGO_LEASE_OWNER:-}"
 if [[ -z "$lease_owner" ]]; then
-  lease_owner="$(basename "$workspace")"
+  # Workspace names are useful diagnostics, but checkout directories may contain
+  # spaces or Unicode while the durable lease schema deliberately has a portable
+  # identifier alphabet. Normalize only this derived default; an explicit owner
+  # still reaches the schema boundary unchanged and fails closed if invalid.
+  lease_owner="$(basename "$workspace" | LC_ALL=C sed -E 's/[^A-Za-z0-9._-]+/-/g')"
+  lease_owner="${lease_owner:-cargo-wrapper}"
 fi
 lease_host="${HARN_CARGO_LEASE_HOST:-}"
 lease_wait_ms="${HARN_CARGO_LEASE_WAIT_MS:-3600000}"

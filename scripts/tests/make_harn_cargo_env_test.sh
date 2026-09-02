@@ -178,6 +178,24 @@ if ! diff -u "$tmp_root/expected-harn-lease-record.txt" "$lease_record"; then
   exit 1
 fi
 
+spaced_workspace="$tmp_root/workspace with ünicode"
+mkdir -p "$spaced_workspace"
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE -u HARN_CARGO_LEASE_OWNER \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  HARN_CARGO_LEASE_WORKSPACE="$spaced_workspace" \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+if ! awk 'previous == "--owner" && $0 == "workspace-with-nicode" { found = 1 }
+          { previous = $0 }
+          END { exit !found }' "$lease_record"; then
+  echo "wrapper did not normalize its derived workspace owner" >&2
+  cat "$lease_record" >&2
+  exit 1
+fi
+
 auto_harn="$target_dir/debug/harn"
 mkdir -p "$(dirname "$auto_harn")"
 cp "$fake_bin/harn-lease" "$auto_harn"
