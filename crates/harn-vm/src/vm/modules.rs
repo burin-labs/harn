@@ -18,6 +18,8 @@ use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::stdlib_artifact::stdlib_module_artifact;
 use super::{ScopeSpan, Vm};
+
+mod transaction;
 // Reached by `modules_tests` through this module's bindings.
 #[cfg(test)]
 use super::stdlib_artifact::{
@@ -400,6 +402,26 @@ impl Vm {
         source: &str,
         use_prepared_generation: bool,
     ) -> Result<Arc<LoadedModule>, VmError> {
+        let mut transaction = self.module_load_transaction();
+        let result = transaction
+            .load_module_from_source_with_preparation_inner(
+                synthetic,
+                source,
+                use_prepared_generation,
+            )
+            .await;
+        if result.is_ok() {
+            self.commit_module_load_transaction(&mut transaction);
+        }
+        result
+    }
+
+    async fn load_module_from_source_with_preparation_inner(
+        &mut self,
+        synthetic: PathBuf,
+        source: &str,
+        use_prepared_generation: bool,
+    ) -> Result<Arc<LoadedModule>, VmError> {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
@@ -446,13 +468,17 @@ impl Vm {
         let source_dir = use_prepared_generation
             .then(|| synthetic.parent().map(Path::to_path_buf))
             .flatten();
-        let loaded = Arc::new(self.instantiate_module(source_dir, &artifact).await?);
+        let loaded = self.instantiate_module(source_dir, &artifact).await;
         self.imported_paths.pop();
+        let loaded = Arc::new(loaded?);
         {
             let _load_span = self.module_load_span();
             Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
         }
         self.record_module_loaded();
+        if self.imported_paths.is_empty() {
+            self.flush_deferred_cyclic_imports()?;
+        }
         Ok(loaded)
     }
 
@@ -500,8 +526,9 @@ impl Vm {
             self.module_phase_recorder.as_ref(),
         )?;
         self.imported_paths.push(synthetic.clone());
-        let mut loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
+        let loaded = self.instantiate_stdlib_module(artifact.as_ref()).await;
         self.imported_paths.pop();
+        let mut loaded = loaded?;
         Self::add_builtin_reexports(module, &mut loaded);
         let loaded = Arc::new(loaded);
         {
@@ -536,6 +563,19 @@ impl Vm {
         self.env = VmEnv::new();
         self.source_dir = module_source_dir.clone();
 
+        let result = self
+            .instantiate_module_inner(module_source_dir, artifact)
+            .await;
+        self.env = caller_env;
+        self.source_dir = old_source_dir;
+        result
+    }
+
+    async fn instantiate_module_inner(
+        &mut self,
+        module_source_dir: Option<PathBuf>,
+        artifact: &PreparedModuleArtifact,
+    ) -> Result<LoadedModule, VmError> {
         for import in &artifact.imports {
             let projection = match &import.binding {
                 ModuleImportBinding::Wildcard => ImportProjection::BindCaller(None),
@@ -547,7 +587,7 @@ impl Vm {
                             Some(members.iter().cloned().collect::<Vec<_>>())
                         }
                     };
-                    self.execute_import_with_projection(
+                    self.execute_import_with_projection_inner(
                         &import.path,
                         ImportProjection::BindNamespace(alias, members.as_deref()),
                         artifact.provenance,
@@ -556,58 +596,94 @@ impl Vm {
                     continue;
                 }
             };
-            self.execute_import_with_projection(&import.path, projection, artifact.provenance)
-                .await?;
+            self.execute_import_with_projection_inner(
+                &import.path,
+                projection,
+                artifact.provenance,
+            )
+            .await?;
         }
 
         // Nested modules own their own load spans. Start this module's span
         // only after those imports finish so aggregate load time is additive.
         let _load_span = self.module_load_span();
 
-        let module_state: crate::value::ModuleState = {
-            let mut init_env = self.env.clone();
-            if !artifact.type_schema_init_chunks.is_empty() || artifact.init_chunk.is_some() {
-                let saved_env = std::mem::replace(&mut self.env, init_env);
-                let saved_frames = std::mem::take(&mut self.frames);
-                let saved_handlers = std::mem::take(&mut self.exception_handlers);
-                let saved_iterators = std::mem::take(&mut self.iterators);
-                let saved_deadlines = std::mem::take(&mut self.deadlines);
-                // STEP_STACK / PERSONA_STACK are thread-locals shared with
-                // the calling frame. Emptying `self.frames` above means
-                // any `prune_below_frame(0)` triggered while the init
-                // chunk's bytecode runs — including the inevitable
-                // frame-pop prune at end-of-chunk — would wipe active
-                // steps owned by the *caller* (e.g., a `@step`-decorated
-                // function whose body lazily imports a module). Snapshot
-                // the persona/step context here and restore it after init
-                // so module loading is invisible to the step-tracking
-                // surface.
-                let active_context = crate::step_runtime::suspend_active_context();
-                let init_result: Result<(), VmError> = async {
-                    for chunk in &artifact.type_schema_init_chunks {
-                        self.run_chunk(Arc::clone(chunk)).await?;
-                    }
-                    if let Some(chunk) = &artifact.init_chunk {
-                        self.run_chunk(Arc::clone(chunk)).await?;
-                    }
-                    Ok(())
-                }
-                .await;
-                drop(active_context);
-                init_env = std::mem::replace(&mut self.env, saved_env);
-                self.frames = saved_frames;
-                self.exception_handlers = saved_handlers;
-                self.iterators = saved_iterators;
-                self.deadlines = saved_deadlines;
-                init_result?;
-            }
-            Arc::new(crate::value::VmMutex::new(init_env))
-        };
-
+        // Bind every compiled callable before replaying value initializers.
+        // Initializers are part of the module body and may call private or
+        // public functions declared anywhere in that module. The artifact
+        // compiler retains those reachable functions; instantiation must make
+        // the matching runtime namespace available before the init chunk runs.
         let module_env = self.env.clone();
+        let module_state: crate::value::ModuleState =
+            Arc::new(crate::value::VmMutex::new(self.env.clone()));
         let registry: ModuleFunctionRegistry =
             Arc::new(crate::value::VmMutex::new(BTreeMap::new()));
         let mut functions: BTreeMap<String, Arc<VmClosure>> = BTreeMap::new();
+        for (name, compiled) in &artifact.functions {
+            let closure = Arc::new(VmClosure {
+                func: Arc::clone(compiled),
+                env: module_env.clone(),
+                source_dir: module_source_dir.clone(),
+                module_functions: Some(Arc::downgrade(&registry)),
+                module_state: Some(Arc::downgrade(&module_state)),
+                retained_module_scope: None,
+            });
+            registry.lock().insert(name.clone(), Arc::clone(&closure));
+            self.env
+                .define(name, VmValue::Closure(Arc::clone(&closure)), false)?;
+            module_state
+                .lock()
+                .define(name, VmValue::Closure(Arc::clone(&closure)), false)?;
+            functions.insert(name.clone(), closure);
+        }
+
+        if !artifact.type_schema_init_chunks.is_empty() || artifact.init_chunk.is_some() {
+            let init_env = module_state.lock().clone();
+            let saved_env = std::mem::replace(&mut self.env, init_env);
+            let saved_frames = std::mem::take(&mut self.frames);
+            let saved_handlers = std::mem::take(&mut self.exception_handlers);
+            let saved_iterators = std::mem::take(&mut self.iterators);
+            let saved_deadlines = std::mem::take(&mut self.deadlines);
+            let saved_sync_guards = std::mem::take(&mut self.held_sync_guards);
+            let saved_task_scopes = std::mem::take(&mut self.task_scopes);
+            // STEP_STACK / PERSONA_STACK are thread-locals shared with
+            // the calling frame. Emptying `self.frames` above means
+            // any `prune_below_frame(0)` triggered while the init
+            // chunk's bytecode runs — including the inevitable
+            // frame-pop prune at end-of-chunk — would wipe active
+            // steps owned by the *caller* (e.g., a `@step`-decorated
+            // function whose body lazily imports a module). Snapshot
+            // the persona/step context here and restore it after init
+            // so module loading is invisible to the step-tracking
+            // surface.
+            let active_context = crate::step_runtime::suspend_active_context();
+            let init_result: Result<(), VmError> = async {
+                for chunk in &artifact.type_schema_init_chunks {
+                    self.run_chunk(Arc::clone(chunk)).await?;
+                }
+                if let Some(chunk) = &artifact.init_chunk {
+                    self.run_chunk(Arc::clone(chunk)).await?;
+                }
+                Ok(())
+            }
+            .await;
+            drop(active_context);
+            let initialized_env = std::mem::replace(&mut self.env, saved_env);
+            self.frames = saved_frames;
+            self.exception_handlers = saved_handlers;
+            self.iterators = saved_iterators;
+            self.deadlines = saved_deadlines;
+            // Any synchronization guard or nursery still present belongs to
+            // the initializer. Release/cancel it before reinstating the
+            // caller's frame-depth-indexed state.
+            self.held_sync_guards.clear();
+            self.cancel_task_scopes_where(|_| true);
+            self.held_sync_guards = saved_sync_guards;
+            self.task_scopes = saved_task_scopes;
+            *module_state.lock() = initialized_env;
+            init_result?;
+        }
+
         let mut public_exports = artifact.public_exports.clone();
         // The init chunk already ran into `module_state`, so init-backed public
         // values are live there. Read only the names identified by the artifact
@@ -639,24 +715,6 @@ impl Vm {
                 .filter_map(|name| state.get(name).map(|schema| (name.clone(), schema)))
                 .collect()
         };
-
-        for (name, compiled) in &artifact.functions {
-            let closure = Arc::new(VmClosure {
-                func: Arc::clone(compiled),
-                env: module_env.clone(),
-                source_dir: module_source_dir.clone(),
-                module_functions: Some(Arc::downgrade(&registry)),
-                module_state: Some(Arc::downgrade(&module_state)),
-                retained_module_scope: None,
-            });
-            registry.lock().insert(name.clone(), Arc::clone(&closure));
-            self.env
-                .define(name, VmValue::Closure(Arc::clone(&closure)), false)?;
-            module_state
-                .lock()
-                .define(name, VmValue::Closure(Arc::clone(&closure)), false)?;
-            functions.insert(name.clone(), Arc::clone(&closure));
-        }
 
         for import in artifact.imports.iter().filter(|import| import.is_pub) {
             let cache_key = self.cache_key_for_import(&import.path)?;
@@ -746,9 +804,6 @@ impl Vm {
                 public_exports.insert(name, kind);
             }
         }
-
-        self.env = caller_env;
-        self.source_dir = old_source_dir;
 
         Ok(LoadedModule {
             functions,
@@ -898,6 +953,24 @@ impl Vm {
         provenance: ModuleProvenance,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(async move {
+            let mut transaction = self.module_load_transaction();
+            let result = transaction
+                .execute_import_with_projection_inner(path, projection, provenance)
+                .await;
+            if result.is_ok() {
+                self.commit_module_load_transaction(&mut transaction);
+            }
+            result
+        })
+    }
+
+    fn execute_import_with_projection_inner<'a>(
+        &'a mut self,
+        path: &'a str,
+        projection: ImportProjection<'a>,
+        provenance: ModuleProvenance,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
+        Box::pin(async move {
             let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
 
             let stdlib_module = path
@@ -919,14 +992,14 @@ impl Vm {
                             ))
                         })?;
                         self.imported_paths.push(synthetic.clone());
-                        let loaded = Arc::new(
-                            self.instantiate_module(
+                        let loaded = self
+                            .instantiate_module(
                                 synthetic.parent().map(Path::to_path_buf),
                                 &artifact,
                             )
-                            .await?,
-                        );
+                            .await;
                         self.imported_paths.pop();
+                        let loaded = Arc::new(loaded?);
                         Arc::make_mut(&mut self.module_cache)
                             .insert(synthetic.clone(), Arc::clone(&loaded));
                         self.record_module_loaded();
@@ -1027,8 +1100,6 @@ impl Vm {
                 }
                 return self.apply_import_projection(&canonical, &loaded, projection);
             }
-            self.imported_paths.push(canonical.clone());
-
             // The link table, when this graph has one, names this module's
             // artifact from a digest the entry walk already recorded — so the
             // file is never read. Guard-verified package bytes are excluded:
@@ -1138,11 +1209,12 @@ impl Vm {
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
-            let loaded = Arc::new(
-                self.instantiate_module(module_source_dir, artifact.as_ref())
-                    .await?,
-            );
+            self.imported_paths.push(canonical.clone());
+            let loaded = self
+                .instantiate_module(module_source_dir, artifact.as_ref())
+                .await;
             self.imported_paths.pop();
+            let loaded = Arc::new(loaded?);
             {
                 let _load_span = self.module_load_span();
                 Arc::make_mut(&mut self.module_cache)
@@ -1210,82 +1282,6 @@ impl Vm {
             compilation_context,
             Arc::new(PreparedModuleArtifact::from_cached(artifact)),
         ))
-    }
-
-    /// Bind imports that were deferred because their target module was still
-    /// mid-load (an import cycle). By the time the import stack has unwound,
-    /// both the importing and target modules are fully instantiated and cached,
-    /// so we can resolve the requested names against the target and define them
-    /// into the importer's shared, mutable `module_state`. That env is the one
-    /// every closure from the importing module consults (after its local env)
-    /// at call time, so the late binding becomes visible without needing to
-    /// rewrite the closures' captured lexical snapshots.
-    fn flush_deferred_cyclic_imports(&mut self) -> Result<(), VmError> {
-        if self.deferred_cyclic_imports.is_empty() {
-            return Ok(());
-        }
-        let deferred = std::mem::take(&mut self.deferred_cyclic_imports);
-        let mut still_pending = Vec::new();
-        for import in deferred {
-            let (Some(importer), Some(target)) = (
-                self.module_cache.get(&import.importer).cloned(),
-                self.module_cache.get(&import.target).cloned(),
-            ) else {
-                // One endpoint is not cached yet (a lazy import inside a
-                // function body can defer before the other side loads). Keep
-                // it for a later flush.
-                still_pending.push(import);
-                continue;
-            };
-
-            let mut module_state = importer._module_state.lock();
-            if let Some(alias) = &import.namespace_alias {
-                if module_state.get(alias).is_none() {
-                    let dict = build_namespace_dict(
-                        &import.target.display().to_string(),
-                        &target,
-                        import.namespace_members.as_deref(),
-                    )?;
-                    module_state.define(alias, dict, false)?;
-                }
-                continue;
-            }
-
-            let export_names = module_import_names(
-                &import.target.display().to_string(),
-                &target,
-                import.selected_names.as_deref(),
-                ImportNameUse::Binding,
-            )?;
-
-            for name in export_names {
-                // A real local declaration (or an already-bound non-cyclic
-                // import) wins over the cyclic re-binding.
-                if module_state.get(&name).is_some() {
-                    continue;
-                }
-                if let Some(closure) = target.functions.get(&name) {
-                    module_state.define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
-                } else if let Some(value) = target.public_values.get(&name) {
-                    // Init-backed public declarations imported across a cycle.
-                    module_state.define(&name, value.clone(), false)?;
-                } else if target
-                    .public_exports
-                    .get(&name)
-                    .is_some_and(|kind| !kind.has_runtime_value())
-                {
-                    // Type-only public declarations carry no runtime binding.
-                    continue;
-                } else {
-                    return Err(VmError::Runtime(format!(
-                        "Import error: '{name}' is not defined in {}",
-                        import.target.display()
-                    )));
-                }
-            }
-        }
-        self.deferred_cyclic_imports = still_pending;
-        Ok(())
     }
 
     /// Return the path key that `execute_import` would use to cache the

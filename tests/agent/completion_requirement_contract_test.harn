@@ -5,6 +5,7 @@ import {
   completion_requirement_contract,
   completion_requirement_pending_feedback,
   completion_requirement_report,
+  completion_requirement_unassessed_feedback,
 } from "std/agent/completion_requirements"
 import { agent_capture_events } from "std/agent/events"
 import {
@@ -460,9 +461,13 @@ pipeline test_unreadable_contract_cannot_switch_the_completion_gate_off(
     { -> completion_requirement_contract({requirements: [{requirement_id: "", name: ""}]}) },
     "non-empty `requirement_id` and `name`",
   )
+  // An empty list is READABLE: it says there is nothing to itemize, and is
+  // satisfied by construction rather than rejected. See
+  // `test_an_empty_acceptance_set_is_a_satisfied_ledger_not_an_error`.
+  assert_eq(completion_requirement_contract({requirements: []}), nil)
   assert_error_contains(
-    { -> completion_requirement_contract({requirements: []}) },
-    "must be a non-empty list",
+    { -> completion_requirement_contract({requirements: "artifact"}) },
+    "must be a list",
   )
   assert_error_contains(
     { -> completion_requirement_contract({requirements: ["artifact"]}) },
@@ -721,4 +726,312 @@ pipeline test_pending_feedback_names_the_item_and_its_evidence_kind(
   assert(feedback.contains("1 of 2 acceptance item(s) still pending"))
   assert(feedback.contains("`behavior` is not assessed"))
   assert(feedback.contains("Accepted evidence kinds: deterministic_verification"))
+}
+
+// The whole-task catch-all for a task that writes nothing. One row, no declared
+// evidence roles, so it accepts assistant_output and deterministic_verification.
+fn no_write_contract() -> CompletionRequirementContract {
+  return {requirements: [{requirement_id: "say-hello", name: "Say hello."}]}
+}
+
+fn no_write_judge_opts(session: string, cap: int) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: cap,
+    verify_completion_judge: {
+      provider: "mock",
+      max_invocations: 1,
+      requirement_contract: no_write_contract(),
+    },
+  }
+}
+
+// harn#7823. A judge that answers `done` and never itemizes is the party that
+// failed to assess. Before the fix this vetoed as `completion_requirements_pending`
+// — feedback addressed to an actor who does not write assessments, identical on
+// every iteration, so the run could only thrash.
+pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      // Both the first judge call and its itemization retry answer with a bare
+      // scalar. Falling closed is still correct; naming the actor is not.
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      llm_done(),
+    ],
+    { ->
+      const session = "requirement-omitted-report-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
+      )
+      const receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.requirements != nil },
+      )
+        .to_list()
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].action, "continue")
+      assert_eq(receipts[0].reason, "completion_judge_report_omitted")
+      // The judge was re-asked exactly once and still did not itemize.
+      const reasks = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+              == "harn.completion_judge_itemization_retry.v1"
+        },
+      )
+        .map({ event -> event.checkpoint })
+        .to_list()
+      assert_eq(len(reasks), 1)
+      assert_eq(reasks[0].itemized_after_reask, false)
+      // The actor-facing text names the judge, not the actor's work.
+      const feedback = completion_requirement_unassessed_feedback(receipts[0].requirements)
+      assert(feedback.contains("completion judge returned no assessment"))
+      assert(feedback.contains("`say-hello`"))
+    },
+  )
+}
+
+// The retry is asked of the JUDGE, not the actor. One re-ask that itemizes
+// closes the ledger on evidence the runtime already recorded.
+pipeline test_itemization_retry_closes_the_no_write_row(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The greeting was returned.",
+            requirement_report: [{requirement_id: "say-hello", met: true, evidence_refs: [-1]}],
+          },
+        ),
+      },
+    ],
+    { ->
+      const session = "requirement-retry-itemizes-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
+      )
+      assert_eq(captured.result.status, "done")
+      const receipts = completion_receipts(captured.events)
+      const last = receipts[len(receipts) - 1]
+      assert_eq(last.action, "accept")
+      assert(last.requirements.complete)
+      assert_eq(last.requirements.rows[0].status, "met")
+    },
+  )
+}
+
+// Negative control for the retry. A judge that DID itemize and left the row out
+// is a real actor gap: no retry, and the existing pending vocabulary stands.
+pipeline test_itemized_report_that_omits_a_row_is_still_an_actor_gap(
+  harness: Harness,
+  task: unknown,
+) {
+  const report = completion_requirement_report(
+    no_write_contract(),
+    [{requirement_id: "unrelated", met: true, evidence_refs: [-1]}],
+    trial_shaped_packet("passed"),
+  )
+  assert(!report.complete)
+  assert_eq(report.rows[0].status, "missing")
+  const feedback = completion_requirement_pending_feedback(report)
+  assert(feedback.contains("still pending"))
+  assert(!feedback.contains("completion judge returned no assessment"))
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// harn#7830 / bc#7759. An EMPTY acceptance set is satisfied by construction.
+//
+// The founder ruling is that a row exists only when there is something real to
+// verify. A conversational task therefore reaches the judge with NO ledger at
+// all, and must cost exactly one judge call: no `requirement_report` property
+// on the schema, no itemization re-ask, no `continue` override of `done`, and
+// so no thrash. These pin that a ledger-free run is cheap AND that a declared
+// ledger still binds exactly as harn#7555/#7557/#7824 left it.
+
+// -------------------------------------------------------------------------------------------------
+
+fn ledger_free_judge_opts(session: string, cap: int) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: cap,
+    verify_completion_judge: {provider: "mock", max_invocations: 1},
+  }
+}
+
+fn judge_invocations(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_judge_evidence_projection.v1"
+    },
+  )
+    .to_list()
+}
+
+fn itemization_retries(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_judge_itemization_retry.v1"
+    },
+  )
+    .to_list()
+}
+
+// An explicitly empty acceptance set is a readable declaration that nothing is
+// checkable, not an unreadable contract. Today it throws, which is strictly
+// worse than the thrash it was meant to prevent: the run cannot start at all.
+pipeline test_an_empty_acceptance_set_is_a_satisfied_ledger_not_an_error(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(completion_requirement_contract({requirements: []}), nil)
+  // And it reaches the judge seam as no ledger, so the schema never demands a
+  // report the ledger could not have rows for.
+  const schema = __judge_completion_verdict_schema({requirements: []})
+  assert(!contains(schema.properties.keys(), "requirement_report"))
+}
+
+// The bc#7759 `Say hello.` shape, run through the loop with no ledger. A bare
+// scalar `done` must terminate the run on the FIRST judge call.
+pipeline test_a_ledger_free_task_completes_on_one_judge_call(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+    ],
+    { ->
+      const session = "ledger-free-one-call-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, ledger_free_judge_opts(session, 2)) },
+      )
+      assert_eq(captured.result.status, "done")
+      // Exactly one judge call, and no itemization round on top of it.
+      assert_eq(len(judge_invocations(captured.events)), 1)
+      assert_eq(len(itemization_retries(captured.events)), 0)
+      // The scalar verdict was accepted rather than overridden into `continue`.
+      const receipts = completion_receipts(captured.events)
+      const last = receipts[len(receipts) - 1]
+      assert_eq(last.action, "accept")
+      assert_eq(last?.requirements ?? nil, nil)
+    },
+  )
+}
+
+// Negative control for the two above. A DECLARED ledger keeps every binding:
+// the judge is still handed the report property, an omitted report is still
+// re-asked exactly once, and the completion still falls closed. Without this a
+// widened empty-set rule would read as green while having disabled the gate.
+pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
+  harness: Harness,
+  task: unknown,
+) {
+  const schema = __judge_completion_verdict_schema(no_write_contract())
+  assert_eq(schema.properties.requirement_report.type, "array")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      {text: json_stringify({verdict: "done", detail: "The greeting was returned."})},
+      llm_done(),
+    ],
+    { ->
+      const session = "declared-ledger-control-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
+      )
+      // One re-ask happened, and the omitted report still vetoed.
+      assert_eq(len(itemization_retries(captured.events)), 1)
+      const receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.requirements != nil },
+      )
+        .to_list()
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].action, "continue")
+      assert_eq(receipts[0].reason, "completion_judge_report_omitted")
+    },
+  )
+}
+
+// RULING (bc#7759, 2026-09-02). A declared verifier does NOT become a ledger
+// row: the verifier gate already owns that acceptance decision
+// deterministically, and a row over the same fact is a second, weaker authority,
+// which is the duplication the ruling forbids. Burin implements that, so nothing
+// here needs to change to accommodate a verifier row.
+//
+// FINDING, not a fix. Closing an UNREPORTED
+// verification-only row from its passing receipt was tried and reverted. It
+// reads as obviously right and is not: the receipt says one verifier passed,
+// while a row narrowed to `deterministic_verification` may be about something
+// that verifier never exercised. Turning the missing row met broke
+// `test_requirement_report_fails_closed_on_missing_duplicate_and_unsupported_rows`,
+// `test_pending_feedback_names_the_item_and_its_evidence_kind`, and
+// `test_requirement_schema_is_optional_for_legacy_judges`, which encode that
+// invariant deliberately. These pin the CURRENT behavior so the next reader
+// does not re-derive the same wrong idea.
+pipeline test_an_unreported_verification_row_stays_unassessed(harness: Harness, task: unknown) {
+  const verification_only: CompletionRequirementContract = {
+    requirements: [
+      {
+        requirement_id: "verify",
+        name: "Run the exact scoped verification command `pytest`.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+  // A passing receipt does NOT close a row the judge never reported.
+  const report = completion_requirement_report(
+    verification_only,
+    nil,
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(report.rows[0].status, "missing")
+  assert(!report.complete)
+  // Reported met but badly cited IS closed by the receipt. That is the
+  // narrow, existing affordance, and it still requires the judge to answer.
+  const cited = completion_requirement_report(
+    verification_only,
+    [{requirement_id: "verify", met: true, evidence_refs: [999]}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(cited.rows[0].status, "met")
+  // An explicit `not met` is still the judge's answer, receipt or no receipt.
+  const refused = completion_requirement_report(
+    verification_only,
+    [{requirement_id: "verify", met: false, evidence_refs: []}],
+    trial_shaped_packet("passed"),
+  )
+  assert_eq(refused.rows[0].status, "unmet")
 }

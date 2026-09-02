@@ -284,6 +284,10 @@ pub use api::{
     OllamaRuntimeSettings, HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV,
     OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
+/// The closed LLM outcome vocabularies carried on the ACP prompt-error
+/// envelope. Exported so the protocol-artifact generator projects them into
+/// every host binding instead of leaving `kind` and `reason` as bare strings.
+pub use api::{LlmErrorKind, LlmErrorReason};
 /// Catalog-backed per-call pricing, `None` when the (provider, model) pair has
 /// no rate. Exported so a CLI surface reports cost through the one owner of
 /// what a call costs instead of embedding its own rate table.

@@ -3,7 +3,7 @@ use super::*;
 
 mod terminal_projection;
 mod tool_call_artifacts;
-
+mod typed_application_errors;
 async fn collect_task_stream_until_terminal(
     mut rx: UnboundedReceiver<JsonValue>,
 ) -> Vec<JsonValue> {

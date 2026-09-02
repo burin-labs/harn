@@ -9,6 +9,13 @@ const META = {
       name: "harn-vm",
       version: "1.2.3",
       manifest_path: "/repo/crates/harn-vm/Cargo.toml",
+      metadata: {
+        harn: {package_verify: {dependency_contracts: [{name: "rmcp", minimum: "3.1.4"}]}},
+      },
+      dependencies: [
+        {name: "rmcp", req: "=3.1.4", kind: nil},
+        {name: "rmcp", req: "=3.1.4", kind: "dev"},
+      ],
     },
     {
       id: "id-private",
@@ -75,8 +82,75 @@ pipeline test_plan_rows_are_shell_readable(harness: Harness, task: unknown) {
       "target_directory\t/repo/target",
       "package\tharn-cli\t1.2.3\t/repo/crates/harn-cli/Cargo.toml\tcrates/harn-cli",
       "package\tharn-vm\t1.2.3\t/repo/crates/harn-vm/Cargo.toml\tcrates/harn-vm",
+      "dependency_contract\tharn-vm\t1.2.3\trmcp\t=3.1.4\t3.1.4\trmcp",
     ],
   )
+}
+
+@test
+pipeline test_dependency_contracts_name_the_normal_dependency_and_minimum(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(
+    package_dependency_contracts_from_metadata(META),
+    [
+      {
+        dependency: "rmcp",
+        minimum: "3.1.4",
+        package: "harn-vm",
+        package_version: "1.2.3",
+        requirement: "=3.1.4",
+        resolution_name: "rmcp",
+      },
+    ],
+  )
+}
+
+@test
+pipeline test_dependency_contract_fails_closed_when_the_normal_dependency_is_absent(
+  harness: Harness,
+  task: unknown,
+) {
+  const meta = META
+    + {
+      packages: META.packages.map(
+        { package ->
+          if package.name == "harn-vm" {
+            return package + {dependencies: [{name: "rmcp", req: "=3.1.4", kind: "dev"}]}
+          }
+          return package
+        },
+      ),
+    }
+  assert_throws_contains(
+    { -> package_dependency_contracts_from_metadata(meta) },
+    "normal dependency",
+  )
+}
+
+@test
+pipeline test_dependency_contract_fails_closed_when_minimum_is_missing(
+  harness: Harness,
+  task: unknown,
+) {
+  const meta = META
+    + {
+      packages: META.packages.map(
+        { package ->
+          if package.name == "harn-vm" {
+            return package
+              + {
+                metadata: {
+                  harn: {package_verify: {dependency_contracts: [{name: "rmcp", minimum: ""}]}},
+                },
+              }
+          }
+          return package
+        },
+      ),
+    }
+  assert_throws_contains({ -> package_dependency_contracts_from_metadata(meta) }, "minimum")
 }
 
 @test

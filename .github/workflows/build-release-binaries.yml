@@ -1646,7 +1646,14 @@ jobs:
         # release artifact that otherwise built and packaged successfully.
         continue-on-error: true
         with:
-          name: harn-binary-size-${{ matrix.target }}
+          # Source-qualified on purpose. A benchmark dispatch's run head_sha is
+          # the policy ref (main), not the revision it measured, so the run
+          # metadata alone cannot answer "has this exact commit already been
+          # measured?". harn-bump-fleet's pre-tag gate asks exactly that before
+          # spending ~40 minutes re-measuring a commit a previous release
+          # attempt already built, and its answer is the existence of this
+          # artifact. Same idiom as candidate-archive-manifest-<sha>.
+          name: harn-binary-size-${{ matrix.target }}-${{ env.HARN_BUILD_REVISION }}
           path: dist/binary-size-${{ matrix.target }}
           if-no-files-found: ignore
           # Human-read diagnostic, never downloaded by a job. Declared rather

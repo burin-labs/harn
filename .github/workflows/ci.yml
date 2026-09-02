@@ -599,17 +599,21 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     # Paid capacity covers the merge queue and trusted same-repository PRs; fork
     # PRs and pushes retain the free hosted fallback. At $0.016/min every paid
-    # run has a hard 20-minute/$0.32 fuse. The hosted recovery path gets forty
-    # minutes because it sequentially builds the portable CLI, security
-    # archive, and workspace suite; a cold coarse-cache run exceeded twenty-five
-    # minutes before nextest could start. The producer builds
-    # both portable artifacts before executing the full workspace suite, and
-    # observed merge-group runs need more than fifteen minutes for that complete
-    # fail-closed proof even with the persistent compiler cache warm. The
-    # machine-readable performance budget remains ten minutes so this extra
-    # recovery margin does not weaken the latency SLO.
+    # run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves a cache.
+    #
+    # The hosted ceiling is owned by the workload rather than chosen as a round
+    # number: it is the sum of the three step budgets below (9 + 12 + 26), plus
+    # six minutes of setup and cache restore, plus a twelve-minute reserve for
+    # this job's main-branch cache save. The save is a post step, so before the
+    # reserve existed it ran inside whatever margin the tests happened to leave;
+    # on 2026-09-02 a contended runner spent 36m29s reaching a passing 12853-test
+    # suite and was cancelled 8m35s into a full-generation save (#7845). Each
+    # step carries its own budget so an overrun fails on that budget instead of
+    # spending the save's reserve. The machine-readable performance budget
+    # remains ten minutes, so this recovery margin does not weaken the latency
+    # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
-    timeout-minutes: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 40 }}
+    timeout-minutes: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 65 }}
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
     permissions:
@@ -655,6 +659,7 @@ jobs:
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
+        timeout-minutes: 9
         env:
           CARGO_BUILD_JOBS: "4"
         run: >-
@@ -677,6 +682,7 @@ jobs:
       # archive is compiled. Keeping it in the same producer preserves the warm
       # target graph without putting it on the Harn critical path.
       - name: Build security test archive
+        timeout-minutes: 12
         env:
           CARGO_BUILD_JOBS: "4"
         run: >-
@@ -702,6 +708,7 @@ jobs:
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
       - name: Run Rust workspace tests
+        timeout-minutes: 26
         id: release-audit-rust-test
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
@@ -1153,6 +1160,137 @@ jobs:
           path: ${{ runner.temp }}/harn-source-gate-${{ matrix.kind }}.json
           if-no-files-found: error
           retention-days: 14
+
+  # The pull-request binary-growth signal.
+  #
+  # Advisory by construction and deliberately absent from `ci-status`'s needs
+  # list: a growth number must never be able to block a merge. The one size
+  # question that can refuse anything is the distribution fuse, and it is
+  # answered in build-release-binaries.yml against a real release artifact.
+  #
+  # This job adds no build. It measures the debug `harn` the producer already
+  # published as harn-cli.tar.zst, so its marginal cost is one small hosted job
+  # of download-plus-stat. A release-profile build here would be ~40 minutes per
+  # pull request to answer a question that is nearly always "no change" — see
+  # docs/src/dev/release-binary-size-policy.md for why the proxy is the right
+  # instrument and what it does not prove.
+  binary-size-signal:
+    name: Binary size signal
+    needs: [changes, rust-artifacts-ready]
+    # Merge-group runs re-measure a commit nobody is reviewing. The signal is
+    # for the pull-request author, plus the main push that records the baseline
+    # the next pull request compares against.
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+
+      # Verifies the bundle's checksums and manifest against this exact commit
+      # before anything measures it. Exports HARN_BIN.
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+
+      # Both baselines come from the same place: the newest artifact a
+      # main-headed run published. main is therefore the only writer, a pull
+      # request cannot poison what the next one reads, and neither reader needs
+      # a second storage mechanism. Nothing found is reported as "not
+      # recorded", never as "no growth".
+      - name: Fetch main's last debug measurement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          ./scripts/ci/fetch_latest_main_artifact.sh
+          harn-debug-binary-size-main-
+          "$RUNNER_TEMP/binary-size-baseline"
+
+      # main's most recent release-profile measurement, published by
+      # build-release-binaries.yml as a source-qualified artifact.
+      - name: Fetch main's last release binary-size report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          ./scripts/ci/fetch_latest_main_artifact.sh
+          harn-binary-size-x86_64-unknown-linux-gnu-
+          "$RUNNER_TEMP/release-size"
+
+      - name: Measure and render the growth signal
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/binary-size-record"
+          "$HARN_BIN" run --no-sandbox scripts/pr_binary_size_signal.harn -- \
+            --bin "$HARN_BIN" \
+            --revision "$GITHUB_SHA" \
+            --baseline "$RUNNER_TEMP/binary-size-baseline/debug-binary-size.json" \
+            --release-report "$RUNNER_TEMP/release-size/binary-size.json" \
+            --out-comment "$RUNNER_TEMP/binary-size-comment.md" \
+            --out-record "$RUNNER_TEMP/binary-size-record/debug-binary-size.json"
+          {
+            echo "## Binary size signal"
+            cat "$RUNNER_TEMP/binary-size-comment.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One comment per pull request, rewritten in place. A fork pull request
+      # holds a read-only token, so it gets the job summary above instead of a
+      # comment the API would refuse.
+      - name: Post or update the pull-request comment
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: '<!-- harn:pr-binary-size -->'
+        run: |
+          set -euo pipefail
+          existing="$(
+            gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+              --jq "[.[] | select(.body | startswith(\"${MARKER}\"))] | .[0].id // empty"
+          )"
+          if [[ -n "$existing" ]]; then
+            gh api -X PATCH "repos/${GH_REPO}/issues/comments/${existing}" \
+              -F "body=@$RUNNER_TEMP/binary-size-comment.md" > /dev/null
+            echo "::notice::Updated binary-size comment ${existing}."
+          else
+            gh api -X POST "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+              -F "body=@$RUNNER_TEMP/binary-size-comment.md" > /dev/null
+            echo "::notice::Posted the binary-size comment."
+          fi
+
+      # Only main publishes the baseline. Source-qualified so the artifact list
+      # can be sorted to the newest one, and retained long enough that a quiet
+      # weekend does not leave the next pull request without a comparison.
+      - name: Record main's debug measurement
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-debug-binary-size-main-${{ github.sha }}
+          path: ${{ runner.temp }}/binary-size-record/debug-binary-size.json
+          if-no-files-found: error
+          retention-days: 30
 
   ci-walltime-report:
     name: Write CI timing report

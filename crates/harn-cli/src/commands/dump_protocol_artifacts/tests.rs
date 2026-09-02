@@ -38,6 +38,7 @@ use super::*;
 mod generated_rust_binding;
 
 mod external_action_roundtrip;
+mod llm_outcome_vocabulary;
 mod prepared_session;
 mod session_recap;
 mod session_update_payloads;
@@ -1268,6 +1269,65 @@ fn manifest_advertises_python_and_go_bindings() {
         manifest["acp"]["deprecatedAgentMethods"]["session/stop"]["replacement"],
         json!("session/close")
     );
+}
+
+#[test]
+fn generated_artifacts_publish_the_harn_tools_contract() {
+    let artifacts =
+        generate_artifacts(&protocol_source(), env!("CARGO_PKG_VERSION")).expect("artifacts");
+    let schema = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.relative_path == harn_vm::tool_registry::TOOL_CATALOG_SCHEMA_ARTIFACT
+        })
+        .expect("harn-tools JSON Schema artifact");
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema.contents).expect("harn-tools JSON Schema");
+    jsonschema::meta::validate(&schema)
+        .expect("harn-tools artifact must be a meta-valid Draft 2020-12 schema");
+    let artifact_validator =
+        jsonschema::draft202012::new(&schema).expect("harn-tools artifact validator");
+    let structurally_valid_catalog = json!({
+        "schema_version": "harn-tools/2.0",
+        "tools": [{
+            "name": "inspect",
+            "inputSchema": {"type": "object", "not": 7},
+            "governance": {"audiences": ["catalog"]},
+            "cli": {"command": ["inspect"], "hidden": false},
+            "deferLoading": false
+        }]
+    });
+    assert!(
+        artifact_validator.is_valid(&structurally_valid_catalog),
+        "the artifact validates the catalog envelope, keeps outputSchema optional, and leaves embedded Draft semantics to Harn"
+    );
+    assert!(
+        serde_json::from_value::<harn_vm::tool_registry::ToolCatalog>(structurally_valid_catalog)
+            .is_err(),
+        "Harn's semantic parser must reject the invalid embedded Draft schema"
+    );
+
+    let typescript = artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.relative_path == harn_vm::tool_registry::TOOL_CATALOG_TYPESCRIPT_ARTIFACT
+        })
+        .expect("harn-tools TypeScript artifact");
+    assert!(typescript.contents.contains("export type ToolCatalog ="));
+
+    let manifest: serde_json::Value = serde_json::from_str(
+        &generate_manifest(&protocol_source()).expect("generate protocol manifest"),
+    )
+    .expect("parse protocol manifest");
+    assert_eq!(
+        manifest["bindings"]["harnToolsTypescript"]["schemaVersion"],
+        json!(harn_vm::tool_registry::TOOL_CATALOG_SCHEMA_VERSION)
+    );
+    assert!(manifest["schemas"].as_array().is_some_and(|schemas| {
+        schemas
+            .iter()
+            .any(|entry| entry["artifact"] == harn_vm::tool_registry::TOOL_CATALOG_SCHEMA_ARTIFACT)
+    }));
 }
 
 #[test]
