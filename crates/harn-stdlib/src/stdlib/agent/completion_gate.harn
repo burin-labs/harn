@@ -10,6 +10,7 @@ import {
   __completion_gate_feedback_keys,
   __completion_gate_ladder,
 } from "std/agent/judge_internals"
+import { CompletionObligations, completion_obligations_from_messages } from "std/agent/obligations"
 import { JudgeConfig } from "std/agent/options_types"
 
 /**
@@ -47,6 +48,7 @@ pub type CompletionFacts = {
 pub type CompletionGateContext = {
   session_id: string,
   task: string,
+  obligations?: CompletionObligations?,
   stop_reason: string,
   text: string,
   messages: list,
@@ -79,7 +81,8 @@ pub type CompletionVetoCombiner = fn(list<CompletionVerifyVerdict>) -> Completio
  *
  * Host-fact callbacks (all optional):
  * - `facts(ctx) -> CompletionFacts` — the primary fact supplier. `ctx` carries
- *   `{session_id, task, stop_reason, text, messages}`.
+ *   `{session_id, task, obligations, stop_reason, text, messages}`. `task` is
+ *   the original task; `obligations` adds accepted mid-run user steering.
  * - `classify_write(path, diff?) -> WriteKind` — classifies a single write when
  *   `facts` returns a `writes` list without counts.
  * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when
@@ -296,9 +299,11 @@ fn __completion_gate_evaluate(
     }
   }
   const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
+  const task = to_string(payload?.task ?? "")
   const ctx = {
     session_id: session_id,
-    task: to_string(payload?.task ?? ""),
+    task: task,
+    obligations: completion_obligations_from_messages(messages, task),
     stop_reason: to_string(payload?.stop_reason ?? ""),
     text: to_string(payload?.text ?? ""),
     messages: messages,

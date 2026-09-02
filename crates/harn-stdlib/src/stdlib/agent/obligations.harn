@@ -8,8 +8,9 @@
 // the authority that decides whether the run may stop: the judge then vetoes a
 // stop the user themselves authorized, and orders work the user withdrew.
 //
-// Derived once, at the judge payload seam, and carried on the evidence
-// snapshot. No consumer re-derives it from raw transcript history.
+// Derived once at each exit authority's payload seam, then carried on its typed
+// context or evidence snapshot. No host callback or downstream consumer
+// re-derives it from raw transcript history.
 import { agent_session_messages } from "std/agent/state"
 
 /**

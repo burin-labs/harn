@@ -1,0 +1,93 @@
+// Run: harn test tests/agent/completion_gate_obligations_test.harn
+//
+// The completion judge and deterministic completion gate are two authorities
+// over the same proposed stop. These fixtures pin their shared obligation
+// reading at the gate's public facts-callback seam. Judge-side obligation
+// coverage lives in `steering_obligations_test.harn`; this file proves the
+// remaining deterministic authority reads that same amended target.
+import {
+  CompletionFacts,
+  CompletionGateContext,
+  agent_completion_gate,
+} from "std/agent/completion_gate"
+
+const TASK = "Implement one bounded improvement and verify it."
+
+fn __steer_aware_facts(ctx: CompletionGateContext) -> CompletionFacts? {
+  const obligations = ctx.obligations ?? {original_task: "", steers: []}
+  assert(ctx.obligations != nil, "the gate supplies typed completion obligations")
+  assert_eq(obligations.schema, "harn.completion_obligations.v1")
+  assert_eq(obligations.original_task, TASK)
+  assert_eq(ctx.task, TASK)
+  assert_eq(len(obligations.steers), 2)
+  assert_eq(obligations.steers[0].message_id, "steer-finish")
+  assert_eq(obligations.steers[0].mode, "finish_step")
+  assert_eq(obligations.steers[0].content, "Do not change source; inspect and report instead.")
+  assert_eq(obligations.steers[1].message_id, "steer-interrupt")
+  assert_eq(obligations.steers[1].mode, "interrupt_immediate")
+  assert_eq(obligations.steers[1].content, "Report what you found and stop now.")
+  // The accepted steers withdrew the original write requirement. The host
+  // supplies domain facts; the gate owns delivering the amended target.
+  return {requires_write: false, source_write_count: 0}
+}
+
+fn __unsteered_facts(ctx: CompletionGateContext) -> CompletionFacts? {
+  const obligations = ctx.obligations ?? {original_task: "", steers: []}
+  assert(ctx.obligations != nil, "even a steer-free run has an explicit obligation record")
+  assert_eq(obligations.schema, "harn.completion_obligations.v1")
+  assert_eq(obligations.original_task, TASK)
+  assert_eq(len(obligations.steers), 0)
+  return {requires_write: true, source_write_count: 0}
+}
+
+pipeline test_gate_does_not_veto_a_judge_accepted_amended_target(harness: Harness, task: unknown) {
+  const messages = [
+    {role: "user", content: TASK},
+    {
+      role: "user",
+      content: "Do not change source; inspect and report instead.",
+      messageId: "steer-finish",
+      injectedMode: "finish_step",
+    },
+    {
+      role: "user",
+      content: "for the audit log only",
+      messageId: "steer-audit",
+      injectedMode: "audit_only",
+    },
+    {
+      role: "user",
+      content: "Report what you found and stop now.",
+      messageId: "steer-interrupt",
+      injectedMode: "interrupt_immediate",
+    },
+    {role: "assistant", content: "No typed implementation exists; stopping as requested."},
+  ]
+  const gate = agent_completion_gate(harness.runtime, {facts: __steer_aware_facts, max_vetoes: 0})
+  const verdict = gate.verify_completion(
+    {
+      session_id: "gate-steered",
+      task: TASK,
+      stop_reason: "done_sentinel",
+      text: "No typed implementation exists; stopping as requested.",
+      transcript: json_stringify(messages),
+    },
+  )
+  assert_eq(verdict.confirm, true)
+  assert_eq(verdict.reason, "no_workspace_write")
+}
+
+pipeline test_steer_free_gate_keeps_the_original_task_and_veto(harness: Harness, task: unknown) {
+  const gate = agent_completion_gate(harness.runtime, {facts: __unsteered_facts, max_vetoes: 0})
+  const verdict = gate.verify_completion(
+    {
+      session_id: "gate-unsteered",
+      task: TASK,
+      stop_reason: "done_sentinel",
+      text: "Nothing changed.",
+      transcript: json_stringify([{role: "user", content: TASK}]),
+    },
+  )
+  assert_eq(verdict.confirm, false)
+  assert_eq(verdict.reason, "no_source_write")
+}
