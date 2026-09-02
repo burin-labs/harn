@@ -200,6 +200,7 @@ pub(crate) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
 
 /// Convert a VmValue annotations dict to a serde_json::Value with only the
 /// recognized MCP annotation fields.
+#[cfg(test)]
 pub(crate) fn annotations_to_json(annotations: &VmValue) -> Option<serde_json::Value> {
     let dict = match annotations {
         VmValue::Dict(d) => d,

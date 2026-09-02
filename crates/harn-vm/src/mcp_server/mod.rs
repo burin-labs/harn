@@ -26,4 +26,4 @@ pub use register::{
     take_mcp_serve_registry, take_mcp_serve_resource_templates, take_mcp_serve_resources,
 };
 pub use server::{McpServer, McpServerReload};
-pub use tools_schema::tool_registry_to_mcp_tools;
+pub use tools_schema::{tool_registry_to_mcp_tools, McpToolSet};

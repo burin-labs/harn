@@ -145,7 +145,7 @@ impl DispatchCore {
     }
 
     pub(crate) fn is_concurrent_dispatch(&self, function: &str) -> bool {
-        self.catalog
+        self.catalog()
             .function(function)
             .and_then(|function| function.annotations)
             .is_some_and(|annotations| {

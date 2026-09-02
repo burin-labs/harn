@@ -37,19 +37,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 jobs:
+  # TODO(repo-hygiene): wire the shared PR title check once
+  # burin-labs/.github#84 merges. It adds a reusable composite action at
+  # `burin-labs/.github/.github/actions/pr-title-check` plus the canonical
+  # `.github/labels.yml` taxonomy. Add a `pr-title-check` job here, pinned to
+  # that PR's merge-commit SHA, passing Harn's area tags:
+  #   Parser, VM, Stdlib, Agent, CLI, Modules, Orchestrator, ACP, Evals,
+  #   Docs, CI, Release
+  # The check MUST exempt two title shapes:
+  #   - `Release vX.Y.Z` exactly, because publish-release.yml matches that
+  #     commit subject before it tags and publishes.
+  #   - bot-authored titles (Dependabot writes `chore(deps): ...`).
+  # Until then the convention is documented-only; see CONTRIBUTING.md
+  # "Pull request titles and descriptions".
+
   public-metadata-privacy:
     name: Public metadata privacy
     runs-on: ubuntu-latest
     steps:
-      - name: Skip merge-group replay
-        if: github.event_name == 'merge_group'
-        run: echo "::notice title=Public metadata privacy::merge_group event is a no-op pass."
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
+        with:
+          # Commit messages are public PR metadata. The scanner fails closed if
+          # either range endpoint is absent; keep the exact range available for
+          # pull-request and merge-group events.
+          fetch-depth: 0
 
-      - name: Scan pull-request title and body
-        if: github.event_name == 'pull_request'
+      - name: Scan public metadata
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: ./scripts/check_pr_metadata_privacy.sh

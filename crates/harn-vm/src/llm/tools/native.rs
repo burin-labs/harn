@@ -58,6 +58,21 @@ pub(crate) fn vm_tools_to_native(
                     .get("description")
                     .map(|value| value.display())
                     .unwrap_or_default();
+                // `compact: true` serves the leading sentences instead of the
+                // whole description. The wire payload is the only copy the
+                // model reads on this path, so the shortening has to happen
+                // here; the registry and the sidecar keep the full text.
+                //
+                // No per-tool "call tool_schema for the rest" pointer is
+                // appended: the recovery affordance is the `tool_schema` tool's
+                // own entry, which is not compact, and repeating the pointer
+                // once per compact tool would spend a slice of the tokens the
+                // flag exists to save.
+                let description = if super::summary::entry_is_summary_only(entry) {
+                    super::summary::tool_summary(&description)
+                } else {
+                    description
+                };
                 let output_schema = entry
                     .get("outputSchema")
                     .map(super::super::vm_value_to_json);
@@ -145,6 +160,17 @@ pub(crate) fn vm_tools_to_native(
     Ok(native_tools)
 }
 
+/// Whether this native tool ships to the provider deferred — its schema stays
+/// out of the model's context until a tool-search call surfaces it.
+///
+/// The flag sits at the wrapper level in both provider shapes, so one read
+/// serves both. Token accounting needs the same predicate pre-flight
+/// validation does; two spellings of "is this deferred" is how a segment ends
+/// up counting a tool the model never read.
+pub(crate) fn native_tool_is_deferred(tool: &serde_json::Value) -> bool {
+    tool.get("defer_loading").and_then(|value| value.as_bool()) == Some(true)
+}
+
 /// Return the names of all tools in `native_tools` that have the
 /// `defer_loading: true` flag set. Used for pre-flight validation
 /// (Anthropic rejects all-deferred tool lists with HTTP 400).
@@ -152,7 +178,7 @@ pub(crate) fn extract_deferred_tool_names(native_tools: &[serde_json::Value]) ->
     native_tools
         .iter()
         .filter_map(|tool| {
-            if tool.get("defer_loading").and_then(|value| value.as_bool()) == Some(true) {
+            if native_tool_is_deferred(tool) {
                 // Anthropic shape: `name` at top level.
                 if let Some(name) = tool.get("name").and_then(|value| value.as_str()) {
                     return Some(name.to_string());

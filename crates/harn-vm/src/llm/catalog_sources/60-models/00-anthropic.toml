@@ -375,3 +375,38 @@ open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_pro = 80.3 }
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+# Claude Fable 5.1 (released 2026-09-01) — successor to Claude Fable 5 in the
+# same Mythos-class tier above Opus, at the same $10 / $50 per MTok. It does
+# NOT supersede Opus 5; the `opus` alias keeps tracking the Opus generation.
+# Claude Mythos 5.1 is the same underlying model behind a restricted access
+# program (Project Glasswing) and is deliberately absent from this catalog —
+# a row nobody on a normal API key can call is a route that only fails.
+#
+# Same request surface as Fable 5 — thinking always on (an explicit
+# `disabled` is a 400, so the request builder omits the field), effort
+# low..max, no assistant prefill, sampling params rejected — with three
+# changes that matter to the wire:
+#   1. Forced tool choice is gone. `tool_choice` `any` / `tool` return a 400
+#      on this model (also on count_tokens and Batches), so the capability
+#      row narrows `allowed_tool_choice_modes` to auto/none. Use `auto` plus
+#      an instruction naming the tool, `strict: true`, or structured output.
+#   2. Thinking blocks are bound to the producing model, and editing earlier
+#      turns invalidates them ("preserved thinking"). Append-only history is
+#      the safe harness shape.
+#   3. Cache reads drop to $0.25 per MTok (0.025x input, not the uniform 0.1x
+#      ladder every other Anthropic row uses). 5-min cache write stays 1.25x.
+# No fast mode tier and no Priority Tier. Covered Model: zero-data-retention
+# orgs get a 400 unless expressly authorized by Anthropic. 1M context, 128K
+# max output. SWE-bench Verified is not published at launch, so it is omitted
+# rather than carried over from Fable 5.
+[models."claude-fable-5-1"]
+name = "Claude Fable 5.1"
+provider = "anthropic"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
