@@ -13,10 +13,7 @@ import {
   agent_loop_command_hold_transition,
   agent_loop_post_turn_transition,
 } from "std/agent/loop_post_turn"
-import {
-  agent_loop_provider_failure,
-  agent_loop_demote_empty_turn,
-} from "std/agent/loop_provider_failure"
+import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
 import "std/agent/loop_purpose_labels"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
