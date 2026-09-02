@@ -15,6 +15,7 @@ fn gha_expression(body: string) -> string {
 type ReleaseWorkflowStep = {
   id?: string,
   name?: string,
+  with?: {name?: string, path?: string},
   if?: string,
   shell?: string,
   uses?: string,
@@ -1226,4 +1227,43 @@ pipeline test_the_structured_report_carries_the_baseline_refresh_fields(
   assert_eq(record.comparability, "comparable")
   assert_eq(record.build_identity, valid_build_identity())
   assert_eq(record.blocking, false)
+}
+
+/**
+ * The size report's artifact name is a cross-repo contract.
+ *
+ * harn-bump-fleet's pre-tag gate asks "has this exact commit already been
+ * measured?" before spending a ~40-minute release build, and the existence of
+ * this artifact is its whole answer. A benchmark dispatch's run head SHA is the
+ * policy ref, not the revision it measured, so run metadata cannot answer it.
+ *
+ * Dropping the revision from this name would not fail anything here. It would
+ * quietly make every repeated release attempt pay for the build again, which is
+ * exactly the cost the v0.10.126 cut paid twice.
+ */
+@test
+pipeline test_the_size_report_artifact_is_source_qualified(harness: Harness, task: unknown) {
+  const steps = release_workflow(harness.fs).jobs.build.steps
+  const upload = release_workflow_step(steps, "Upload binary-size report")
+  assert_eq(
+    upload.with?.name,
+    "harn-binary-size-" + gha_expression("matrix.target") + "-"
+      + gha_expression("env.HARN_BUILD_REVISION"),
+  )
+  // The revision is exported before the build, so it is set by the time this
+  // step names it even when an earlier step failed.
+  let attested = -1
+  let uploaded = -1
+  let index = 0
+  for step in steps {
+    if (step.name ?? "") == "Attest checked-out source revision" {
+      attested = index
+    }
+    if (step.name ?? "") == "Upload binary-size report" {
+      uploaded = index
+    }
+    index = index + 1
+  }
+  assert(attested >= 0, "the build job attests its checked-out revision")
+  assert(uploaded > attested, "the report is named after the revision is known")
 }
