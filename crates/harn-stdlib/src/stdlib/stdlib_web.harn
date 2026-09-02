@@ -580,7 +580,7 @@ pub fn web_grounding_tools(
     opts?.search_tool_name ?? "web_search",
     "Search authoritative docs, package registries, or a configured search API and return normalized results with provenance.",
     {
-      parameters: {
+      input_schema: {
         type: "object",
         required: ["query"],
         properties: {
@@ -601,7 +601,7 @@ pub fn web_grounding_tools(
     opts?.verify_tool_name ?? "verify_imports",
     "Verify imports in source files against manifests, installed-package hints, registry evidence, symbol metadata, and package trust signals.",
     {
-      parameters: {
+      input_schema: {
         type: "object",
         required: ["paths"],
         properties: {

@@ -35,6 +35,11 @@ profile (`agentclientprotocol/agent-client-protocol schema v0.12.2`).
 deterministic session recap availability and snapshot types.
 - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative
 plan-document schema with revisions, comments, and resolution receipts.
+- `schemas/harn-tools-v2.schema.json`: structural envelope schema for the
+transport-neutral `harn-tools/2.0` catalog. Harn's Rust parser performs
+the required second-stage Draft 2020-12 and reference-closure validation.
+- `harn-tools.ts`: strict TypeScript definitions generated from the same
+catalog DTOs as the JSON Schema.
 - `harn-protocol.ts`: TypeScript definitions for ACP session updates,
 tool lifecycle metadata, A2A task events, and MCP metadata.
 - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.

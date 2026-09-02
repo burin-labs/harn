@@ -38,6 +38,10 @@ use std::process;
 
 use harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT;
 use harn_vm::llm::receipts::TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT;
+use harn_vm::tool_registry::{
+    tool_catalog_json_schema, tool_catalog_typescript, TOOL_CATALOG_SCHEMA_ARTIFACT,
+    TOOL_CATALOG_TYPESCRIPT_ARTIFACT,
+};
 
 use activity::ActivityVocabulary;
 use connector_setup::ConnectorSetupVocabulary;
@@ -199,6 +203,12 @@ fn generate_artifacts(
             serde_json::to_string_pretty(&harn_vm::llm::plan::plan_document_json_schema())
                 .map_err(|error| format!("failed to encode plan document schema: {error}"))?,
         ),
+        Artifact::new(
+            TOOL_CATALOG_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&tool_catalog_json_schema())
+                .map_err(|error| format!("failed to encode tool catalog schema: {error}"))?,
+        ),
+        Artifact::new(TOOL_CATALOG_TYPESCRIPT_ARTIFACT, tool_catalog_typescript()),
         Artifact::new(
             harn_vm::session_recap::SESSION_RECAP_SCHEMA_ARTIFACT,
             serde_json::to_string_pretty(&harn_vm::session_recap::session_recap_json_schema())
