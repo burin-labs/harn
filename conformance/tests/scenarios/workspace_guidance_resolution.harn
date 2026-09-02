@@ -7,7 +7,7 @@ import { guidance_prompt_fragments, resolve_workspace_guidance } from "std/agent
  * still ships the wrong context, so "outside/AGENTS.md is absent" is the
  * assertion that can actually fail.
  */
-pipeline test(harness: Harness, task: unknown) {
+pipeline test(harness: Harness) {
   const base = harness.fs.mkdtemp_in_workspace("harn-guidance-")
   const home = path_join(base, "home")
   const root = path_join(base, "repo")
