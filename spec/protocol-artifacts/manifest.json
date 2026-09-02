@@ -624,6 +624,12 @@
       "modulePath": "github.com/burin-labs/harn/spec/protocol-artifacts/go/harnprotocol",
       "stability": "stable"
     },
+    "harnToolsTypescript": {
+      "artifact": "harn-tools.ts",
+      "schema": "schemas/harn-tools-v2.schema.json",
+      "schemaVersion": "harn-tools/2.0",
+      "stability": "stable"
+    },
     "python": {
       "artifact": "python/harn_protocol.py",
       "minimumPythonVersion": "3.9",
@@ -998,6 +1004,15 @@
         "schema_version": "harn.plan_document.v1"
       },
       "source": "crates/harn-vm/src/llm/plan/document.rs"
+    },
+    {
+      "artifact": "schemas/harn-tools-v2.schema.json",
+      "protocol": "harn-tools",
+      "provenance": {
+        "owner": "harn-vm::tool_registry::contract",
+        "schemaVersion": "harn-tools/2.0"
+      },
+      "source": "crates/harn-vm/src/tool_registry/contract.rs"
     }
   ]
 }

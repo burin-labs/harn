@@ -40,6 +40,10 @@ pub enum DispatchError {
         message: String,
     },
     Validation(String),
+    /// A handler deliberately threw data matching its declared `throws` type.
+    Application(harn_vm::tool_registry::ToolApplicationError),
+    /// A handler produced success or error data outside its declared schema.
+    Contract(harn_vm::tool_registry::ToolContractViolation),
     MissingExport(String),
     Cancelled(String),
     Execution(String),
@@ -72,6 +76,10 @@ impl DispatchError {
             | Self::Execution(message)
             | Self::Io(message)
             | Self::Cache(message) => message.clone(),
+            Self::Application(error) => {
+                format!("tool {:?} failed: {}", error.tool, error.summary())
+            }
+            Self::Contract(error) => error.to_string(),
             Self::SecretBackend(message) => {
                 format!("no usable secret backend: {message}")
             }

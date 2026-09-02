@@ -6,9 +6,23 @@
 
 use std::path::Path;
 
-use harn_parser::{SNode, TypedParam};
+use harn_parser::{SNode, TypeExpr, TypedParam};
 
 use super::ExportedParam;
+
+/// Whether a declared type expression accepts a JSON object value: a bare
+/// `dict`, an inline object shape, a `DictType`, or any union/intersection
+/// member that does. Backs [`ExportedParam::accepts_json_object`].
+pub fn type_expr_accepts_json_object(type_expr: &TypeExpr) -> bool {
+    match type_expr {
+        TypeExpr::Named(name) => name == "dict",
+        TypeExpr::Shape(_) | TypeExpr::DictType(_, _) => true,
+        TypeExpr::Union(types) | TypeExpr::Intersection(types) => {
+            types.iter().any(type_expr_accepts_json_object)
+        }
+        _ => false,
+    }
+}
 
 pub(super) fn resolver_for_module(path: &Path, program: &[SNode]) -> harn_vm::TypeSchemaResolver {
     let module_graph = harn_modules::build(&[path.to_path_buf()]);
@@ -31,16 +45,23 @@ pub(super) fn exported_params(
 ) -> Vec<ExportedParam> {
     params
         .iter()
-        .map(|param| ExportedParam {
-            name: param.name.clone(),
-            type_expr: param.type_expr.clone(),
-            input_schema: param
+        .map(|param| {
+            let item_schema = param
                 .type_expr
                 .as_ref()
                 .and_then(|type_expr| resolver.json_schema_for_input_type_expr(type_expr))
-                .unwrap_or_else(|| serde_json::json!({})),
-            has_default: param.default_value.is_some(),
-            rest: param.rest,
+                .unwrap_or_else(|| serde_json::json!({}));
+            ExportedParam {
+                name: param.name.clone(),
+                type_expr: param.type_expr.clone(),
+                input_schema: if param.rest {
+                    serde_json::json!({"type": "array", "items": item_schema})
+                } else {
+                    item_schema
+                },
+                has_default: param.default_value.is_some(),
+                rest: param.rest,
+            }
         })
         .collect()
 }

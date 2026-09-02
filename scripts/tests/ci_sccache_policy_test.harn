@@ -1,4 +1,9 @@
-import { ci_linux_lane_policy_errors, windows_shared_cache_errors } from "../check_ci_cache_policy"
+import {
+  ci_linux_lane_policy_errors,
+  producer_cache_save_reserve_minutes,
+  producer_hosted_ceiling_minutes,
+  windows_shared_cache_errors,
+} from "../check_ci_cache_policy"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -18,7 +23,7 @@ fn persistent_lane(
       "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (${paid_event} && '${runner}' || 'ubuntu-latest')",
     ),
     "timeout-minutes": gha_expression(
-      "${paid_event} && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 40",
+      "${paid_event} && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 65",
     ),
     env: {
       HARN_RUNNER_TIER: gha_expression(
@@ -124,11 +129,13 @@ fn workflow() {
           + [
             {
               name: "Build portable Harn CLI",
+              "timeout-minutes": 9,
               run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
             },
             {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
             {
               name: "Build security test archive",
+              "timeout-minutes": 12,
               run: "./scripts/ci/rust_artifact.sh build-security security-bundle sha",
             },
             {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
@@ -140,6 +147,7 @@ fn workflow() {
             },
             {
               name: "Run Rust workspace tests",
+              "timeout-minutes": 26,
               id: "release-audit-rust-test",
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
               env: {HARN_LLM_CALLS_DISABLED: "1"},
@@ -801,7 +809,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 40-minute hosted recovery ceiling",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 65-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
     ),
   )
 }
@@ -1025,4 +1033,22 @@ pipeline test_rejects_paired_windows_cache_source_partitioning(harness: Harness,
     windows_shared_cache_errors(consumer, producer),
     ["workspace-windows producer and consumer must use one stable native restore namespace"],
   )
+}
+
+/**
+ * The main-branch cache save is a post step, so it spends whatever the bounded
+ * steps leave behind. This holds the reserve above the largest full-generation
+ * save observed on main (8m35s on 2026-09-02, run 33630075085), which is the
+ * save that cancelled a job after its 12853-test suite had already passed.
+ * Raising a step budget without raising the ceiling would silently spend the
+ * reserve, and the symptom would be a cancelled green job, not a policy error.
+ */
+@test
+pipeline test_producer_ceiling_reserves_a_full_cache_generation_save(
+  harness: Harness,
+  task: unknown,
+) {
+  assert(producer_cache_save_reserve_minutes() >= 9)
+  assert(producer_hosted_ceiling_minutes() > producer_cache_save_reserve_minutes())
+  assert_eq(ci_linux_lane_policy_errors(workflow()), [])
 }

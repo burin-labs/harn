@@ -66,9 +66,22 @@ fn main(harness: Harness) {
       name: "greet",
       description: "Greet one person.",
       parameters: {name: {schema: {type: "string"}, required: true}},
+      returns: {
+        type: "object",
+        properties: {message: {type: "string"}},
+        required: ["message"],
+        additionalProperties: false,
+      },
+      cli: {
+        command: ["people", "greet"],
+        arguments: {name: {position: 0, value_name: "NAME"}},
+      },
       handler: {args -> {message: "Hello, " + args.name}},
     },
-  ], {name: "widgets", version: "1.2.3", description: "Widget integration"})
+  ], {
+    info: {name: "widgets", version: "1.2.3", description: "Widget integration"},
+    cli: {commands: [{command: ["people"], title: "Work with people"}]},
+  })
   harness.tools.mcp_tools(tools)
 }
 "#,
@@ -98,7 +111,7 @@ fn main(harness: Harness) {
       governance: {audiences: ["catalog", "mcp"]},
       handler: {_args -> {surface: "mcp"}},
     },
-  ], {name: "governed-tools"})
+  ], {info: {name: "governed-tools"}})
   harness.tools.mcp_tools(tools)
 }
 "#,
@@ -127,7 +140,7 @@ fn main(harness: Harness) {{
       }},
       handler: {{_args -> {{value: "{value}"}}}},
     }},
-  ], {{name: "reload-fixture"}})
+  ], {{info: {{name: "reload-fixture"}}}})
   harness.tools.mcp_tools(tools)
 }}
 "#
@@ -232,9 +245,29 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
 
 #[ignore = "binary surface: runs in the slow E2E/smoke job"]
 #[test]
-fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
+fn registry_handler_has_generated_cli_and_mcp_parity() {
     let temp = TempDir::new().unwrap();
-    write_export_fixture(&temp);
+    write_registry_info_fixture(&temp);
+    let script = temp.path().join("server.harn");
+    let cli = harn_e2e_command()
+        .args([
+            "tool",
+            "run",
+            &script.display().to_string(),
+            "people",
+            "greet",
+            "Harn",
+            "--json",
+        ])
+        .output()
+        .expect("generated CLI invocation");
+    assert!(
+        cli.status.success(),
+        "generated CLI failed: {}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let cli_result: JsonValue = serde_json::from_slice(&cli.stdout).expect("generated CLI JSON");
+
     let mut command = harn_e2e_command();
     command
         .current_dir(temp.path())
@@ -256,13 +289,14 @@ fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
     let called = client.request(stable_request(
         3,
         "tools/call",
-        json!({"name": "greet", "arguments": {"name": "Harn", "excited": true}}),
+        json!({"name": "greet", "arguments": {"name": "Harn"}}),
     ));
     assert_eq!(called["result"]["resultType"], "complete");
     assert_eq!(
         called["result"]["structuredContent"]["message"],
-        "Hello, Harn!"
+        "Hello, Harn"
     );
+    assert_eq!(called["result"]["structuredContent"], cli_result);
     client.shutdown_expect_success();
 }
 

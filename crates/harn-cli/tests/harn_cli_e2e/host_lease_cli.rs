@@ -162,6 +162,78 @@ fn supervised_cargo_run_releases_the_worker_owned_rust_heavy_lease() {
     assert_eq!(envelope["data"]["active"], serde_json::Value::Null);
 }
 
+#[cfg(unix)]
+#[test]
+fn cargo_launch_failure_is_distinct_from_a_compiler_failure_at_the_cli_boundary() {
+    let temp = TempDir::new().expect("create temp directory");
+    let compile_workspace = temp.path().join("compile-failure");
+    let compile_target = temp.path().join("compile-target");
+    let compile_leases = temp.path().join("compile-leases");
+    fs::create_dir_all(compile_workspace.join("src")).expect("create compile fixture");
+    fs::write(
+        compile_workspace.join("Cargo.toml"),
+        "[package]\nname = \"lease-compile-failure\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write compile fixture manifest");
+    fs::write(
+        compile_workspace.join("src/main.rs"),
+        "fn main() { let _: u8 = \"not a number\"; }\n",
+    )
+    .expect("write invalid Rust source");
+
+    let compile = test_util::process::harn_e2e_command()
+        .args([
+            "host",
+            "lease",
+            "run",
+            "cargo",
+            "--owner",
+            "compile-failure",
+        ])
+        .arg("--workspace")
+        .arg(&compile_workspace)
+        .arg("--target-dir")
+        .arg(&compile_target)
+        .args(["--", "check", "--quiet"])
+        .env(harn_hostlib::HOST_LEASE_ROOT_ENV, &compile_leases)
+        .env("CARGO_TARGET_DIR", &compile_target)
+        .env_remove("CARGO_BUILD_BUILD_DIR")
+        .output()
+        .expect("run genuine compiler failure");
+    assert_eq!(
+        compile.status.code(),
+        Some(101),
+        "compiler stderr: {}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+
+    let empty_path = temp.path().join("empty-path");
+    let launch_target = temp.path().join("launch-target");
+    let launch_leases = temp.path().join("launch-leases");
+    fs::create_dir_all(&empty_path).expect("create empty executable path");
+
+    let launch = test_util::process::harn_e2e_command()
+        .args(["host", "lease", "run", "cargo", "--owner", "launch-failure"])
+        .arg("--workspace")
+        .arg(&compile_workspace)
+        .arg("--target-dir")
+        .arg(&launch_target)
+        .args(["--", "check", "--quiet"])
+        .env(harn_hostlib::HOST_LEASE_ROOT_ENV, &launch_leases)
+        .env("CARGO_TARGET_DIR", &launch_target)
+        .env("PATH", &empty_path)
+        .env_remove("CARGO_BUILD_BUILD_DIR")
+        .output()
+        .expect("run deterministic Cargo launch failure");
+    let stderr = String::from_utf8_lossy(&launch.stderr);
+    assert_eq!(launch.status.code(), Some(75), "launch stderr: {stderr}");
+    assert_ne!(launch.status.code(), compile.status.code());
+    assert!(
+        stderr.contains("state=launch-failed error=process-spawn"),
+        "launch failure did not name its typed terminal state: {stderr}"
+    );
+}
+
 #[test]
 fn supervised_cargo_run_defers_before_invoking_cargo_when_rust_heavy_is_held() {
     let temp = TempDir::new().expect("create temp directory");
