@@ -1287,7 +1287,7 @@ fn generated_artifacts_publish_the_harn_tools_contract() {
     let artifact_validator =
         jsonschema::draft202012::new(&schema).expect("harn-tools artifact validator");
     let structurally_valid_catalog = json!({
-        "schema_version": "harn-tools/1.0",
+        "schema_version": "harn-tools/2.0",
         "tools": [{
             "name": "inspect",
             "inputSchema": {"type": "object", "not": 7},

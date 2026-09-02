@@ -12,7 +12,7 @@ const sideEffect: SideEffectLevel = "network";
 const taskSupport: ToolTaskSupport = "optional";
 
 const catalog: ToolCatalog = {
-  schema_version: "harn-tools/1.0",
+  schema_version: "harn-tools/2.0",
   info: {
     name: "widgets",
     version: "1.0.0",
@@ -33,6 +33,15 @@ const catalog: ToolCatalog = {
         type: "object",
         properties: { id: { type: "integer" } },
         required: ["id"],
+        additionalProperties: false,
+      },
+      errorSchema: {
+        type: "object",
+        properties: {
+          kind: { const: "not_found" },
+          widget_id: { type: "integer" },
+        },
+        required: ["kind", "widget_id"],
         additionalProperties: false,
       },
       annotations: {
@@ -83,7 +92,7 @@ const catalog: ToolCatalog = {
 const tool = catalog.tools[0];
 if (
   tool === undefined ||
-  catalog.schema_version !== "harn-tools/1.0" ||
+  catalog.schema_version !== "harn-tools/2.0" ||
   catalog.tools.length !== 1 ||
   tool.name !== "get_widget" ||
   tool.governance.audiences[1] !== audience ||
@@ -91,6 +100,7 @@ if (
   tool.policy?.kind !== kind ||
   tool.policy.side_effect_level !== sideEffect ||
   tool.cli.command.join(" ") !== "widgets get" ||
+  tool.errorSchema === undefined ||
   catalog.components?.schemas.Widget === undefined
 ) {
   throw new Error(

@@ -244,7 +244,7 @@ impl McpTaskStore {
         wake.notify_waiters();
     }
 
-    /// Record a finished task whose result is already an MCP `tools/call`
+    /// Record a completed task whose result is already an MCP `tools/call`
     /// result rather than a bare tool return value.
     ///
     /// A server that projects its own result -- the export adapter builds MCP
@@ -252,12 +252,10 @@ impl McpTaskStore {
     /// nothing left for [`McpTaskStore::complete`] to wrap, and wrapping it
     /// again nests `content` inside `content`. Handing the projection over
     /// intact is also lossless: a multi-block or non-object result survives,
-    /// where reconstructing a bare value from the blocks would not.
+    /// where reconstructing a bare value from the blocks would not. `isError`
+    /// belongs to the completed tool-call result; only failure to produce a
+    /// result transitions the task itself to `failed`.
     pub fn complete_with_tool_result(&self, task_id: &str, result: JsonValue) {
-        let failed = result
-            .get("isError")
-            .and_then(JsonValue::as_bool)
-            .unwrap_or(false);
         let Some(wake) = ({
             let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
             let Some(record) = tasks.get_mut(task_id) else {
@@ -267,19 +265,8 @@ impl McpTaskStore {
                 return;
             }
             record.task.last_updated_at = now_rfc3339();
-            if failed {
-                record.task.status = mcp_protocol::McpTaskStatus::Failed;
-                record.task.status_message = Some(format!(
-                    "Tool execution failed: {}",
-                    result
-                        .pointer("/content/0/text")
-                        .and_then(JsonValue::as_str)
-                        .unwrap_or("Tool execution failed")
-                ));
-            } else {
-                record.task.status = mcp_protocol::McpTaskStatus::Completed;
-                record.task.status_message = Some("The task completed successfully.".to_string());
-            }
+            record.task.status = mcp_protocol::McpTaskStatus::Completed;
+            record.task.status_message = Some("The task produced a tool result.".to_string());
             record.result = Some(result);
             Some(record.notify.clone())
         }) else {
@@ -477,6 +464,26 @@ mod tests {
             read["result"]["result"]["structuredContent"],
             json!({ "answer": 42 })
         );
+    }
+
+    #[test]
+    fn a_completed_tool_error_remains_a_typed_result() {
+        let store = McpTaskStore::new();
+        let task = store.create("client-a", None);
+        let result = json!({
+            "content": [{"type": "text", "text": "NotFound"}],
+            "isError": true,
+            "_meta": {
+                crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY: {
+                    "applicationError": {"tool": "lookup"},
+                },
+            },
+        });
+        store.complete_with_tool_result(&task.task_id, result.clone());
+
+        let read = store.handle_get(json!(1), "client-a", &params(&task.task_id));
+        assert_eq!(read["result"]["status"], "completed");
+        assert_eq!(read["result"]["result"], result);
     }
 
     #[test]

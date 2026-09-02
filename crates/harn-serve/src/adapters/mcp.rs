@@ -417,6 +417,12 @@ impl McpServer {
         {
             return ImmediateResult::Response(response);
         }
+        if request_profile.uses_result_envelope()
+            && mcp_protocol::is_task_method(method)
+            && !mcp_protocol::client_supports_tasks(&params)
+        {
+            return ImmediateResult::Response(mcp_protocol::missing_tasks_capability_response(id));
+        }
 
         let response = match method {
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
@@ -723,6 +729,13 @@ impl McpServer {
             Err(DispatchError::MissingExport(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }
+            Err(DispatchError::Application(error)) => harn_vm::jsonrpc::response(
+                job.request_id,
+                harn_vm::tool_registry::application_error_mcp_result(&error),
+            ),
+            Err(DispatchError::Contract(error)) => {
+                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.to_string()))
+            }
             Err(DispatchError::Execution(message))
             | Err(DispatchError::Cancelled(message))
             | Err(DispatchError::Io(message))
@@ -735,21 +748,23 @@ impl McpServer {
                 harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message()))
             }
         };
-        let response = if job.request_profile.uses_result_envelope() {
-            envelope(response, None)
-        } else {
-            response
-        };
         // A task call's client is polling `tasks/get`, not reading this stream,
         // so the terminal response is filed rather than written. Progress
         // notifications above still went to the wire: those are addressed by
         // `progressToken`, which is a property of the request and independent
         // of how the result comes back.
         if let Some(task_id) = job.task_id {
-            self.tasks
-                .complete_with_tool_result(&task_id, task_outcome(response));
+            match task_outcome(response) {
+                Ok(result) => self.tasks.complete_with_tool_result(&task_id, result),
+                Err(error) => self.tasks.complete(&task_id, Err(error)),
+            }
             return;
         }
+        let response = if job.request_profile.uses_result_envelope() {
+            envelope(response, None)
+        } else {
+            response
+        };
         notify(response);
     }
 
@@ -950,24 +965,18 @@ fn forbidden_jsonrpc_error_response(
 
 /// Reduce a finished JSON-RPC response to the MCP result the task store files.
 ///
-/// A JSON-RPC `error` and a `result` with `isError` are the two ways this
-/// transport reports a failure; a client reading `tasks/get` should not have to
-/// know which one the tool hit, so the error shape is normalized into the
-/// `isError` result the store already understands.
-fn task_outcome(response: JsonValue) -> JsonValue {
+/// A JSON-RPC `error` means the request failed before it produced a tool
+/// result, so the task itself fails. A `result` with `isError` is still a
+/// completed tool result and is preserved intact by the task store.
+fn task_outcome(response: JsonValue) -> Result<JsonValue, String> {
     if let Some(error) = response.get("error") {
-        return json!({
-            "content": [{
-                "type": "text",
-                "text": error
-                    .get("message")
-                    .and_then(JsonValue::as_str)
-                    .unwrap_or("Tool execution failed"),
-            }],
-            "isError": true,
-        });
+        return Err(error
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("Tool execution failed")
+            .to_string());
     }
-    response.get("result").cloned().unwrap_or(json!({}))
+    Ok(response.get("result").cloned().unwrap_or(json!({})))
 }
 
 fn requires_protocol_auth(method: &str) -> bool {

@@ -2296,7 +2296,7 @@ boundaries instead of `dict` or a local structural copy.
 | `tool_select(registry, names)` | registry: `ToolRegistry`, names: list | `ToolRegistry` | Return a registry containing only the named tools |
 | `tool_count(registry)` | registry: `ToolRegistry` | int | Number of tools in the registry |
 | `tool_describe(registry)` | registry: `ToolRegistry` | string | Human-readable summary of all tools |
-| `tool_schema(registry)` | registry: `ToolRegistry` | `ToolCatalog` | Project the registry, including its reusable component schemas, into `harn-tools/1.0` |
+| `tool_schema(registry)` | registry: `ToolRegistry` | `ToolCatalog` | Project the registry, including its reusable component schemas, into `harn-tools/2.0` |
 | `tool_prompt(registry)` | registry: `ToolRegistry` | string | Generate an LLM system prompt describing available tools |
 | `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
 | `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |

@@ -4,7 +4,7 @@
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonSchema202012 = boolean | { readonly [keyword: string]: JsonValue };
 
-export type ToolCatalogSchemaVersion = "harn-tools/1.0";
+export type ToolCatalogSchemaVersion = "harn-tools/2.0";
 
 export type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard" | "agent";
 
@@ -87,6 +87,6 @@ export type ToolPolicy = { kind: ToolKind, side_effect_level: SideEffectLevel, }
 
 export type ToolCatalogComponents = { schemas: Readonly<Record<string, JsonSchema202012>>, };
 
-export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null, annotations?: ToolPresentationAnnotations | null, icons?: Array<ToolIcon> | null, execution?: ToolExecution | null, governance: ToolGovernance, cli: ToolCliSpec, namespace?: string | null, deferLoading: boolean, source?: ToolSource | null, policy?: ToolPolicy | null, _meta?: Readonly<Record<string, JsonValue>> | null, };
+export type ToolCatalogEntry = { name: string, title?: string | null, description?: string | null, inputSchema: JsonSchema202012, outputSchema?: JsonSchema202012 | null, errorSchema?: JsonSchema202012 | null, annotations?: ToolPresentationAnnotations | null, icons?: Array<ToolIcon> | null, execution?: ToolExecution | null, governance: ToolGovernance, cli: ToolCliSpec, namespace?: string | null, deferLoading: boolean, source?: ToolSource | null, policy?: ToolPolicy | null, _meta?: Readonly<Record<string, JsonValue>> | null, };
 
 export type ToolCatalog = { schema_version: ToolCatalogSchemaVersion, info?: ToolRegistryInfo | null, cli?: ToolCliTreeSpec | null, tools: Array<ToolCatalogEntry>, components?: ToolCatalogComponents | null, };

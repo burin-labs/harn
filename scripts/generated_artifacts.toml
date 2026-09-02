@@ -309,7 +309,7 @@ outputs = [
   "spec/protocol-artifacts/harn-tools.ts",
   "spec/protocol-artifacts/HarnProtocol.swift",
   "spec/protocol-artifacts/manifest.json",
-  "spec/protocol-artifacts/schemas/harn-tools-v1.schema.json",
+  "spec/protocol-artifacts/schemas/harn-tools-v2.schema.json",
   "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
 ]
 sources = [

@@ -46,8 +46,7 @@ pub pipeline deploy(replicas: int) -> bool {
     assert_eq!(
         error,
         DispatchError::Validation(
-            "tool \"deploy\" input violates its declared schema: \"many\" is not of type \"integer\""
-                .to_string(),
+            "tool \"deploy\" input violates its declared schema: /* failed type".to_string(),
         )
     );
 }

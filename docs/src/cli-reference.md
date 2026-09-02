@@ -1771,16 +1771,23 @@ contract. Run the entrypoint with `harn serve mcp server.harn`.
 [Tool registry adapters](./tool-registry-adapters.md) for metadata, coercion,
 validation, and catalog details.
 
+When a tool declares `error_schema`, a matching thrown value exits nonzero.
+JSON output writes
+`{"ok":false,"error":{"kind":"application","tool":...,"data":...}}`;
+text output writes a generic application-error summary to stderr. Undeclared
+throws and values outside the declared schema remain runtime or contract
+failures.
+
 `harn tool completions` emits static completion for Bash, Zsh, Fish, or
 PowerShell. It reads the same validated command tree as `harn tool run`, so
 command aliases, flags, positionals, enum values, and path hints cannot drift
 from parsing or help. Use `--shell bash`, `zsh`, `fish`, or `power-shell`.
 
-`harn tool schema` emits the versioned `harn-tools/1.0` catalog. Its
+`harn tool schema` emits the versioned `harn-tools/2.0` catalog. Its
 `--surface` value is `script` or `exports`; `script` is the default. The
-`exports` surface compiles public functions and resolves their input and output
-types without running `main` or acquiring runtime capabilities. Use
-`--pretty` for indented JSON.
+`exports` surface compiles public functions and resolves their input, output,
+and declared `throws` types without running `main` or acquiring runtime
+capabilities. Use `--pretty` for indented JSON.
 
 ## harn skill
 

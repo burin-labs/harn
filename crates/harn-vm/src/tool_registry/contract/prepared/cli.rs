@@ -635,6 +635,7 @@ mod tests {
                 "additionalProperties": false
             }),
             output_schema: None,
+            error_schema: None,
             annotations: None,
             icons: None,
             execution: None,
@@ -674,7 +675,7 @@ mod tests {
 
     fn catalog(tool: ToolCatalogEntry) -> ToolCatalog {
         ToolCatalog {
-            schema_version: ToolCatalogSchemaVersion::V1,
+            schema_version: ToolCatalogSchemaVersion::V2,
             info: None,
             cli: Some(ToolCliTreeSpec {
                 commands: vec![ToolCliCommandSpec {

@@ -7,8 +7,11 @@
  */
 pub type ToolRegistryInfo = {name: string, version?: string, description?: string}
 
+/** Draft 2020-12 schema document, including the standard boolean form. */
+pub type JsonSchema202012 = bool | dict<string, unknown>
+
 /** Reusable named JSON Schemas shared by every adapter projection. */
-pub type ToolComponents = {schemas: dict}
+pub type ToolComponents = {schemas: dict<string, JsonSchema202012>}
 
 pub type ToolCliValueHint = "file" \
   | "directory" \
@@ -102,8 +105,9 @@ pub type ToolCatalogEntry = {
   name: string,
   title?: string,
   description?: string,
-  inputSchema: dict,
-  outputSchema?: dict,
+  inputSchema: JsonSchema202012,
+  outputSchema?: JsonSchema202012,
+  errorSchema?: JsonSchema202012,
   annotations?: dict,
   icons?: list<ToolIcon>,
   execution?: ToolExecution,
@@ -118,7 +122,7 @@ pub type ToolCatalogEntry = {
 
 /** Versioned static projection shared by generated presentation adapters. */
 pub type ToolCatalog = {
-  schema_version: "harn-tools/1.0",
+  schema_version: "harn-tools/2.0",
   info?: ToolRegistryInfo,
   cli?: ToolCliTreeSpec,
   tools: list<ToolCatalogEntry>,
@@ -126,9 +130,13 @@ pub type ToolCatalog = {
 }
 
 type ToolDefinitionConfig = {
+  /** Legacy per-parameter shorthand. Prefer input_schema for new adapters. */
   parameters?: dict,
-  returns?: dict,
-  output_schema?: dict,
+  /** Complete caller-owned object schema, normalized directly into inputSchema. */
+  input_schema?: dict<string, unknown>,
+  returns?: JsonSchema202012,
+  output_schema?: JsonSchema202012,
+  error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
   executor?: string,
   host_capability?: string,
@@ -162,9 +170,13 @@ pub type ToolDefinitionSpec = {
   description?: string,
   desc?: string,
   config?: ToolDefinitionConfig,
+  /** Legacy per-parameter shorthand. Prefer input_schema for new adapters. */
   parameters?: dict,
-  returns?: dict,
-  output_schema?: dict,
+  /** Complete caller-owned object schema, normalized directly into inputSchema. */
+  input_schema?: dict<string, unknown>,
+  returns?: JsonSchema202012,
+  output_schema?: JsonSchema202012,
+  error_schema?: JsonSchema202012,
   handler?: fn(dict) -> any,
   executor?: string,
   host_capability?: string,

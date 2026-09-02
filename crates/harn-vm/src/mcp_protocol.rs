@@ -414,6 +414,10 @@ pub fn standard_name_header_value(method: &str, params: &JsonValue) -> Option<St
             .get("uri")
             .and_then(JsonValue::as_str)
             .map(str::to_string),
+        METHOD_TASKS_GET | METHOD_TASKS_UPDATE | METHOD_TASKS_CANCEL => params
+            .get("taskId")
+            .and_then(JsonValue::as_str)
+            .map(str::to_string),
         _ => None,
     }
 }
@@ -583,6 +587,26 @@ pub fn client_supports_tasks(params: &JsonValue) -> bool {
     params
         .pointer("/_meta/io.modelcontextprotocol~1clientCapabilities/extensions/io.modelcontextprotocol~1tasks")
         .is_some()
+}
+
+pub fn is_task_method(method: &str) -> bool {
+    matches!(
+        method,
+        METHOD_TASKS_GET | METHOD_TASKS_UPDATE | METHOD_TASKS_CANCEL
+    )
+}
+
+pub fn missing_tasks_capability_response(id: impl Into<JsonValue>) -> JsonValue {
+    crate::jsonrpc::error_response_with_data(
+        id,
+        MISSING_REQUIRED_CLIENT_CAPABILITY_CODE,
+        "Missing required client capability",
+        json!({
+            "requiredCapabilities": {
+                "extensions": {TASKS_EXTENSION_ID: {}}
+            }
+        }),
+    )
 }
 
 pub fn tasks_capability() -> JsonValue {
@@ -1063,7 +1087,23 @@ mod tests {
             standard_name_header_value("resources/read", &json!({"uri": "harn://x"})),
             Some("harn://x".to_string())
         );
+        for method in [METHOD_TASKS_GET, METHOD_TASKS_UPDATE, METHOD_TASKS_CANCEL] {
+            assert_eq!(
+                standard_name_header_value(method, &json!({"taskId": "task-123"})),
+                Some("task-123".to_string())
+            );
+        }
         assert_eq!(standard_name_header_value("tools/list", &json!({})), None);
+    }
+
+    #[test]
+    fn missing_task_capability_uses_the_extension_error_contract() {
+        let response = missing_tasks_capability_response(json!(7));
+        assert_eq!(response["error"]["code"], -32021);
+        assert_eq!(
+            response["error"]["data"]["requiredCapabilities"]["extensions"][TASKS_EXTENSION_ID],
+            json!({})
+        );
     }
 
     #[test]

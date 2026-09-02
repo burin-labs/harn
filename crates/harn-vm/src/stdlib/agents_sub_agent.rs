@@ -592,6 +592,8 @@ fn nested_budget_denial_error(result: &serde_json::Value) -> Option<VmValue> {
         .unwrap_or_else(|| {
             serde_json::json!({
                 "category": "budget_exceeded",
+                "kind": "budget_exhausted",
+                "reason": "nested_execution_budget_exhausted",
                 "message": "nested execution budget exhausted",
             })
         });

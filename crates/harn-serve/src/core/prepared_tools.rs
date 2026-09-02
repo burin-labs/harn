@@ -27,6 +27,41 @@ impl PreparedTools {
     pub(super) fn exports(&self) -> &ExportCatalog {
         &self.exports
     }
+
+    pub(super) fn classify_result(
+        &self,
+        tool: &str,
+        result: Result<harn_vm::VmValue, harn_vm::VmError>,
+    ) -> Result<(harn_vm::VmValue, serde_json::Value), DispatchError> {
+        match harn_vm::tool_registry::classify_tool_result(&self.contract, tool, result) {
+            Ok(harn_vm::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
+                Ok((value, json))
+            }
+            Ok(harn_vm::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
+                Err(DispatchError::Application(error))
+            }
+            Err(harn_vm::tool_registry::ToolInvocationError::Contract(error)) => {
+                Err(DispatchError::Contract(error))
+            }
+            Err(harn_vm::tool_registry::ToolInvocationError::Runtime(error)) => {
+                Err(super::classify_vm_error(error))
+            }
+        }
+    }
+
+    pub(super) fn classify_failure(&self, tool: &str, error: harn_vm::VmError) -> DispatchError {
+        match harn_vm::tool_registry::classify_tool_failure(&self.contract, tool, error) {
+            harn_vm::tool_registry::ToolFailureClassification::Application(error) => {
+                DispatchError::Application(error)
+            }
+            harn_vm::tool_registry::ToolFailureClassification::Contract(error) => {
+                DispatchError::Contract(error)
+            }
+            harn_vm::tool_registry::ToolFailureClassification::Runtime(error) => {
+                super::classify_vm_error(error)
+            }
+        }
+    }
 }
 
 impl DispatchCore {

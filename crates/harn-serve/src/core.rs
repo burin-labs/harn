@@ -10,7 +10,6 @@ use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 use harn_vm::event_log::{
     active_event_log, install_active_event_log, install_default_for_base_dir, AnyEventLog,
 };
-use harn_vm::llm::vm_value_to_export_json;
 use harn_vm::mcp_progress::ProgressContext;
 use harn_vm::trust_graph::{append_trust_record, TrustOutcome, TrustRecord};
 #[cfg(test)]
@@ -88,7 +87,7 @@ fn install_dispatch_vm_runtime(
 /// * everything else → `Execution` (HTTP 500).
 fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
     let category = harn_vm::error_to_category(&error);
-    let message = error.to_string();
+    let message = harn_vm::tool_registry::tool_runtime_error_summary(&error);
     match category {
         harn_vm::ErrorCategory::Cancelled => DispatchError::Cancelled(message),
         harn_vm::ErrorCategory::BudgetExceeded => DispatchError::BudgetExceeded {
@@ -109,10 +108,17 @@ fn classify_vm_error(error: harn_vm::VmError) -> DispatchError {
 /// mid-call variant instead, where we disambiguate on the message.
 fn budget_category_from_error(error: &harn_vm::VmError) -> Option<String> {
     match error {
-        harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => d
-            .get("limit")
-            .map(|value| value.display())
-            .filter(|s| !s.is_empty()),
+        harn_vm::VmError::Thrown(harn_vm::VmValue::Dict(d)) => {
+            let harn_vm::VmValue::String(limit) = d.get("limit")? else {
+                return None;
+            };
+            let limit = limit.as_str();
+            matches!(
+                limit,
+                "llm_cost_usd" | "llm_tokens" | "mcp_calls" | "pg_queries"
+            )
+            .then(|| limit.to_string())
+        }
         harn_vm::VmError::CategorizedError { message, .. } if message.contains("LLM") => {
             if message.contains("token") {
                 Some("llm_tokens".to_string())
@@ -490,11 +496,14 @@ impl DispatchCore {
         let invocation = async {
             let value = match function.kind {
                 ExportedCallableKind::Function => self.invoke_function(&request, function).await?,
-                ExportedCallableKind::Pipeline => self.invoke_pipeline(&request, function).await?,
+                ExportedCallableKind::Pipeline => {
+                    let value = self.invoke_pipeline(&request, function).await?;
+                    self.prepared_tool_catalog()
+                        .validate_output(&request.function, &value.0)
+                        .map_err(DispatchError::Contract)?;
+                    value
+                }
             };
-            self.prepared_tool_catalog()
-                .validate_output(&request.function, &value.0)
-                .map_err(|error| DispatchError::Execution(error.to_string()))?;
             Ok::<_, DispatchError>(value)
         }
         .instrument(span)
@@ -623,7 +632,7 @@ impl DispatchCore {
                             self.generation.source(),
                         )
                         .await
-                        .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                        .map_err(classify_vm_error)?;
                     let Some(closure) = exports.get(&request.function) else {
                         return Err(DispatchError::MissingExport(format!(
                             "function '{}' is not exported by {}",
@@ -642,10 +651,8 @@ impl DispatchCore {
                     args.extend(user_args);
                     let result = vm.call_closure_pub(closure, &args).await;
 
-                    match result {
-                        Ok(value) => Ok((vm_value_to_export_json(&value), vm.output().to_string())),
-                        Err(error) => Err(classify_vm_error(error)),
-                    }
+                    let (_, json) = self.tools.classify_result(&request.function, result)?;
+                    Ok((json, vm.output().to_string()))
                 })
                 .await
             }))
@@ -717,7 +724,7 @@ impl DispatchCore {
                             let output = vm.output().to_string();
                             Ok((serde_json::Value::String(output.clone()), output))
                         }
-                        Err(error) => Err(classify_vm_error(error)),
+                        Err(error) => Err(self.tools.classify_failure(&function.name, error)),
                     }
                 })
                 .await

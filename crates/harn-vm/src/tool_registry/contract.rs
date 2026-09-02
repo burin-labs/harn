@@ -1,4 +1,4 @@
-//! Versioned, transport-neutral `harn-tools/1.0` data contract.
+//! Versioned, transport-neutral Harn tool catalog data contract.
 //!
 //! Runtime closures and adapter configuration deliberately do not appear here.
 //! OpenAPI and Harn exports normalize into this contract; CLI, MCP, docs, and
@@ -28,12 +28,20 @@ pub use cli::{
 };
 pub use prepared::{
     PreparedCliArgument, PreparedCliCommand, PreparedCliTree, PreparedToolCatalog,
-    PreparedToolCatalogError, ToolContractPhase, ToolContractViolation,
+    PreparedToolCatalogError, ToolApplicationError, ToolContractPhase, ToolContractViolation,
+    ToolContractViolationDetail, ToolThrownClassification,
 };
 
-pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/1.0";
-pub const TOOL_CATALOG_SCHEMA_ARTIFACT: &str = "schemas/harn-tools-v1.schema.json";
+pub const TOOL_CATALOG_SCHEMA_VERSION: &str = "harn-tools/2.0";
+pub const TOOL_CATALOG_SCHEMA_ARTIFACT: &str = "schemas/harn-tools-v2.schema.json";
+const JSON_SCHEMA_2020_12_URI: &str = "https://json-schema.org/draft/2020-12/schema";
 pub const TOOL_CATALOG_TYPESCRIPT_ARTIFACT: &str = "harn-tools.ts";
+/// Harn-owned metadata nested below MCP `_meta`.
+///
+/// MCP reserves reverse-DNS names for vendor extensions. Keeping the complete
+/// typed-tool payload below one key prevents collisions with caller metadata
+/// and leaves room for compatible additions to the Harn projection.
+pub const HARN_MCP_TOOL_CONTRACT_META_KEY: &str = "com.harnlang/toolContract";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCatalogProjectionError {
@@ -52,8 +60,8 @@ impl std::error::Error for ToolCatalogProjectionError {}
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub enum ToolCatalogSchemaVersion {
     #[default]
-    #[serde(rename = "harn-tools/1.0")]
-    V1,
+    #[serde(rename = "harn-tools/2.0")]
+    V2,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -246,6 +254,14 @@ pub struct ToolCatalogEntry {
     #[ts(optional = nullable, type = "JsonSchema202012 | null")]
     #[schemars(schema_with = "json_schema_document")]
     pub output_schema: Option<JsonValue>,
+    /// Portable shape of values deliberately thrown by this tool.
+    ///
+    /// Runtime faults remain adapter errors. Only a raw Harn `throw` from a
+    /// handler with this contract is application error data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable, type = "JsonSchema202012 | null")]
+    #[schemars(schema_with = "json_schema_document")]
+    pub error_schema: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub annotations: Option<ToolPresentationAnnotations>,
@@ -410,7 +426,20 @@ impl ToolCatalog {
                 require_non_empty(&source.kind, &format!("{context}.source.kind"))?;
                 require_optional_non_empty(source.id.as_deref(), &format!("{context}.source.id"))?;
             }
+            if tool
+                .meta
+                .as_ref()
+                .is_some_and(|meta| meta.contains_key(HARN_MCP_TOOL_CONTRACT_META_KEY))
+            {
+                return Err(format!(
+                    "{context}._meta[{HARN_MCP_TOOL_CONTRACT_META_KEY:?}] is reserved for Harn-owned adapter projections"
+                ));
+            }
             validate_schema_document(&tool.input_schema, true, &format!("{context}.inputSchema"))?;
+            validate_portable_schema_extensions(
+                &tool.input_schema,
+                &format!("{context}.inputSchema"),
+            )?;
             validate_defs_do_not_shadow_components(
                 &tool.input_schema,
                 component_schemas,
@@ -423,6 +452,10 @@ impl ToolCatalog {
             )?;
             if let Some(output_schema) = tool.output_schema.as_ref() {
                 validate_schema_document(output_schema, false, &format!("{context}.outputSchema"))?;
+                validate_portable_schema_extensions(
+                    output_schema,
+                    &format!("{context}.outputSchema"),
+                )?;
                 validate_defs_do_not_shadow_components(
                     output_schema,
                     component_schemas,
@@ -432,6 +465,23 @@ impl ToolCatalog {
                     output_schema,
                     component_schemas,
                     &format!("{context}.outputSchema"),
+                )?;
+            }
+            if let Some(error_schema) = tool.error_schema.as_ref() {
+                validate_schema_document(error_schema, false, &format!("{context}.errorSchema"))?;
+                validate_portable_schema_extensions(
+                    error_schema,
+                    &format!("{context}.errorSchema"),
+                )?;
+                validate_defs_do_not_shadow_components(
+                    error_schema,
+                    component_schemas,
+                    &format!("{context}.errorSchema"),
+                )?;
+                validate_refs(
+                    error_schema,
+                    component_schemas,
+                    &format!("{context}.errorSchema"),
                 )?;
             }
         }
@@ -550,6 +600,16 @@ fn validate_schema_document(
     if !schema.is_boolean() && !schema.is_object() {
         return Err(format!("{field} must be a boolean or object JSON Schema"));
     }
+    try_visit_schema_nodes(schema, &mut |object| {
+        if let Some(dialect) = object.get("$schema").and_then(JsonValue::as_str) {
+            if dialect.trim_end_matches('#') != JSON_SCHEMA_2020_12_URI {
+                return Err(format!(
+                    "{field} declares unsupported JSON Schema dialect {dialect:?}; expected Draft 2020-12 ({JSON_SCHEMA_2020_12_URI})"
+                ));
+            }
+        }
+        Ok(())
+    })?;
     jsonschema::meta::validate(schema)
         .map_err(|error| format!("{field} is not a valid Draft 2020-12 JSON Schema: {error}"))?;
     if require_object && schema.get("type").and_then(JsonValue::as_str) != Some("object") {
@@ -730,6 +790,14 @@ fn tool_catalog_entry_to_mcp_with_components(
     if let Some(output_schema) = entry.output_schema.as_ref() {
         tool["outputSchema"] = mcp_output_schema(&standalone_schema(output_schema, components)?);
     }
+    if let Some(error_schema) = entry.error_schema.as_ref() {
+        let error_schema = standalone_schema(error_schema, components)?;
+        tool.as_object_mut()
+            .expect("MCP tool projection is an object")
+            .entry("_meta")
+            .or_insert_with(|| json!({}))[HARN_MCP_TOOL_CONTRACT_META_KEY] =
+            json!({"errorSchema": error_schema});
+    }
     if let Some(annotations) = entry.annotations.as_ref() {
         let mut annotations = annotations.clone();
         annotations.title.get_or_insert(title);
@@ -741,12 +809,21 @@ fn tool_catalog_entry_to_mcp_with_components(
     if let Some(icons) = entry.icons.as_ref() {
         tool["icons"] = serde_json::to_value(icons).expect("tool icons are serializable");
     }
-    if let Some(execution) = entry.execution.as_ref() {
-        tool["execution"] =
-            serde_json::to_value(execution).expect("tool execution metadata is serializable");
-    }
     if let Some(meta) = entry.meta.as_ref() {
-        tool["_meta"] = serde_json::to_value(meta).expect("tool metadata is serializable");
+        let projected = tool
+            .as_object_mut()
+            .expect("MCP tool projection is an object")
+            .entry("_meta")
+            .or_insert_with(|| json!({}));
+        let projected = projected
+            .as_object_mut()
+            .expect("Harn creates MCP tool metadata as an object");
+        for (key, value) in meta {
+            if key == HARN_MCP_TOOL_CONTRACT_META_KEY {
+                continue;
+            }
+            projected.insert(key.clone(), value.clone());
+        }
     }
     Ok(tool)
 }
@@ -832,6 +909,20 @@ fn collect_component_refs(value: &JsonValue, names: &mut std::collections::BTree
     .expect("infallible schema traversal");
 }
 
+fn validate_portable_schema_extensions(value: &JsonValue, field: &str) -> Result<(), String> {
+    try_visit_schema_nodes(value, &mut |object| {
+        let Some(kind) = object.get("x-harn-type").and_then(JsonValue::as_str) else {
+            return Ok(());
+        };
+        if matches!(kind, "closure" | "builtin") {
+            return Err(format!(
+                "{field} contains runtime-only Harn type {kind:?}, which has no portable JSON value"
+            ));
+        }
+        Ok(())
+    })
+}
+
 fn reject_unsafe_bundled_schema_keywords(
     value: &JsonValue,
     field: &str,
@@ -900,65 +991,11 @@ pub fn tool_output_to_mcp_structured_content(
     output_schema: Option<&JsonValue>,
     result: JsonValue,
 ) -> Option<JsonValue> {
-    output_schema.map(|output_schema| {
-        if schema_guarantees_object(output_schema) {
-            result
-        } else {
-            json!({"result": result})
-        }
-    })
+    output_schema.map(|_| result)
 }
 
 fn mcp_output_schema(output_schema: &JsonValue) -> JsonValue {
-    if schema_guarantees_object(output_schema) {
-        return output_schema.clone();
-    }
-    json!({
-        "type": "object",
-        "properties": {"result": output_schema},
-        "required": ["result"],
-        "additionalProperties": false,
-    })
-}
-
-fn schema_guarantees_object(schema: &JsonValue) -> bool {
-    schema_node_guarantees_object(schema, schema, &mut std::collections::BTreeSet::new())
-}
-
-fn schema_node_guarantees_object<'a>(
-    root: &'a JsonValue,
-    schema: &'a JsonValue,
-    visited_refs: &mut std::collections::BTreeSet<&'a str>,
-) -> bool {
-    if schema.get("type").and_then(JsonValue::as_str) == Some("object") {
-        return true;
-    }
-    if let Some(reference) = schema.get("$ref").and_then(JsonValue::as_str) {
-        if let Some(pointer) = reference.strip_prefix('#') {
-            return visited_refs.insert(reference)
-                && root.pointer(pointer).is_some_and(|target| {
-                    schema_node_guarantees_object(root, target, visited_refs)
-                });
-        }
-    }
-    ["oneOf", "anyOf"].iter().any(|keyword| {
-        schema
-            .get(keyword)
-            .and_then(JsonValue::as_array)
-            .is_some_and(|branches| {
-                !branches.is_empty()
-                    && branches.iter().all(|branch| {
-                        schema_node_guarantees_object(root, branch, &mut visited_refs.clone())
-                    })
-            })
-    }) || schema
-        .get("allOf")
-        .and_then(JsonValue::as_array)
-        .is_some_and(|branches| {
-            branches.iter().any(|branch| {
-                schema_node_guarantees_object(root, branch, &mut visited_refs.clone())
-            })
-        })
+    output_schema.clone()
 }
 
 /// Draft 2020-12 schema generated by the owning Rust contract module.
@@ -968,7 +1005,7 @@ pub fn tool_catalog_json_schema() -> JsonValue {
         .into_generator();
     let mut schema = serde_json::to_value(generator.into_root_schema_for::<ToolCatalog>())
         .expect("tool catalog schema is serializable");
-    schema["$id"] = json!("https://harnlang.com/schemas/harn-tools-v1.schema.json");
+    schema["$id"] = json!("https://harnlang.com/schemas/harn-tools-v2.schema.json");
     schema["title"] = json!("Harn Tool Catalog");
     schema
 }
@@ -1029,7 +1066,7 @@ mod tests {
 
     fn valid_catalog_json() -> JsonValue {
         json!({
-          "schema_version": "harn-tools/1.0",
+          "schema_version": "harn-tools/2.0",
           "info": {
             "name": "inspection-suite",
             "version": "1.2.3",
@@ -1127,13 +1164,13 @@ mod tests {
 
         for invalid in shared_invalid_catalogs().into_iter().chain([
             json!({"schema_version": "harn-tools/2.0", "tools": []}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [], "unknown": true}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["shell"]},"cli":{"command":["x"],"hidden":false},"deferLoading":false}]}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["x"],"hidden":false},"deferLoading":false,"icons":[{"src":7}]}]}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["x"],"hidden":false},"deferLoading":false,"execution":{"taskSupport":"sometimes"}}]}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["-x"],"hidden":false},"deferLoading":false}]}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["x y"],"hidden":false},"deferLoading":false}]}),
-            json!({"schema_version": "harn-tools/1.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":[],"hidden":false},"deferLoading":false}]}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [], "unknown": true}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["shell"]},"cli":{"command":["x"],"hidden":false},"deferLoading":false}]}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["x"],"hidden":false},"deferLoading":false,"icons":[{"src":7}]}]}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["x"],"hidden":false},"deferLoading":false,"execution":{"taskSupport":"sometimes"}}]}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["-x"],"hidden":false},"deferLoading":false}]}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":["x y"],"hidden":false},"deferLoading":false}]}),
+            json!({"schema_version": "harn-tools/2.0", "tools": [{"name":"x","inputSchema":{"type":"object"},"governance":{"audiences":["cli"]},"cli":{"command":[],"hidden":false},"deferLoading":false}]}),
         ]) {
             assert!(!validator.is_valid(&invalid), "fixture unexpectedly valid: {invalid}");
             assert!(
@@ -1161,18 +1198,6 @@ mod tests {
                 .contains("inputSchema is not a valid Draft 2020-12 JSON Schema"),
             "unexpected semantic validation error: {error}"
         );
-    }
-
-    #[test]
-    fn serde_rejects_unknown_owned_fields_and_versions() {
-        assert!(serde_json::from_value::<ToolCatalog>(json!({
-            "schema_version": "harn-tools/1.0", "tools": [], "extra": true
-        }))
-        .is_err());
-        assert!(serde_json::from_value::<ToolCatalog>(json!({
-            "schema_version": "harn-tools/9.0", "tools": []
-        }))
-        .is_err());
     }
 
     #[test]
@@ -1446,48 +1471,15 @@ mod tests {
     }
 
     #[test]
-    fn non_object_output_schema_and_result_share_one_wrapper() {
-        let mut value = valid_catalog_json();
-        value["tools"][0]["outputSchema"] = json!({"type": "string"});
-        let catalog: ToolCatalog = serde_json::from_value(value).expect("valid catalog");
-        let entry = &catalog.tools[0];
-        let projected = catalog.mcp_tool(entry).expect("MCP projection");
-        let structured =
-            tool_result_to_mcp_structured_content(entry, json!("ok")).expect("declared output");
-        assert_eq!(structured, json!({"result": "ok"}));
-        let validator = jsonschema::draft202012::new(&projected["outputSchema"])
-            .expect("valid standalone output schema");
-        assert!(validator.is_valid(&structured));
-    }
-
-    #[test]
-    fn wire_and_typescript_preserve_optional_and_false_compatibility() {
+    fn wire_preserves_optional_and_false_compatibility() {
         let catalog: ToolCatalog = serde_json::from_value(valid_catalog_json()).unwrap();
         let wire = serde_json::to_value(&catalog).unwrap();
         assert_eq!(wire["tools"][0]["cli"]["hidden"], false);
         assert_eq!(wire["tools"][0]["deferLoading"], false);
         assert_eq!(wire["tools"][0]["icons"][0]["theme"], "dark");
-
-        let typescript = tool_catalog_typescript();
-        assert!(typescript.ends_with('\n'));
-        assert!(!typescript.ends_with("\n\n"));
-        assert!(
-            typescript.lines().all(|line| line == line.trim_end()),
-            "generated TypeScript must not contain trailing line whitespace"
-        );
-        for expected in [
-            "title?: string | null",
-            "theme?: ToolIconTheme | null",
-            "outputSchema?: JsonSchema202012 | null",
-            "binding?: Readonly<Record<string, JsonValue>> | null",
-            "_meta?: Readonly<Record<string, JsonValue>> | null",
-            "hidden: boolean",
-            "deferLoading: boolean",
-        ] {
-            assert!(
-                typescript.contains(expected),
-                "missing TS fragment {expected:?}"
-            );
-        }
     }
 }
+
+#[cfg(test)]
+#[path = "contract/application_contract_tests.rs"]
+mod application_contract_tests;

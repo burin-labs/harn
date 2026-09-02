@@ -740,8 +740,14 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     }
 
-    let parameters = config
-        .get("parameters")
+    let parameters = config.get("parameters");
+    let input_schema = config.get("input_schema");
+    if parameters.is_some() && input_schema.is_some() {
+        return Err(VmError::Runtime(
+            "tool_define: use either 'parameters' or 'input_schema', not both".to_string(),
+        ));
+    }
+    let parameters = parameters
         .cloned()
         .unwrap_or(VmValue::dict(crate::value::DictMap::new()));
     let output_schema = config
@@ -749,17 +755,27 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .or_else(|| config.get("output_schema"))
         .cloned()
         .unwrap_or(VmValue::Nil);
+    let error_schema = config.get("error_schema").cloned().unwrap_or(VmValue::Nil);
 
     let mut tool_entry = crate::value::DictMap::new();
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert(crate::value::intern_key("handler"), handler);
     tool_entry.insert(crate::value::intern_key("parameters"), parameters);
+    if let Some(input_schema) = input_schema {
+        tool_entry.insert(
+            crate::value::intern_key("inputSchema"),
+            input_schema.clone(),
+        );
+    }
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
     tool_entry.put_str("executor", resolved_executor);
     if !matches!(output_schema, VmValue::Nil) {
         tool_entry.insert(crate::value::intern_key("outputSchema"), output_schema);
+    }
+    if !matches!(error_schema, VmValue::Nil) {
+        tool_entry.insert(crate::value::intern_key("errorSchema"), error_schema);
     }
 
     if let Some(policy @ VmValue::Dict(_)) = config.get("execution_policy") {
@@ -783,7 +799,14 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     for (key, value) in config.iter() {
         if matches!(
             key.as_str(),
-            "handler" | "parameters" | "returns" | "output_schema" | "annotations" | "executor"
+            "handler"
+                | "parameters"
+                | "input_schema"
+                | "returns"
+                | "output_schema"
+                | "error_schema"
+                | "annotations"
+                | "executor"
         ) {
             continue;
         }

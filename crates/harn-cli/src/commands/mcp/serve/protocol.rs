@@ -56,6 +56,12 @@ impl McpOrchestratorService {
         {
             return response;
         }
+        if request_profile.uses_result_envelope()
+            && mcp_protocol::is_task_method(method)
+            && !mcp_protocol::client_supports_tasks(&params)
+        {
+            return mcp_protocol::missing_tasks_capability_response(id);
+        }
 
         let response = match method {
             "ping" => harn_vm::jsonrpc::response(id, json!({})),

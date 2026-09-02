@@ -107,6 +107,20 @@
             "null"
           ]
         },
+        "errorSchema": {
+          "description": "Portable shape of values deliberately thrown by this tool.\n\nRuntime faults remain adapter errors. Only a raw Harn `throw` from a\nhandler with this contract is application error data.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "execution": {
           "anyOf": [
             {
@@ -209,7 +223,7 @@
     "ToolCatalogSchemaVersion": {
       "description": "Closed version discriminator for the portable catalog.",
       "enum": [
-        "harn-tools/1.0"
+        "harn-tools/2.0"
       ],
       "type": "string"
     },
@@ -737,7 +751,7 @@
       ]
     }
   },
-  "$id": "https://harnlang.com/schemas/harn-tools-v1.schema.json",
+  "$id": "https://harnlang.com/schemas/harn-tools-v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Versioned, serializable projection of a tool registry or static exports.",

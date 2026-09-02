@@ -13,7 +13,13 @@ use crate::value::{VmClosure, VmDictExt, VmError, VmValue};
 
 mod cli_projection;
 mod contract;
+mod invocation;
 pub use contract::*;
+pub use invocation::{
+    application_error_cli_envelope, application_error_mcp_result, classify_tool_failure,
+    classify_tool_result, tool_runtime_error_summary, ToolFailureClassification,
+    ToolInvocationError, ToolInvocationOutcome,
+};
 
 use cli_projection::cli_spec;
 
@@ -96,7 +102,7 @@ pub fn tool_registry_catalog(registry: &VmValue) -> Result<ToolCatalog, VmError>
         tools.push(catalog);
     }
     let catalog = ToolCatalog {
-        schema_version: ToolCatalogSchemaVersion::V1,
+        schema_version: ToolCatalogSchemaVersion::V2,
         info: registry_info(registry)?,
         cli: registry_cli(registry)?,
         tools,
@@ -178,7 +184,7 @@ fn executable_tools_matching(
 /// Convert a handler result to portable JSON without stringifying unsupported
 /// runtime-only values such as closures or capability handles.
 pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {
-    crate::llm::helpers::vm_value_to_json_strict(value, "result")
+    crate::llm::helpers::vm_value_to_export_json_strict(value, "result")
 }
 
 /// Validate one definition as it enters a registry. Cross-entry invariants are
@@ -318,11 +324,23 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let namespace = optional_string(entry, "namespace", &format!("tool {name:?}"))?;
     let defer_loading =
         optional_bool(entry, "defer_loading", &format!("tool {name:?}"))?.unwrap_or(false);
-    let input_schema = params_to_json_schema(entry.get("parameters"))?;
-    let output_schema = optional_object(entry, "outputSchema", &format!("tool {name:?}"))?;
+    let input_schema = match entry.get("inputSchema") {
+        Some(schema @ VmValue::Dict(_)) => portable_json(schema, &format!("tool {name:?}"))?,
+        Some(_) => {
+            return Err(VmError::Runtime(format!(
+                "tool {name:?} field \"inputSchema\" must be an object-root JSON Schema"
+            )))
+        }
+        None => params_to_json_schema(entry.get("parameters"))?,
+    };
+    let output_schema = optional_schema(entry, "outputSchema", &format!("tool {name:?}"))?;
+    let error_schema = optional_schema(entry, "errorSchema", &format!("tool {name:?}"))?;
     validate_json_schema(&input_schema, &format!("tool {name:?} input schema"))?;
     if let Some(output_schema) = output_schema.as_ref() {
         validate_json_schema(output_schema, &format!("tool {name:?} output schema"))?;
+    }
+    if let Some(error_schema) = error_schema.as_ref() {
+        validate_json_schema(error_schema, &format!("tool {name:?} error schema"))?;
     }
     let annotations = presentation_annotations(entry.get("annotations"), &name)?;
     let icons = icons_spec(entry.get("icons"), &name)?;
@@ -342,6 +360,7 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
         description,
         input_schema,
         output_schema,
+        error_schema,
         annotations,
         icons,
         execution,
@@ -752,16 +771,18 @@ fn optional_bool(
     }
 }
 
-fn optional_object(
+fn optional_schema(
     fields: &crate::value::DictMap,
     key: &str,
     owner: &str,
 ) -> Result<Option<JsonValue>, VmError> {
     match fields.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
-        Some(value @ VmValue::Dict(_)) => Ok(Some(portable_json(value, owner)?)),
+        Some(value @ (VmValue::Bool(_) | VmValue::Dict(_))) => {
+            Ok(Some(portable_json(value, owner)?))
+        }
         _ => Err(VmError::Runtime(format!(
-            "{owner} field {key:?} must be an object"
+            "{owner} field {key:?} must be a JSON Schema boolean or object"
         ))),
     }
 }
@@ -769,8 +790,16 @@ fn optional_object(
 /// Convert Harn parameter definitions into the canonical JSON object schema.
 pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmError> {
     let params = match params {
+        None | Some(VmValue::Nil) => {
+            return Ok(serde_json::json!({"type": "object", "properties": {}}));
+        }
         Some(VmValue::Dict(params)) => params,
-        _ => return Ok(serde_json::json!({"type": "object", "properties": {}})),
+        Some(_) => {
+            return Err(VmError::Runtime(
+                "tool parameters must be a per-parameter definition object; use input_schema for a complete JSON Schema"
+                    .to_string(),
+            ));
+        }
     };
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
@@ -778,11 +807,13 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
         let property = match definition {
             VmValue::Dict(definition) => {
                 let mut property = match definition.get("schema") {
-                    Some(schema @ VmValue::Dict(_)) => {
+                    Some(schema @ (VmValue::Bool(_) | VmValue::Dict(_))) => {
                         portable_json(schema, "tool parameter schema")?
-                            .as_object()
-                            .cloned()
-                            .unwrap_or_default()
+                    }
+                    Some(_) => {
+                        return Err(VmError::Runtime(format!(
+                            "tool parameter {name:?} field \"schema\" must be a JSON Schema boolean or object"
+                        )))
                     }
                     _ => {
                         let mut fields = serde_json::Map::new();
@@ -805,23 +836,38 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
                                 );
                             }
                         }
-                        fields
+                        JsonValue::Object(fields)
                     }
                 };
                 if matches!(definition.get("required"), Some(VmValue::Bool(true))) {
                     required.push(JsonValue::String(name.to_string()));
                 }
                 if let Some(VmValue::String(description)) = definition.get("description") {
-                    property
-                        .entry("description")
-                        .or_insert_with(|| JsonValue::String(description.to_string()));
+                    if let Some(property) = property.as_object_mut() {
+                        property
+                            .entry("description")
+                            .or_insert_with(|| JsonValue::String(description.to_string()));
+                    } else {
+                        property = serde_json::json!({
+                            "allOf": [property],
+                            "description": description,
+                        });
+                    }
                 }
-                JsonValue::Object(property)
+                property
             }
             VmValue::String(kind) => json_schema_type(kind.as_str())
                 .map(|kind| serde_json::json!({"type": kind}))
-                .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new())),
-            _ => JsonValue::Object(serde_json::Map::new()),
+                .ok_or_else(|| {
+                    VmError::Runtime(format!(
+                        "tool parameter {name:?} has unknown shorthand type {kind:?}"
+                    ))
+                })?,
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "tool parameter {name:?} must be a type string or definition object"
+                )))
+            }
         };
         properties.insert(name.to_string(), property);
     }
@@ -968,6 +1014,76 @@ mod tests {
         tool.insert("description".into(), string(""));
         let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)])).unwrap();
         assert_eq!(catalog.tools[0].description, None);
+    }
+
+    #[test]
+    fn registry_preserves_boolean_output_and_error_schemas() {
+        let mut tool = match entry("always_fails", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        tool.insert("outputSchema".into(), VmValue::Bool(false));
+        tool.insert("errorSchema".into(), VmValue::Bool(true));
+        let mut parameter = DictMap::new();
+        parameter.insert("schema".into(), VmValue::Bool(false));
+        parameter.insert("description".into(), string("No value is accepted."));
+        let mut parameters = DictMap::new();
+        parameters.insert("impossible".into(), VmValue::dict(parameter));
+        tool.insert("parameters".into(), VmValue::dict(parameters));
+
+        let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)]))
+            .expect("Draft 2020-12 boolean schemas are portable");
+        assert_eq!(
+            catalog.tools[0].input_schema["properties"]["impossible"],
+            serde_json::json!({
+                "allOf": [false],
+                "description": "No value is accepted."
+            })
+        );
+        assert_eq!(catalog.tools[0].output_schema, Some(JsonValue::Bool(false)));
+        assert_eq!(catalog.tools[0].error_schema, Some(JsonValue::Bool(true)));
+    }
+
+    #[test]
+    fn registry_preserves_a_complete_object_root_input_schema() {
+        let mut tool = match entry("lookup", None) {
+            VmValue::Dict(tool) => (*tool).clone(),
+            _ => unreachable!(),
+        };
+        tool.insert(
+            "inputSchema".into(),
+            crate::schema::json_to_vm_value(&serde_json::json!({
+                "type": "object",
+                "properties": {"id": {"type": "integer"}},
+                "required": ["id"],
+                "additionalProperties": false
+            })),
+        );
+
+        let catalog = tool_registry_catalog(&registry(vec![VmValue::dict(tool)]))
+            .expect("complete input schema is normalized without reinterpretation");
+        assert_eq!(
+            catalog.tools[0].input_schema["required"],
+            serde_json::json!(["id"])
+        );
+        assert_eq!(catalog.tools[0].input_schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn legacy_parameter_shorthand_rejects_shapes_it_cannot_interpret() {
+        let bool_error = params_to_json_schema(Some(&VmValue::Bool(true)))
+            .expect_err("a complete schema must use input_schema");
+        assert!(bool_error.to_string().contains("use input_schema"));
+
+        let invalid = VmValue::dict(DictMap::from_iter([(
+            "id".into(),
+            VmValue::String("unrecognized".into()),
+        )]));
+        let shorthand_error = params_to_json_schema(Some(&invalid))
+            .expect_err("unknown shorthand must not erase to an open schema");
+        assert!(shorthand_error
+            .to_string()
+            .contains("unknown shorthand type"));
     }
 
     #[test]

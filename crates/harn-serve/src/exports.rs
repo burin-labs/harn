@@ -108,8 +108,10 @@ pub struct ExportedFunction {
     pub annotations: Option<ToolAnnotations>,
     pub params: Vec<ExportedParam>,
     pub return_type: Option<TypeExpr>,
+    pub throws_type: Option<TypeExpr>,
     pub input_schema: serde_json::Value,
     pub output_schema: Option<serde_json::Value>,
+    pub error_schema: Option<serde_json::Value>,
     /// Scopes the caller's credential must carry to invoke this function,
     /// for *every* HTTP method (the method-agnostic baseline). Populated
     /// from un-prefixed `@scopes("...", "...")` literals on the
@@ -316,6 +318,7 @@ impl ExportCatalog {
                 name,
                 params,
                 return_type,
+                throws,
                 is_pub,
                 ..
             } = &inner.node
@@ -351,8 +354,12 @@ impl ExportCatalog {
                     ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
+                    throws_type: throws.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
+                        .as_ref()
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
+                    error_schema: throws
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
                     required_scopes: scopes.baseline,
@@ -376,6 +383,7 @@ impl ExportCatalog {
                 name,
                 params,
                 return_type,
+                throws,
                 is_pub,
                 ..
             } = &inner.node
@@ -411,8 +419,12 @@ impl ExportCatalog {
                     ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
+                    throws_type: throws.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
+                        .as_ref()
+                        .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
+                    error_schema: throws
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
                     required_scopes: scopes.baseline,

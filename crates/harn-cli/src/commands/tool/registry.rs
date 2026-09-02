@@ -79,17 +79,35 @@ async fn run_loaded_registry(
     let input = harn_vm::schema::json_to_vm_value(&invocation.arguments);
     let result = tokio::task::LocalSet::new()
         .run_until(loaded.vm.call_closure_pub(&tool.handler, &[input]))
-        .await
-        .map_err(|error| format!("tool {:?} failed: {error}", tool.catalog.name))?;
-    let json = harn_vm::tool_registry::result_to_json(&result).map_err(|error| {
-        format!(
-            "tool {:?} returned a non-JSON value: {error}",
-            tool.catalog.name
-        )
-    })?;
-    prepared
-        .validate_output(&tool.catalog.name, &json)
-        .map_err(|error| error.to_string())?;
+        .await;
+    let outcome =
+        harn_vm::tool_registry::classify_tool_result(&prepared, &tool.catalog.name, result)
+            .map_err(|error| format!("tool {:?} failed: {error}", tool.catalog.name))?;
+    let json = match outcome {
+        harn_vm::tool_registry::ToolInvocationOutcome::Success { json, .. } => json,
+        harn_vm::tool_registry::ToolInvocationOutcome::ApplicationError(error) => {
+            if invocation.output == "json" || invocation.output == "pretty" {
+                let envelope = harn_vm::tool_registry::application_error_cli_envelope(&error);
+                if invocation.output == "pretty" {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&envelope)
+                            .map_err(|error| error.to_string())?
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&envelope).map_err(|error| error.to_string())?
+                    );
+                }
+            }
+            return Err(format!(
+                "tool {:?} returned application error: {}",
+                tool.catalog.name,
+                error.summary()
+            ));
+        }
+    };
     match invocation.output.as_str() {
         "json" => println!(
             "{}",
@@ -686,6 +704,7 @@ mod tests {
             description: Some(format!("Run {name}")),
             input_schema,
             output_schema: None,
+            error_schema: None,
             annotations: None,
             icons: None,
             execution: None,
@@ -708,7 +727,7 @@ mod tests {
         tools: Vec<harn_vm::tool_registry::ToolCatalogEntry>,
     ) -> harn_vm::tool_registry::ToolCatalog {
         harn_vm::tool_registry::ToolCatalog {
-            schema_version: harn_vm::tool_registry::ToolCatalogSchemaVersion::V1,
+            schema_version: harn_vm::tool_registry::ToolCatalogSchemaVersion::V2,
             info: None,
             cli: None,
             tools,

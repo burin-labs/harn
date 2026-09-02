@@ -3,6 +3,8 @@ use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
 
 use super::*;
 
+#[path = "modules_tests/lifecycle.rs"]
+mod lifecycle;
 #[path = "modules_tests/tool_registry.rs"]
 mod tool_registry;
 

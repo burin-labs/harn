@@ -323,8 +323,8 @@ pub(super) fn generate_readme() -> String {
            deterministic session recap availability and snapshot types.\n\
          - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative\n\
            plan-document schema with revisions, comments, and resolution receipts.\n\
-         - `schemas/harn-tools-v1.schema.json`: structural envelope schema for the\n\
-           transport-neutral `harn-tools/1.0` catalog. Harn's Rust parser performs\n\
+         - `schemas/harn-tools-v2.schema.json`: structural envelope schema for the\n\
+           transport-neutral `harn-tools/2.0` catalog. Harn's Rust parser performs\n\
            the required second-stage Draft 2020-12 and reference-closure validation.\n\
          - `harn-tools.ts`: strict TypeScript definitions generated from the same\n\
            catalog DTOs as the JSON Schema.\n\

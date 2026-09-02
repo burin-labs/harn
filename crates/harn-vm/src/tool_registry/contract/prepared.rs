@@ -2,7 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use jsonschema::Validator;
+use jsonschema::{error::ValidationErrorKind, Validator};
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 
 use super::{
@@ -43,13 +44,15 @@ impl std::error::Error for PreparedToolCatalogError {}
 pub enum ToolContractPhase {
     Input,
     Output,
+    ApplicationError,
 }
 
 impl ToolContractPhase {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Input => "input",
             Self::Output => "output",
+            Self::ApplicationError => "application error",
         }
     }
 }
@@ -59,7 +62,36 @@ impl ToolContractPhase {
 pub struct ToolContractViolation {
     pub tool: String,
     pub phase: ToolContractPhase,
-    pub violations: Vec<String>,
+    pub violations: Vec<ToolContractViolationDetail>,
+}
+
+/// Owned, value-free JSON Schema failure detail safe for adapter diagnostics.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ToolContractViolationDetail {
+    /// Value-free shape of the failing location. Object keys become `*` and
+    /// array indexes become `[]` so caller-controlled identifiers never enter
+    /// human diagnostics.
+    pub structural_path: String,
+    pub schema_path: String,
+    pub keyword: String,
+    /// A schema-owned property name for `required` failures. This is contract
+    /// metadata, never rejected application data.
+    pub missing_property: Option<String>,
+}
+
+impl std::fmt::Display for ToolContractViolationDetail {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = if self.structural_path.is_empty() {
+            "/"
+        } else {
+            &self.structural_path
+        };
+        write!(formatter, "{path} failed {}", self.keyword)?;
+        if let Some(property) = &self.missing_property {
+            write!(formatter, " ({property:?} is required)")?;
+        }
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for ToolContractViolation {
@@ -69,17 +101,49 @@ impl std::fmt::Display for ToolContractViolation {
             "tool {:?} {} violates its declared schema: {}",
             self.tool,
             self.phase.label(),
-            self.violations.join("; ")
+            self.violations
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
         )
     }
 }
 
 impl std::error::Error for ToolContractViolation {}
 
+/// Validated application failure data independent of any execution transport.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ToolApplicationError {
+    pub tool: String,
+    pub data: JsonValue,
+}
+
+impl ToolApplicationError {
+    /// Canonical portable payload shared by every adapter.
+    pub fn to_json(&self) -> JsonValue {
+        serde_json::to_value(self).expect("application error data is already portable JSON")
+    }
+
+    /// Stable human summary that never reads free-form application data.
+    pub fn summary(&self) -> &'static str {
+        "declared application error"
+    }
+}
+
+/// Total classification of one portable raw throw.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ToolThrownClassification {
+    Application(ToolApplicationError),
+    Undeclared,
+    ContractViolation(ToolContractViolation),
+}
+
 #[derive(Clone, Debug)]
 struct PreparedToolEntry {
     input: Validator,
     output: Option<Validator>,
+    error: Option<Validator>,
 }
 
 /// A validated catalog with every instance validator and adapter projection
@@ -128,8 +192,26 @@ impl PreparedToolCatalog {
                     })
                 })
                 .transpose()?;
+            let error = tool
+                .error_schema
+                .as_ref()
+                .map(|schema| {
+                    runtime_schemas.rewrite(schema).and_then(|schema| {
+                        compile_validator(
+                            &tool.name,
+                            ToolContractPhase::ApplicationError,
+                            &schema,
+                            &runtime_schemas.registry,
+                        )
+                    })
+                })
+                .transpose()?;
             names.insert(tool.name.clone(), index);
-            entries.push(PreparedToolEntry { input, output });
+            entries.push(PreparedToolEntry {
+                input,
+                output,
+                error,
+            });
             if tool.governance.allows(ToolAudience::Mcp) {
                 mcp_tools.push(
                     catalog
@@ -183,6 +265,25 @@ impl PreparedToolCatalog {
         self.validate(name, ToolContractPhase::Output, value)
     }
 
+    /// Classify one portable raw throw without depending on VM error types.
+    pub fn classify_thrown_json(&self, name: &str, value: &JsonValue) -> ToolThrownClassification {
+        let Some(index) = self.names.get(name).copied() else {
+            return ToolThrownClassification::ContractViolation(
+                self.missing_tool_violation(name, ToolContractPhase::ApplicationError),
+            );
+        };
+        if self.entries[index].error.is_none() {
+            return ToolThrownClassification::Undeclared;
+        }
+        match self.validate(name, ToolContractPhase::ApplicationError, value) {
+            Ok(()) => ToolThrownClassification::Application(ToolApplicationError {
+                tool: name.to_string(),
+                data: value.clone(),
+            }),
+            Err(error) => ToolThrownClassification::ContractViolation(error),
+        }
+    }
+
     fn validate(
         &self,
         name: &str,
@@ -190,23 +291,39 @@ impl PreparedToolCatalog {
         value: &JsonValue,
     ) -> Result<(), ToolContractViolation> {
         let Some(index) = self.names.get(name).copied() else {
-            return Err(ToolContractViolation {
-                tool: name.to_string(),
-                phase,
-                violations: vec!["tool is absent from the prepared catalog".to_string()],
-            });
+            return Err(self.missing_tool_violation(name, phase));
         };
+        let entry = &self.entries[index];
         let validator = match phase {
-            ToolContractPhase::Input => Some(&self.entries[index].input),
-            ToolContractPhase::Output => self.entries[index].output.as_ref(),
+            ToolContractPhase::Input => Some(&entry.input),
+            ToolContractPhase::Output => entry.output.as_ref(),
+            ToolContractPhase::ApplicationError => entry.error.as_ref(),
         };
         let Some(validator) = validator else {
             return Ok(());
         };
-        let violations = validator
+        let mut violations = validator
             .iter_errors(value)
-            .map(|error| error.to_string())
+            .map(|error| {
+                let instance_pointer = error.instance_path().to_string();
+                let structural_path = structural_instance_path(value, &instance_pointer);
+                let schema_path = error.schema_path().to_string();
+                let keyword = error.kind().keyword().to_string();
+                let missing_property = match error.kind() {
+                    ValidationErrorKind::Required { property } => {
+                        property.as_str().map(ToOwned::to_owned)
+                    }
+                    _ => None,
+                };
+                ToolContractViolationDetail {
+                    structural_path,
+                    schema_path,
+                    keyword,
+                    missing_property,
+                }
+            })
             .collect::<Vec<_>>();
+        violations.sort();
         if violations.is_empty() {
             Ok(())
         } else {
@@ -217,6 +334,52 @@ impl PreparedToolCatalog {
             })
         }
     }
+
+    fn missing_tool_violation(
+        &self,
+        name: &str,
+        phase: ToolContractPhase,
+    ) -> ToolContractViolation {
+        ToolContractViolation {
+            tool: name.to_string(),
+            phase,
+            violations: vec![ToolContractViolationDetail {
+                structural_path: String::new(),
+                schema_path: String::new(),
+                keyword: "toolAbsent".to_string(),
+                missing_property: None,
+            }],
+        }
+    }
+}
+
+fn structural_instance_path(value: &JsonValue, pointer: &str) -> String {
+    if pointer.is_empty() {
+        return String::new();
+    }
+    let mut current = Some(value);
+    let mut structural = Vec::new();
+    for encoded in pointer.trim_start_matches('/').split('/') {
+        let segment = decode_json_pointer_segment(encoded);
+        match current {
+            Some(JsonValue::Object(object)) => {
+                structural.push("*");
+                current = segment.as_deref().and_then(|key| object.get(key));
+            }
+            Some(JsonValue::Array(items)) => {
+                structural.push("[]");
+                current = segment
+                    .as_deref()
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .and_then(|index| items.get(index));
+            }
+            _ => {
+                structural.push("?");
+                current = None;
+            }
+        }
+    }
+    format!("/{}", structural.join("/"))
 }
 
 fn compile_validator(
@@ -337,7 +500,7 @@ mod tests {
 
     fn catalog() -> ToolCatalog {
         ToolCatalog {
-            schema_version: ToolCatalogSchemaVersion::V1,
+            schema_version: ToolCatalogSchemaVersion::V2,
             info: None,
             cli: None,
             tools: vec![ToolCatalogEntry {
@@ -353,6 +516,7 @@ mod tests {
                     "additionalProperties": false
                 }),
                 output_schema: Some(json!({"$ref": "#/components/schemas/Widget"})),
+                error_schema: None,
                 annotations: None,
                 icons: None,
                 execution: None,
@@ -408,6 +572,89 @@ mod tests {
             .validate_output("create_widget", &json!({"kind": "other", "count": 2}))
             .expect_err("invalid output");
         assert_eq!(output_error.phase, ToolContractPhase::Output);
+    }
+
+    #[test]
+    fn classifies_declared_application_error_through_compiled_component() {
+        let mut catalog = catalog();
+        catalog.tools[0].error_schema = Some(json!({"$ref": "#/components/schemas/Widget"}));
+        let prepared = PreparedToolCatalog::prepare(catalog).expect("prepare catalog");
+
+        assert!(matches!(
+            prepared.classify_thrown_json(
+                "create_widget",
+                &json!({"kind": "widget", "count": 2})
+            ),
+            ToolThrownClassification::Application(ToolApplicationError { data, .. })
+                if data == json!({"kind": "widget", "count": 2})
+        ));
+        assert!(matches!(
+            prepared.classify_thrown_json("create_widget", &json!({"kind": "other", "count": 2})),
+            ToolThrownClassification::ContractViolation(ToolContractViolation {
+                phase: ToolContractPhase::ApplicationError,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn application_error_summary_never_reads_application_data() {
+        let error = ToolApplicationError {
+            tool: "lookup".to_string(),
+            data: json!({"variant": "private customer\nidentifier", "message": "secret"}),
+        };
+        let summary = error.summary();
+        assert_eq!(summary, "declared application error");
+        assert!(!summary.contains("private customer"));
+        assert!(!summary.contains('\n'));
+    }
+
+    #[test]
+    fn contract_diagnostic_paths_do_not_expose_application_object_keys() {
+        let mut catalog = catalog();
+        catalog.tools[0].input_schema = json!({
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {"count": {"type": "integer"}},
+                "required": ["count"]
+            }
+        });
+        let prepared = PreparedToolCatalog::prepare(catalog).expect("prepare catalog");
+        let error = prepared
+            .validate_input(
+                "create_widget",
+                &json!({"private-customer-id": {"count": false}}),
+            )
+            .expect_err("invalid nested value");
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("/*/* failed type"), "{diagnostic}");
+        assert!(!diagnostic.contains("private-customer-id"), "{diagnostic}");
+    }
+
+    #[test]
+    fn component_required_diagnostics_name_each_missing_schema_property_once() {
+        let mut catalog = catalog();
+        catalog.tools[0].input_schema = json!({
+            "type": "object",
+            "properties": {"widget": {"$ref": "#/components/schemas/Widget"}},
+            "required": ["widget"],
+            "additionalProperties": false
+        });
+        let prepared = PreparedToolCatalog::prepare(catalog).expect("prepare catalog");
+        let error = prepared
+            .validate_input("create_widget", &json!({"widget": {}}))
+            .expect_err("both component properties are required");
+        let properties = error
+            .violations
+            .iter()
+            .filter_map(|violation| violation.missing_property.as_deref())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            properties,
+            std::collections::BTreeSet::from(["count", "kind"])
+        );
+        assert_eq!(error.violations.len(), 2);
     }
 
     #[test]

@@ -14,6 +14,9 @@ use super::tools_schema::params_to_json_schema;
 use super::uri::match_uri_template;
 use super::{McpServer, McpServerMetadata, McpToolSet};
 
+#[path = "tests/application_errors.rs"]
+mod application_errors;
+
 fn empty_closure(name: &str) -> VmClosure {
     VmClosure {
         func: Arc::new(CompiledFunction {
@@ -49,6 +52,7 @@ fn tool_def(
             description: Some(description.to_string()),
             input_schema: serde_json::json!({"type": "object"}),
             output_schema: None,
+            error_schema: None,
             annotations: None,
             icons: None,
             execution: (task_support != crate::mcp_tasks::McpTaskSupport::Forbidden)
@@ -1088,7 +1092,23 @@ async fn server_task_endpoints_report_a_genuinely_missing_task() {
         )
         .await
         .expect("response");
-    assert_eq!(missing["error"]["code"], serde_json::json!(-32602));
+    assert_eq!(missing["error"]["code"], serde_json::json!(-32021));
+
+    let genuinely_missing = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                3,
+                "tasks/get",
+                task_client_params(serde_json::json!({"taskId": "missing"})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        genuinely_missing["error"]["code"],
+        serde_json::json!(-32602)
+    );
 }
 
 fn task_capable_server(support: crate::mcp_tasks::McpTaskSupport) -> McpServer {
@@ -1190,14 +1210,15 @@ async fn tool_contract_validation_precedes_execution_and_task_success() {
             crate::jsonrpc::request(
                 4,
                 "tasks/get",
-                stable_metadata_params(serde_json::json!({"taskId": task_id})),
+                task_client_params(serde_json::json!({"taskId": task_id})),
             ),
             &mut vm,
         )
         .await
         .expect("response");
-    assert_eq!(read["result"]["status"], serde_json::json!("failed"));
-    assert!(read["result"]["result"].is_null());
+    assert_eq!(read["result"]["status"], serde_json::json!("completed"));
+    assert_eq!(read["result"]["result"]["isError"], true);
+    assert!(read["result"]["result"]["structuredContent"].is_null());
 }
 
 /// The whole point of the extension from a client's side: hand back an id,
@@ -1265,7 +1286,7 @@ async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
             crate::jsonrpc::request(
                 2,
                 "tasks/get",
-                stable_metadata_params(serde_json::json!({"taskId": task_id})),
+                task_client_params(serde_json::json!({"taskId": task_id})),
             ),
             &mut vm,
         )
@@ -1299,7 +1320,7 @@ async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
             crate::jsonrpc::request(
                 3,
                 "tasks/cancel",
-                stable_metadata_params(serde_json::json!({"taskId": task_id})),
+                task_client_params(serde_json::json!({"taskId": task_id})),
             ),
             &mut vm,
         )
@@ -1354,32 +1375,23 @@ async fn a_required_tool_refuses_a_client_that_did_not_ask_for_a_task() {
         )
         .await
         .expect("response");
-    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
-    assert!(response["error"]["message"]
-        .as_str()
-        .expect("the refusal explains itself")
-        .contains("must be invoked as a task"));
+    assert_eq!(response["error"]["code"], serde_json::json!(-32021));
+    assert_eq!(
+        response["error"]["data"]["requiredCapabilities"]["extensions"]
+            [crate::mcp_protocol::TASKS_EXTENSION_ID],
+        serde_json::json!({})
+    );
 }
 
-/// A client decides whether to poll from `tools/list`, so the declaration has
-/// to reach it there. An undeclared tool stays silent rather than saying
-/// `forbidden`, keeping the listing byte-identical for servers that never opt in.
+/// The stable tasks extension makes the server the sole per-request decider;
+/// retired tool-level task metadata must not leak back into discovery.
 #[tokio::test]
-async fn tools_list_reports_which_tools_accept_a_task() {
+async fn tools_list_omits_retired_tool_level_task_support() {
     let mut vm = crate::Vm::new();
-    for (support, expected) in [
-        (
-            crate::mcp_tasks::McpTaskSupport::Optional,
-            serde_json::json!({"taskSupport": "optional"}),
-        ),
-        (
-            crate::mcp_tasks::McpTaskSupport::Required,
-            serde_json::json!({"taskSupport": "required"}),
-        ),
-        (
-            crate::mcp_tasks::McpTaskSupport::Forbidden,
-            serde_json::Value::Null,
-        ),
+    for support in [
+        crate::mcp_tasks::McpTaskSupport::Optional,
+        crate::mcp_tasks::McpTaskSupport::Required,
+        crate::mcp_tasks::McpTaskSupport::Forbidden,
     ] {
         let listed = task_capable_server(support)
             .handle_json_rpc(
@@ -1392,6 +1404,6 @@ async fn tools_list_reports_which_tools_accept_a_task() {
             )
             .await
             .expect("response");
-        assert_eq!(listed["result"]["tools"][0]["execution"], expected);
+        assert!(listed["result"]["tools"][0].get("execution").is_none());
     }
 }

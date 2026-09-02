@@ -3,7 +3,7 @@
 `ToolRegistry` is Harn's executable integration contract. A registry owns each
 operation's name, description, input and output schemas, handler, safety hints,
 and presentation metadata. Harn projects that one value into MCP, a nested CLI,
-and the versioned `harn-tools/1.0` catalog.
+and the versioned `harn-tools/2.0` catalog.
 
 Do not maintain a separate MCP list, CLI dispatch table, or static operation
 catalog. Generate or author one registry and choose presentation adapters at
@@ -186,11 +186,24 @@ bundling. Server preparation fails instead of publishing a misleading schema.
 Resource-aware bundling can add those cases later without weakening the
 portable catalog.
 
-Harn compiles each standalone input and output validator once when it prepares
-the registry. Plain `tools/call`, completed MCP tasks, generated CLI calls, and
+Harn compiles each standalone input, output, and application-error validator
+once when it prepares the registry. Plain `tools/call`, completed MCP tasks,
+generated CLI calls, and
 export-backed adapters all validate against that prepared catalog. Invalid
 arguments never reach the handler. Invalid or non-JSON results become tool
 failures and are never stored or reported as successful task results.
+
+Set `error_schema` on a handwritten definition to declare the portable shape
+of values its handler deliberately throws. Public Harn functions project their
+language-level `throws E` type to the same catalog field. A matching raw throw
+is typed application data; an undeclared throw remains a runtime failure, and
+a declared throw that does not match is a contract failure. Harn never treats
+`Result<T, E>` as a throw declaration. Runtime summaries classify undeclared
+throws without rendering their values, so a legacy string or object cannot
+leak through CLI stderr, MCP content, HTTP messages, A2A history, or trust
+records. A declared `throws` type that cannot be represented as Draft 2020-12
+JSON Schema prevents catalog publication instead of silently dropping the
+error contract.
 
 The `exports` surface derives its MCP tools from public Harn functions through
 the same canonical catalog entries as `harn tool schema --surface exports`.
@@ -219,7 +232,7 @@ acquiring capabilities, or contacting connectors. Use the exports surface for
 offline SDK generation and compatibility checks.
 
 Both surfaces return the same catalog shape. The result has
-`schema_version: "harn-tools/1.0"`, optional registry `info`, optional parent
+`schema_version: "harn-tools/2.0"`, optional registry `info`, optional parent
 command metadata under `cli.commands`, a `tools` list, and optional reusable
 schemas under `components.schemas`. Handlers and capability values are
 intentionally absent.
@@ -228,7 +241,7 @@ the generated CLI name/version/description. Explicit transport metadata wins.
 Each tool retains:
 
 - `name` plus optional `title` and `description`
-- `inputSchema` and optional `outputSchema`
+- `inputSchema`, optional `outputSchema`, and optional `errorSchema`
 - MCP `annotations` and Harn execution `policy`
 - adapter `governance`
 - `cli`, `namespace`, and `deferLoading`
@@ -240,13 +253,18 @@ and compatibility checks. Use the live registry for execution.
 
 The generated contract files are:
 
-- `spec/protocol-artifacts/schemas/harn-tools-v1.schema.json` for structural
+- `spec/protocol-artifacts/schemas/harn-tools-v2.schema.json` for structural
   envelope validation and language generators;
 - `spec/protocol-artifacts/harn-tools.ts` for strict TypeScript consumers.
 
 Run `make check-protocol-artifacts` to detect drift between those files and the
 runtime contract. The artifact manifest records their paths and catalog
 version.
+
+Version 2 is the sole emitted and accepted catalog version. Version 1 readers
+reject the new `errorSchema` field, and version 2 readers reject version 1's
+discriminator. Regenerate schemas and language bindings atomically with the
+catalog producer.
 
 The generated schema checks required fields, closed owned records, primitive
 types, and enum values. It treats embedded JSON Schema documents as open
@@ -282,13 +300,63 @@ mistaken for an execution classification.
 
 `source.binding` is the protocol-specific escape hatch. `_meta` remains the
 namespaced extension point for presentation protocols. Put behavior and policy
-in typed registry fields rather than `_meta`.
+in typed registry fields rather than `_meta`. The reverse-DNS key
+`_meta["com.harnlang/toolContract"]` is reserved for Harn's generated MCP
+adapter projection.
 
 All other owned records reject unknown fields. JSON Schema values remain open
 because their vocabulary evolves independently. They must be valid Draft
-2020-12 documents. `components.schemas` holds named reusable schemas, and
-catalog input or output schemas can reference them with
-`#/components/schemas/<name>`.
+2020-12 documents. Use `input_schema` for a complete object-root input schema;
+`parameters` remains the legacy per-parameter shorthand, whose nested `schema`
+field accepts either a boolean schema or a schema object. Output, error, and
+component positions also accept both standard forms. `components.schemas`
+holds named reusable schemas, and catalog input, output, or error schemas can
+reference them with `#/components/schemas/<name>`.
+
+## Declared failures
+
+The generated CLI keeps successful output unchanged. A declared application
+error exits nonzero. JSON and pretty output write this stable envelope to
+stdout:
+
+```json
+{"ok":false,"error":{"kind":"application","tool":"lookup","data":{"variant":"NotFound"}}}
+```
+
+Text output writes only a generic summary to stderr. It does not read or
+stringify the complete error object.
+
+MCP discovery carries the standalone error schema at
+`tools[]._meta["com.harnlang/toolContract"].errorSchema`. A matching failure is a normal
+`CallToolResult`, not a JSON-RPC error:
+
+```json
+{
+  "content": [{"type":"text","text":"tool \"lookup\" failed: declared application error"}],
+  "isError": true,
+  "_meta": {
+    "com.harnlang/toolContract": {
+      "applicationError": {
+        "tool": "lookup",
+        "data": {"variant":"NotFound"}
+      }
+    }
+  }
+}
+```
+
+The same result shape is stored for MCP task completion. The task status is
+`completed`: `isError` describes the tool result, while task `failed` is
+reserved for failure to produce a result, as required by
+[SEP-2663](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2663-tasks-extension.md).
+Invalid input remains a JSON-RPC invalid-params error. Runtime and contract
+failures remain untyped tool failures and never acquire application-error
+metadata.
+
+The A2A adapter stores the same `{tool, data}` record at
+`task.metadata.harn.applicationError` and terminates the task as `failed`.
+Task history contains only the generic application-error summary, never error
+fields.
 
 ## Adapter governance
 

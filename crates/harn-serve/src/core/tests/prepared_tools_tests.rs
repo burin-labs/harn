@@ -58,12 +58,43 @@ pub fn inspect(count: int) -> int {
         .dispatch(invalid_output)
         .await
         .expect_err("invalid output must fail");
-    assert!(matches!(output_error, DispatchError::Execution(_)));
+    assert!(matches!(output_error, DispatchError::Contract(_)));
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
         "valid input reaches handler"
     );
+}
+
+#[tokio::test]
+async fn module_initialization_throw_is_value_free_at_the_dispatch_boundary() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+fn initialize() {
+  throw {message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"}
+}
+
+let initialized = initialize()
+
+pub fn inspect() -> int {
+  return if initialized == nil { 1 } else { 2 }
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let mut request = replay_test_request(None);
+    request.function = "inspect".to_string();
+
+    let error = core
+        .dispatch(request)
+        .await
+        .expect_err("module initialization must fail");
+    assert_eq!(error.message(), "tool threw an undeclared value");
+    assert!(!error.message().contains("PRIVATE-CUSTOMER-DIAGNOSTIC"));
 }
 
 #[tokio::test]

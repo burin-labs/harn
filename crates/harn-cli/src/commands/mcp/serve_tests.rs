@@ -398,6 +398,28 @@ async fn inline_tool_completes_when_client_supports_tasks() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn stable_task_method_requires_the_tasks_extension() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+
+    let response = service
+        .handle_request(
+            &mut session,
+            stable_request(100, "tasks/get", json!({"taskId": "missing"})),
+        )
+        .await;
+    assert_eq!(response["error"]["code"], json!(-32021));
+    assert_eq!(
+        response["error"]["data"]["requiredCapabilities"]["extensions"]
+            [mcp_protocol::TASKS_EXTENSION_ID],
+        json!({})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
@@ -439,7 +461,7 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
         let task = service
             .handle_request(
                 &mut session,
-                stable_request(102, "tasks/get", json!({ "taskId": task_id })),
+                task_client_request(102, "tasks/get", json!({ "taskId": task_id })),
             )
             .await;
         if task["result"]["status"] == json!("completed") {
@@ -1004,6 +1026,14 @@ fn stable_request(id: i64, method: &str, params: JsonValue) -> JsonValue {
         "method": method,
         "params": params,
     })
+}
+
+fn task_client_request(id: i64, method: &str, params: JsonValue) -> JsonValue {
+    let mut request = stable_request(id, method, params);
+    request["params"]["_meta"][mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES] = json!({
+        "extensions": {mcp_protocol::TASKS_EXTENSION_ID: {}}
+    });
+    request
 }
 
 #[tokio::test(flavor = "current_thread")]

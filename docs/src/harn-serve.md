@@ -151,12 +151,16 @@ Behavior today:
 
 - stdio transport for local subprocess-style MCP clients
 - stable Streamable HTTP `POST` endpoint at `--path`
-- `tools/list` includes `outputSchema` from the resolved Harn return type.
+- `tools/list` includes `outputSchema` from the resolved Harn return type and
+  `_meta.harn.errorSchema` from the resolved `throws` type.
   Imported aliases, structs, enums, optional fields, lists, typed maps, unions,
   and generic instantiations keep their structure. `inputSchema` continues to
   project caller-owned parameters, inline records, and structural aliases.
 - `tools/call` returns object-shaped results in `structuredContent`. The value
   satisfies the same `outputSchema` advertised by `tools/list`.
+- A value matching a public callable's declared `throws` type returns
+  `isError: true` with typed data at `_meta.harn.applicationError`. It never
+  appears in success `structuredContent` or as a JSON-RPC transport error.
 - record and enum results are direct objects. Scalar, list, and nullable
   top-level results use `{ "result": value }` because MCP structured content
   and output schemas are object-valued contracts.
@@ -392,6 +396,9 @@ Behavior today:
   agent message text; entry lists render as markdown checklists and final task
   completion is still emitted separately
 - cooperative cancel propagation into the shared VM cancel token
+- declared application failures terminate the task as `failed` and preserve
+  typed data at `task.metadata.harn.applicationError`; human history and status
+  text use a generic application-error summary and never read application data
 - push notification callbacks from caller-provided task configuration
 - HTTP auth hooks built on the shared `AuthPolicy` surface:
   API keys

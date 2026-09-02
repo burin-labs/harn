@@ -22,7 +22,7 @@ impl McpToolSet {
             })
             .collect::<Vec<_>>();
         let catalog = crate::tool_registry::ToolCatalog {
-            schema_version: crate::tool_registry::ToolCatalogSchemaVersion::V1,
+            schema_version: crate::tool_registry::ToolCatalogSchemaVersion::V2,
             info: None,
             cli: None,
             tools: definitions

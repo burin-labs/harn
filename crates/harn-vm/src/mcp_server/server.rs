@@ -311,6 +311,12 @@ impl McpServer {
         {
             return Some(response);
         }
+        if request_profile.uses_result_envelope()
+            && mcp_protocol::is_task_method(method)
+            && !mcp_protocol::client_supports_tasks(&params)
+        {
+            return Some(mcp_protocol::missing_tasks_capability_response(id.clone()));
+        }
 
         let response = match method {
             mcp_protocol::METHOD_SERVER_DISCOVER => self.handle_server_discover(&id),
@@ -482,11 +488,7 @@ impl McpServer {
             .unwrap_or_default();
         let as_task = task_support.allows_task() && wants_task;
         if task_support == crate::mcp_tasks::McpTaskSupport::Required && !wants_task {
-            return crate::jsonrpc::error_response(
-                id.clone(),
-                -32602,
-                &format!("Tool '{tool_name}' must be invoked as a task"),
-            );
+            return mcp_protocol::missing_tasks_capability_response(id.clone());
         }
 
         let arguments = params
@@ -536,18 +538,36 @@ impl McpServer {
                 &self.client_identity(),
                 Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS),
             );
-            match &result {
-                Ok(value) => match successful_tool_call_result(&self.tools, tool, value) {
-                    Ok(result) => self.tasks.complete_with_tool_result(&task.task_id, result),
-                    Err(error) => self.tasks.complete(&task.task_id, Err(error)),
-                },
-                Err(VmError::McpInputRequired(_)) => self.tasks.complete(
+            match crate::tool_registry::classify_tool_result(
+                self.tools.prepared(),
+                &tool.catalog.name,
+                result,
+            ) {
+                Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
+                    match successful_tool_call_result(&self.tools, tool, &value, json) {
+                        Ok(result) => self.tasks.complete_with_tool_result(&task.task_id, result),
+                        Err(error) => self.tasks.complete(&task.task_id, Err(error)),
+                    }
+                }
+                Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
+                    self.tasks.complete_with_tool_result(
+                        &task.task_id,
+                        crate::tool_registry::application_error_mcp_result(&error),
+                    )
+                }
+                Err(crate::tool_registry::ToolInvocationError::Runtime(
+                    VmError::McpInputRequired(_),
+                )) => self.tasks.complete(
                     &task.task_id,
                     Err("Tool requested client input, which a task cannot carry".to_string()),
                 ),
-                Err(error) => self
-                    .tasks
-                    .complete(&task.task_id, Err(tool_error_text(error))),
+                Err(error) => self.tasks.complete_with_tool_result(
+                    &task.task_id,
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": error.to_string()}],
+                        "isError": true,
+                    }),
+                ),
             }
             return crate::mcp_tasks::task_created_response(
                 id.clone(),
@@ -556,29 +576,41 @@ impl McpServer {
             );
         }
 
-        match result {
-            Ok(value) => match successful_tool_call_result(&self.tools, tool, &value) {
-                Ok(result) => serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": result
-                }),
-                Err(error) => crate::jsonrpc::response(
-                    id.clone(),
-                    serde_json::json!({
-                        "content": [{"type": "text", "text": error}],
-                        "isError": true,
+        match crate::tool_registry::classify_tool_result(
+            self.tools.prepared(),
+            &tool.catalog.name,
+            result,
+        ) {
+            Ok(crate::tool_registry::ToolInvocationOutcome::Success { value, json }) => {
+                match successful_tool_call_result(&self.tools, tool, &value, json) {
+                    Ok(result) => serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": result
                     }),
-                ),
-            },
-            Err(VmError::McpInputRequired(required)) => {
-                crate::jsonrpc::response(id.clone(), crate::mcp_input::input_result(*required))
+                    Err(error) => crate::jsonrpc::response(
+                        id.clone(),
+                        serde_json::json!({
+                            "content": [{"type": "text", "text": error}],
+                            "isError": true,
+                        }),
+                    ),
+                }
             }
-            Err(e) => serde_json::json!({
+            Ok(crate::tool_registry::ToolInvocationOutcome::ApplicationError(error)) => {
+                crate::jsonrpc::response(
+                    id.clone(),
+                    crate::tool_registry::application_error_mcp_result(&error),
+                )
+            }
+            Err(crate::tool_registry::ToolInvocationError::Runtime(VmError::McpInputRequired(
+                required,
+            ))) => crate::jsonrpc::response(id.clone(), crate::mcp_input::input_result(*required)),
+            Err(error) => serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
-                    "content": [{ "type": "text", "text": tool_error_text(&e) }],
+                    "content": [{ "type": "text", "text": error.to_string() }],
                     "isError": true,
                 },
             }),
@@ -1051,17 +1083,8 @@ fn successful_tool_call_result(
     tools: &McpToolSet,
     tool: &McpToolDef,
     value: &crate::value::VmValue,
+    value_json: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let value_json = crate::tool_registry::result_to_json(value).map_err(|error| {
-        format!(
-            "tool {:?} returned non-portable JSON: {error}",
-            tool.catalog.name
-        )
-    })?;
-    tools
-        .prepared()
-        .validate_output(&tool.catalog.name, &value_json)
-        .map_err(|error| error.to_string())?;
     let mut result = serde_json::json!({
         "content": vm_value_to_content(value),
         "isError": false,
@@ -1093,15 +1116,6 @@ fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
         }
         "resources/read" => Some(&READ),
         _ => None,
-    }
-}
-
-/// Stamp the stable `resultType`/cache-hint envelope onto a handler's
-/// response in one place. Error responses pass through untouched.
-fn tool_error_text(error: &VmError) -> String {
-    match error {
-        VmError::Thrown(value) => value.display(),
-        other => format!("{other}"),
     }
 }
 

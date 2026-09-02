@@ -12,6 +12,12 @@ fn fixture() -> (tempfile::TempDir, String) {
         r#"
 import { ToolRegistry, tool_registry_from } from "std/tools"
 
+type WidgetLookupError = {variant: "NotFound", message: string, secret: string}
+
+fn fail_widget(_args: dict) -> any throws WidgetLookupError {
+  throw {variant: "NotFound", message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456", secret: "typed-detail"}
+}
+
 fn registry() -> ToolRegistry {
   return tool_registry_from([
     {
@@ -59,6 +65,23 @@ fn registry() -> ToolRegistry {
       cli: {command: ["remote", "probe"]},
       handler: {_args -> {surface: "mcp"}},
     },
+    {
+      name: "fail_widget",
+      description: "Return one declared widget failure.",
+      parameters: {},
+      error_schema: {
+        type: "object",
+        properties: {
+          variant: {const: "NotFound"},
+          message: {type: "string"},
+          secret: {type: "string"},
+        },
+        required: ["variant", "message", "secret"],
+        additionalProperties: false,
+      },
+      cli: {command: ["widgets", "fail"]},
+      handler: fail_widget,
+    },
   ], {
     info: {name: "widgets", version: "1.2.3", description: "Widget integration"},
     cli: {
@@ -95,7 +118,7 @@ fn tool_registry_projects_schema_help_and_execution_from_one_handler() {
         String::from_utf8_lossy(&schema.stderr)
     );
     let schema: JsonValue = serde_json::from_slice(&schema.stdout).expect("schema JSON");
-    assert_eq!(schema["schema_version"], "harn-tools/1.0");
+    assert_eq!(schema["schema_version"], "harn-tools/2.0");
     assert_eq!(schema["info"]["name"], "widgets");
     assert_eq!(schema["tools"][0]["name"], "lookup_widget");
     assert_eq!(
@@ -203,6 +226,73 @@ fn tool_registry_cli_rejects_schema_violations_before_dispatch() {
 }
 
 #[test]
+fn tool_registry_cli_emits_typed_application_errors_without_raw_human_data() {
+    let (_temp, path) = fixture();
+    let json = harn_e2e_command()
+        .args(["tool", "run", &path, "widgets", "fail", "--json"])
+        .output()
+        .expect("JSON application error");
+    assert!(!json.status.success());
+    assert_eq!(
+        serde_json::from_slice::<JsonValue>(&json.stdout).expect("error envelope"),
+        serde_json::json!({
+            "ok": false,
+            "error": {
+                "kind": "application",
+                "tool": "fail_widget",
+                "data": {
+                    "variant": "NotFound",
+                    "message": "PRIVATE-CUSTOMER-DIAGNOSTIC-123456",
+                    "secret": "typed-detail",
+                },
+            },
+        })
+    );
+
+    let human = harn_e2e_command()
+        .args([
+            "tool",
+            "run",
+            &path,
+            "widgets",
+            "fail",
+            "--harn-output",
+            "text",
+        ])
+        .output()
+        .expect("human application error");
+    assert!(!human.status.success());
+    assert!(human.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&human.stderr);
+    assert!(stderr.contains("declared application error"), "{stderr}");
+    assert!(!stderr.contains("typed-detail"), "{stderr}");
+    assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+}
+
+#[test]
+fn tool_registry_cli_does_not_render_a_top_level_thrown_value() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script = temp.path().join("startup-failure.harn");
+    fs::write(
+        &script,
+        r#"throw {message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"}"#,
+    )
+    .expect("write startup failure");
+
+    let output = harn_e2e_command()
+        .args(["tool", "run", &script.display().to_string()])
+        .output()
+        .expect("startup failure");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("tool threw an undeclared value"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"), "{stderr}");
+}
+
+#[test]
 fn tool_schema_exports_is_offline_typed_and_byte_deterministic() {
     let temp = tempfile::tempdir().expect("tempdir");
     let contracts = temp.path().join("contracts.harn");
@@ -270,7 +360,7 @@ pub fn search(request: Request) -> Response {{
     );
 
     let catalog: JsonValue = serde_json::from_slice(&first.stdout).expect("catalog JSON");
-    assert_eq!(catalog["schema_version"], "harn-tools/1.0");
+    assert_eq!(catalog["schema_version"], "harn-tools/2.0");
     assert_eq!(catalog["tools"][0]["name"], "search");
     assert_eq!(
         catalog["tools"][0]["inputSchema"]["properties"]["request"]["properties"]["options"]
