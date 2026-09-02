@@ -31,6 +31,10 @@ async fn host_agent_session_init(
     let has_canonical_history = initialized.has_canonical_history;
     let run_id = initialized.run_id;
     let prompt_session_id = initialized.session_id;
+    // The prepared journal/session is live before any hook runs. One guard
+    // owns rollback from here through host registration so `?`, unwind, and
+    // future cancellation cannot strand a partial session.
+    let mut init_rollback = cancellation::AgentSessionInitRollback::new(prompt_session_id.clone());
 
     let prompt_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
@@ -53,6 +57,7 @@ async fn host_agent_session_init(
         )
         .await?;
         let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
+        init_rollback.disarm();
         return Ok(agent_init_control_done(
             &prompt_session_id,
             &run_id,
@@ -72,6 +77,7 @@ async fn host_agent_session_init(
                 "autonomy_budget_denied",
             )
             .await?;
+            init_rollback.disarm();
             return Ok(agent_init_control_done(
                 &session_id,
                 &run_id,
@@ -100,6 +106,7 @@ async fn host_agent_session_init(
                 "nested_policy_denied",
             )
             .await?;
+            init_rollback.disarm();
             return Ok(agent_init_control_done(
                 &resolved,
                 &run_id,
@@ -133,10 +140,7 @@ async fn host_agent_session_init(
     }
 
     let llm_transcript_dir = opt_str(&opts_map, "llm_transcript_dir").unwrap_or_default();
-    let pushed_transcript_dir = !llm_transcript_dir.is_empty();
-    if pushed_transcript_dir {
-        crate::llm::agent_observe::push_llm_transcript_dir(&llm_transcript_dir);
-    }
+    let transcript_dir = (!llm_transcript_dir.is_empty()).then_some(llm_transcript_dir);
     // Seed any caller-managed conversation history BEFORE the fresh user turn,
     // so the first (and every) provider request presents the prior turns
     // exactly as `llm_call`'s `messages` array would. The caller owns this
@@ -185,7 +189,7 @@ async fn host_agent_session_init(
         last_provider: None,
         last_model: None,
         last_tool_format: None,
-        pushed_transcript_dir,
+        transcript_dir: transcript_dir.clone(),
         started_at: now_id(),
         max_iterations,
         daemon_state: None,
@@ -206,6 +210,9 @@ async fn host_agent_session_init(
     // tool handlers + nested calls inside the loop see it via
     // `agent_session_current_id()`. Paired with the pop in finalize.
     crate::agent_sessions::push_current_session(resolved.clone());
+    if let Some(dir) = transcript_dir.as_deref() {
+        crate::llm::agent_observe::push_llm_transcript_dir(dir);
+    }
 
     let start_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::SessionStart.as_str(),
@@ -214,26 +221,34 @@ async fn host_agent_session_init(
         "system": system.clone().unwrap_or_default(),
         "max_iterations": max_iterations,
     });
-    crate::orchestration::run_lifecycle_hooks_with_ctx(
-        Some(&ctx),
-        crate::orchestration::HookEvent::SessionStart,
-        &start_payload,
-    )
-    .await?;
-    // SessionStart is a paired event: hooks above run any user-registered
-    // `session_start` closures, and this call lets canonical reminder
-    // providers (currently `project_facts`) inject pre-turn context.
-    // Mirrors the pattern used at the `PostToolUse` and `PostCompact` call
-    // sites so adding new providers does not require new wiring.
-    let _ = crate::llm::reminder_providers::evaluate_and_inject(
-        Some(&ctx),
-        crate::orchestration::HookEvent::SessionStart,
-        &resolved,
-        start_payload,
-        crate::llm::reminder_providers::options_map_to_json(&opts_map),
-    )
-    .await?;
-    crate::agent_session_journal::flush(&resolved).await?;
+    let initialized = async {
+        crate::orchestration::run_lifecycle_hooks_with_ctx(
+            Some(&ctx),
+            crate::orchestration::HookEvent::SessionStart,
+            &start_payload,
+        )
+        .await?;
+        // SessionStart is a paired event: hooks above run any user-registered
+        // `session_start` closures, and this call lets canonical reminder
+        // providers (currently `project_facts`) inject pre-turn context.
+        // Mirrors the pattern used at the `PostToolUse` and `PostCompact` call
+        // sites so adding new providers does not require new wiring.
+        let _ = crate::llm::reminder_providers::evaluate_and_inject(
+            Some(&ctx),
+            crate::orchestration::HookEvent::SessionStart,
+            &resolved,
+            start_payload,
+            crate::llm::reminder_providers::options_map_to_json(&opts_map),
+        )
+        .await?;
+        crate::agent_session_journal::flush(&resolved).await
+    }
+    .await;
+    if let Err(error) = initialized {
+        init_rollback.fail().await;
+        return Err(error);
+    }
+    init_rollback.disarm();
 
     Ok(agent_init_control(
         &resolved,
@@ -371,14 +386,14 @@ async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
-    if session.pushed_transcript_dir {
+    if let Some(dir) = session.transcript_dir.as_deref() {
         crate::llm::agent_session_transcript::append_finalized_marker(
             &session_id,
             &canonical_status,
             &stop_reason,
             iterations,
         );
-        crate::llm::agent_observe::pop_llm_transcript_dir();
+        crate::llm::agent_observe::remove_llm_transcript_dir(dir);
     }
     if terminal_error.is_some() || session_status_indicates_error(&final_status) {
         let error_payload = serde_json::json!({
@@ -425,7 +440,7 @@ async fn host_agent_session_finalize(
     }
 
     // Pair with the push in init so subsequent loops see the right stack.
-    crate::agent_sessions::pop_current_session();
+    crate::agent_sessions::remove_current_session(&session_id);
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or_else(|| session.tool_mode.clone());
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,

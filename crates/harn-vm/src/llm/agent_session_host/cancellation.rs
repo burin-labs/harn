@@ -41,6 +41,73 @@ pub(super) fn finish_agent_session(
     }
 }
 
+/// Cancellation-safe rollback for a session that crossed the host-registration
+/// boundary but whose id has not yet been returned to Harn.
+pub(super) struct AgentSessionInitRollback {
+    session_id: String,
+    armed: bool,
+}
+
+impl AgentSessionInitRollback {
+    pub(super) fn new(session_id: String) -> Self {
+        Self {
+            session_id,
+            armed: true,
+        }
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    pub(super) async fn fail(&mut self) {
+        if let Err(error) = super::live_transcript_journal::flush_init_terminal(
+            &self.session_id,
+            "failed",
+            "session_initialization_failed",
+        )
+        .await
+        {
+            crate::events::log_warn(
+                "agent.session_init_terminal_flush",
+                &format!("session={} terminal flush error: {error}", self.session_id),
+            );
+        }
+        self.rollback(true);
+    }
+
+    fn rollback(&mut self, finish_nested_policy: bool) {
+        if !self.armed {
+            return;
+        }
+        self.armed = false;
+        let removed = super::AGENT_HOST_SESSIONS
+            .with(|sessions| sessions.borrow_mut().remove(&self.session_id));
+        crate::agent_sessions::remove_current_session(&self.session_id);
+        crate::llm::permissions::clear_session_grants(&self.session_id);
+        crate::orchestration::clear_approval_policy_repeat_counts(&self.session_id);
+
+        if let Some(mut session) = removed {
+            if let Some(dir) = session.transcript_dir.as_deref() {
+                crate::llm::agent_observe::remove_llm_transcript_dir(dir);
+            }
+            if finish_nested_policy {
+                finish_agent_session(&mut session, &self.session_id, true);
+            } else {
+                crate::llm::agent_runtime::fire_session_end_hooks(&self.session_id, true);
+                crate::llm::agent_runtime::fire_session_close_hooks(&self.session_id);
+            }
+        }
+        crate::agent_sessions::close(&self.session_id);
+    }
+}
+
+impl Drop for AgentSessionInitRollback {
+    fn drop(&mut self) {
+        self.rollback(false);
+    }
+}
+
 /// Release host-owned state after an embedding surface has cancelled and
 /// awaited an agent future instead of letting it reach `finalize`.
 pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmError> {

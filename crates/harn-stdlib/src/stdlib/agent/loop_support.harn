@@ -4,6 +4,7 @@ pub import {
   agent_budget_post_call_stop_reason,
   agent_budget_pre_call_blocked,
 } from "std/agent/budget"
+import { AgentLoopTerminalError, AgentResult } from "std/agent/contracts"
 pub import {
   agent_loop_apply_command,
   agent_loop_control_invoke,
@@ -321,31 +322,10 @@ pub fn __agent_loop_enable_equivalent_failover(
   return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
 }
 
-pub fn __agent_loop_finalize_failed(
-  agent: HarnessAgent,
-  session: dict,
-  iteration: int,
+fn __agent_loop_terminal_error(
   error: unknown,
-) {
-  const totals = agent_session_totals(agent, session.session_id)
-  if type_of(totals?.provider_call_count) != "int" {
-    throw {
-      kind: "agent_loop_measurement_unavailable",
-      category: "internal",
-      reason: "provider_call_count_missing",
-      message: "agent session totals did not report provider_call_count",
-      cause: error,
-      provider_call_count: nil,
-    }
-  }
-  const provider_call_count = max(0, totals.provider_call_count)
-  const _ = try {
-    agent_session_finalize(
-      agent,
-      session.session_id,
-      {final_status: "failed", stop_reason: "error", iterations: iteration, error: error},
-    )
-  }
+  provider_call_count: int?,
+) -> AgentLoopTerminalError {
   const details = type_of(error) == "dict" ? error : {}
   return details
     + {
@@ -358,14 +338,109 @@ pub fn __agent_loop_finalize_failed(
     }
 }
 
+fn __agent_loop_measured_error(
+  agent: HarnessAgent,
+  session: dict,
+  error: unknown,
+) -> AgentLoopTerminalError {
+  const measured = try {
+    agent_session_totals(agent, session.session_id)
+  }
+  if is_err(measured) {
+    return __agent_loop_terminal_error(
+      {
+        kind: "agent_loop_measurement_unavailable",
+        category: "internal",
+        reason: "session_totals_unavailable",
+        message: "agent session totals could not be read",
+        cause: {terminal_error: error, measurement_error: unwrap_err(measured)},
+      },
+      nil,
+    )
+  }
+  const totals = unwrap(measured)
+  if type_of(totals?.provider_call_count) != "int" {
+    return __agent_loop_terminal_error(
+      {
+        kind: "agent_loop_measurement_unavailable",
+        category: "internal",
+        reason: "provider_call_count_missing",
+        message: "agent session totals did not report provider_call_count",
+        cause: error,
+      },
+      nil,
+    )
+  }
+  return __agent_loop_terminal_error(error, max(0, totals.provider_call_count))
+}
+
+pub fn __agent_loop_finalize_failed(
+  agent: HarnessAgent,
+  session: dict,
+  iteration: int,
+  error: unknown,
+) -> AgentLoopTerminalError {
+  const terminal = __agent_loop_measured_error(agent, session, error)
+  const _ = try {
+    agent_session_finalize(
+      agent,
+      session.session_id,
+      {final_status: "failed", stop_reason: "error", iterations: iteration, error: error},
+    )
+  }
+  return terminal
+}
+
+/**
+ * Normalize failures from the public loop boundary without double-finalizing
+ * errors already normalized by the inner run owner.
+ *
+ * Before a session exists, no provider transport is reachable, so zero is a
+ * measured invariant. Once a session exists, its ledger is authoritative.
+ *
+ * @effects: [agent]
+ * @errors: [runtime]
+ */
+pub fn __agent_loop_normalize_boundary_error(
+  agent: HarnessAgent,
+  session: dict?,
+  error: unknown,
+  session_finalized: bool = false,
+) -> AgentLoopTerminalError {
+  if session != nil {
+    if session_finalized {
+      return __agent_loop_measured_error(agent, session, error)
+    }
+    return __agent_loop_finalize_failed(agent, session, 0, error)
+  }
+  return __agent_loop_terminal_error(error, 0)
+}
+
 pub type AgentLoopRunExitState = {
   iteration: int,
   session_finalized: bool,
   audit_background_tasks: list,
 }
 
+/** Private control-flow result returned to the public agent-loop boundary. */
+fn __agent_loop_failed_outcome(
+  agent: HarnessAgent,
+  session: dict,
+  state: AgentLoopRunExitState,
+  error: unknown,
+) {
+  if state.session_finalized {
+    return {kind: "failed", error: __agent_loop_measured_error(agent, session, error)}
+  }
+  return {
+    kind: "failed",
+    error: __agent_loop_finalize_failed(agent, session, state.iteration, error),
+  }
+}
+
 /**
- * Return a completed loop run or surface one normalized exceptional terminal.
+ * Return a tagged completed or failed outcome. The public boundary owns the
+ * eventual throw, so normalized failures never need a forgeable public marker.
  *
  * @effects: [agent]
  * @errors: [runtime]
@@ -375,16 +450,26 @@ pub fn __agent_loop_finish_run(
   session: dict,
   state: AgentLoopRunExitState,
   run: unknown,
-) -> unknown {
+) -> {kind: "completed", result: AgentResult} | {kind: "failed", error: AgentLoopTerminalError} {
   if is_ok(run) {
-    return unwrap(run)
+    const result = unwrap(run)
+    if !schema_is(result, schema_of(AgentResult)) {
+      return __agent_loop_failed_outcome(
+        agent,
+        session,
+        state,
+        "agent_loop: terminal result violated AgentResult",
+      )
+    }
+    return {kind: "completed", result: result}
   }
-  __drain_audit_flushes(state.audit_background_tasks)
-  let surfaced_error = unwrap_err(run)
-  if !state.session_finalized {
-    surfaced_error = __agent_loop_finalize_failed(agent, session, state.iteration, surfaced_error)
+  const drained = try {
+    __drain_audit_flushes(state.audit_background_tasks)
   }
-  throw surfaced_error
+  if is_err(drained) {
+    return __agent_loop_failed_outcome(agent, session, state, unwrap_err(drained))
+  }
+  return __agent_loop_failed_outcome(agent, session, state, unwrap_err(run))
 }
 
 pub fn __agent_loop_current_worker(agents: HarnessAgent, runtime: HarnessRuntime) {

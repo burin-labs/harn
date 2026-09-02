@@ -542,6 +542,23 @@ pub(crate) fn pop_current_session() {
     });
 }
 
+/// Remove one exact ambient session without disturbing newer nested work.
+///
+/// Async session setup and teardown may yield while another session is active
+/// on the same worker thread. A blind stack pop can then remove the wrong
+/// owner. Exact removal makes rollback and finalization idempotent and preserves
+/// unrelated ambient state.
+pub(crate) fn remove_current_session(id: &str) -> bool {
+    CURRENT_SESSION_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        let Some(index) = stack.iter().rposition(|candidate| candidate == id) else {
+            return false;
+        };
+        stack.remove(index);
+        true
+    })
+}
+
 pub fn current_session_id() -> Option<String> {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
 }

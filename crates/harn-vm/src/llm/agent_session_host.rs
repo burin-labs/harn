@@ -133,7 +133,7 @@ struct AgentHostSession {
     /// the immutable session preference, this follows custom callers, route
     /// switches, and runtime channel degradation turn by turn.
     last_tool_format: Option<String>,
-    pushed_transcript_dir: bool,
+    transcript_dir: Option<String>,
     started_at: String,
     /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
     /// here so finalize can disambiguate `final_status == "budget_exhausted"`
@@ -276,7 +276,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         last_provider: Some(provider.to_string()),
         last_model: Some(model.to_string()),
         last_tool_format: None,
-        pushed_transcript_dir: false,
+        transcript_dir: None,
         started_at: now_id(),
         max_iterations: 0,
         daemon_state: None,

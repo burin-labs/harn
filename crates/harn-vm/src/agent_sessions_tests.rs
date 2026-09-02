@@ -1503,6 +1503,20 @@ async fn current_tool_call_scope_is_task_local() {
     assert_eq!(current_tool_call_id(), None);
 }
 
+#[test]
+fn exact_session_removal_preserves_newer_ambient_owner() {
+    reset_session_store();
+    push_current_session("outer".to_string());
+    push_current_session("inner".to_string());
+
+    assert!(remove_current_session("outer"));
+    assert_eq!(current_session_id().as_deref(), Some("inner"));
+    assert!(!remove_current_session("missing"));
+    assert_eq!(current_session_id().as_deref(), Some("inner"));
+    assert!(remove_current_session("inner"));
+    assert_eq!(current_session_id(), None);
+}
+
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() {
     reset_all_sinks();

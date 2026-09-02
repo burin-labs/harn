@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { default_llm_caller } from "std/llm/caller"
 import { with_budget } from "std/llm/handlers"
 import { llm_text, with_llm_script } from "std/testing"
@@ -99,6 +100,55 @@ pipeline default(harness: Harness) {
       harness.stdio.println(is_err(outcome))
       harness.stdio.println(error.provider_call_count)
       harness.stdio.println(error.cause)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  // A routing-policy failover performs two physical provider requests inside
+  // one public agent-loop turn. The session ledger counts both links once.
+  with_llm_script(
+    harness.llm,
+    [{error: {category: "rate_limit", message: "HTTP 429 rate limit"}}, llm_text("fallback won")],
+    { ->
+      const policy = harness.llm.routing_policy(
+        {
+          chain: [
+            {provider: "mock", model: "mock", label: "primary"},
+            {provider: "mock", model: "mock-strong", label: "fallback"},
+          ],
+          failover: {on_status: [429], max_attempts: 2},
+          label: "provider-count-failover",
+        },
+      )
+      const options: AgentSpec = {routing: policy, max_iterations: 1, final_wrapup: false}
+      const result = agent_loop(harness, "count both routed requests", nil, options)
+      harness.stdio.println(result.provider_call_count)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  // A link rejected by routing policy before transport remains visible in the
+  // routing attempt trace, but it is not a physical provider request.
+  with_llm_script(
+    harness.llm,
+    [llm_text("cheap link won")],
+    { ->
+      const policy = harness.llm.routing_policy(
+        {
+          chain: [
+            {provider: "anthropic", model: "claude-opus-4-20250514", label: "skipped"},
+            {provider: "openai", model: "gpt-4o-mini", label: "dispatched"},
+          ],
+          budget: {per_call_usd: 0.01, on_exceed: "skip"},
+          label: "provider-count-skipped-link",
+        },
+      )
+      const options: AgentSpec = {
+        routing: policy,
+        max_tokens: 2000,
+        max_iterations: 1,
+        final_wrapup: false,
+      }
+      const result = agent_loop(harness, "do not count skipped routes", nil, options)
+      harness.stdio.println(result.provider_call_count)
       harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )

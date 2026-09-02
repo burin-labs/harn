@@ -145,6 +145,21 @@ pub(crate) fn pop_llm_transcript_dir() {
     reset_deduplication();
 }
 
+pub(crate) fn remove_llm_transcript_dir(dir: &str) -> bool {
+    let removed = TRANSCRIPT_DIR_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        let Some(index) = stack.iter().rposition(|candidate| candidate == dir) else {
+            return false;
+        };
+        stack.remove(index);
+        true
+    });
+    if removed {
+        reset_deduplication();
+    }
+    removed
+}
+
 pub(crate) fn current_transcript_dir() -> Option<String> {
     let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
     stacked.or_else(|| {
@@ -192,6 +207,24 @@ mod tests {
             "a new pushed scope cannot inherit a prior file's definitions"
         );
         pop_llm_transcript_dir();
+        let _ = swap_llm_transcript_ambient(saved);
+    }
+
+    #[test]
+    fn exact_transcript_removal_preserves_newer_ambient_owner() {
+        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        push_llm_transcript_dir("/tmp/harn-transcript-outer");
+        push_llm_transcript_dir("/tmp/harn-transcript-inner");
+
+        assert!(remove_llm_transcript_dir("/tmp/harn-transcript-outer"));
+        assert_eq!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-inner")
+        );
+        assert!(!remove_llm_transcript_dir("/tmp/harn-transcript-missing"));
+        assert!(remove_llm_transcript_dir("/tmp/harn-transcript-inner"));
+        assert_eq!(current_transcript_dir(), None);
+
         let _ = swap_llm_transcript_ambient(saved);
     }
 

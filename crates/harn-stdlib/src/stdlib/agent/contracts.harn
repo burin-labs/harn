@@ -244,6 +244,9 @@ pub type AgentLoopTerminalError = {
   reason: string,
   message: string,
   cause: unknown,
-  provider_call_count: int,
+  provider_call_count: int?,
   ...rest,
 }
+// Nil means the session ledger itself was unavailable. A measured zero is
+// always the integer 0, so consumers cannot confuse missing measurement
+// with a request that was refused before dispatch.

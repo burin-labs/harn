@@ -122,7 +122,7 @@ use transcript_ambient::{
 };
 pub(crate) use transcript_ambient::{
     current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
-    swap_llm_transcript_ambient, LlmTranscriptAmbient,
+    remove_llm_transcript_dir, swap_llm_transcript_ambient, LlmTranscriptAmbient,
 };
 
 fn next_call_id() -> String {

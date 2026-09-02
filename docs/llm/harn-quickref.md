@@ -2451,8 +2451,10 @@ session-owned `provider_call_count` is always an integer, including measured
 zero, and counts physical provider dispatches even when transport, schema, or
 provider handling later fails. Cache/replay hits and routes rejected before
 dispatch do not increment it. Uncaught loop errors carry the same field on the
-thrown error envelope, so consumers never reconstruct request counts from
-tokens, transcript absence, or error text. The
+typed `AgentLoopTerminalError` envelope. Its value is an integer when the
+session ledger was read, including measured zero, and `nil` only when that
+ledger itself was unavailable. Consumers therefore never reconstruct request
+counts from tokens, transcript absence, or error text. The
 resilience surface is the `llm_caller:` seam (see "Composable LLM
 callers"); the pre-0.10 `llm_retries` / `llm_backoff_ms` options were
 removed and the `removed-llm-options` lint hard-errors on them. Plus its
