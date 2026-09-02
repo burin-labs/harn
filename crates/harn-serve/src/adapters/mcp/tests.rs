@@ -1393,6 +1393,23 @@ pub fn cancellable(value: string) -> string {
 }
 
 #[tokio::test]
+async fn acknowledged_cancel_wins_when_cancel_and_completion_are_both_ready() {
+    let tasks = harn_vm::mcp_tasks::McpTaskStore::new();
+    let access = harn_vm::mcp_tasks::McpTaskAccess::unscoped();
+    let lease = tasks.begin(access.clone(), None).expect("task admitted");
+    let task_id = lease.task().task_id.clone();
+
+    let cancel = tasks.handle_cancel(&access, json!(1), &json!({"taskId": task_id}));
+    assert_eq!(cancel["result"], json!({}));
+
+    // Cancellation is ready before this helper is first polled, and the
+    // completion future is ready by construction. This is the exact
+    // simultaneous-readiness shape that failed Windows certification.
+    let selected = run_until_task_cancelled(&lease, std::future::ready("completed")).await;
+    assert_eq!(selected, None);
+}
+
+#[tokio::test]
 async fn declared_application_error_completes_task_with_typed_error_result() {
     let dir = tempfile::tempdir().expect("tempdir");
     let server = Arc::new(job_export_server(&dir));
