@@ -88,8 +88,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
 pub(crate) async fn mcp_connect_http_impl(
     spec: &McpServerSpec,
 ) -> Result<VmMcpClientHandle, VmError> {
-    let builder = reqwest::Client::builder()
-        .redirect(crate::egress::redirect_policy("mcp_http_redirect", 10));
+    let builder = reqwest::Client::builder().redirect(mcp_http_redirect_policy(spec));
     let client = crate::egress::install_ssrf_guard(builder)
         .build()
         .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
@@ -112,6 +111,7 @@ pub(crate) async fn mcp_connect_http_impl(
             protocol_version: options.protocol_version,
             next_id: 1,
             proxy_server_name: spec.proxy_server_name.clone(),
+            static_headers: spec.headers.clone(),
             tool_headers: BTreeMap::new(),
             fixtures: None,
         })))),
@@ -122,6 +122,40 @@ pub(crate) async fn mcp_connect_http_impl(
 
     discover_server(&handle).await?;
     Ok(handle)
+}
+
+fn mcp_http_redirect_policy(spec: &McpServerSpec) -> reqwest::redirect::Policy {
+    if spec.headers.is_empty() {
+        return crate::egress::redirect_policy("mcp_http_redirect", 10);
+    }
+    let configured_origin = url::Url::parse(&spec.url).ok().map(|url| {
+        (
+            url.scheme().to_string(),
+            url.host_str().map(str::to_ascii_lowercase),
+            url.port_or_known_default(),
+        )
+    });
+    reqwest::redirect::Policy::custom(move |attempt| {
+        let target = attempt.url();
+        let target_origin = (
+            target.scheme().to_string(),
+            target.host_str().map(str::to_ascii_lowercase),
+            target.port_or_known_default(),
+        );
+        if attempt.previous().len() >= 10 {
+            attempt.error("too many redirects")
+        } else if configured_origin.as_ref() != Some(&target_origin) {
+            attempt.error("MCP configured headers cannot cross an origin redirect")
+        } else if crate::egress::redirect_url_allowed(
+            "mcp_http_redirect",
+            attempt.previous().last().map(|url| url.as_str()),
+            target.as_str(),
+        ) {
+            attempt.follow()
+        } else {
+            attempt.error("egress policy blocked redirect target")
+        }
+    })
 }
 
 pub(crate) async fn resolve_http_auth_token_source(spec: &McpServerSpec) -> ResolvedHttpAuthToken {

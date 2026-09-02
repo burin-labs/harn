@@ -1,3 +1,4 @@
+pub(crate) mod agent_plugin;
 pub(crate) mod agents_conformance;
 pub(crate) mod app;
 mod app_host_assets;

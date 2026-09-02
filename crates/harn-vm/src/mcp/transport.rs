@@ -224,6 +224,7 @@ pub(crate) async fn send_http_request_once(
         Some(method),
         payload.get("params"),
         &inner.tool_headers,
+        &inner.static_headers,
     );
 
     request.timeout(MCP_TIMEOUT).send().await.map_err(|e| {
@@ -293,7 +294,13 @@ pub(crate) fn apply_http_headers(
     method: Option<&str>,
     params: Option<&serde_json::Value>,
     tool_headers: &BTreeMap<String, Vec<McpToolHeader>>,
+    static_headers: &BTreeMap<String, String>,
 ) -> reqwest::RequestBuilder {
+    for (name, value) in static_headers {
+        if !client_owns_http_header(name, tool_headers) {
+            request = request.header(name, value);
+        }
+    }
     request = request.header(MCP_HEADER_PROTOCOL_VERSION, protocol_version);
     if let Some(token) = auth_token {
         request = request.header("Authorization", format!("Bearer {token}"));
@@ -310,6 +317,29 @@ pub(crate) fn apply_http_headers(
         }
     }
     request
+}
+
+fn client_owns_http_header(
+    name: &str,
+    tool_headers: &BTreeMap<String, Vec<McpToolHeader>>,
+) -> bool {
+    const OWNED: &[&str] = &[
+        "accept",
+        "authorization",
+        "connection",
+        "content-length",
+        "content-type",
+        "host",
+        MCP_HEADER_METHOD,
+        MCP_HEADER_NAME,
+        MCP_HEADER_PROTOCOL_VERSION,
+        "transfer-encoding",
+    ];
+    OWNED.iter().any(|owned| name.eq_ignore_ascii_case(owned))
+        || tool_headers
+            .values()
+            .flatten()
+            .any(|header| name.eq_ignore_ascii_case(&header.header_name))
 }
 
 pub(crate) fn apply_mcp_tool_parameter_headers(

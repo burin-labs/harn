@@ -49,6 +49,7 @@ mod parse_tokens;
 mod persona;
 mod pg;
 mod playground;
+mod plugin;
 mod portable;
 mod portal;
 mod precompile;
@@ -196,6 +197,7 @@ pub(crate) use persona::{
 };
 pub(crate) use pg::{PgArgs, PgCodegenArgs, PgCommand};
 pub(crate) use playground::PlaygroundArgs;
+pub(crate) use plugin::{PluginArgs, PluginCommand, PluginPathArgs};
 pub(crate) use portable::{
     PortableArgs, PortableCommand, PortableCompileArgs, PortableEntryKindArg, PortablePackageArgs,
     PortableResumeArgs, PortableStartArgs,
@@ -565,6 +567,8 @@ SCRIPTING
     /// resolved/inspect/match/install/new) and provenance (sign/endorse/
     /// verify/who-signed/key/trust).
     Skill(SkillArgs),
+    /// Inspect and validate portable Agent Plugins packages.
+    Plugin(PluginArgs),
     /// Scaffold and inspect Harn-native custom tools.
     Tool(ToolArgs),
     /// Print the decorated version banner.

@@ -80,6 +80,10 @@ pub struct McpServerSpec {
     pub cwd: Option<String>,
     #[serde(default)]
     pub url: String,
+    /// Static headers applied to every HTTP request. Header values are
+    /// intentionally explicit configuration, not secret interpolation.
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
     #[serde(default)]
     pub auth_token: Option<String>,
     #[serde(default)]
@@ -88,6 +92,48 @@ pub struct McpServerSpec {
     pub protocol_version: Option<String>,
     #[serde(default)]
     pub proxy_server_name: Option<String>,
+}
+
+impl McpServerSpec {
+    pub fn stdio(
+        name: String,
+        command: String,
+        args: Vec<String>,
+        env: BTreeMap<String, String>,
+        cwd: Option<String>,
+    ) -> Self {
+        Self {
+            name,
+            transport: McpTransport::Stdio,
+            command,
+            args,
+            env,
+            cwd,
+            url: String::new(),
+            headers: BTreeMap::new(),
+            auth_token: None,
+            token_exchange: None,
+            protocol_version: None,
+            proxy_server_name: None,
+        }
+    }
+
+    pub fn http(name: String, url: String, headers: BTreeMap<String, String>) -> Self {
+        Self {
+            name,
+            transport: McpTransport::Http,
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: None,
+            url,
+            headers,
+            auth_token: None,
+            token_exchange: None,
+            protocol_version: None,
+            proxy_server_name: None,
+        }
+    }
 }
 
 fn default_transport() -> McpTransport {
@@ -109,6 +155,7 @@ pub(crate) struct HttpMcpClientInner {
     protocol_version: String,
     next_id: u64,
     proxy_server_name: Option<String>,
+    static_headers: BTreeMap<String, String>,
     tool_headers: BTreeMap<String, Vec<McpToolHeader>>,
     fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }

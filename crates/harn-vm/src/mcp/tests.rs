@@ -62,11 +62,45 @@ fn http_spec(url: &str, auth_token: Option<&str>) -> McpServerSpec {
         env: BTreeMap::new(),
         cwd: None,
         url: url.to_string(),
+        headers: BTreeMap::new(),
         auth_token: auth_token.map(str::to_string),
         token_exchange: None,
         protocol_version: None,
         proxy_server_name: None,
     }
+}
+
+#[test]
+fn configured_http_headers_are_literal_and_client_headers_take_precedence() {
+    let mut configured = BTreeMap::new();
+    configured.insert("X-Tenant".to_string(), "acme".to_string());
+    configured.insert(
+        MCP_HEADER_PROTOCOL_VERSION.to_ascii_lowercase(),
+        "plugin-value".to_string(),
+    );
+    configured.insert("Authorization".to_string(), "plugin-value".to_string());
+    let request = apply_http_headers(
+        reqwest::Client::new().get("https://example.com/mcp"),
+        &Some("client-token".to_string()),
+        PROTOCOL_VERSION,
+        None,
+        None,
+        &BTreeMap::new(),
+        &configured,
+    )
+    .build()
+    .unwrap();
+    assert_eq!(request.headers()["x-tenant"], "acme");
+    assert_eq!(
+        request.headers()[MCP_HEADER_PROTOCOL_VERSION],
+        PROTOCOL_VERSION
+    );
+    assert_eq!(request.headers()["authorization"], "Bearer client-token");
+    assert_eq!(
+        request.headers().get_all("authorization").iter().count(),
+        1,
+        "client-owned headers must replace configured values, not append"
+    );
 }
 
 #[test]
@@ -533,6 +567,7 @@ async fn stable_http_handle(base_url: &str) -> VmMcpClientHandle {
         env: BTreeMap::new(),
         cwd: None,
         url: format!("{base_url}/mcp"),
+        headers: BTreeMap::new(),
         auth_token: None,
         token_exchange: None,
         protocol_version: Some(PROTOCOL_VERSION.to_string()),

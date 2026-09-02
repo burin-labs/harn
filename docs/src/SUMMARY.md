@@ -197,6 +197,7 @@
   - [Contributing preset hooks](./contributing/preset-hooks.md)
 - [Context maintenance hooks](./context-maintenance-hooks.md)
 - [Skills](./skills.md)
+- [Agent Plugins packages](./agent-plugins.md)
 - [Engineering principles](./dev/engineering-principles.md)
 - [Personas](./personas.md)
   - [Persona prelude](./personas/prelude.md)

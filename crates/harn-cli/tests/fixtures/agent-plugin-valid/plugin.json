@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "harn.fixture",
+  "version": "1.0.0",
+  "description": "Portable Agent Plugins fixture for Harn product-path tests"
+}

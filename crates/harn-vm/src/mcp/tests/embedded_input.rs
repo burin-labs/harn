@@ -107,6 +107,7 @@ async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
                     protocol_version: PROTOCOL_VERSION.to_string(),
                     next_id: 1,
                     proxy_server_name: None,
+                    static_headers: BTreeMap::new(),
                     tool_headers: BTreeMap::new(),
                     fixtures: None,
                 })))),

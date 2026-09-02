@@ -2,7 +2,7 @@
 //! `harn` invocation lands in, plus the argument shims and one-off subcommand
 //! runners it owns.
 
-use crate::cli::PackageRegistryCommand;
+use crate::cli::{PackageRegistryCommand, PluginCommand};
 use crate::*;
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
@@ -104,6 +104,10 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 SkillTrustCommand::Add(add) => commands::skill::run_trust_add(&add),
                 SkillTrustCommand::List(list) => commands::skill::run_trust_list(&list),
             },
+        },
+        Command::Plugin(args) => match args.command {
+            PluginCommand::Inspect(plugin) => commands::agent_plugin::run(&plugin, false),
+            PluginCommand::Validate(plugin) => commands::agent_plugin::run(&plugin, true),
         },
         Command::Guard(args) => match args.command {
             GuardCommand::List(list_args) => commands::guard::run_list(&list_args),

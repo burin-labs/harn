@@ -27,6 +27,7 @@ pub use runtime_stack::RUNTIME_STACK_SIZE;
 pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
+pub mod agent_plugins;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
 pub mod agent_sessions;
