@@ -230,11 +230,26 @@ pub(crate) async fn resolve_input_required_result(
         }
         return Ok(None);
     };
-    let input_requests: rmcp::model::InputRequests = serde_json::from_value(input_requests.clone())
-        .map_err(|error| VmError::Runtime(format!("invalid MCP inputRequests: {error}")))?;
+    let mut input_requests_value = input_requests.clone();
+    let mut requested_schema_property_orders = BTreeMap::new();
+    if let Some(requests) = input_requests_value.as_object_mut() {
+        for (key, request) in requests {
+            let property_order = request
+                .get_mut("params")
+                .and_then(serde_json::Value::as_object_mut)
+                .and_then(|params| params.remove(REQUESTED_SCHEMA_PROPERTY_ORDER));
+            if let Some(property_order) = property_order {
+                requested_schema_property_orders.insert(key.clone(), property_order);
+            }
+        }
+    }
+    let input_requests: rmcp::model::InputRequests =
+        serde_json::from_value(input_requests_value)
+            .map_err(|error| VmError::Runtime(format!("invalid MCP inputRequests: {error}")))?;
     let fixtures = client.capability_fixtures().await;
     let mut responses = rmcp::model::InputResponses::new();
     for (key, input_request) in input_requests {
+        let requested_schema_property_order = requested_schema_property_orders.remove(&key);
         let mut request = serde_json::to_value(input_request).map_err(|error| {
             VmError::Runtime(format!("invalid MCP input request {key:?}: {error}"))
         })?;
@@ -243,6 +258,17 @@ pub(crate) async fn resolve_input_required_result(
         })?;
         object.insert("jsonrpc".to_string(), serde_json::json!("2.0"));
         object.insert("id".to_string(), serde_json::json!(format!("input-{key}")));
+        if let Some(property_order) = requested_schema_property_order {
+            let params = object
+                .get_mut("params")
+                .and_then(serde_json::Value::as_object_mut)
+                .ok_or_else(|| {
+                    VmError::Runtime(format!(
+                        "MCP elicitation input request {key:?} has no params object"
+                    ))
+                })?;
+            params.insert(REQUESTED_SCHEMA_PROPERTY_ORDER.to_string(), property_order);
+        }
         let response = resolve_embedded_input_request(&client.name, &request, fixtures.as_deref())
             .await
             .ok_or_else(|| {

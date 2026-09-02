@@ -177,10 +177,9 @@ impl BindingManifest {
     }
 }
 
-/// Stable digest for a binding manifest value. Producers should build
-/// manifests with deterministic object key order before hashing.
+/// Stable digest for a binding manifest value.
 pub fn binding_manifest_hash(manifest: &Value) -> Result<String, serde_json::Error> {
-    let canonical = serde_json::to_vec(manifest)?;
+    let canonical = crate::canonical_json::to_vec(manifest);
     let mut hasher = Sha256::new();
     hasher.update(b"harn.composition.binding_manifest.v1\0");
     hasher.update(&canonical);

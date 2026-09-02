@@ -133,7 +133,7 @@ impl ClientHandler for HarnSdkClientHandler {
         let request = Self::request(
             crate::mcp_elicit::ELICITATION_METHOD,
             &context.id,
-            serde_json::to_value(params).map_err(|error| {
+            super::protocol::project_elicitation_params(&params).map_err(|error| {
                 McpError::new(ErrorCode::INVALID_PARAMS, error.to_string(), None)
             })?,
         );
