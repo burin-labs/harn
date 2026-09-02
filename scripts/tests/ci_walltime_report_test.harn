@@ -349,7 +349,27 @@ pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
   assert(!report.measurement_complete)
   assert_eq(latency_report_exit_code(report, true), 1)
   assert_eq(latency_report_exit_code(report, false), 0)
-  assert_eq(latency_report_exit_code({...report, measurement_complete: true}, true), 0)
+  const complete_report: CiLatencyReport = {
+    schema_version: report.schema_version,
+    policy: report.policy,
+    candidate_runs: report.candidate_runs,
+    qualifying_runs: report.qualifying_runs,
+    jobs_observed: report.jobs_observed,
+    jobs_measured: report.jobs_measured,
+    jobs_excluded: report.jobs_excluded,
+    measurement_complete: true,
+    excluded_jobs: report.excluded_jobs,
+    rejected_jobs: report.rejected_jobs,
+    wall: report.wall,
+    dependency_wait: report.dependency_wait,
+    runner_queue: report.runner_queue,
+    execution: report.execution,
+    critical_paths: report.critical_paths,
+    steps: report.steps,
+    runners: report.runners,
+    evaluation: report.evaluation,
+  }
+  assert_eq(latency_report_exit_code(complete_report, true), 0)
   assert_eq(report.rejected_jobs.count, 1)
   assert_eq(
     report.critical_paths,
