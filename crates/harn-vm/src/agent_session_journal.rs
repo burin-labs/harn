@@ -410,6 +410,10 @@ fn event_kind_for_transcript(event: &serde_json::Value, message_default: bool) -
         Some("system_reminder") => SessionEventKind::SystemReminder,
         Some("reminder") => SessionEventKind::Reminder,
         Some("permission_decision") => SessionEventKind::PermissionDecision,
+        // An accepted control word. The typed variant is what lets an
+        // exit authority read "the user stopped this run" instead of
+        // matching prose; see `harn_session_store::control`.
+        Some(harn_session_store::CONTROL_EVENT_KIND) => SessionEventKind::Control,
         Some("message") if message_default => SessionEventKind::Message,
         Some(kind) => SessionEventKind::Custom {
             custom_type: kind.to_string(),

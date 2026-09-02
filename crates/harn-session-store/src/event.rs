@@ -2,10 +2,10 @@
 //!
 //! Every event a session can persist — `Message`, `ToolCall`,
 //! `ToolResult`, `Plan`, `Compaction`, `SystemReminder`, `Hypothesis`,
-//! `Receipt`, `Reminder`, `PermissionDecision`, plus `Custom { type,
-//! payload }` for surface-specific shapes — shares one envelope shape so
-//! a TUI session can be read by a cloud verifier and an IDE replay
-//! without bespoke per-surface marshalling.
+//! `Receipt`, `Reminder`, `PermissionDecision`, `Control`, plus
+//! `Custom { type, payload }` for surface-specific shapes — shares one
+//! envelope shape so a TUI session can be read by a cloud verifier and
+//! an IDE replay without bespoke per-surface marshalling.
 //!
 //! The on-the-wire shape is intentionally JSON-first: the storage
 //! backend keeps events as canonical UTF-8 bytes, which lets the
@@ -41,6 +41,17 @@ pub enum SessionEventKind {
     Receipt,
     Reminder,
     PermissionDecision,
+    /// An accepted control word — a stop, a steer, an interrupt, or a
+    /// queued note — recorded at the moment the surface accepted it.
+    ///
+    /// The product contract says control words are events. Without this
+    /// variant a stop leaves no trace in the store at all, and a steer,
+    /// an interrupt and a queued note read back as the same `Message`
+    /// row, so an exit authority has to recover "the user stopped this
+    /// run" by matching prose. See [`crate::control`] for the payload
+    /// shape and the reason the caller's own word is retained beside
+    /// the canonical delivery mode.
+    Control,
     Custom {
         #[serde(rename = "type")]
         custom_type: String,
@@ -61,8 +72,107 @@ impl SessionEventKind {
             Self::Receipt => "receipt",
             Self::Reminder => "reminder",
             Self::PermissionDecision => "permission_decision",
+            Self::Control => "control",
             Self::Custom { custom_type } => custom_type.as_str(),
         }
+    }
+
+    /// Inverse of [`Self::discriminator`] for the named variants.
+    ///
+    /// Kept in this `impl` on purpose. A storage backend that hand-wrote
+    /// its own string-to-variant table drifted from this one the first
+    /// time a variant was added: rows written with the new discriminator
+    /// were accepted on the way in and then failed to decode on the way
+    /// out. Both directions now come from the same match.
+    ///
+    /// Returns `None` for `custom`, which needs the caller's stored
+    /// custom type to reconstruct.
+    pub fn from_discriminator(discriminator: &str) -> Option<Self> {
+        Some(match discriminator {
+            "message" => Self::Message,
+            "tool_call" => Self::ToolCall,
+            "tool_result" => Self::ToolResult,
+            "plan" => Self::Plan,
+            "compaction" => Self::Compaction,
+            "system_reminder" => Self::SystemReminder,
+            "hypothesis" => Self::Hypothesis,
+            "receipt" => Self::Receipt,
+            "reminder" => Self::Reminder,
+            "permission_decision" => Self::PermissionDecision,
+            "control" => Self::Control,
+            _ => return None,
+        })
+    }
+
+    /// Every named variant, for round-trip and coverage checks.
+    pub const NAMED: [Self; 11] = [
+        Self::Message,
+        Self::ToolCall,
+        Self::ToolResult,
+        Self::Plan,
+        Self::Compaction,
+        Self::SystemReminder,
+        Self::Hypothesis,
+        Self::Receipt,
+        Self::Reminder,
+        Self::PermissionDecision,
+        Self::Control,
+    ];
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::SessionEventKind;
+
+    /// Structural guard. Every named variant must survive a trip through
+    /// its discriminator string, so a backend that persists the string
+    /// can always decode it again. A new variant that is added to the
+    /// enum without a `from_discriminator` arm fails here rather than at
+    /// read time on a real session.
+    #[test]
+    fn every_named_kind_round_trips_through_its_discriminator() {
+        for kind in SessionEventKind::NAMED {
+            let discriminator = kind.discriminator().to_string();
+            assert_eq!(
+                SessionEventKind::from_discriminator(&discriminator),
+                Some(kind.clone()),
+                "{discriminator} does not decode back to its own variant"
+            );
+        }
+    }
+
+    /// The `NAMED` list is itself hand-written, so prove it is complete:
+    /// the exhaustive match below stops compiling when a variant is
+    /// added, and the assertion fails if it is added without being
+    /// listed.
+    #[test]
+    fn the_named_list_covers_every_non_custom_variant() {
+        fn listed(kind: &SessionEventKind) -> bool {
+            match kind {
+                SessionEventKind::Message
+                | SessionEventKind::ToolCall
+                | SessionEventKind::ToolResult
+                | SessionEventKind::Plan
+                | SessionEventKind::Compaction
+                | SessionEventKind::SystemReminder
+                | SessionEventKind::Hypothesis
+                | SessionEventKind::Receipt
+                | SessionEventKind::Reminder
+                | SessionEventKind::PermissionDecision
+                | SessionEventKind::Control => true,
+                SessionEventKind::Custom { .. } => false,
+            }
+        }
+        for kind in SessionEventKind::NAMED {
+            assert!(listed(&kind), "{kind:?} missing from the exhaustive match");
+        }
+        assert_eq!(SessionEventKind::NAMED.len(), 11);
+    }
+
+    #[test]
+    fn custom_and_unknown_discriminators_do_not_decode_to_a_named_variant() {
+        assert_eq!(SessionEventKind::from_discriminator("custom"), None);
+        assert_eq!(SessionEventKind::from_discriminator("not_a_kind"), None);
     }
 }
 
