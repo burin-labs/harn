@@ -228,6 +228,31 @@ pub fn completion_requirement_contract_prompt(contract: CompletionRequirementCon
     + "\nReturn one requirement_report row for every requirement_id. Mark met only when requirement_evidence semantically supports that item, and cite indices with an allowed evidence role."
 }
 
+/**
+ * Instruction appended to the judge's USER message on the one itemization
+ * re-ask. It rides on the user turn so the cached stable system prefix stays
+ * byte-identical and the retry still reads from cache.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_itemization_retry_prompt(contract)
+ */
+pub fn completion_requirement_itemization_retry_prompt(
+  contract: CompletionRequirementContract?,
+) -> string {
+  if contract == nil || len(contract.requirements) == 0 {
+    return ""
+  }
+  let ids: list<string> = []
+  for requirement in contract.requirements {
+    ids = ids + ["`" + requirement.requirement_id + "`"]
+  }
+  return "\n\nYour previous response omitted `requirement_report`, so no acceptance item was assessed and the completion could not be accepted. `requirement_report` is mandatory whenever atomic completion requirements are listed. Answer again with one row for every requirement_id ("
+    + join(ids, ", ")
+    + "), each carrying `met` and `evidence_refs` citing requirement_evidence indices whose role that item allows. Report an item met only when the evidence supports it; reporting it not met is a valid answer."
+}
+
 fn completion_requirement_strict_refs(raw: unknown) -> list<int> {
   let refs: list<int> = []
   if type_of(raw) != "list" {
@@ -516,6 +541,15 @@ fn completion_requirement_clip_name(name: string) -> string {
   return substring(name, 0, limit) + "…"
 }
 
+fn completion_requirement_row_phrase(row: CompletionRequirementStatus) -> string {
+  return "`" + row.requirement_id + "` is " + completion_requirement_status_phrase(row.status)
+    + " — "
+    + completion_requirement_clip_name(row.name)
+    + " Accepted evidence kinds: "
+    + join(completion_requirement_role_names(row.evidence_roles), ", ")
+    + "."
+}
+
 pub fn completion_requirement_pending_feedback(report: CompletionRequirementReport) -> string {
   let parts: list<string> = []
   let row_names: list<string> = []
@@ -524,15 +558,7 @@ pub fn completion_requirement_pending_feedback(report: CompletionRequirementRepo
     if row.met {
       continue
     }
-    parts = parts
-      + [
-        "`" + row.requirement_id + "` is " + completion_requirement_status_phrase(row.status)
-          + " — "
-          + completion_requirement_clip_name(row.name)
-          + " Accepted evidence kinds: "
-          + join(completion_requirement_role_names(row.evidence_roles), ", ")
-          + ".",
-      ]
+    parts = parts + [completion_requirement_row_phrase(row)]
   }
   for name in report.pending_names {
     if !row_names.contains(name) {
@@ -543,5 +569,56 @@ pub fn completion_requirement_pending_feedback(report: CompletionRequirementRepo
     + " of "
     + to_string(report.required_count)
     + " acceptance item(s) still pending. "
+    + join(parts, " ")
+}
+
+/**
+ * True when a contract is in force and the judge returned no requirement
+ * report at all, as opposed to a report that itemized and left rows out.
+ *
+ * These two are not the same failure and must not share a repair. A judge that
+ * itemized and omitted a row has assessed the ledger and found a gap, which is
+ * the actor's to close. A judge that returned no report has assessed nothing,
+ * so charging the actor produces feedback it cannot act on and that cannot
+ * change on the next turn.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_report_omitted(contract, result?.requirement_report)
+ */
+pub fn completion_requirement_report_omitted(
+  contract: CompletionRequirementContract?,
+  raw_rows: unknown,
+) -> bool {
+  if contract == nil || len(contract.requirements) == 0 {
+    return false
+  }
+  return type_of(raw_rows) != "list"
+}
+
+/**
+ * Feedback for a completion the judge never assessed. It names the judge as the
+ * party that did not answer and lists the items left unassessed, so the record
+ * does not read as work the actor failed to do.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_unassessed_feedback(report)
+ */
+pub fn completion_requirement_unassessed_feedback(report: CompletionRequirementReport) -> string {
+  let parts: list<string> = []
+  for row in report.rows {
+    if row.met {
+      continue
+    }
+    parts = parts + [completion_requirement_row_phrase(row)]
+  }
+  return "Completion rejected: the completion judge returned no assessment for "
+    + to_string(report.pending_count)
+    + " of "
+    + to_string(report.required_count)
+    + " acceptance item(s), so they could not be verified. Unassessed: "
     + join(parts, " ")
 }
