@@ -147,11 +147,15 @@ pipeline test_completion_judge_projects_bounded_structural_evidence(
   assert_eq(projected.packet.schema, "harn.completion_judge_evidence.v2")
   assert_eq(projected.packet.raw_transcript_digest, "sha256:" + sha256(json_stringify(messages)))
   assert_eq(projected.packet.raw_message_count, 8)
-  assert_eq(projected.packet.omitted_read_only_call_count, 1)
+  // The read is represented, so it is not omitted; only its bounded digest
+  // enters the packet, never the 25k-character body.
+  assert_eq(projected.packet.omitted_read_only_call_count, 0)
+  assert_eq(projected.packet.research_summary.included_count, 1)
   assert_eq(projected.packet.relevant_action_count, 3)
   assert_eq(len(projected.packet.actions), 3)
   assert(contains(projected.packet.actions.map({ action -> action.name }).to_list(), "edit"))
-  assert(!contains(projected.serialized, "READ_ONLY_TRANSCRIPT_BULK"))
+  assert(!contains(projected.serialized, huge_read))
+  assert(len(projected.packet.research_summary.reads[0].result_digest) < 300)
   assert(contains(projected.serialized, "EDIT_HEAD"))
   assert(contains(projected.serialized, "assert not hasattr"))
   assert(contains(projected.serialized, "VERIFY_FAILURE_HEAD"))
@@ -415,7 +419,8 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(
         .to_list()
       assert_eq(len(projection), 1)
       assert_eq(projection[0].checkpoint.included_action_count, 1)
-      assert_eq(projection[0].checkpoint.omitted_read_only_call_count, 1)
+      assert_eq(projection[0].checkpoint.included_read_only_call_count, 1)
+      assert_eq(projection[0].checkpoint.omitted_read_only_call_count, 0)
     },
   )
 }
@@ -798,4 +803,125 @@ pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, t
       assert(!receipts[0].invoked.turn_end_condition)
     },
   )
+}
+
+// The read-only tool registry used by the research-summary fixtures below.
+// `delete` is a canonical workspace mutation; the rest are pure reads.
+fn __research_tools() -> list {
+  return [
+    {name: "grep", annotations: {kind: "read", side_effect_level: "read_only"}},
+    {name: "read_file", annotations: {kind: "read", side_effect_level: "read_only"}},
+    {name: "delete", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+  ]
+}
+
+fn __read_turn(ordinal: int, name: string, target: string, result: string) -> list {
+  const call_id = "read-" + to_string(ordinal)
+  return [
+    __assistant_facts(
+      "Look at " + target + ".",
+      [{id: call_id, function: {name: name, arguments: {path: target}}}],
+    ),
+    __result_facts(name, call_id, result, "ok"),
+  ]
+}
+
+/*
+ * harn#7797. A turn that proves no work is warranted produces read-only
+ * evidence and nothing else. Before the research summary the packet kept the
+ * single mutation and dropped every read, so the judge saw a bare `delete` and
+ * read a compliant stop as an unexplained gap.
+ */
+pipeline test_completion_evidence_carries_read_only_research(harness: Harness, task: unknown) {
+  let messages = []
+  messages = messages
+    + __read_turn(1, "grep", "src/service.rs", "grep: no matches for `delete_experiment`")
+  messages = messages + __read_turn(2, "read_file", "src/service.rs", "pub struct Service {}")
+  messages = messages + __read_turn(3, "grep", "tests/", "grep: no matches")
+  messages = messages + __read_turn(4, "read_file", "Cargo.toml", "[package]\nname = \"svc\"")
+  messages = messages + __read_turn(5, "grep", "docs/", "grep: no matches")
+  messages = messages
+    + [
+      __assistant_facts(
+        "No typed code exists; revert the speculative change.",
+        [{id: "delete-1", function: {name: "delete", arguments: {path: "src/new.rs"}}}],
+      ),
+      __result_facts("delete", "delete-1", "removed", "ok", {mutation_status: "applied"}),
+    ]
+  const projected = __judge_evidence_projection(messages, {tools: __research_tools()})
+  const summary = projected.packet.research_summary
+  assert_eq(summary.schema, "harn.completion_judge_research_summary.v1")
+  assert_eq(summary.read_only_call_count, 5)
+  assert_eq(summary.included_count, 5)
+  assert_eq(summary.omitted_count, 0)
+  assert_eq(len(summary.reads), 5)
+  assert_eq(projected.stats.included_read_only_call_count, 5)
+  assert_eq(projected.stats.omitted_read_only_call_count, 0)
+  const names = summary.reads.map({ read -> read.name }).to_list()
+  assert(contains(names, "grep"))
+  assert(contains(names, "read_file"))
+  const first = summary.reads[0]
+  assert(contains(first.target, "src/service.rs"))
+  assert(contains(first.result_digest, "no matches"))
+  assert(!first.has_error_result)
+  // The research must reach the judge's own view, not only telemetry.
+  assert(contains(projected.serialized, "delete_experiment"))
+  assert(contains(projected.serialized, "Cargo.toml"))
+  // Negative direction: the mutation is still the retained action.
+  assert_eq(len(projected.packet.actions), 1)
+  assert_eq(projected.packet.actions[0].name, "delete")
+}
+
+/*
+ * The budget degrades to counts, never to silence. Nine reads exceed the
+ * record budget; the recent ones keep records and the rest stay visible as a
+ * non-zero omitted count.
+ */
+pipeline test_completion_evidence_research_budget_degrades_to_counts(
+  harness: Harness,
+  task: unknown,
+) {
+  let messages = []
+  for index in range(1, 10) {
+    messages = messages
+      + __read_turn(index, "grep", "file-" + to_string(index) + ".rs", "no matches")
+  }
+  const projected = __judge_evidence_projection(messages, {tools: __research_tools()})
+  const summary = projected.packet.research_summary
+  assert_eq(summary.read_only_call_count, 9)
+  assert_eq(summary.included_count, 6)
+  assert_eq(summary.omitted_count, 3)
+  assert_eq(len(summary.reads), 6)
+  // The retained window is the most recent reads, not the oldest.
+  assert(contains(summary.reads[0].target, "file-4.rs"))
+  assert(contains(summary.reads[5].target, "file-9.rs"))
+  assert_eq(projected.stats.included_read_only_call_count, 6)
+  assert_eq(projected.stats.omitted_read_only_call_count, 3)
+}
+
+/*
+ * Negative control. A turn with only mutations gains no research records and
+ * keeps its action selection unchanged.
+ */
+pipeline test_completion_evidence_mutation_only_turn_has_empty_research(
+  harness: Harness,
+  task: unknown,
+) {
+  const messages = [
+    __assistant_facts(
+      "Apply the change.",
+      [{id: "edit-1", function: {name: "delete", arguments: {path: "src/old.rs"}}}],
+    ),
+    __result_facts("delete", "edit-1", "removed", "ok", {mutation_status: "applied"}),
+  ]
+  const projected = __judge_evidence_projection(messages, {tools: __research_tools()})
+  const summary = projected.packet.research_summary
+  assert_eq(summary.read_only_call_count, 0)
+  assert_eq(summary.included_count, 0)
+  assert_eq(summary.omitted_count, 0)
+  assert_eq(len(summary.reads), 0)
+  assert_eq(projected.stats.included_read_only_call_count, 0)
+  assert_eq(projected.stats.omitted_read_only_call_count, 0)
+  assert_eq(len(projected.packet.actions), 1)
+  assert_eq(projected.packet.actions[0].name, "delete")
 }

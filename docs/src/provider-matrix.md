@@ -14,6 +14,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|
 | `anthropic` | `claude-mythos-preview*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `anthropic/claude-mythos-preview*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `anthropic` | `claude-fable-5-1*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-fable-*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-mythos-*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-fable-*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `xml` | `native_json` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
@@ -145,6 +146,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `mlx` | `*qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `mock` | `mock-minimal*` | `any` | no | `none` | no | no | no | no | yes | no | no | `markdown` | `none` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `mock` | `mock \| mock-*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `moonshot` | `*kimi-k3*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `moonshot` | `*kimi-k2.7-code*` | `any` | `enabled` | `none` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `moonshot` | `*kimi*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -300,6 +303,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-3-5-sonnet-20241022` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-3-opus-20240229` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-fable-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-fable-5-1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-haiku-4-5-20251001` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-opus-4-1-20250805` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-opus-4-20250514` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

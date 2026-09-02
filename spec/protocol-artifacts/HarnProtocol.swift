@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static let artifactVersion = "0.10.126-dev"
+    public static let artifactVersion = "0.10.127"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let toolPermissionDecisionSchema = "harn.tool_permission_decision.v1"
     public static let toolPermissionActivitySchema = "harn.tool_permission_activity.v1"
@@ -1662,6 +1662,98 @@ public enum HarnAgentTerminalOwner: String, Codable, Sendable, CaseIterable {
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnLlmErrorCategory: String, Codable, Sendable, CaseIterable {
+    case timeout = "timeout"
+    case auth = "auth"
+    case invalidRequest = "invalid_request"
+    case rateLimit = "rate_limit"
+    case overloaded = "overloaded"
+    case serverError = "server_error"
+    case transientNetwork = "transient_network"
+    case resourceBusy = "resource_busy"
+    case schemaIncompatible = "schema_incompatible"
+    case schemaValidation = "schema_validation"
+    case schemaStreamAborted = "schema_stream_aborted"
+    case toolError = "tool_error"
+    case toolRejected = "tool_rejected"
+    case egressBlocked = "egress_blocked"
+    case cancelled = "cancelled"
+    case channelClosed = "channel_closed"
+    case notFound = "not_found"
+    case circuitOpen = "circuit_open"
+    case budgetExceeded = "budget_exceeded"
+    case `internal` = "internal"
+    case environment = "environment"
+    case generic = "generic"
+
+    public static let allCases: [Self] = [
+        "timeout",
+        "auth",
+        "invalid_request",
+        "rate_limit",
+        "overloaded",
+        "server_error",
+        "transient_network",
+        "resource_busy",
+        "schema_incompatible",
+        "schema_validation",
+        "schema_stream_aborted",
+        "tool_error",
+        "tool_rejected",
+        "egress_blocked",
+        "cancelled",
+        "channel_closed",
+        "not_found",
+        "circuit_open",
+        "budget_exceeded",
+        "internal",
+        "environment",
+        "generic",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnLlmErrorKind: String, Codable, Sendable, CaseIterable {
+    case transient = "transient"
+    case terminal = "terminal"
+
+    public static let allCases: [Self] = [
+        "transient",
+        "terminal",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnLlmErrorReason: String, Codable, Sendable, CaseIterable {
+    case rateLimit = "rate_limit"
+    case serverError = "server_error"
+    case networkError = "network_error"
+    case timeout = "timeout"
+    case authFailure = "auth_failure"
+    case contextOverflow = "context_overflow"
+    case contentPolicy = "content_policy"
+    case invalidRequest = "invalid_request"
+    case invalidResponse = "invalid_response"
+    case modelUnavailable = "model_unavailable"
+    case emptyGeneration = "empty_generation"
+    case outputBudgetExhausted = "output_budget_exhausted"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "rate_limit",
+        "server_error",
+        "network_error",
+        "timeout",
+        "auth_failure",
+        "context_overflow",
+        "content_policy",
+        "invalid_request",
+        "invalid_response",
+        "model_unavailable",
+        "empty_generation",
+        "output_budget_exhausted",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
     case harnAcpPromptErrorV1 = "harn.acp.prompt_error.v1"
 
@@ -1673,9 +1765,16 @@ public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
 public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
+    /// Wire string for `HarnLlmErrorCategory`. Decode with
+    /// `HarnLlmErrorCategory(rawValue:)`; `nil` means the producing Harn used
+    /// a value this binding predates.
     public var category: String?
+    /// Wire string for `HarnLlmErrorKind` (`transient` or `terminal`).
     public var kind: String?
+    /// Wire string for `HarnLlmErrorReason`.
     public var reason: String?
+    /// PROVIDER PASSTHROUGH. Opaque diagnostic text with no closed set and no
+    /// Harn-owned vocabulary. Never branch on it; branch on `reason`.
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?

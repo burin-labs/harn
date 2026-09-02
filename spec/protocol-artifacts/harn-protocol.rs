@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.126-dev";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.127";
 
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
@@ -2506,7 +2506,7 @@ pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_p
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
 
-/// Stable terminal classes carried by typed ACP prompt-error data.
+/// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "context_overflow",
     "provider_misconfigured",
@@ -2534,7 +2534,7 @@ pub const AGENT_TERMINAL_KIND_RUNTIME_ERROR: &str = "runtime_error";
 pub const AGENT_TERMINAL_KIND_SUSPENDED: &str = "suspended";
 pub const AGENT_TERMINAL_KIND_UNKNOWN: &str = "unknown";
 
-/// Producer-owned agent terminal outcome kinds.
+/// Producer-owned agent terminal outcome kinds. Superseded by `HarnAgentTerminalKind`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_KINDS: &[&str] = &[
     "natural",
     "user_cancelled",
@@ -2557,9 +2557,588 @@ pub const AGENT_TERMINAL_OWNER_PROVIDER: &str = "provider";
 pub const AGENT_TERMINAL_OWNER_HARNESS: &str = "harness";
 pub const AGENT_TERMINAL_OWNER_UNKNOWN: &str = "unknown";
 
-/// Owners attributed by producer-owned agent terminal outcomes.
+/// Owners attributed by producer-owned agent terminal outcomes. Superseded by `HarnAgentTerminalOwner`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_OWNERS: &[&str] =
     &["agent", "user", "policy", "provider", "harness", "unknown"];
+
+/// Stable terminal classes carried by typed ACP prompt-error data.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnAgentTerminalClass {
+    ContextOverflow,
+    ProviderMisconfigured,
+    ProviderUnavailable,
+    RateLimited,
+    Timeout,
+    ResourceBusy,
+    ToolPolicyRejected,
+    HostBridgeUnimplemented,
+    AgentLoopProtocolFailure,
+    ParseDropped,
+    GenericThrow,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnAgentTerminalClass {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::ContextOverflow,
+        Self::ProviderMisconfigured,
+        Self::ProviderUnavailable,
+        Self::RateLimited,
+        Self::Timeout,
+        Self::ResourceBusy,
+        Self::ToolPolicyRejected,
+        Self::HostBridgeUnimplemented,
+        Self::AgentLoopProtocolFailure,
+        Self::ParseDropped,
+        Self::GenericThrow,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ContextOverflow => "context_overflow",
+            Self::ProviderMisconfigured => "provider_misconfigured",
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::RateLimited => "rate_limited",
+            Self::Timeout => "timeout",
+            Self::ResourceBusy => "resource_busy",
+            Self::ToolPolicyRejected => "tool_policy_rejected",
+            Self::HostBridgeUnimplemented => "host_bridge_unimplemented",
+            Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
+            Self::ParseDropped => "parse_dropped",
+            Self::GenericThrow => "generic_throw",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "context_overflow" => Self::ContextOverflow,
+            "provider_misconfigured" => Self::ProviderMisconfigured,
+            "provider_unavailable" => Self::ProviderUnavailable,
+            "rate_limited" => Self::RateLimited,
+            "timeout" => Self::Timeout,
+            "resource_busy" => Self::ResourceBusy,
+            "tool_policy_rejected" => Self::ToolPolicyRejected,
+            "host_bridge_unimplemented" => Self::HostBridgeUnimplemented,
+            "agent_loop_protocol_failure" => Self::AgentLoopProtocolFailure,
+            "parse_dropped" => Self::ParseDropped,
+            "generic_throw" => Self::GenericThrow,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnAgentTerminalClass {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnAgentTerminalClass> for String {
+    fn from(value: HarnAgentTerminalClass) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnAgentTerminalClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Producer-owned agent terminal outcome kinds.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnAgentTerminalKind {
+    Natural,
+    UserCancelled,
+    PolicyBudget,
+    CompletionUnverified,
+    PolicyNoProgress,
+    PolicyThrash,
+    PolicyGuardrail,
+    PolicyStop,
+    ProviderError,
+    RuntimeError,
+    Suspended,
+    Unknown,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnAgentTerminalKind {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::Natural,
+        Self::UserCancelled,
+        Self::PolicyBudget,
+        Self::CompletionUnverified,
+        Self::PolicyNoProgress,
+        Self::PolicyThrash,
+        Self::PolicyGuardrail,
+        Self::PolicyStop,
+        Self::ProviderError,
+        Self::RuntimeError,
+        Self::Suspended,
+        Self::Unknown,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Natural => "natural",
+            Self::UserCancelled => "user_cancelled",
+            Self::PolicyBudget => "policy_budget",
+            Self::CompletionUnverified => "completion_unverified",
+            Self::PolicyNoProgress => "policy_no_progress",
+            Self::PolicyThrash => "policy_thrash",
+            Self::PolicyGuardrail => "policy_guardrail",
+            Self::PolicyStop => "policy_stop",
+            Self::ProviderError => "provider_error",
+            Self::RuntimeError => "runtime_error",
+            Self::Suspended => "suspended",
+            Self::Unknown => "unknown",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "natural" => Self::Natural,
+            "user_cancelled" => Self::UserCancelled,
+            "policy_budget" => Self::PolicyBudget,
+            "completion_unverified" => Self::CompletionUnverified,
+            "policy_no_progress" => Self::PolicyNoProgress,
+            "policy_thrash" => Self::PolicyThrash,
+            "policy_guardrail" => Self::PolicyGuardrail,
+            "policy_stop" => Self::PolicyStop,
+            "provider_error" => Self::ProviderError,
+            "runtime_error" => Self::RuntimeError,
+            "suspended" => Self::Suspended,
+            "unknown" => Self::Unknown,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnAgentTerminalKind {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnAgentTerminalKind> for String {
+    fn from(value: HarnAgentTerminalKind) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnAgentTerminalKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Owners attributed by producer-owned agent terminal outcomes.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnAgentTerminalOwner {
+    Agent,
+    User,
+    Policy,
+    Provider,
+    Harness,
+    Unknown,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnAgentTerminalOwner {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::Agent,
+        Self::User,
+        Self::Policy,
+        Self::Provider,
+        Self::Harness,
+        Self::Unknown,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Agent => "agent",
+            Self::User => "user",
+            Self::Policy => "policy",
+            Self::Provider => "provider",
+            Self::Harness => "harness",
+            Self::Unknown => "unknown",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "agent" => Self::Agent,
+            "user" => Self::User,
+            "policy" => Self::Policy,
+            "provider" => Self::Provider,
+            "harness" => Self::Harness,
+            "unknown" => Self::Unknown,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnAgentTerminalOwner {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnAgentTerminalOwner> for String {
+    fn from(value: HarnAgentTerminalOwner) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnAgentTerminalOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Thrown-error categories carried in `category` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `ErrorCategory`.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnLlmErrorCategory {
+    Timeout,
+    Auth,
+    InvalidRequest,
+    RateLimit,
+    Overloaded,
+    ServerError,
+    TransientNetwork,
+    ResourceBusy,
+    SchemaIncompatible,
+    SchemaValidation,
+    SchemaStreamAborted,
+    ToolError,
+    ToolRejected,
+    EgressBlocked,
+    Cancelled,
+    ChannelClosed,
+    NotFound,
+    CircuitOpen,
+    BudgetExceeded,
+    Internal,
+    Environment,
+    Generic,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnLlmErrorCategory {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::Timeout,
+        Self::Auth,
+        Self::InvalidRequest,
+        Self::RateLimit,
+        Self::Overloaded,
+        Self::ServerError,
+        Self::TransientNetwork,
+        Self::ResourceBusy,
+        Self::SchemaIncompatible,
+        Self::SchemaValidation,
+        Self::SchemaStreamAborted,
+        Self::ToolError,
+        Self::ToolRejected,
+        Self::EgressBlocked,
+        Self::Cancelled,
+        Self::ChannelClosed,
+        Self::NotFound,
+        Self::CircuitOpen,
+        Self::BudgetExceeded,
+        Self::Internal,
+        Self::Environment,
+        Self::Generic,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Auth => "auth",
+            Self::InvalidRequest => "invalid_request",
+            Self::RateLimit => "rate_limit",
+            Self::Overloaded => "overloaded",
+            Self::ServerError => "server_error",
+            Self::TransientNetwork => "transient_network",
+            Self::ResourceBusy => "resource_busy",
+            Self::SchemaIncompatible => "schema_incompatible",
+            Self::SchemaValidation => "schema_validation",
+            Self::SchemaStreamAborted => "schema_stream_aborted",
+            Self::ToolError => "tool_error",
+            Self::ToolRejected => "tool_rejected",
+            Self::EgressBlocked => "egress_blocked",
+            Self::Cancelled => "cancelled",
+            Self::ChannelClosed => "channel_closed",
+            Self::NotFound => "not_found",
+            Self::CircuitOpen => "circuit_open",
+            Self::BudgetExceeded => "budget_exceeded",
+            Self::Internal => "internal",
+            Self::Environment => "environment",
+            Self::Generic => "generic",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "timeout" => Self::Timeout,
+            "auth" => Self::Auth,
+            "invalid_request" => Self::InvalidRequest,
+            "rate_limit" => Self::RateLimit,
+            "overloaded" => Self::Overloaded,
+            "server_error" => Self::ServerError,
+            "transient_network" => Self::TransientNetwork,
+            "resource_busy" => Self::ResourceBusy,
+            "schema_incompatible" => Self::SchemaIncompatible,
+            "schema_validation" => Self::SchemaValidation,
+            "schema_stream_aborted" => Self::SchemaStreamAborted,
+            "tool_error" => Self::ToolError,
+            "tool_rejected" => Self::ToolRejected,
+            "egress_blocked" => Self::EgressBlocked,
+            "cancelled" => Self::Cancelled,
+            "channel_closed" => Self::ChannelClosed,
+            "not_found" => Self::NotFound,
+            "circuit_open" => Self::CircuitOpen,
+            "budget_exceeded" => Self::BudgetExceeded,
+            "internal" => Self::Internal,
+            "environment" => Self::Environment,
+            "generic" => Self::Generic,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnLlmErrorCategory {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnLlmErrorCategory> for String {
+    fn from(value: HarnLlmErrorCategory) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnLlmErrorCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Coarse retry semantics carried in `kind` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorKind`. `transient` means a byte-identical replay may succeed; `terminal` means it cannot.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnLlmErrorKind {
+    Transient,
+    Terminal,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnLlmErrorKind {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Transient, Self::Terminal];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Transient => "transient",
+            Self::Terminal => "terminal",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "transient" => Self::Transient,
+            "terminal" => Self::Terminal,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnLlmErrorKind {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnLlmErrorKind> for String {
+    fn from(value: HarnLlmErrorKind) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnLlmErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Canonical provider-failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is opaque diagnostic text, and a host must never branch on it. Branch on `reason` instead.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnLlmErrorReason {
+    RateLimit,
+    ServerError,
+    NetworkError,
+    Timeout,
+    AuthFailure,
+    ContextOverflow,
+    ContentPolicy,
+    InvalidRequest,
+    InvalidResponse,
+    ModelUnavailable,
+    EmptyGeneration,
+    OutputBudgetExhausted,
+    Unknown,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnLlmErrorReason {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::RateLimit,
+        Self::ServerError,
+        Self::NetworkError,
+        Self::Timeout,
+        Self::AuthFailure,
+        Self::ContextOverflow,
+        Self::ContentPolicy,
+        Self::InvalidRequest,
+        Self::InvalidResponse,
+        Self::ModelUnavailable,
+        Self::EmptyGeneration,
+        Self::OutputBudgetExhausted,
+        Self::Unknown,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::RateLimit => "rate_limit",
+            Self::ServerError => "server_error",
+            Self::NetworkError => "network_error",
+            Self::Timeout => "timeout",
+            Self::AuthFailure => "auth_failure",
+            Self::ContextOverflow => "context_overflow",
+            Self::ContentPolicy => "content_policy",
+            Self::InvalidRequest => "invalid_request",
+            Self::InvalidResponse => "invalid_response",
+            Self::ModelUnavailable => "model_unavailable",
+            Self::EmptyGeneration => "empty_generation",
+            Self::OutputBudgetExhausted => "output_budget_exhausted",
+            Self::Unknown => "unknown",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "rate_limit" => Self::RateLimit,
+            "server_error" => Self::ServerError,
+            "network_error" => Self::NetworkError,
+            "timeout" => Self::Timeout,
+            "auth_failure" => Self::AuthFailure,
+            "context_overflow" => Self::ContextOverflow,
+            "content_policy" => Self::ContentPolicy,
+            "invalid_request" => Self::InvalidRequest,
+            "invalid_response" => Self::InvalidResponse,
+            "model_unavailable" => Self::ModelUnavailable,
+            "empty_generation" => Self::EmptyGeneration,
+            "output_budget_exhausted" => Self::OutputBudgetExhausted,
+            "unknown" => Self::Unknown,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnLlmErrorReason {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnLlmErrorReason> for String {
+    fn from(value: HarnLlmErrorReason) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnLlmErrorReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_TERMINAL: &str = "terminal";
 

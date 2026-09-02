@@ -117,6 +117,21 @@ pub(super) fn generate_typescript_for_version(
         &agent_terminal_owner_values(),
         "AgentTerminalOwner",
     ));
+    out.push_str(&ts_array_owned(
+        "LLM_ERROR_CATEGORIES",
+        &llm_error_category_values(),
+        "LlmErrorCategory",
+    ));
+    out.push_str(&ts_array_owned(
+        "LLM_ERROR_KINDS",
+        &llm_error_kind_values(),
+        "LlmErrorKind",
+    ));
+    out.push_str(&ts_array_owned(
+        "LLM_ERROR_REASONS",
+        &llm_error_reason_values(),
+        "LlmErrorReason",
+    ));
     out.push_str(&ts_array(
         "HARN_PROMPT_RESULT_EXTENSION_FIELDS",
         HARN_PROMPT_RESULT_EXTENSION_FIELDS,
