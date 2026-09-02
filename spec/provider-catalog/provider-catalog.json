@@ -15533,6 +15533,38 @@
             "interactive_chat"
           ]
         }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top."
+        }
       ]
     },
     {
@@ -15721,6 +15753,38 @@
             "interactive_chat"
           ]
         }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top."
+        }
       ]
     },
     {
@@ -15906,6 +15970,38 @@
           "unsuitable_workloads": [
             "interactive_chat"
           ]
+        }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top."
         }
       ]
     },

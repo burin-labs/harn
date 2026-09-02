@@ -513,6 +513,14 @@ pub(crate) struct LlmCallOptions {
     /// validated against the catalog at option extraction time.
     pub fast: bool,
 
+    // --- Reasoning mode ---
+    /// Opt into a non-default reasoning execution mode declared in the
+    /// catalog (`reasoning_modes`), such as OpenAI's `reasoning.mode = "pro"`.
+    /// `None` and `Some("standard")` both mean the provider default. Distinct
+    /// from `thinking`/effort, which tunes work WITHIN a mode. Validated
+    /// against the catalog at option extraction time.
+    pub reasoning_mode: Option<String>,
+
     // --- Structured output ---
     pub output_format: OutputFormat,
     pub output_schema: Option<serde_json::Value>,
@@ -662,6 +670,7 @@ impl Default for LlmCallOptions {
             portable_option_intent: std::collections::BTreeSet::new(),
             provider_contract_probe: None,
             fast: false,
+            reasoning_mode: None,
             output_format: OutputFormat::default(),
             output_schema: None,
             output_validation: None,
@@ -864,6 +873,10 @@ pub(crate) struct LlmRequestPayload {
     /// they can inject the catalog's fast-mode knob, and to cost recording
     /// so confirmed-fast responses bill at the premium tier.
     pub fast: bool,
+    /// See [`LlmCallOptions::reasoning_mode`]. Forwarded to provider body
+    /// builders so they can inject the catalog's reasoning-mode knob.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_mode: Option<String>,
     pub output_format: OutputFormat,
     /// Provider-compatible output schema used for both the request and
     /// streaming validation. It retains the caller-selected contract after
@@ -1033,6 +1046,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             parallel_tool_calls: opts.parallel_tool_calls,
             provider_contract_probe: opts.provider_contract_probe,
             fast: opts.fast,
+            reasoning_mode: opts.reasoning_mode.clone(),
             output_format,
             output_schema,
             schema_stream_abort: opts.schema_stream_abort,

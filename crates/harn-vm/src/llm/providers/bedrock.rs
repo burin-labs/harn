@@ -1270,6 +1270,7 @@ aws_secret_access_key = dev-secret
             parallel_tool_calls: None,
             provider_contract_probe: None,
             fast: false,
+            reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::Text,
             output_schema: None,
             schema_stream_abort: false,
