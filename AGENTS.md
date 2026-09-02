@@ -195,6 +195,18 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Use `no-changelog-needed` only after the soft gate fires on a change with no
   user-visible impact.
 
+## Pull requests
+
+- Title pull requests `[Area] Sentence case description`, using one tag from
+  the table in [CONTRIBUTING.md](CONTRIBUTING.md#title-format). Release pull
+  requests stay exactly `Release vX.Y.Z`; `publish-release.yml` matches that
+  subject. Bot titles are left alone.
+- Keep the description to roughly five sentences: what changed in behavior
+  terms, why, the one risk or blind spot, and how you verified the claim at the
+  level of the claim. Do not restate the Files or Checks tabs.
+- Name the sub-asks a pull request closes with `Closes #N items: 1, 3`, or
+  `Single-ask: #N` when the issue is not enumerated.
+
 ## Release
 
 - Run live releases only through the `hosted-release.yml` workflow on
