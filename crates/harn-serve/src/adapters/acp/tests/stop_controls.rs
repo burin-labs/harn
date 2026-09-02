@@ -634,3 +634,265 @@ fn agent_session_guard_binds_the_id_backgrounded_handles_are_keyed_by() {
         "handles keyed by current_agent_session_id must be addressable by the ACP session id"
     );
 }
+
+/// Every `control_outcome` notification seen so far, oldest first.
+fn control_outcomes(seen: &[serde_json::Value]) -> Vec<&serde_json::Value> {
+    seen.iter()
+        .filter(|message| {
+            message["method"] == super::super::schema::HARN_AGENT_EVENT_METHOD
+                && message["params"]["kind"] == "control_outcome"
+        })
+        .map(|message| &message["params"])
+        .collect()
+}
+
+fn outcomes_with_action<'a>(
+    seen: &'a [serde_json::Value],
+    action: &str,
+) -> Vec<&'a serde_json::Value> {
+    control_outcomes(seen)
+        .into_iter()
+        .filter(|params| params["metadata"]["action"] == action)
+        .collect()
+}
+
+/// harn#7851. A steer accepted at settled tool calls and a stop accepted
+/// after it must each become a typed control record, and the record must
+/// say it reached the session's event stream.
+///
+/// The two assertions that carry the claim are the exact counts: exactly
+/// one steer row and exactly one stop row. A reader that classified every
+/// accepted control as a stop, or that emitted a row per loop iteration,
+/// fails on the count rather than passing the existence check.
+#[tokio::test(flavor = "current_thread")]
+async fn accepted_steer_and_stop_are_recorded_as_typed_control_events() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let tick_path = dir.path().join("ticks.txt");
+            std::fs::write(&tick_path, "").expect("seed tick file");
+            let pipeline_path = dir.path().join("control-events.harn");
+            let tick_path_literal = harn_string_literal(&tick_path.to_string_lossy());
+
+            let mut mocks = String::new();
+            for index in 0..MAX_ITERATIONS {
+                mocks.push_str(&format!(
+                    "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
+                     [{{id: \"c{index}\", name: \"tick\", arguments: {{n: {index}}}}}]}})\n"
+                ));
+            }
+
+            let source = format!(
+                r#"import {{ agent_loop }} from "std/agent/loop"
+
+fn tick_tools(harness: Harness) {{
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "tick",
+    "Record one tick and wait",
+    {{
+      handler: {{ args ->
+        harness.fs.append({tick_path_literal}, "tick\n")
+        harness.clock.sleep_ms({TICK_SLEEP_MS})
+        "ticked"
+      }},
+      parameters: {{n: {{type: "number", description: "Tick index"}}}},
+      returns: {{type: "string"}},
+      annotations: {{kind: "read"}},
+    }},
+  )
+  return tools
+}}
+
+pipeline default(harness: Harness, task: unknown) {{
+  harness.llm.mock_clear()
+{mocks}
+  const result = agent_loop(harness, "tick until told to stop", nil, {{
+    provider: "mock",
+    tools: tick_tools(harness),
+    tool_format: "native",
+    loop_until_done: true,
+    max_iterations: {MAX_ITERATIONS},
+    done_judge: nil,
+  }})
+  harness.fs.append({tick_path_literal}, "STATUS:" + to_string(result.status) + "\n")
+}}
+"#,
+            );
+            std::fs::write(&pipeline_path, source).expect("write control-events pipeline");
+
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_code_session_with_config(
+                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+                    serde_json::json!(dir.path()),
+                )
+                .await;
+
+            let mut seen: Vec<serde_json::Value> = Vec::new();
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "prompt": [{"type": "text", "text": "tick"}],
+                    },
+                }))
+                .expect("send session/prompt");
+
+            // Let the loop settle on real tool calls before steering, so the
+            // steer lands mid-turn rather than before the turn began.
+            let mut ticks_at_steer = 0usize;
+            for _ in 0..400 {
+                ticks_at_steer = count_ticks(&tick_path);
+                if ticks_at_steer >= 2 {
+                    break;
+                }
+                while let Ok(line) = response_rx.try_recv() {
+                    let message: serde_json::Value =
+                        serde_json::from_str(&line).expect("ACP JSON line");
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                    }
+                    seen.push(message);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert!(
+                ticks_at_steer >= 2,
+                "agent loop never reached 2 ticks; saw {ticks_at_steer}"
+            );
+            assert!(
+                control_outcomes(&seen).is_empty(),
+                "no control had been sent yet, so no control outcome may exist"
+            );
+
+            const STEER_TEXT: &str = "if no typed code exists, say so and stop";
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "session/inject",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "mode": "steer",
+                        "content": STEER_TEXT,
+                    },
+                }))
+                .expect("send session/inject steer");
+
+            // Wait for the inject's own JSON-RPC reply, not for the loop to
+            // do anything: acceptance is what this test measures.
+            let mut inject_accepted = false;
+            for _ in 0..200 {
+                while let Ok(line) = response_rx.try_recv() {
+                    let message: serde_json::Value =
+                        serde_json::from_str(&line).expect("ACP JSON line");
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                    }
+                    if message["id"] == 4 {
+                        inject_accepted = true;
+                    }
+                    seen.push(message);
+                }
+                if inject_accepted {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert!(inject_accepted, "session/inject never answered");
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "session/cancel",
+                    "params": {"sessionId": session_id.clone()},
+                }))
+                .expect("send session/cancel notification");
+
+            // Drain until the prompt reports back, or until the run has
+            // already reported back while we were steering.
+            let mut prompt_settled = seen.iter().any(|message| message["id"] == 3);
+            for _ in 0..400 {
+                if prompt_settled {
+                    break;
+                }
+                while let Ok(line) = response_rx.try_recv() {
+                    let message: serde_json::Value =
+                        serde_json::from_str(&line).expect("ACP JSON line");
+                    if message["method"] == "host/capabilities" {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                    }
+                    if message["id"] == 3 {
+                        prompt_settled = true;
+                    }
+                    seen.push(message);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert!(prompt_settled, "prompt never reported a result");
+
+            drop(request_tx);
+            let _ = server.await;
+
+            let steers = outcomes_with_action(&seen, "steer");
+            assert_eq!(
+                steers.len(),
+                1,
+                "expected exactly one accepted steer control event; saw {:#?}",
+                control_outcomes(&seen)
+            );
+            let steer = steers[0];
+            assert_eq!(
+                steer["metadata"]["requestedMode"], "steer",
+                "the caller's own mode word must survive: {steer}"
+            );
+            assert_eq!(
+                steer["metadata"]["deliveryMode"], "finish_step",
+                "the canonical delivery mode must be recorded beside it: {steer}"
+            );
+            assert_eq!(
+                steer["metadata"]["recorded"], "recorded",
+                "an accepted steer that never reached the session event stream is \
+                 indistinguishable from no steer at all: {steer}"
+            );
+            assert_eq!(steer["status"], "accepted");
+
+            let stops = outcomes_with_action(&seen, "stop");
+            assert_eq!(
+                stops.len(),
+                1,
+                "expected exactly one accepted stop control event; saw {:#?}",
+                control_outcomes(&seen)
+            );
+            assert_eq!(
+                stops[0]["metadata"]["recorded"], "recorded",
+                "an accepted stop must reach the session event stream: {}",
+                stops[0]
+            );
+            assert_eq!(stops[0]["status"], "cancelled");
+        })
+        .await;
+}

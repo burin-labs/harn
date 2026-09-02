@@ -9,6 +9,9 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default(harness: Harness) {
   const pre_seen = harness.runtime.atomic(0)
   const post_seen = harness.runtime.atomic(0)
+  const post_receipt_json = harness.runtime.shared_cell(
+    {scope: "task_group", key: "post-compact-receipt", initial: ""},
+  )
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "pre_compact",
@@ -19,7 +22,7 @@ pipeline default(harness: Harness) {
       if harness.runtime.atomic_get(pre_seen) == 1 {
         return {block: true, reason: "first compact intentionally vetoed"}
       }
-      return nil
+      return {modify: {strategy: "truncate"}}
     },
   )
   // First call: block. Second call: allow.
@@ -28,6 +31,9 @@ pipeline default(harness: Harness) {
     { _hook_harness, event ->
       if (event?.archived_messages ?? 0) > 0 {
         harness.runtime.atomic_add(post_seen, 1)
+      }
+      if type_of(event?.receipt?.receipt_id) == "string" {
+        harness.runtime.shared_set(post_receipt_json, json_stringify(event.receipt))
       }
       return nil
     },
@@ -54,6 +60,13 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.status)
       harness.stdio.println(harness.runtime.atomic_get(pre_seen))
       harness.stdio.println(harness.runtime.atomic_get(post_seen))
+      const compactions = transcript_events_by_kind(result.transcript, "compaction")
+      const receipt = compactions[0].metadata.receipt
+      harness.stdio.println(receipt.requested_strategy == "observation_mask")
+      harness.stdio.println(receipt.engine_strategy == "truncate")
+      harness.stdio.println(
+        json_stringify(receipt) == harness.runtime.shared_get(post_receipt_json),
+      )
       harness.agent.clear_session_hooks()
     },
   )

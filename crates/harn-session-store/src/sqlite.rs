@@ -491,26 +491,18 @@ fn kind_to_sql(kind: &SessionEventKind) -> (String, Option<String>) {
 }
 
 fn kind_from_sql(kind: &str, custom_kind: Option<String>) -> StoreResult<SessionEventKind> {
-    Ok(match kind {
-        "message" => SessionEventKind::Message,
-        "tool_call" => SessionEventKind::ToolCall,
-        "tool_result" => SessionEventKind::ToolResult,
-        "plan" => SessionEventKind::Plan,
-        "compaction" => SessionEventKind::Compaction,
-        "system_reminder" => SessionEventKind::SystemReminder,
-        "hypothesis" => SessionEventKind::Hypothesis,
-        "receipt" => SessionEventKind::Receipt,
-        "reminder" => SessionEventKind::Reminder,
-        "permission_decision" => SessionEventKind::PermissionDecision,
-        "custom" => SessionEventKind::Custom {
+    // `custom` is the one discriminator this backend owns, because it
+    // needs the separately stored custom type to reconstruct. Every
+    // named variant decodes through `SessionEventKind::from_discriminator`,
+    // the inverse of the `discriminator()` used on the way in, so the two
+    // directions cannot drift apart.
+    if kind == "custom" {
+        return Ok(SessionEventKind::Custom {
             custom_type: custom_kind.unwrap_or_default(),
-        },
-        other => {
-            return Err(StoreError::Backend(format!(
-                "unknown event kind '{other}' in storage"
-            )))
-        }
-    })
+        });
+    }
+    SessionEventKind::from_discriminator(kind)
+        .ok_or_else(|| StoreError::Backend(format!("unknown event kind '{kind}' in storage")))
 }
 
 fn status_to_sql(status: SessionStatus) -> &'static str {

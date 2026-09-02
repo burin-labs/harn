@@ -2168,8 +2168,9 @@ Compaction entrypoints accept a typed host/user instruction lane through
 ```harn
 import {compact_preserving_test_failures} from "std/agent/autocompact"
 
-// Returns { messages, archived, summary
-// }. Use `archived` (the engine's true
+// Returns { messages, archived, summary, receipt
+// }. `receipt` is nil when archived is 0.
+// Use `archived` (the engine's true
 // archived-message count) to tell whether
 // compaction happened -- never infer
 // it from a length delta, since archiving one message and inserting one
@@ -2180,7 +2181,15 @@ const result = transcript_auto_compact(messages, {
   policy: compact_preserving_test_failures({author: "host"})
 })
 const compacted = result.messages
+const applied = result.receipt?.engine_strategy
 ```
+
+When compaction fires, `receipt` is the canonical engine result. It separates
+`requested_strategy` from `engine_strategy`, records
+`resolved_threshold_tokens`, `threshold_source`, and `hard_limit_tokens`, and
+carries the tri-state `source_measurement` (`nil` means unmeasured; a contained
+zero is a measured zero). Wrappers should project this receipt rather than
+reconstructing lifecycle facts from their input options.
 
 Omitting `extend_default_instructions` or setting it to `true` appends the
 instructions to Harn's default summary guidance; `false` replaces it.

@@ -542,10 +542,12 @@ impl super::super::Vm {
                             ));
                         }
                     }
-                } else if self.retry_pending_task_cleanup(&id).await? {
-                    self.stack
-                        .push(VmValue::enum_variant("Result", "Ok", vec![VmValue::Nil]));
                 } else {
+                    // Retry cleanup for its side effect. Both outcomes report
+                    // Ok(Nil): a task that is still pending afterwards is not
+                    // an error for this caller, so the boolean is deliberately
+                    // discarded rather than branched on.
+                    let _ = self.retry_pending_task_cleanup(&id).await?;
                     self.stack
                         .push(VmValue::enum_variant("Result", "Ok", vec![VmValue::Nil]));
                 }

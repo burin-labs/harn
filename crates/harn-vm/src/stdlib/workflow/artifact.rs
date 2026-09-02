@@ -61,7 +61,11 @@ pub(super) fn checkpoint_run(
 }
 
 pub(super) fn snapshot_trace_spans() -> Vec<RunTraceSpanRecord> {
-    crate::tracing::peek_spans()
+    // This fills `run.evidence.trace_spans`, the same execution-evidence field
+    // the canonical writer in `vm/execution_evidence.rs` fills through
+    // `completed_spans_for_execution`. Select on the owning execution so the two
+    // writers agree instead of this one absorbing a foreign scope's spans.
+    crate::tracing::peek_spans_for_current_execution()
         .into_iter()
         .map(|span| {
             let cost_usd = span

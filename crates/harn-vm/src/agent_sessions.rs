@@ -337,6 +337,7 @@ pub enum LiveClientMode {
     Controller,
 }
 
+mod control_events;
 pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
@@ -352,6 +353,7 @@ use text_tool_call_seq::{
     next_text_tool_call_seq_from_json_messages, next_text_tool_call_seq_from_transcript,
 };
 
+pub use control_events::{control_events, record_control_event, ControlRecordOutcome};
 pub use host_injection::*;
 pub use live_clients::*;
 pub use metadata::*;

@@ -144,6 +144,16 @@ pub const MIN_FUSE_HEADROOM_PERCENT: int = 10
 
 pub const MAX_FUSE_HEADROOM_PERCENT: int = 15
 
+/**
+ * The exact `baseline.observed_at` shape this validator accepts.
+ *
+ * One definition, exported, because the generator that writes this file lives
+ * in another repository and restates it. A refresh stamped with millisecond
+ * precision produced a file this validator refuses, so every baseline refresh
+ * pull request was born red until the two agreed.
+ */
+pub const OBSERVED_AT_PATTERN: string = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+
 fn release_build_identity_schema() -> any {
   return schema_closed_object(
     {
@@ -226,13 +236,7 @@ fn baseline_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
   if !is_full_commit_sha(baseline.source_sha) {
     errors = errors + ["${entry.target}: baseline.source_sha must be a full lowercase Git commit"]
   }
-  if len(
-    regex_captures(
-      "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
-      baseline.observed_at,
-    ),
-  )
-    == 0 {
+  if len(regex_captures(OBSERVED_AT_PATTERN, baseline.observed_at)) == 0 {
     errors = errors
       + ["${entry.target}: baseline.observed_at must be a UTC second-resolution timestamp"]
   }

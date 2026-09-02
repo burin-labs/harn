@@ -83,14 +83,15 @@ impl AcpServer {
         } else {
             "already_cancelled"
         };
-        self.emit_control_outcome(
+        // An accepted stop is a control event, not just a flag flip. The
+        // completion judge and every forensic reader need it in the
+        // session's own event stream; recovering it later by matching
+        // stop-sounding prose misclassifies task prompts that happen to
+        // contain the same phrase.
+        self.record_and_emit_control(
             &session_id,
-            "session/cancel",
-            status,
-            "accepted",
-            actor.clone(),
-            serde_json::json!({"sessionId": session_id}),
-            None,
+            harn_session_store::ControlEvent::stop("session/cancel", control_id(), status)
+                .with_actor(actor.clone()),
         );
         if !id.is_null() {
             self.send_response(
@@ -242,6 +243,14 @@ impl AcpServer {
                     return;
                 }
             };
+        // The caller's word, before `bridge_mode_for_session_inject`
+        // normalized it onto a delivery checkpoint.
+        let requested_mode = params
+            .get("mode")
+            .and_then(|value| value.as_str())
+            .unwrap_or(mode)
+            .to_string();
+        let recorded_text = content.clone();
         let message_id = inject_state
             .push_pending_user_message(content, transcript_content, mode)
             .await;
@@ -250,14 +259,23 @@ impl AcpServer {
             message_id.clone(),
             actor.clone(),
         );
-        self.emit_control_outcome(
+        // Record the caller's own mode word beside the canonical
+        // delivery mode. `steer` and `finish_step` collapse onto one
+        // checkpoint, and `queue` never reaches the model at all, so
+        // without both words a steer, an interrupt and a queued note
+        // read back out of the store as the same row.
+        self.record_and_emit_control(
             &session_id,
-            "session/inject",
-            "accepted",
-            "accepted",
-            actor.clone(),
-            serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-            None,
+            harn_session_store::ControlEvent::injection(
+                "session/inject",
+                control_id(),
+                "accepted",
+                requested_mode,
+                mode,
+                message_id.clone(),
+                recorded_text,
+            )
+            .with_actor(actor.clone()),
         );
         self.send_response(
             id,

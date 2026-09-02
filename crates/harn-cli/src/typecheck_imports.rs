@@ -26,15 +26,6 @@ pub(crate) fn checker_with_resolved_graph(
     checker_with_graph(checker, path, graph)
 }
 
-pub(crate) fn checker_with_standalone_imports(
-    checker: TypeChecker,
-    path: &Path,
-    source: &str,
-) -> TypeChecker {
-    let graph = harn_modules::build_with_standalone_source(path, source);
-    checker_with_graph(checker, path, &graph)
-}
-
 fn checker_with_graph(
     mut checker: TypeChecker,
     path: &Path,

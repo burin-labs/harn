@@ -371,6 +371,10 @@ pub fn reset_registry() {
 pub fn to_auto_compact_config(policy: &CompactionPolicyDeclaration) -> super::AutoCompactConfig {
     let engine_strategy = policy.strategy.engine_strategy();
     let mut cfg = super::AutoCompactConfig {
+        request_provenance: super::CompactionRequestProvenance {
+            requested_strategy: Some(policy.strategy.as_str().to_string()),
+            threshold_source: Some(super::CompactionThresholdSource::CompactionPolicy),
+        },
         keep_last: policy.keep_last,
         keep_first: policy.keep_first,
         compact_strategy: engine_strategy.clone(),
