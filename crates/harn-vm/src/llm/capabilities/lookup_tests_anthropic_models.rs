@@ -135,6 +135,38 @@ fn anthropic_fable_effort_cannot_be_disabled() {
     }
 }
 
+/// Fable 5.1 keeps the whole Fable/Mythos surface and narrows exactly one
+/// thing: forced tool choice is gone. `tool_choice` `any` / `tool` are a 400
+/// on this model, so only `auto` and `none` may reach the wire. The Fable 5
+/// control below is what makes this assertion mean something — an empty
+/// `allowed_tool_choice_modes` is "unrestricted", so without the control a
+/// silently-unmatched 5.1 rule would still read as a pass on every other line.
+#[test]
+fn anthropic_fable_51_forbids_forced_tool_choice() {
+    reset();
+    let caps = lookup("anthropic", "claude-fable-5-1");
+    assert_eq!(caps.allowed_tool_choice_modes, vec!["auto", "none"]);
+
+    // Inherited-by-restatement: 5.1 is a full rule, not an `extends` merge,
+    // so every field the catch-all sets has to survive the copy.
+    assert_eq!(caps.thinking_modes, vec!["adaptive", "effort"]);
+    assert_eq!(
+        caps.reasoning_effort_levels,
+        vec!["low", "medium", "high", "xhigh", "max"]
+    );
+    assert!(!caps.reasoning_disable_supported);
+    assert!(!caps.supports_assistant_prefill);
+    assert!(!caps.temperature_supported);
+    assert!(caps.native_tools);
+    assert!(caps.prompt_caching);
+    assert_eq!(caps.prompt_cache_min_prefix_tokens, 512);
+
+    // Control: Fable 5 must stay unrestricted, or the 5.1 row is matching
+    // more than it should.
+    let fable5 = lookup("anthropic", "claude-fable-5");
+    assert!(fable5.allowed_tool_choice_modes.is_empty());
+}
+
 #[test]
 fn anthropic_47_and_newer_sampling_is_denied_by_the_catalog() {
     reset();
