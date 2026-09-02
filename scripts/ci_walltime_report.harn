@@ -48,14 +48,43 @@ type CiDetailedJobSample = {
   name: string,
   conclusion: string,
   duration_ms: int,
-  start_delay_ms: int,
+  dependency_wait_ms: int,
+  runner_queue_ms: int,
+  completion_offset_ms: int,
   runner: string,
   steps: list<CiStepSample>,
+}
+
+type CiRejectedJobSample = {run_id: int, name: string, reason: string}
+
+type CiExcludedJobSample = {run_id: int, name: string, conclusion: string, reason: string}
+
+type CiDetailedJobObservation = {
+  observed: int,
+  samples: list<CiDetailedJobSample>,
+  excluded: list<CiExcludedJobSample>,
+  rejected: list<CiRejectedJobSample>,
 }
 
 type CiDetailedRunSample = {id: int, duration_ms: int, url: string, created_at: string}
 
 type CiMetricGroup = {name: string, stats: DurationStats}
+
+type CiCriticalPathSample = {
+  run_id: int,
+  run_url: string,
+  wall_ms: int,
+  terminal_job: string,
+  runner: string,
+  dependency_wait_ms: int,
+  runner_queue_ms: int,
+  execution_ms: int,
+  completion_offset_ms: int,
+  tail_ms: int,
+  last_completed_before_queue: string?,
+  last_completed_runner: string?,
+  last_completion_offset_ms: int?,
+}
 
 type CiLatencyEvaluation = {
   status: string,
@@ -73,9 +102,17 @@ type CiLatencyReport = {
   policy: CiLatencyPolicy,
   candidate_runs: int,
   qualifying_runs: list<CiDetailedRunSample>,
+  jobs_observed: int,
+  jobs_measured: int,
+  jobs_excluded: int,
+  measurement_complete: bool,
+  excluded_jobs: list<CiExcludedJobSample>,
+  rejected_jobs: list<CiRejectedJobSample>,
   wall: DurationStats,
-  jobs: list<CiMetricGroup>,
-  start_delay: list<CiMetricGroup>,
+  dependency_wait: list<CiMetricGroup>,
+  runner_queue: list<CiMetricGroup>,
+  execution: list<CiMetricGroup>,
+  critical_paths: list<CiCriticalPathSample>,
   steps: list<CiMetricGroup>,
   runners: dict<string, int>,
   evaluation: CiLatencyEvaluation,
@@ -308,17 +345,47 @@ fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDe
   return samples
 }
 
-fn detailed_job_samples_from_api(
+pub fn detailed_job_observation_from_api(
   run_id: int,
   run_created_at: string,
   data: any,
-) -> list<CiDetailedJobSample> {
+) -> CiDetailedJobObservation {
   let samples: list<CiDetailedJobSample> = []
+  let excluded: list<CiExcludedJobSample> = []
+  let rejected: list<CiRejectedJobSample> = []
+  let observed = 0
   for raw in data?.jobs ?? [] {
+    observed = observed + 1
     const name = to_string(raw?.name ?? "")
+    const conclusion = to_string(raw?.conclusion ?? "")
     const duration_ms = elapsed_ms(raw?.started_at, raw?.completed_at)
-    const start_delay_ms = elapsed_ms(run_created_at, raw?.started_at)
-    if name == "" || duration_ms == nil || start_delay_ms == nil {
+    const dependency_wait_ms = elapsed_ms(run_created_at, raw?.created_at)
+    const runner_queue_ms = elapsed_ms(raw?.created_at, raw?.started_at)
+    const completion_offset_ms = elapsed_ms(run_created_at, raw?.completed_at)
+    if name == "" {
+      rejected = rejected + [{run_id: run_id, name: name, reason: "missing_name"}]
+      continue
+    }
+    if conclusion != "success" {
+      excluded = excluded
+        + [
+          {run_id: run_id, name: name, conclusion: conclusion, reason: "not_executed_successfully"},
+        ]
+      continue
+    }
+    if dependency_wait_ms == nil {
+      rejected = rejected
+        + [{run_id: run_id, name: name, reason: "invalid_run_to_job_created_interval"}]
+      continue
+    }
+    if runner_queue_ms == nil {
+      rejected = rejected
+        + [{run_id: run_id, name: name, reason: "invalid_job_created_to_started_interval"}]
+      continue
+    }
+    if duration_ms == nil || completion_offset_ms == nil {
+      rejected = rejected
+        + [{run_id: run_id, name: name, reason: "invalid_job_execution_interval"}]
       continue
     }
     let steps: list<CiStepSample> = []
@@ -350,15 +417,17 @@ fn detailed_job_samples_from_api(
         {
           run_id: run_id,
           name: name,
-          conclusion: to_string(raw?.conclusion ?? ""),
+          conclusion: conclusion,
           duration_ms: duration_ms,
-          start_delay_ms: start_delay_ms,
+          dependency_wait_ms: dependency_wait_ms,
+          runner_queue_ms: runner_queue_ms,
+          completion_offset_ms: completion_offset_ms,
           runner: runner,
           steps: steps,
         },
       ]
   }
-  return samples
+  return {observed: observed, samples: samples, excluded: excluded, rejected: rejected}
 }
 
 fn sentinel_matches_job(sentinel: CiSentinel, job: CiDetailedJobSample) -> bool {
@@ -433,11 +502,61 @@ pub fn evaluate_ci_latency(
   }
 }
 
-fn build_latency_report(
+fn critical_path_samples(
+  runs: list<CiDetailedRunSample>,
+  jobs: list<CiDetailedJobSample>,
+) -> list<CiCriticalPathSample> {
+  let paths: list<CiCriticalPathSample> = []
+  for run in runs {
+    const run_jobs = jobs.filter({ job -> job.run_id == run.id && job.conclusion == "success" })
+      .to_list()
+      .sorted_by({ job -> job.name })
+    let terminal: CiDetailedJobSample? = nil
+    for job in run_jobs {
+      if terminal == nil || job.completion_offset_ms > terminal.completion_offset_ms {
+        terminal = job
+      }
+    }
+    if terminal == nil {
+      continue
+    }
+    let last_completed: CiDetailedJobSample? = nil
+    for job in run_jobs {
+      if job.name == terminal.name || job.completion_offset_ms > terminal.dependency_wait_ms {
+        continue
+      }
+      if last_completed == nil || job.completion_offset_ms > last_completed.completion_offset_ms {
+        last_completed = job
+      }
+    }
+    paths = paths
+      + [
+        {
+          run_id: run.id,
+          run_url: run.url,
+          wall_ms: run.duration_ms,
+          terminal_job: terminal.name,
+          runner: terminal.runner,
+          dependency_wait_ms: terminal.dependency_wait_ms,
+          runner_queue_ms: terminal.runner_queue_ms,
+          execution_ms: terminal.duration_ms,
+          completion_offset_ms: terminal.completion_offset_ms,
+          tail_ms: max(0, run.duration_ms - terminal.completion_offset_ms),
+          last_completed_before_queue: last_completed?.name,
+          last_completed_runner: last_completed?.runner,
+          last_completion_offset_ms: last_completed?.completion_offset_ms,
+        },
+      ]
+  }
+  return paths
+}
+
+pub fn build_latency_report(
   policy: CiLatencyPolicy,
   candidates: list<CiDetailedRunSample>,
-  all_jobs: list<CiDetailedJobSample>,
+  observation: CiDetailedJobObservation,
 ) -> CiLatencyReport {
+  const all_jobs = observation.samples
   const qualifying = candidates.filter(
     { run -> run_has_full_coverage(run.id, all_jobs, policy.full_run_jobs) },
   )
@@ -447,7 +566,13 @@ fn build_latency_report(
     { job -> qualifying_ids.contains(job.run_id) && job.conclusion == "success" },
   )
     .to_list()
-  const start_delay_samples = jobs.map({ job -> {name: job.name, duration_ms: job.start_delay_ms} })
+  const dependency_wait_samples = jobs.map(
+    { job -> {name: job.name, duration_ms: job.dependency_wait_ms} },
+  )
+    .to_list()
+  const runner_queue_samples = jobs.map(
+    { job -> {name: job.name, duration_ms: job.runner_queue_ms} },
+  )
     .to_list()
   let step_samples = []
   let runners: dict<string, int> = {}
@@ -460,17 +585,32 @@ fn build_latency_report(
     runners = runners + {[job.runner]: (runners[job.runner] ?? 0) + 1}
   }
   return {
-    schema_version: 2,
+    schema_version: 3,
     policy: policy,
     candidate_runs: candidates.count,
     qualifying_runs: qualifying,
+    jobs_observed: observation.observed,
+    jobs_measured: observation.samples.count,
+    jobs_excluded: observation.excluded.count,
+    measurement_complete: observation.rejected.count == 0,
+    excluded_jobs: observation.excluded,
+    rejected_jobs: observation.rejected,
     wall: duration_stats(qualifying.map({ run -> run.duration_ms }).to_list()),
-    jobs: group_metrics(jobs),
-    start_delay: group_metrics(start_delay_samples),
+    dependency_wait: group_metrics(dependency_wait_samples),
+    runner_queue: group_metrics(runner_queue_samples),
+    execution: group_metrics(jobs),
+    critical_paths: critical_path_samples(qualifying, jobs),
     steps: group_metrics(step_samples),
     runners: runners,
     evaluation: evaluate_ci_latency(qualifying, policy.slo),
   }
+}
+
+pub fn latency_report_exit_code(report: CiLatencyReport, check: bool) -> int {
+  if check && (!report.evaluation.ok || !report.measurement_complete) {
+    return 1
+  }
+  return 0
 }
 
 fn format_seconds(duration_ms: int) -> string {
@@ -513,16 +653,53 @@ fn render_report(report: CiWalltimeReport) -> string {
   return summary + "\n\n" + render_groups(report.jobs, "No completed jobs found.")
 }
 
+fn render_critical_paths(paths: list<CiCriticalPathSample>) -> string {
+  const rows = paths[0:min(paths.count, 12)].map(
+    { path ->
+      {
+        run: path.run_id,
+        terminal: path.terminal_job,
+        prior: path.last_completed_before_queue ?? "none observed",
+        dependency: format_seconds(path.dependency_wait_ms),
+        queue: format_seconds(path.runner_queue_ms),
+        execution: format_seconds(path.execution_ms),
+        tail: format_seconds(path.tail_ms),
+      }
+    },
+  )
+    .to_list()
+  return render_table(
+    rows,
+    {
+      columns: [
+        {key: "run", header: "run"},
+        {key: "terminal", header: "terminal job"},
+        {key: "prior", header: "last completed before queue"},
+        {key: "dependency", header: "dependency", align: "right"},
+        {key: "queue", header: "queue", align: "right"},
+        {key: "execution", header: "execution", align: "right"},
+        {key: "tail", header: "tail", align: "right"},
+      ],
+      empty: "No critical-path observations found.",
+    },
+  )
+}
+
 fn render_latency_report(report: CiLatencyReport) -> string {
   const wall = report.wall
   const evaluation = report.evaluation
   const summary =
     "${report.policy.repository} ${report.policy.workflow} ${report.policy.event}: ${evaluation.status}; full runs=${wall.count}/${report.candidate_runs}; p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
   return summary
-    + "\n\nCritical job duration\n"
-    + render_groups(report.jobs, "No qualifying jobs found.")
-    + "\n\nStart delay (dependencies plus runner queue)\n"
-    + render_groups(report.start_delay, "No start-delay observations found.")
+    + "\nJob observations: ${report.jobs_measured} measured + ${report.jobs_excluded} excluded / ${report.jobs_observed} observed; rejected=${report.rejected_jobs.count}; complete=${report.measurement_complete}"
+    + "\n\nPer-run terminal path\n"
+    + render_critical_paths(report.critical_paths)
+    + "\n\nDependency wait\n"
+    + render_groups(report.dependency_wait, "No dependency-wait observations found.")
+    + "\n\nRunner queue\n"
+    + render_groups(report.runner_queue, "No runner-queue observations found.")
+    + "\n\nExecution\n"
+    + render_groups(report.execution, "No execution observations found.")
     + "\n\nSlowest steps\n"
     + render_groups(report.steps, "No step observations found.")
 }
@@ -577,18 +754,28 @@ pipeline main(harness: Harness, task: unknown) {
     return 0
   }
   const candidates = detailed_run_samples_from_api(runs_data, policy.topology_epoch)
-  let detailed_jobs: list<CiDetailedJobSample> = []
+  let detailed_jobs: CiDetailedJobObservation = {
+    observed: 0,
+    samples: [],
+    excluded: [],
+    rejected: [],
+  }
   for run in candidates {
-    detailed_jobs = detailed_jobs
-      + detailed_job_samples_from_api(
-        run.id,
-        run.created_at,
-        github_api_json(
-          harness.process,
-          harness.clock,
-          "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
-        ),
-      )
+    const observed = detailed_job_observation_from_api(
+      run.id,
+      run.created_at,
+      github_api_json(
+        harness.process,
+        harness.clock,
+        "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
+      ),
+    )
+    detailed_jobs = {
+      observed: detailed_jobs.observed + observed.observed,
+      samples: detailed_jobs.samples + observed.samples,
+      excluded: detailed_jobs.excluded + observed.excluded,
+      rejected: detailed_jobs.rejected + observed.rejected,
+    }
   }
   const report = build_latency_report(policy, candidates, detailed_jobs)
   if parsed.json {
@@ -596,8 +783,5 @@ pipeline main(harness: Harness, task: unknown) {
   } else {
     harness.stdio.println(render_latency_report(report))
   }
-  if parsed.check && !report.evaluation.ok {
-    return 1
-  }
-  return 0
+  return latency_report_exit_code(report, parsed.check)
 }

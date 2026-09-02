@@ -1,9 +1,12 @@
 import {
+  build_latency_report,
   build_report,
+  detailed_job_observation_from_api,
   duration_stats,
   evaluate_ci_latency,
   group_job_samples,
   job_samples_from_api,
+  latency_report_exit_code,
   parse_ci_latency_policy,
   run_has_full_coverage,
   run_samples_from_api,
@@ -147,7 +150,9 @@ pipeline test_full_run_requires_every_successful_sentinel(harness: Harness, task
       name: "Rust workspace tests",
       conclusion: "success",
       duration_ms: 100,
-      start_delay_ms: 10,
+      dependency_wait_ms: 4,
+      runner_queue_ms: 6,
+      completion_offset_ms: 110,
       runner: "runner-a",
       steps: [],
     },
@@ -156,7 +161,9 @@ pipeline test_full_run_requires_every_successful_sentinel(harness: Harness, task
       name: "Run Harn conformance tests (1/2)",
       conclusion: "success",
       duration_ms: 100,
-      start_delay_ms: 10,
+      dependency_wait_ms: 4,
+      runner_queue_ms: 6,
+      completion_offset_ms: 110,
       runner: "runner-b",
       steps: [],
     },
@@ -180,6 +187,181 @@ pipeline test_full_run_requires_every_successful_sentinel(harness: Harness, task
         {name: "Run Linux sandbox tests", match: "exact"},
       ],
     ),
+  )
+}
+
+@test
+pipeline test_job_observation_splits_wait_queue_and_execution_and_preserves_rejections(
+  harness: Harness,
+  task: unknown,
+) {
+  const observed = detailed_job_observation_from_api(
+    7,
+    "2026-08-01T00:00:00Z",
+    {
+      jobs: [
+        {
+          name: "BurinApp macOS build & tests",
+          conclusion: "success",
+          created_at: "2026-08-01T00:03:00Z",
+          started_at: "2026-08-01T00:03:30Z",
+          completed_at: "2026-08-01T00:13:30Z",
+          runner_name: "GitHub Actions 42",
+          labels: ["macos-latest"],
+          steps: [],
+        },
+        {
+          name: "Missing queue boundary",
+          conclusion: "success",
+          started_at: "2026-08-01T00:01:00Z",
+          completed_at: "2026-08-01T00:02:00Z",
+          steps: [],
+        },
+        {
+          name: "Inverted queue boundary",
+          conclusion: "success",
+          created_at: "2026-08-01T00:02:00Z",
+          started_at: "2026-08-01T00:01:00Z",
+          completed_at: "2026-08-01T00:03:00Z",
+          steps: [],
+        },
+        {
+          name: "Intentional platform skip",
+          conclusion: "skipped",
+          created_at: "2026-08-01T00:02:00Z",
+          started_at: nil,
+          completed_at: nil,
+          steps: [],
+        },
+      ],
+    },
+  )
+  assert_eq(observed.observed, 4)
+  assert_eq(observed.samples.count, 1)
+  assert_eq(
+    observed.samples[0],
+    {
+      run_id: 7,
+      name: "BurinApp macOS build & tests",
+      conclusion: "success",
+      duration_ms: 600000,
+      dependency_wait_ms: 180000,
+      runner_queue_ms: 30000,
+      completion_offset_ms: 810000,
+      runner: "github-hosted",
+      steps: [],
+    },
+  )
+  assert_eq(
+    observed.excluded,
+    [
+      {
+        run_id: 7,
+        name: "Intentional platform skip",
+        conclusion: "skipped",
+        reason: "not_executed_successfully",
+      },
+    ],
+  )
+  assert_eq(
+    observed.rejected,
+    [
+      {run_id: 7, name: "Missing queue boundary", reason: "invalid_run_to_job_created_interval"},
+      {
+        run_id: 7,
+        name: "Inverted queue boundary",
+        reason: "invalid_job_created_to_started_interval",
+      },
+    ],
+  )
+}
+
+@test
+pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
+  harness: Harness,
+  task: unknown,
+) {
+  const policy = parse_ci_latency_policy(
+    json_stringify(
+      {
+        schema_version: 1,
+        repository: "burin-labs/burin-code",
+        workflow: "ci.yml",
+        event: "push",
+        topology_epoch: "2026-08-01T00:00:00Z",
+        full_run_jobs: [{name: "CI status", match: "exact"}],
+        slo: {
+          warning_ms: 540000,
+          p90_ms: 600000,
+          hard_max_ms: 1200000,
+          min_samples: 1,
+          window_samples: 1,
+        },
+      },
+    ),
+  )
+  const run = {
+    id: 7,
+    duration_ms: 900000,
+    url: "https://example.test/run/7",
+    created_at: "2026-08-01T00:00:00Z",
+  }
+  const common = {run_id: 7, conclusion: "success", runner: "github-hosted", steps: []}
+  const report = build_latency_report(
+    policy,
+    [run],
+    {
+      observed: 3,
+      samples: [
+        {
+          ...common,
+          name: "BurinApp macOS build & tests",
+          duration_ms: 600000,
+          dependency_wait_ms: 120000,
+          runner_queue_ms: 30000,
+          completion_offset_ms: 750000,
+        },
+        {
+          ...common,
+          name: "CI status",
+          duration_ms: 10000,
+          dependency_wait_ms: 760000,
+          runner_queue_ms: 5000,
+          completion_offset_ms: 775000,
+        },
+      ],
+      excluded: [],
+      rejected: [{run_id: 7, name: "Unknown", reason: "invalid_job_execution_interval"}],
+    },
+  )
+  assert_eq(report.schema_version, 3)
+  assert_eq(report.jobs_observed, 3)
+  assert_eq(report.jobs_measured, 2)
+  assert_eq(report.jobs_excluded, 0)
+  assert(!report.measurement_complete)
+  assert_eq(latency_report_exit_code(report, true), 1)
+  assert_eq(latency_report_exit_code(report, false), 0)
+  assert_eq(latency_report_exit_code({...report, measurement_complete: true}, true), 0)
+  assert_eq(report.rejected_jobs.count, 1)
+  assert_eq(
+    report.critical_paths,
+    [
+      {
+        run_id: 7,
+        run_url: "https://example.test/run/7",
+        wall_ms: 900000,
+        terminal_job: "CI status",
+        runner: "github-hosted",
+        dependency_wait_ms: 760000,
+        runner_queue_ms: 5000,
+        execution_ms: 10000,
+        completion_offset_ms: 775000,
+        tail_ms: 125000,
+        last_completed_before_queue: "BurinApp macOS build & tests",
+        last_completed_runner: "github-hosted",
+        last_completion_offset_ms: 750000,
+      },
+    ],
   )
 }
 
