@@ -985,7 +985,13 @@ pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
   )
 }
 
-// FINDING, not a fix (bc#7759 follow-up). Closing an UNREPORTED
+// RULING (bc#7759, 2026-09-02). A declared verifier does NOT become a ledger
+// row: the verifier gate already owns that acceptance decision
+// deterministically, and a row over the same fact is a second, weaker authority,
+// which is the duplication the ruling forbids. Burin implements that, so nothing
+// here needs to change to accommodate a verifier row.
+//
+// FINDING, not a fix. Closing an UNREPORTED
 // verification-only row from its passing receipt was tried and reverted. It
 // reads as obviously right and is not: the receipt says one verifier passed,
 // while a row narrowed to `deterministic_verification` may be about something
