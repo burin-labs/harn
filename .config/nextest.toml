@@ -159,6 +159,13 @@ leak-timeout = { period = "10s", result = "pass" }
 # those event budgets — the limiter becomes the test, not the scheduler.
 [test-groups]
 harn-subprocess = { max-threads = 8 }
+# Future-queue 0.4 can strand a custom group's queued heavyweight at the head
+# when the global pool is wider than that group: unrelated one-thread tests
+# immediately refill each global slot, so the queued test never observes the
+# four free slots it requires. Keep the only weighted harn_cli_fast cases in a
+# group with no lightweight predecessors. The thread-parity workflow's receipt
+# names every selected test if a scheduler ever drops work again.
+harn-cli-heavy-replay = { max-threads = 8 }
 harn-cli-bin = { max-threads = 8 }
 # harn-dap's unit tests are short, but several construct debugger VMs, Tokio
 # runtimes, and host-bridge state. Serializing the binary keeps the leak
@@ -169,6 +176,10 @@ harn-dap = { max-threads = 1 }
 # OS resources. Keep these tests serialized under nextest so a valid sandbox
 # spawn is not forced to contend with several sibling AppContainer launches.
 harn-windows-sandbox = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::burin_mini_rate_limit_(overresearch_planner_commits_final_action_graph|weak_verify_plan_normalizes_to_single_verify_action)/)'
+test-group = "harn-cli-heavy-replay"
 
 [[profile.default.overrides]]
 filter = "package(harn-cli) and kind(test)"

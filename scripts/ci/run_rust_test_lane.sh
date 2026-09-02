@@ -63,7 +63,11 @@ trap 'report_on_signal SIGINT' INT
 report_resources "Rust test resources before"
 started=$SECONDS
 status=0
-"$@" || status=$?
+if [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
+  "$@" >"$RUST_TEST_STDOUT_PATH" || status=$?
+else
+  "$@" || status=$?
+fi
 duration=$((SECONDS - started))
 report_resources "Rust test resources after"
 echo "rust_test_execution_seconds=${duration}"
