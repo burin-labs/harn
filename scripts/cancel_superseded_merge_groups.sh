@@ -104,7 +104,7 @@ if ! jq -e '
 fi
 
 if jq -e '.data.repository.mergeQueue == null' "$queue_json" >/dev/null; then
-  printf 'summary queue_state=disabled active_runs=not_queried action=none reason=nothing_to_supersede apply=%s\n' \
+  printf 'summary queue_state=disabled pending=0 active_runs=not_queried action=none reason=nothing_to_supersede apply=%s\n' \
     "$apply"
   exit 0
 fi

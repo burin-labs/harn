@@ -159,7 +159,7 @@ null_output="$(
   FAKE_QUEUE_JSON="$null_queue_json" \
     "$script" --repo burin-labs/harn --expected-sha "$current_a" --apply
 )"
-grep -Fxq 'summary queue_state=disabled active_runs=not_queried action=none reason=nothing_to_supersede apply=true' <<< "$null_output"
+grep -Fxq 'summary queue_state=disabled pending=0 active_runs=not_queried action=none reason=nothing_to_supersede apply=true' <<< "$null_output"
 if grep -Fq 'actions/runs' "$calls"; then
   echo "disabled merge queue reached the Actions API" >&2
   exit 1
@@ -172,7 +172,7 @@ null_plan_output="$(
   FAKE_QUEUE_JSON="$null_queue_json" \
     "$script" --repo burin-labs/harn
 )"
-grep -Fxq 'summary queue_state=disabled active_runs=not_queried action=none reason=nothing_to_supersede apply=false' <<< "$null_plan_output"
+grep -Fxq 'summary queue_state=disabled pending=0 active_runs=not_queried action=none reason=nothing_to_supersede apply=false' <<< "$null_plan_output"
 if grep -Fq 'actions/runs' "$calls"; then
   echo "disabled merge queue plan reached the Actions API" >&2
   exit 1
