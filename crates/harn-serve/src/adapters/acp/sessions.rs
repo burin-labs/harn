@@ -621,16 +621,11 @@ pub(super) fn mark_cancelled_session(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     params: &serde_json::Value,
 ) -> Option<bool> {
-    let Some(session_id) = params
+    let session_id = params
         .get("sessionId")
         .or_else(|| params.get("session_id"))
-        .and_then(|value| value.as_str())
-    else {
-        return None;
-    };
-    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
-        return None;
-    };
+        .and_then(|value| value.as_str())?;
+    let cancellation = lookup_session_cancellation(cancellations, session_id)?;
     let newly_cancelled = cancellation.cancel();
     if newly_cancelled {
         cancel_session_command_handles(session_id);
