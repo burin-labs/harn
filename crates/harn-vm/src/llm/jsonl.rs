@@ -157,11 +157,20 @@ pub fn parse_llm_mock_value_versioned(
         consume_match,
     )?;
     let text = optional_string_field(object, "text")?.unwrap_or_default();
-    let input_tokens = optional_i64_field(object, "input_tokens")?;
-    let output_tokens = optional_i64_field(object, "output_tokens")?;
-    let cache_read_tokens = optional_i64_field(object, "cache_read_tokens")?;
+    // A `usage` object is the shape every provider reports and the shape
+    // fixture authors reach for. Read it as an alias for the flat fields
+    // rather than dropping it: a scripted zero-token completion that silently
+    // became the default thirty is indistinguishable from a fixture that was
+    // never applied, and it takes the response off the empty path the author
+    // meant to exercise. Flat fields win when both are present.
+    let usage = parse_llm_mock_usage(object.get("usage"))?;
+    let input_tokens = optional_i64_field(object, "input_tokens")?.or(usage.input_tokens);
+    let output_tokens = optional_i64_field(object, "output_tokens")?.or(usage.output_tokens);
+    let cache_read_tokens =
+        optional_i64_field(object, "cache_read_tokens")?.or(usage.cache_read_tokens);
     let cache_write_tokens = optional_i64_field(object, "cache_write_tokens")?
-        .or(optional_i64_field(object, "cache_creation_input_tokens")?);
+        .or(optional_i64_field(object, "cache_creation_input_tokens")?)
+        .or(usage.cache_write_tokens);
     let simulated_cost_usd = optional_nonnegative_f64_field(object, "simulated_cost_usd")?;
     let thinking = optional_string_field(object, "thinking")?;
     let thinking_summary = optional_string_field(object, "thinking_summary")?;
@@ -526,6 +535,7 @@ const V1_ENTRY_FIELDS: &[&str] = &[
     "consume",
     "match",
     "text",
+    "usage",
     "input_tokens",
     "output_tokens",
     "cache_read_tokens",
@@ -615,6 +625,52 @@ fn validate_v1_object_fields(
         }
     }
     Ok(())
+}
+
+/// Token counts read from a fixture entry's `usage` object.
+///
+/// Accepts both the OpenAI-compat spellings (`prompt_tokens` /
+/// `completion_tokens`) and the flat Harn names, because fixture authors copy
+/// whichever their provider prints. Every field stays optional so a `usage`
+/// carrying only one count leaves the others to their defaults.
+#[derive(Default)]
+struct LlmMockUsage {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
+}
+
+const USAGE_FIELDS: &[&str] = &[
+    "input_tokens",
+    "output_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_creation_input_tokens",
+];
+
+fn parse_llm_mock_usage(value: Option<&serde_json::Value>) -> Result<LlmMockUsage, String> {
+    let Some(value) = value else {
+        return Ok(LlmMockUsage::default());
+    };
+    if value.is_null() {
+        return Ok(LlmMockUsage::default());
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| "`usage` must be an object".to_string())?;
+    validate_v1_object_fields(object, "usage", USAGE_FIELDS)?;
+    Ok(LlmMockUsage {
+        input_tokens: optional_i64_field(object, "input_tokens")?
+            .or(optional_i64_field(object, "prompt_tokens")?),
+        output_tokens: optional_i64_field(object, "output_tokens")?
+            .or(optional_i64_field(object, "completion_tokens")?),
+        cache_read_tokens: optional_i64_field(object, "cache_read_tokens")?,
+        cache_write_tokens: optional_i64_field(object, "cache_write_tokens")?
+            .or(optional_i64_field(object, "cache_creation_input_tokens")?),
+    })
 }
 
 fn parse_llm_tool_calls(
@@ -893,6 +949,63 @@ mod tests {
         assert_eq!(call["arguments"], serde_json::json!({"query": "harn"}));
         assert_eq!(call["thought_signature"], "opaque-gemini-signature");
         assert!(call.get("args").is_none(), "legacy alias is canonicalized");
+    }
+
+    #[test]
+    /// harn#7860 falsifier. A scripted zero-token completion must stay zero.
+    /// Before this, `usage` was accepted by the parser and dropped, so the
+    /// entry fell through to the thirty-token default and the response the
+    /// author wrote as empty read as billed work.
+    #[test]
+    fn a_scripted_usage_sets_the_token_counts_it_names() {
+        let entry = parse_llm_mock_value(&serde_json::json!({
+            "text": "",
+            "usage": {"completion_tokens": 0},
+        }))
+        .expect("a usage-only entry parses");
+        assert_eq!(
+            entry.output_tokens,
+            Some(0),
+            "a scripted zero must survive as a zero, not fall through to the default"
+        );
+
+        // Both provider spellings, and the flat field still wins over `usage`
+        // so an entry carrying both is not ambiguous.
+        let openai = parse_llm_mock_value(&serde_json::json!({
+            "usage": {"prompt_tokens": 7, "completion_tokens": 11},
+        }))
+        .expect("openai-compat spellings parse");
+        assert_eq!(
+            (openai.input_tokens, openai.output_tokens),
+            (Some(7), Some(11))
+        );
+
+        let both = parse_llm_mock_value(&serde_json::json!({
+            "output_tokens": 5,
+            "usage": {"completion_tokens": 11},
+        }))
+        .expect("an entry carrying both parses");
+        assert_eq!(
+            both.output_tokens,
+            Some(5),
+            "the flat field is authoritative"
+        );
+
+        // Negative control: a misspelled key inside `usage` fails loudly rather
+        // than repeating the silent drop this test exists to close.
+        let error = parse_llm_mock_value(&serde_json::json!({
+            "usage": {"completion_tokins": 0},
+        }))
+        .expect_err("a misspelled usage field must not be dropped");
+        assert!(
+            error.contains("unknown usage field `completion_tokins`"),
+            "{error}"
+        );
+
+        // An entry with no `usage` at all is unchanged.
+        let bare =
+            parse_llm_mock_value(&serde_json::json!({"text": "hi"})).expect("a bare entry parses");
+        assert_eq!((bare.input_tokens, bare.output_tokens), (None, None));
     }
 
     #[test]

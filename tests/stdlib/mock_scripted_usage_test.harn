@@ -1,0 +1,63 @@
+// Run: harn test tests/stdlib/mock_scripted_usage_test.harn
+//
+// harn#7860. A fixture that scripts a zero-token completion must produce one.
+// The mock used to accept a `usage` object and drop it, so the entry fell
+// through to the thirty-token default: the response an author wrote as an
+// empty provider turn came back reporting billed work, and a caller that
+// classifies emptiness by token count could never see it.
+//
+// Deterministic: mock LLM script, no sleeps, no API calls.
+import { with_llm_script } from "std/testing"
+
+fn call_once(harness: Harness) -> dict {
+  return harness.llm.call(
+    "Inspect the target file.",
+    nil,
+    {provider: "mock", model: "mock-model"},
+  )
+}
+
+/**
+ * A scripted zero-token empty completion reads as an unbilled empty outcome on
+ * both sides: the usage the fixture named, and the typed outcome a caller
+ * branches on.
+ */
+pipeline test_a_scripted_empty_is_an_unbilled_empty(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [{text: "", usage: {completion_tokens: 0, prompt_tokens: 0}}],
+    { ->
+      const response = call_once(harness)
+      assert_eq(
+        response?.usage?.output_tokens,
+        0,
+        "the scripted zero must survive: ${json_stringify(response?.usage)}",
+      )
+      assert_eq(response?.outcome?.kind, "empty")
+      assert_eq(
+        response?.outcome?.billed,
+        false,
+        "a zero-token completion is the unbilled empty, not the billed-noncommittal one",
+      )
+    },
+  )
+}
+
+/**
+ * Negative control. An entry that scripts no usage keeps the default token
+ * counts, so the fix reads a fixture's intent rather than zeroing every mock.
+ */
+pipeline test_an_unscripted_usage_keeps_the_default(harness: Harness, _task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [{text: "Mock answer."}],
+    { ->
+      const response = call_once(harness)
+      assert(
+        (to_int(response?.usage?.output_tokens) ?? 0) > 0,
+        "an entry that scripts no usage must keep its default counts: ${json_stringify(response?.usage)}",
+      )
+      assert_eq(response?.outcome?.kind, "complete")
+    },
+  )
+}
