@@ -311,7 +311,7 @@ pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
     policy,
     [run],
     {
-      observed: 3,
+      observed: 4,
       samples: [
         {
           ...common,
@@ -329,14 +329,22 @@ pipeline test_report_attributes_each_wall_clock_to_the_terminal_job_and_tail(
           runner_queue_ms: 5000,
           completion_offset_ms: 775000,
         },
+        {
+          ...common,
+          name: "Independent job completed after terminal queue",
+          duration_ms: 20000,
+          dependency_wait_ms: 740000,
+          runner_queue_ms: 10000,
+          completion_offset_ms: 770000,
+        },
       ],
       excluded: [],
       rejected: [{run_id: 7, name: "Unknown", reason: "invalid_job_execution_interval"}],
     },
   )
   assert_eq(report.schema_version, 3)
-  assert_eq(report.jobs_observed, 3)
-  assert_eq(report.jobs_measured, 2)
+  assert_eq(report.jobs_observed, 4)
+  assert_eq(report.jobs_measured, 3)
   assert_eq(report.jobs_excluded, 0)
   assert(!report.measurement_complete)
   assert_eq(latency_report_exit_code(report, true), 1)
