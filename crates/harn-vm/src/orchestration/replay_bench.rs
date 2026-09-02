@@ -666,8 +666,7 @@ fn fixture_receipt(
 }
 
 fn sha256_json(value: &JsonValue) -> Result<String, ReplayBenchmarkError> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|error| ReplayBenchmarkError::Serialization(error.to_string()))?;
+    let bytes = crate::canonical_json::to_vec(value);
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 

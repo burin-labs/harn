@@ -668,7 +668,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         },
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
-    events
+    schema_contract::with_purpose_label(events)
 }
 
 #[tokio::test(flavor = "current_thread")]

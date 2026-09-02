@@ -11,6 +11,7 @@ import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
+import { agent_purpose_label_config, agent_purpose_label_extract } from "std/agent/purpose_labels"
 import { tool_call_history_text } from "std/llm/call_shape"
 import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
@@ -42,6 +43,11 @@ pub type AgentLoopLlmResultProjection = {
   visible_text: string,
   normalized: dict,
   tool_options: dict,
+  /**
+   * The heading this turn declared for its tool calls, or "" when the turn
+   * declared none or labels are off. Presentation metadata only.
+   */
+  purpose_label: string,
 }
 
 pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
@@ -105,11 +111,20 @@ pub fn __agent_loop_project_result(
     agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, parser_tool_format),
     context.turn_options,
   )
-  const visible_text = __visible_text(parsed, raw_text)
+  const projected_text = __visible_text(parsed, raw_text)
+  // Strip the purpose declaration here, at the one funnel that decides what
+  // the turn's prose is, so the tag never reaches the transcript, the
+  // rendered message, or the history replayed to the provider.
+  const purpose = agent_purpose_label_extract(
+    agent_purpose_label_config(context.turn_options?.purpose_labels),
+    projected_text,
+  )
+  const visible_text = purpose.text
   return {
     raw_text: raw_text,
     parsed: parsed,
     visible_text: visible_text,
+    purpose_label: purpose.label,
     tool_options: context.turn_options + {tool_format: parser_tool_format},
     normalized: result
       + {

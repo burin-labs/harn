@@ -1,0 +1,79 @@
+import "std/agent/loop_tool_calls"
+import { agent_take_one_shot_prefill } from "std/agent/prefill"
+import {
+  agent_purpose_label_config,
+  agent_purpose_label_emit,
+  agent_purpose_label_prefill,
+  agent_purpose_label_turn_nudge,
+} from "std/agent/purpose_labels"
+
+/**
+ * The agent loop's per-turn purpose-label wiring: arming the declaration at
+ * the start of a turn and publishing it once the batch it covers is settled.
+ *
+ * This lives beside the loop rather than inside it because
+ * `std/agent/purpose_labels` owns the grammar and cannot reach the loop's
+ * feedback injector without an import cycle, and because `loop_run.harn` sits
+ * a few lines under the repository's 1500-line source cap — a concern that
+ * wires itself into the loop belongs in its own module rather than golfed down
+ * to fit at the call site.
+ */
+/**
+ * Arm one turn's declaration and return the prefill record the turn should
+ * use.
+ *
+ * A caller's own one-shot prefill wins: it was armed for this turn on purpose.
+ * Otherwise, under `prefill` delivery the assistant turn starts at the opening
+ * tag so the model continues a heading instead of choosing to write one.
+ *
+ * Under `nudge` delivery the instruction rides every turn, next to the work,
+ * instead of once in a system prompt the model reads past. Injection is
+ * best-effort: a label is presentation metadata, so failing to ask for one
+ * must never fail the turn.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __purpose_label_arm(agent: HarnessAgent, session: dict, opts: any) -> dict {
+  const taken_prefill = agent_take_one_shot_prefill(opts)
+  const session_id = session.session_id
+  const config = agent_purpose_label_config(opts?.purpose_labels)
+  const nudge = agent_purpose_label_turn_nudge(config)
+  if nudge != "" {
+    let _ = try {
+      __inject_feedback_with_tool_repair(agent, session_id, "purpose_label_instruction", nudge)
+    }
+  }
+  const prefill = agent_purpose_label_prefill(config)
+  if taken_prefill.prefill != "" || prefill == "" {
+    return taken_prefill
+  }
+  return taken_prefill + {prefill: prefill}
+}
+
+/**
+ * Publish the turn's declared heading once the batch it covers is settled.
+ *
+ * Best-effort and returns nothing, so nothing downstream can wait on a label.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __purpose_label_publish(
+  agent: HarnessAgent,
+  session: dict,
+  projected: dict,
+  iteration_index: int,
+  tool_calls: list,
+) -> nil {
+  agent_purpose_label_emit(
+    agent,
+    session.session_id,
+    projected.purpose_label,
+    iteration_index + 1,
+    tool_calls.count,
+  )
+  return nil
+}
