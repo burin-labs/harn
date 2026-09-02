@@ -192,7 +192,11 @@ impl Vm {
             .map(ModulePhaseRecorder::load_span)
     }
 
-    pub(crate) fn record_module_loaded(&self) {
+    pub(crate) fn record_module_loaded(&mut self) {
+        if let Some(count) = &mut self.staged_module_load_count {
+            *count = count.saturating_add(1);
+            return;
+        }
         if let Some(recorder) = &self.module_phase_recorder {
             recorder.record_module_loaded();
         }
@@ -235,7 +239,7 @@ mod tests {
         assert!(vm.module_phase_recorder.is_none());
 
         let recorder = vm.enable_module_phase_timing();
-        let child = vm.child_vm();
+        let mut child = vm.child_vm();
         std::thread::spawn(move || child.record_module_loaded())
             .join()
             .expect("child records from another thread");

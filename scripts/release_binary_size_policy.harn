@@ -105,8 +105,16 @@ pub type ReleaseBinarySizeMeasurement = {
  * The two verdicts, kept apart.
  *
  * `fuse` is "ok" or "breached" and always applies. `growth` is "ok", "warn",
- * "accepted", or "not-comparable"; only "warn" fails, and only a comparable
- * baseline can produce it.
+ * "accepted", or "not-comparable"; only a comparable baseline can produce
+ * "warn".
+ *
+ * `failures` and `warnings` encode which of the two may stop a release.
+ * Only a fuse breach can: an artifact above the distribution ceiling is not
+ * distributable, whoever asks. Growth is a complexity signal about a build
+ * that is still perfectly shippable, so it lands in `warnings` and every
+ * consumer reports it without refusing. A stale baseline then costs a reader's
+ * attention instead of a release; #6020 split the two levels apart, and this
+ * finishes the split by giving them different consequences.
  */
 pub type ReleaseBinarySizeVerdict = {
   target: string,
@@ -121,6 +129,7 @@ pub type ReleaseBinarySizeVerdict = {
   growth: string,
   accepted_reason: string,
   failures: list<string>,
+  warnings: list<string>,
 }
 
 pub const RELEASE_BINARY_SIZE_POLICY_PATH: string = ".github/release-binary-size-policy.json"
@@ -373,12 +382,15 @@ fn accepted_growth_reason(entry: ReleaseBinarySizeTargetPolicy, delta_bytes: int
  * distributable, whatever it was built with. The growth signal is conditional
  * on comparability, because subtracting two differently-built artifacts
  * produces a number with no causal meaning.
+ *
+ * Only the fuse populates `failures`. Growth crossings populate `warnings`.
  */
 pub fn evaluate_release_binary_size(
   entry: ReleaseBinarySizeTargetPolicy,
   measurement: ReleaseBinarySizeMeasurement,
 ) -> ReleaseBinarySizeVerdict {
   let failures = []
+  let warnings = []
   const fuse = if measurement.bytes > entry.distribution_fuse_bytes {
     "breached"
   } else {
@@ -414,7 +426,7 @@ pub fn evaluate_release_binary_size(
     }
   }
   if growth == "warn" {
-    failures = failures
+    warnings = warnings
       + [
         "growth signal: ${measurement.source_sha} is ${delta_bytes} bytes (${delta_percent_hundredths} hundredths of a percent) above the ${entry.baseline.version} baseline, and no accepted_growth entry covers it",
       ]
@@ -436,6 +448,7 @@ pub fn evaluate_release_binary_size(
     growth: growth,
     accepted_reason: accepted_reason,
     failures: failures,
+    warnings: warnings,
   }
 }
 
@@ -599,6 +612,68 @@ pub fn verdict_report_lines(
     lines = lines + ["accepted_growth_reason: ${verdict.accepted_reason}"]
   }
   return lines
+}
+
+pub const RELEASE_BINARY_SIZE_REPORT_SCHEMA: string = "harn.release_binary_size_report.v1"
+
+/**
+ * The machine-readable twin of the size report.
+ *
+ * `binary-size.txt` is written for a person reading a job log. This record is
+ * written for the two cross-repo readers that must act on the exact numbers:
+ * the pre-tag gate deciding whether a commit has already been measured, and
+ * the release tail writing the observed bytes back into the baseline. Neither
+ * should parse prose, and neither should have to re-derive comparability.
+ */
+pub type ReleaseBinarySizeReport = {
+  schema: string,
+  target: string,
+  source_sha: string,
+  bytes: int,
+  fuse_bytes: int,
+  fuse: string,
+  comparability: string,
+  baseline_version: string,
+  baseline_source_sha: string,
+  baseline_bytes: int,
+  delta_bytes: int,
+  delta_percent_hundredths: int,
+  growth: string,
+  accepted_reason: string,
+  blocking: bool,
+  failures: list<string>,
+  warnings: list<string>,
+  build_identity: ReleaseBuildIdentity,
+}
+
+/** Render one verdict as the structured report cross-repo readers consume. */
+pub fn release_binary_size_report_record(
+  verdict: ReleaseBinarySizeVerdict,
+  entry: ReleaseBinarySizeTargetPolicy,
+  measurement: ReleaseBinarySizeMeasurement,
+) -> ReleaseBinarySizeReport {
+  return {
+    schema: RELEASE_BINARY_SIZE_REPORT_SCHEMA,
+    target: verdict.target,
+    source_sha: measurement.source_sha,
+    bytes: verdict.bytes,
+    fuse_bytes: verdict.fuse_bytes,
+    fuse: verdict.fuse,
+    comparability: verdict.comparability,
+    baseline_version: entry.baseline.version,
+    baseline_source_sha: entry.baseline.source_sha,
+    baseline_bytes: verdict.baseline_bytes,
+    delta_bytes: verdict.delta_bytes,
+    delta_percent_hundredths: verdict.delta_percent_hundredths,
+    growth: verdict.growth,
+    accepted_reason: verdict.accepted_reason,
+    // The one field a reader needs to answer "may this stop a release?".
+    // Derived from `failures` so it cannot drift from the verdict it reports.
+    blocking: verdict.failures.count > 0,
+    failures: verdict.failures,
+    warnings: verdict.warnings,
+    build_identity: measurement.build_identity,
+  }
 }
 
 /** The section table, rendered under the verdict when a baseline table exists. */

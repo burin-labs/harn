@@ -521,7 +521,7 @@ async fn stable_task_result_is_polled_to_completion() {
             let create = recv_recorded_request(&mut requests).await;
             assert_stable_http_request(&create, "tools/call", Some("deferred"));
             let poll = recv_recorded_request(&mut requests).await;
-            assert_stable_http_request(&poll, "tasks/get", None);
+            assert_stable_http_request(&poll, "tasks/get", Some("task-1"));
             assert_eq!(poll.body["params"]["taskId"], serde_json::json!("task-1"));
         })
         .await;

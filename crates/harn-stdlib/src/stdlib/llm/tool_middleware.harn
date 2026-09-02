@@ -304,7 +304,7 @@ pub fn tools_use_middleware(registry: dict, transform: any) {
  * a new entry whose existing tool-input schema includes the given parameter.
  * Registry entries may spell that schema `parameters`, `input_schema`, or
  * `inputSchema`; the helper preserves the existing spelling so middleware
- * cannot shadow an MCP schema with a second, incomplete schema.
+ * cannot shadow a complete schema with legacy parameter shorthand.
  * Honors both the bare `{x: "string"}` shorthand and the full JSON-schema
  * `{type: "object", properties: {...}, required: [...]}` shape.
  *
@@ -330,16 +330,16 @@ pub fn tool_inject_param(entry: dict, name: string, schema_fragment: dict, opts:
     schema_fragment
   }
   const entry_keys = entry.keys()
-  const schema_key = if contains(entry_keys, "parameters") {
-    "parameters"
-  } else if contains(entry_keys, "input_schema") {
+  const schema_key = if contains(entry_keys, "input_schema") {
     "input_schema"
   } else if contains(entry_keys, "inputSchema") {
     "inputSchema"
+  } else if contains(entry_keys, "parameters") {
+    "parameters"
   } else {
     "parameters"
   }
-  const params = entry?.[schema_key]
+  const params = entry[schema_key]
   if type_of(params) == "dict" && contains(params.keys(), "type")
     && to_string(params.type)
       == "object" {
@@ -463,15 +463,15 @@ pub fn with_required_reason(opts: any = nil) {
     return tool_inject_param(entry, field, schema_fragment, {required: schema_required})
   }
   const caller = { call, next ->
-    let raw = call.tool_args?.[field]
-    let value = if type_of(raw) == "string" {
+    const raw = call.tool_args?.[field]
+    const value = if type_of(raw) == "string" {
       trim(raw)
     } else {
       ""
     }
     if len(value) < min_length {
       if on_missing == "fill_blank" {
-        let stripped_args = if strip {
+        const stripped_args = if strip {
           let cleaned = {}
           for key in call.tool_args.keys() {
             if key != field {
@@ -482,7 +482,7 @@ pub fn with_required_reason(opts: any = nil) {
         } else {
           call.tool_args
         }
-        let result = next(call + {tool_args: stripped_args})
+        const result = next(call + {tool_args: stripped_args})
         return __tool_mw_attach_audit(
           result,
           {
@@ -503,7 +503,7 @@ pub fn with_required_reason(opts: any = nil) {
         },
       )
     }
-    let next_args = if strip {
+    const next_args = if strip {
       let cleaned = {}
       for key in call.tool_args.keys() {
         if key != field {
@@ -514,7 +514,7 @@ pub fn with_required_reason(opts: any = nil) {
     } else {
       call.tool_args
     }
-    let result = next(call + {tool_args: next_args})
+    const result = next(call + {tool_args: next_args})
     return __tool_mw_attach_audit(
       result,
       {[audit_key]: value, layers: [{name: "with_required_reason", status: "ok"}]},

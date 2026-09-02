@@ -702,14 +702,26 @@ impl AnthropicProvider {
         match &opts.output_format {
             crate::llm::api::OutputFormat::Text => {}
             crate::llm::api::OutputFormat::JsonObject => {
-                force_json_via_tool_use(
-                    &mut body,
-                    &serde_json::json!({
-                        "type": "object",
-                        "additionalProperties": true
-                    }),
-                    &opts.model,
-                );
+                let permissive = serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": true
+                });
+                // `force_json_via_tool_use` pins `tool_choice` to the synthetic
+                // `json_response` tool. On a model that removed forced tool
+                // choice (Claude Fable 5.1) that request is a hard 400, so a
+                // plain `output_format: json_object` call could never succeed.
+                // Where the route both refuses forced tool choice and speaks
+                // native structured output, take the native path; the schema
+                // sanitizer closes `additionalProperties`, which is the shape
+                // Anthropic accepts. Every route that still accepts a forced
+                // tool choice keeps the existing synthetic-tool behaviour.
+                if caps.structured_output.as_deref() == Some("native")
+                    && !forced_tool_choice_allowed(&caps)
+                {
+                    set_native_json_schema_output(&mut body, &permissive, &opts.model);
+                } else {
+                    force_json_via_tool_use(&mut body, &permissive, &opts.model);
+                }
             }
             crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
                 if caps.structured_output.as_deref() == Some("native") {
@@ -1182,6 +1194,19 @@ pub(crate) fn tool_choice_forces_tool_use(value: &serde_json::Value) -> bool {
             Some("any") | Some("tool")
         )
     })
+}
+
+/// Whether the catalog says this route accepts a FORCED tool choice —
+/// Anthropic's `{"type": "any"}` / `{"type": "tool", ...}`, spelled `required`
+/// in the shared `allowed_tool_choice_modes` vocabulary. An empty list is the
+/// catalog stating no restriction, which is the case for every Anthropic route
+/// except the ones that removed the feature.
+fn forced_tool_choice_allowed(caps: &crate::llm::capabilities::Capabilities) -> bool {
+    caps.allowed_tool_choice_modes.is_empty()
+        || caps
+            .allowed_tool_choice_modes
+            .iter()
+            .any(|mode| mode == "required")
 }
 
 fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Value, model: &str) {

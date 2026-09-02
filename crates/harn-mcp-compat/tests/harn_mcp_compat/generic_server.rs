@@ -145,7 +145,11 @@ async fn unsupported_version_request_returns_minus_32022() {
             }
         }
     });
-    let response = post_mcp(&server.base_url, &body, &[]).await;
+    let headers = vec![
+        ("mcp-protocol-version", "2099-01-01".to_string()),
+        ("mcp-method", "tools/list".to_string()),
+    ];
+    let response = post_mcp(&server.base_url, &body, &headers).await;
     let error = response.body.get("error").expect("error response");
     assert_eq!(error["code"], json!(-32022));
     let supported = error["data"]["supported"]

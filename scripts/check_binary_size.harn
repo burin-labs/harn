@@ -3,15 +3,15 @@
 // analysis.
 //
 // The distribution fuse fails closed. The growth signal is reported alongside
-// it and fails only when this build is comparable to the recorded baseline,
-// crosses both growth thresholds, and no accepted_growth entry covers it — see
-// `scripts/release_binary_size_policy.harn` for why those are different
-// questions.
+// it and never fails: it warns when this build is comparable to the recorded
+// baseline, crosses both growth thresholds, and no accepted_growth entry
+// covers it — see `scripts/release_binary_size_policy.harn` for why those are
+// different questions, and why only one of them may stop a release.
 //
 // Explicit CLI and environment overrides remain available for recovery, while
 // normal checks read the same policy file as the hosted release gate. Exit
-// codes are 2 for usage/tooling errors and 1 for a missing binary, a fuse
-// breach, or an unaccepted growth crossing.
+// codes are 2 for usage/tooling errors and 1 for a missing binary or a fuse
+// breach. A growth crossing exits 0 with a warning.
 //
 // Usage:
 //   harn run scripts/check_binary_size.harn -- [options]
@@ -475,6 +475,10 @@ pipeline main(harness: Harness) {
   harness.fs.mkdir(report_dir)
   let lines = report_lines(harn_bin, target, actual_bytes, fuse_bytes)
   let size_ok = true
+  // The structured twin of binary-size.txt. Cross-repo readers — the pre-tag
+  // gate and the release tail's baseline refresh — must not have to grep prose
+  // for the bytes they write back into the policy file.
+  let verdict_record: any = nil
   const policy_target_name = if target != "" {
     target
   } else {
@@ -502,6 +506,7 @@ pipeline main(harness: Harness) {
     // The override, when one was given, moves the fuse the verdict applies.
     const effective = entry + {distribution_fuse_bytes: fuse_bytes}
     const verdict = evaluate_release_binary_size(effective, measurement)
+    verdict_record = release_binary_size_report_record(verdict, effective, measurement)
     lines = lines + verdict_report_lines(verdict, effective, measurement)
     const before = baseline_sections(harness.fs, opts.baseline_sections)
     if before.count > 0 {
@@ -514,10 +519,20 @@ pipeline main(harness: Harness) {
       size_ok = false
       harness.stdio.eprintln("error: ${failure}")
     }
+    // Growth is reported, never blocking. `::warning::` so a hosted run
+    // surfaces it in the job annotation list without changing the step's
+    // conclusion; the same text goes to a local reader's stderr.
+    for warning in verdict.warnings {
+      harness.stdio.eprintln("::warning::${warning}")
+      harness.stdio.eprintln("warning: ${warning}")
+    }
   }
   const report = lines.join("\n") + "\n"
   harness.stdio.print(report)
   harness.fs.write_text(size_report, report)
+  if verdict_record != nil {
+    harness.fs.write_text("${report_dir}/binary-size.json", json_stringify(verdict_record) + "\n")
+  }
   if opts.emit_bloat {
     if !command_exists(harness.process, "cargo-bloat") {
       harness.stdio.eprintln("error: cargo-bloat is required to produce ${bloat_report}")

@@ -157,6 +157,25 @@ pipeline test_real_registry_highlight_source_warns(harness: Harness, task: unkno
 }
 
 @test
+pipeline test_real_registry_tool_contract_sources_route_protocol_artifacts(
+  harness: Harness,
+  task: unknown,
+) {
+  const registry = schema_expect(
+    toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
+    generated_artifacts_schema(),
+  )
+  const owned_sources = [
+    "crates/harn-vm/src/mcp_tasks.rs",
+    "crates/harn-vm/src/tool_annotations.rs",
+  ]
+  for source in owned_sources {
+    const ids = drift_warnings(registry.artifact ?? [], [source]).map({ warning -> warning.id })
+    assert_eq(ids.contains("protocol-artifacts"), true)
+  }
+}
+
+@test
 pipeline test_real_registry_model_catalog_source_routes_every_projection(
   harness: Harness,
   task: unknown,

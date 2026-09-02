@@ -85,6 +85,20 @@ case "$phase" in
     exit 2
     ;;
 esac
+
+gate_temp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-audit-gates.XXXXXX")"
+export PYTHONPYCACHEPREFIX="$gate_temp_root/python-pyc"
+audit_log=""
+performance_log=""
+conformance_log=""
+cleanup_files() {
+  [ -z "$audit_log" ] || rm -f "$audit_log"
+  [ -z "$performance_log" ] || rm -f "$performance_log"
+  [ -z "$conformance_log" ] || rm -f "$conformance_log"
+  rm -rf "$gate_temp_root"
+}
+trap cleanup_files EXIT
+
 harn_source_gate_begin "$gate_receipt" "${HARN_EXT_GATE_PR_NUMBER:-}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -224,11 +238,6 @@ audit_log="$(mktemp)"
 performance_log="$(mktemp)"
 conformance_log="$(mktemp)"
 child_pids=()
-cleanup_files() {
-  rm -f "$audit_log"
-  rm -f "$performance_log"
-  rm -f "$conformance_log"
-}
 terminate_children() {
   local status="$1"
   local pid
@@ -252,7 +261,6 @@ forget_child() {
     fi
   done
 }
-trap cleanup_files EXIT
 trap 'terminate_children 129' HUP
 trap 'terminate_children 130' INT
 trap 'terminate_children 143' TERM

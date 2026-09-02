@@ -223,6 +223,9 @@ impl A2aServer {
             {
                 self.auth_required_task(&task.id, &message);
             }
+            Err(DispatchError::Application(error)) => {
+                self.fail_application_task(&task.id, &error);
+            }
             Err(error) => self.fail_task(&task.id, &error.to_string()),
         }
     }
@@ -310,6 +313,39 @@ impl A2aServer {
 
     pub(super) fn fail_task(&self, task_id: &str, message: &str) {
         self.terminate_task(task_id, TaskStatus::Failed, message);
+    }
+
+    pub(super) fn fail_application_task(
+        &self,
+        task_id: &str,
+        error: &harn_vm::tool_registry::ToolApplicationError,
+    ) {
+        let message = format!("tool {:?} failed: {}", error.tool, error.summary());
+        let application_error = error.to_json();
+        let event = json!({
+            "type": "status",
+            "taskId": task_id,
+            "status": {"state": TaskStatus::Failed.as_str()},
+            "error": message,
+            "metadata": {"harn": {"applicationError": application_error}},
+        });
+        let task_for_push = {
+            let mut tasks = self.tasks.lock().expect("tasks poisoned");
+            let Some(task) = tasks.get_mut(task_id) else {
+                return;
+            };
+            task.status = TaskStatus::Failed;
+            task.history.push(TaskMessage {
+                id: Uuid::now_v7().to_string(),
+                role: "agent".to_string(),
+                parts: vec![json!({"type": "text", "text": message})],
+            });
+            merge_harn_metadata(task, &json!({"applicationError": application_error}));
+            publish_locked(task, event);
+            task.cancel_token = None;
+            task_to_json(task)
+        };
+        self.deliver_push(task_for_push);
     }
 
     /// Terminal — the dispatch core's `AuthPolicy` synchronously denied

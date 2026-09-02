@@ -271,6 +271,18 @@ fn add_file_with_kind(
 fn add_tree(paths: &mut BTreeMap<PathBuf, ContentKind>, path: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect manifest input {}: {error}", path.display()))?;
+    if path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| {
+            crate::path_policy::is_harn_internal_entry(
+                name,
+                crate::path_policy::PathEntryKind::from_is_directory(metadata.file_type().is_dir()),
+            )
+        })
+    {
+        return Ok(());
+    }
     insert_path(paths, path.to_path_buf(), ContentKind::Exact)?;
     if !metadata.file_type().is_dir() {
         return Ok(());
@@ -593,6 +605,24 @@ fn write_projection_field(projection: &mut Vec<u8>, value: &str) {
 }
 
 fn directory_inventory_identity(path: &Path) -> Result<blake3::Hash, String> {
+    // A Git-owned file may deliberately live beneath `.harn` (for example a
+    // conformance fixture). `add_git_path` records that file and each ancestor
+    // exactly, but the internal directory's other children remain runtime
+    // state. Bind the directory's existence/type here and let the separately
+    // recorded Git paths own source bytes; otherwise creating `memory/` after
+    // a build makes an unchanged binary appear stale.
+    if path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| {
+            crate::path_policy::is_harn_internal_entry(
+                name,
+                crate::path_policy::PathEntryKind::Directory,
+            )
+        })
+    {
+        return Ok(blake3::hash(b"harn-internal-directory-inventory-v1\0"));
+    }
     let mut children = fs::read_dir(path)
         .map_err(|error| {
             format!(
@@ -1190,8 +1220,14 @@ mod tests {
         let root = &temp.path().join("repo");
         fs::create_dir(root).unwrap();
         let input = root.join("input.harn");
+        let tracked_internal = root.join(".harn/store.json");
+        fs::create_dir(root.join(".harn")).unwrap();
         fs::write(&input, b"source").unwrap();
-        let covered = BTreeSet::from([PathBuf::from("input.harn")]);
+        fs::write(&tracked_internal, b"tracked").unwrap();
+        let covered = BTreeSet::from([
+            PathBuf::from("input.harn"),
+            PathBuf::from(".harn/store.json"),
+        ]);
         let dep_info = temp.path().join("harn.d");
         fs::write(&dep_info, b"target:\n").unwrap();
         let authorities = temp.path().join("authorities");
@@ -1199,13 +1235,57 @@ mod tests {
         let manifest = temp.path().join("manifest");
         write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
 
-        for name in [".harn", ".harn-runs", ".harn-toolchain-cache"] {
+        let memory = root.join(".harn/memory");
+        fs::create_dir(&memory).unwrap();
+        fs::write(memory.join("runtime-artifact"), b"mutable").unwrap();
+        for name in [".harn-runs", ".harn-toolchain-cache"] {
             let internal = root.join(name);
             fs::create_dir(&internal).unwrap();
             fs::write(internal.join("runtime-artifact"), b"mutable").unwrap();
         }
 
         assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
+
+        fs::write(&tracked_internal, b"changed").unwrap();
+        assert!(verify_manifest(&manifest)
+            .unwrap_err()
+            .contains("content changed"));
+    }
+
+    #[test]
+    fn dependency_tree_harn_internal_churn_is_not_source_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("repo");
+        fs::create_dir(&root).unwrap();
+        let dependency = temp.path().join("dependency");
+        let internal = dependency.join(".harn/memory");
+        fs::create_dir_all(&internal).unwrap();
+        let source = dependency.join("source.harn");
+        let runtime_state = internal.join("events.jsonl");
+        fs::write(&source, b"source").unwrap();
+        fs::write(&runtime_state, b"before").unwrap();
+        let dep_info = temp.path().join("harn.d");
+        fs::write(&dep_info, b"target:\n").unwrap();
+        let authorities = temp.path().join("authorities");
+        fs::write(&authorities, []).unwrap();
+        let manifest = temp.path().join("manifest");
+        write_manifest(
+            &manifest,
+            &root,
+            &BTreeSet::new(),
+            &dep_info,
+            &[(dependency, false)],
+            &authorities,
+        )
+        .unwrap();
+
+        fs::write(&runtime_state, b"after!").unwrap();
+        assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
+
+        fs::write(&source, b"changed").unwrap();
+        assert!(verify_manifest(&manifest)
+            .unwrap_err()
+            .contains("content changed"));
     }
 
     #[test]

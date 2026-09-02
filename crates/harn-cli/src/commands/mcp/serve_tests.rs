@@ -398,6 +398,28 @@ async fn inline_tool_completes_when_client_supports_tasks() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn stable_task_method_requires_the_tasks_extension() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+
+    let response = service
+        .handle_request(
+            &mut session,
+            stable_request(100, "tasks/get", json!({"taskId": "missing"})),
+        )
+        .await;
+    assert_eq!(response["error"]["code"], json!(-32021));
+    assert_eq!(
+        response["error"]["data"]["requiredCapabilities"]["extensions"]
+            [mcp_protocol::TASKS_EXTENSION_ID],
+        json!({})
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
@@ -431,7 +453,10 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
     assert_eq!(created["result"]["ttlMs"], json!(DEFAULT_TASK_TTL_MS));
     let task_id = created["result"]["taskId"].as_str().unwrap();
 
-    let notify = service.tasks.notifier(task_id).expect("created task");
+    let notify = service
+        .tasks
+        .notifier(&harn_vm::mcp_tasks::McpTaskAccess::unscoped(), task_id)
+        .expect("created task");
     let task = loop {
         let notified = notify.notified();
         tokio::pin!(notified);
@@ -439,7 +464,7 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
         let task = service
             .handle_request(
                 &mut session,
-                stable_request(102, "tasks/get", json!({ "taskId": task_id })),
+                task_client_request(102, "tasks/get", json!({ "taskId": task_id })),
             )
             .await;
         if task["result"]["status"] == json!("completed") {
@@ -918,6 +943,14 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                 .uri("/mcp")
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
+                .header(
+                    mcp_protocol::MCP_HEADER_PROTOCOL_VERSION,
+                    mcp_protocol::PROTOCOL_VERSION,
+                )
+                .header(
+                    mcp_protocol::MCP_HEADER_METHOD,
+                    mcp_protocol::METHOD_SERVER_DISCOVER,
+                )
                 .header(AUTHORIZATION, "Bearer valid-token")
                 .body(discover_body)
                 .unwrap(),
@@ -935,6 +968,14 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                     .uri("/mcp")
                     .header("accept", "application/json")
                     .header("content-type", "application/json")
+                    .header(
+                        mcp_protocol::MCP_HEADER_PROTOCOL_VERSION,
+                        mcp_protocol::PROTOCOL_VERSION,
+                    )
+                    .header(
+                        mcp_protocol::MCP_HEADER_METHOD,
+                        mcp_protocol::METHOD_SERVER_DISCOVER,
+                    )
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::from(
                         stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({}))
@@ -960,6 +1001,14 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                 .uri("/mcp")
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
+                .header(
+                    mcp_protocol::MCP_HEADER_PROTOCOL_VERSION,
+                    mcp_protocol::PROTOCOL_VERSION,
+                )
+                .header(
+                    mcp_protocol::MCP_HEADER_METHOD,
+                    mcp_protocol::METHOD_SERVER_DISCOVER,
+                )
                 .header(AUTHORIZATION, "Bearer missing-scope")
                 .body(Body::from(
                     stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({})).to_string(),
@@ -1004,6 +1053,14 @@ fn stable_request(id: i64, method: &str, params: JsonValue) -> JsonValue {
         "method": method,
         "params": params,
     })
+}
+
+fn task_client_request(id: i64, method: &str, params: JsonValue) -> JsonValue {
+    let mut request = stable_request(id, method, params);
+    request["params"]["_meta"][mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES] = json!({
+        "extensions": {mcp_protocol::TASKS_EXTENSION_ID: {}}
+    });
+    request
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1260,7 +1317,7 @@ async fn http_stable_request_rejects_method_header_mismatch() {
     let status = response.status();
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: JsonValue = serde_json::from_slice(&body).unwrap();
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], json!(-32020));
     assert_eq!(body["error"]["data"]["headerValue"], "tools/list");
     assert_eq!(body["error"]["data"]["bodyMethod"], "tools/call");
