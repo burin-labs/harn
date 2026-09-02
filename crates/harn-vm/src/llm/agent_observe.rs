@@ -123,6 +123,7 @@ use transcript_ambient::{
 pub(crate) use transcript_ambient::{
     current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
     remove_llm_transcript_dir, swap_llm_transcript_ambient, LlmTranscriptAmbient,
+    TranscriptDirFrame,
 };
 
 fn next_call_id() -> String {
@@ -275,7 +276,9 @@ use retry_request::{
     escalate_options_output_budget,
 };
 use transcript_observability::*;
-pub(crate) use transcript_observability::{append_llm_observability_entry, record_template_render};
+pub(crate) use transcript_observability::{
+    append_llm_observability_entry, append_llm_observability_entry_to_dir, record_template_render,
+};
 /// Extract retry-after delay from an error message if present.
 ///
 /// Supports both forms defined by RFC 7231 §7.1.3:

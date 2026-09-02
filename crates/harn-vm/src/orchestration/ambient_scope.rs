@@ -96,7 +96,7 @@ pub(crate) struct AmbientExecutionScope {
     /// Active agent-session breadcrumb. It starts empty for a spawned worker
     /// (never inherited from the parent), then the child's own
     /// `begin_agent_session` push is saved/restored across awaits.
-    session_stack: Vec<String>,
+    session_stack: Vec<crate::agent_sessions::CurrentSessionFrame>,
     /// The thread execution context (cwd/env/source-dir + capability path-scope
     /// root). Not a LIFO stack — a single `Option` the worker sets at startup and
     /// holds across the whole agent loop's awaits, so it cross-wires fan-out

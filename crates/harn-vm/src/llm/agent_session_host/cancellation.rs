@@ -45,13 +45,15 @@ pub(super) fn finish_agent_session(
 /// boundary but whose id has not yet been returned to Harn.
 pub(super) struct AgentSessionInitRollback {
     session_id: String,
+    owns_session: bool,
     armed: bool,
 }
 
 impl AgentSessionInitRollback {
-    pub(super) fn new(session_id: String) -> Self {
+    pub(super) fn new(session_id: String, owns_session: bool) -> Self {
         Self {
             session_id,
+            owns_session,
             armed: true,
         }
     }
@@ -83,13 +85,15 @@ impl AgentSessionInitRollback {
         self.armed = false;
         let removed = super::AGENT_HOST_SESSIONS
             .with(|sessions| sessions.borrow_mut().remove(&self.session_id));
-        crate::agent_sessions::remove_current_session(&self.session_id);
         crate::llm::permissions::clear_session_grants(&self.session_id);
         crate::orchestration::clear_approval_policy_repeat_counts(&self.session_id);
 
         if let Some(mut session) = removed {
-            if let Some(dir) = session.transcript_dir.as_deref() {
-                crate::llm::agent_observe::remove_llm_transcript_dir(dir);
+            if let Some(frame) = session.current_session_frame.take() {
+                crate::agent_sessions::remove_current_session(frame);
+            }
+            if let Some(frame) = session.transcript_dir_frame.take() {
+                crate::llm::agent_observe::remove_llm_transcript_dir(frame);
             }
             if finish_nested_policy {
                 finish_agent_session(&mut session, &self.session_id, true);
@@ -98,7 +102,10 @@ impl AgentSessionInitRollback {
                 crate::llm::agent_runtime::fire_session_close_hooks(&self.session_id);
             }
         }
-        crate::agent_sessions::close(&self.session_id);
+        crate::agent_sessions::clear_journal(&self.session_id);
+        if self.owns_session {
+            crate::agent_sessions::close(&self.session_id);
+        }
     }
 }
 
@@ -120,7 +127,20 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
     // Do not discard pending transcript mutations. On failure, retain both
     // owners so a later daemon_stop call can retry the durable flush.
     crate::agent_session_journal::flush(session_id).await?;
-    super::AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().remove(session_id));
+    let removed =
+        super::AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().remove(session_id));
+    if let Some(mut session) = removed {
+        if let Some(frame) = session.current_session_frame.take() {
+            crate::agent_sessions::remove_current_session(frame);
+        }
+        if let Some(frame) = session.transcript_dir_frame.take() {
+            crate::llm::agent_observe::remove_llm_transcript_dir(frame);
+        }
+        // The embedding scope has already been restored after cancellation;
+        // dropping the host session intentionally disarms, rather than pops,
+        // its nested-policy guard.
+        drop(session);
+    }
     crate::agent_sessions::clear_journal(session_id);
     crate::llm::permissions::clear_session_grants(session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(session_id);

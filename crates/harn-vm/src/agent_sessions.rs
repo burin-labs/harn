@@ -352,8 +352,22 @@ impl Default for AgentSessionRuntime {
 thread_local! {
     static ACTIVE_SESSION_RUNTIME: RefCell<Arc<AgentSessionRuntime>> =
         RefCell::new(fresh_session_runtime());
-    static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static CURRENT_SESSION_STACK: RefCell<Vec<CurrentSessionFrame>> = const { RefCell::new(Vec::new()) };
     static CURRENT_TOOL_CALL_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+static NEXT_CURRENT_SESSION_FRAME_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+/// Opaque ownership receipt for one ambient current-session push.
+///
+/// Session ids are deliberately reusable by nested and resumed loops. Cleanup
+/// therefore consumes this unique frame receipt rather than searching by the
+/// duplicate-capable public id and accidentally removing a sibling owner.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CurrentSessionFrame {
+    frame_id: u64,
+    session_id: String,
 }
 
 pub(crate) fn fresh_session_runtime() -> Arc<AgentSessionRuntime> {
@@ -425,13 +439,13 @@ tokio::task_local! {
     static CURRENT_TOOL_CALL_TASK: String;
 }
 pub struct CurrentSessionGuard {
-    active: bool,
+    frame: Option<CurrentSessionFrame>,
 }
 
 impl Drop for CurrentSessionGuard {
     fn drop(&mut self) {
-        if self.active {
-            pop_current_session();
+        if let Some(frame) = self.frame.take() {
+            remove_current_session(frame);
         }
     }
 }
@@ -512,7 +526,7 @@ pub fn reset_session_store() {
     let mut owned_session_ids: HashSet<String> =
         SESSIONS.with(|s| s.borrow_mut().drain().map(|(id, _)| id).collect());
     CURRENT_SESSION_STACK.with(|stack| {
-        owned_session_ids.extend(stack.borrow_mut().drain(..));
+        owned_session_ids.extend(stack.borrow_mut().drain(..).map(|frame| frame.session_id));
     });
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
     for session_id in owned_session_ids {
@@ -525,14 +539,21 @@ pub fn reset_session_store() {
     reset_default_transcript_budget_policy();
 }
 
-pub(crate) fn push_current_session(id: String) {
+pub(crate) fn push_current_session(id: String) -> Option<CurrentSessionFrame> {
     if id.is_empty() {
-        return;
+        return None;
     }
-    CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().push(id));
+    let frame = CurrentSessionFrame {
+        frame_id: NEXT_CURRENT_SESSION_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        session_id: id,
+    };
+    CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().push(frame.clone()));
+    Some(frame)
 }
 
-pub(crate) fn swap_current_session_stack(replacement: Vec<String>) -> Vec<String> {
+pub(crate) fn swap_current_session_stack(
+    replacement: Vec<CurrentSessionFrame>,
+) -> Vec<CurrentSessionFrame> {
     CURRENT_SESSION_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), replacement))
 }
 
@@ -548,10 +569,13 @@ pub(crate) fn pop_current_session() {
 /// on the same worker thread. A blind stack pop can then remove the wrong
 /// owner. Exact removal makes rollback and finalization idempotent and preserves
 /// unrelated ambient state.
-pub(crate) fn remove_current_session(id: &str) -> bool {
+pub(crate) fn remove_current_session(frame: CurrentSessionFrame) -> bool {
     CURRENT_SESSION_STACK.with(|stack| {
         let mut stack = stack.borrow_mut();
-        let Some(index) = stack.iter().rposition(|candidate| candidate == id) else {
+        let Some(index) = stack
+            .iter()
+            .position(|candidate| candidate.frame_id == frame.frame_id)
+        else {
             return false;
         };
         stack.remove(index);
@@ -560,7 +584,7 @@ pub(crate) fn remove_current_session(id: &str) -> bool {
 }
 
 pub fn current_session_id() -> Option<String> {
-    CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
+    CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().map(|frame| frame.session_id.clone()))
 }
 
 pub fn current_actor_chain() -> Option<ActorChain> {
@@ -570,10 +594,11 @@ pub fn current_actor_chain() -> Option<ActorChain> {
 pub fn enter_current_session(id: impl Into<String>) -> CurrentSessionGuard {
     let id = id.into();
     if id.trim().is_empty() {
-        return CurrentSessionGuard { active: false };
+        return CurrentSessionGuard { frame: None };
     }
-    push_current_session(id);
-    CurrentSessionGuard { active: true }
+    CurrentSessionGuard {
+        frame: push_current_session(id),
+    }
 }
 
 pub fn actor_chain(id: &str) -> Option<ActorChain> {

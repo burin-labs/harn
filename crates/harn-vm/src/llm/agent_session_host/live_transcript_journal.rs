@@ -11,6 +11,48 @@ pub(super) struct InitializedSession {
     pub(super) session_id: String,
     pub(super) run_id: String,
     pub(super) has_canonical_history: bool,
+    /// True when this initialization created the VM session rather than
+    /// borrowing an already-live caller session with the same public id.
+    pub(super) owns_session: bool,
+}
+
+/// Synchronous cancellation fallback for the await between journal install
+/// and returning the acquisition receipt to the outer lifecycle owner.
+struct JournalInitializationRollback {
+    session_id: String,
+    owns_session: bool,
+    armed: bool,
+}
+
+impl JournalInitializationRollback {
+    fn new(session_id: String, owns_session: bool) -> Self {
+        Self {
+            session_id,
+            owns_session,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    fn rollback(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.armed = false;
+        crate::agent_sessions::clear_journal(&self.session_id);
+        if self.owns_session {
+            crate::agent_sessions::close(&self.session_id);
+        }
+    }
+}
+
+impl Drop for JournalInitializationRollback {
+    fn drop(&mut self) {
+        self.rollback();
+    }
 }
 
 /// Configure canonical persistence before hooks run. A cold session with
@@ -55,15 +97,16 @@ pub(super) async fn initialize(
     } else {
         crate::agent_sessions::open_or_create(Some(session_id.to_string()))
     };
+    let owns_session = !has_live_session;
+    let mut rollback = JournalInitializationRollback::new(session_id.clone(), owns_session);
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
-    if let Err(error) = stamp_run_started(&session_id).await {
-        crate::agent_sessions::clear_journal(&session_id);
-        return Err(error);
-    }
+    stamp_run_started(&session_id).await?;
+    rollback.disarm();
     Ok(InitializedSession {
         session_id,
         run_id,
         has_canonical_history,
+        owns_session,
     })
 }
 

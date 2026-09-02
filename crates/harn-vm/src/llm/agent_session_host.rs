@@ -134,6 +134,8 @@ struct AgentHostSession {
     /// switches, and runtime channel degradation turn by turn.
     last_tool_format: Option<String>,
     transcript_dir: Option<String>,
+    transcript_dir_frame: Option<crate::llm::agent_observe::TranscriptDirFrame>,
+    current_session_frame: Option<crate::agent_sessions::CurrentSessionFrame>,
     started_at: String,
     /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
     /// here so finalize can disambiguate `final_status == "budget_exhausted"`
@@ -277,6 +279,8 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         last_model: Some(model.to_string()),
         last_tool_format: None,
         transcript_dir: None,
+        transcript_dir_frame: None,
+        current_session_frame: None,
         started_at: now_id(),
         max_iterations: 0,
         daemon_state: None,

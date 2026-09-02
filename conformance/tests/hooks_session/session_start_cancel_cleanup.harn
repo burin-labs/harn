@@ -5,7 +5,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 /** Cancelling a pending SessionStart hook rolls back every host owner. */
 pipeline default(harness: Harness) {
-  const cancelled_session = "session-start-cancel-cleanup"
+  const unique = harness.random.uuid()
+  const cancelled_session = "session-start-cancel-cleanup-" + unique
+  const transcript_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "session-start-cancel-cleanup-" + unique,
+  )
   const entered = harness.runtime.channel("session-start-entered", 1)
   const release = harness.runtime.channel("session-start-release", 1)
   harness.agent.clear_session_hooks()
@@ -20,7 +25,7 @@ pipeline default(harness: Harness) {
   const cancelled_options: AgentSpec = {
     provider: "mock",
     session_id: cancelled_session,
-    llm_transcript_dir: "/tmp/harn-session-start-cancel-cleanup",
+    llm_transcript_dir: transcript_dir,
   }
   const handle = spawn {
     agent_loop(harness, "cancel during registered session setup", nil, cancelled_options)
@@ -41,10 +46,19 @@ pipeline default(harness: Harness) {
     harness.llm,
     [llm_text("healthy")],
     { ->
-      const healthy_options: AgentSpec = {provider: "mock"}
+      const healthy_options: AgentSpec = {
+        provider: "mock",
+        session_id: cancelled_session,
+        llm_transcript_dir: transcript_dir,
+      }
       const result = agent_loop(harness, "run after cancelled setup", nil, healthy_options)
       harness.stdio.println(result.status)
       harness.stdio.println(harness.agent.current_id() == nil)
+      const transcript_path = path_join(transcript_dir, "llm_transcript.jsonl")
+      harness.stdio.println(harness.fs.exists(transcript_path))
+      harness.stdio.println(
+        harness.fs.read_text(transcript_path).contains("agent_session_finalized"),
+      )
     },
   )
 }

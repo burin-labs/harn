@@ -1506,14 +1506,14 @@ async fn current_tool_call_scope_is_task_local() {
 #[test]
 fn exact_session_removal_preserves_newer_ambient_owner() {
     reset_session_store();
-    push_current_session("outer".to_string());
-    push_current_session("inner".to_string());
+    let outer = push_current_session("shared".to_string()).expect("outer frame");
+    let inner = push_current_session("shared".to_string()).expect("inner frame");
 
-    assert!(remove_current_session("outer"));
-    assert_eq!(current_session_id().as_deref(), Some("inner"));
-    assert!(!remove_current_session("missing"));
-    assert_eq!(current_session_id().as_deref(), Some("inner"));
-    assert!(remove_current_session("inner"));
+    assert!(remove_current_session(outer.clone()));
+    assert_eq!(current_session_id().as_deref(), Some("shared"));
+    assert!(!remove_current_session(outer));
+    assert_eq!(current_session_id().as_deref(), Some("shared"));
+    assert!(remove_current_session(inner));
     assert_eq!(current_session_id(), None);
 }
 

@@ -112,7 +112,10 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     insert_missing(object, "visible_text", serde_json::json!(""));
     insert_missing(object, "private_reasoning", serde_json::Value::Null);
     insert_missing(object, "thinking_summary", serde_json::Value::Null);
-    insert_missing(object, "transcript", transcript);
+    // Admission terminals are flushed before this canonical projection. The
+    // durable owner therefore replaces any pre-flush snapshot embedded by a
+    // denial helper instead of preserving stale transcript contents.
+    object.insert("transcript".to_string(), transcript);
     insert_missing(
         object,
         "recap",

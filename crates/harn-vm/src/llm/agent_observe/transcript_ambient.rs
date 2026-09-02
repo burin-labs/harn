@@ -16,7 +16,17 @@ thread_local! {
     /// Content-addressed provider-visible messages already defined in the
     /// active transcript. Request receipts carry these ids in served order.
     static EMITTED_SERVED_MESSAGE_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
-    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static TRANSCRIPT_DIR_STACK: RefCell<Vec<TranscriptDirFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+static NEXT_TRANSCRIPT_DIR_FRAME_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+/// Opaque ownership receipt for one ambient transcript-directory push.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TranscriptDirFrame {
+    frame_id: u64,
+    dir: String,
 }
 
 /// Per-agent transcript routing and deduplication state. It is swapped with
@@ -29,7 +39,7 @@ pub(crate) struct LlmTranscriptAmbient {
     tool_schemas_hash: Option<u64>,
     capability_snapshot_ids: BTreeSet<String>,
     served_message_ids: BTreeSet<String>,
-    transcript_dirs: Vec<String>,
+    transcript_dirs: Vec<TranscriptDirFrame>,
 }
 
 pub(crate) fn swap_llm_transcript_ambient(
@@ -130,12 +140,17 @@ fn hash_changed(slot: &'static std::thread::LocalKey<RefCell<Option<u64>>>, curr
     })
 }
 
-pub(crate) fn push_llm_transcript_dir(dir: &str) {
+pub(crate) fn push_llm_transcript_dir(dir: &str) -> Option<TranscriptDirFrame> {
     if dir.trim().is_empty() {
-        return;
+        return None;
     }
-    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir.to_string()));
+    let frame = TranscriptDirFrame {
+        frame_id: NEXT_TRANSCRIPT_DIR_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        dir: dir.to_string(),
+    };
+    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(frame.clone()));
     reset_deduplication();
+    Some(frame)
 }
 
 pub(crate) fn pop_llm_transcript_dir() {
@@ -145,10 +160,13 @@ pub(crate) fn pop_llm_transcript_dir() {
     reset_deduplication();
 }
 
-pub(crate) fn remove_llm_transcript_dir(dir: &str) -> bool {
+pub(crate) fn remove_llm_transcript_dir(frame: TranscriptDirFrame) -> bool {
     let removed = TRANSCRIPT_DIR_STACK.with(|stack| {
         let mut stack = stack.borrow_mut();
-        let Some(index) = stack.iter().rposition(|candidate| candidate == dir) else {
+        let Some(index) = stack
+            .iter()
+            .position(|candidate| candidate.frame_id == frame.frame_id)
+        else {
             return false;
         };
         stack.remove(index);
@@ -161,7 +179,8 @@ pub(crate) fn remove_llm_transcript_dir(dir: &str) -> bool {
 }
 
 pub(crate) fn current_transcript_dir() -> Option<String> {
-    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
+    let stacked =
+        TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().map(|frame| frame.dir.clone()));
     stacked.or_else(|| {
         std::env::var("HARN_LLM_TRANSCRIPT_DIR")
             .ok()
@@ -213,16 +232,16 @@ mod tests {
     #[test]
     fn exact_transcript_removal_preserves_newer_ambient_owner() {
         let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
-        push_llm_transcript_dir("/tmp/harn-transcript-outer");
-        push_llm_transcript_dir("/tmp/harn-transcript-inner");
+        let outer = push_llm_transcript_dir("/tmp/harn-transcript-shared").expect("outer frame");
+        let inner = push_llm_transcript_dir("/tmp/harn-transcript-shared").expect("inner frame");
 
-        assert!(remove_llm_transcript_dir("/tmp/harn-transcript-outer"));
+        assert!(remove_llm_transcript_dir(outer.clone()));
         assert_eq!(
             current_transcript_dir().as_deref(),
-            Some("/tmp/harn-transcript-inner")
+            Some("/tmp/harn-transcript-shared")
         );
-        assert!(!remove_llm_transcript_dir("/tmp/harn-transcript-missing"));
-        assert!(remove_llm_transcript_dir("/tmp/harn-transcript-inner"));
+        assert!(!remove_llm_transcript_dir(outer));
+        assert!(remove_llm_transcript_dir(inner));
         assert_eq!(current_transcript_dir(), None);
 
         let _ = swap_llm_transcript_ambient(saved);
