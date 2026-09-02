@@ -1,0 +1,221 @@
+// std/agent/obligations — the one derivation of what a run is currently
+// obligated to deliver.
+//
+// A run's completion target is the task it started with, amended by every
+// mid-run user directive the model actually saw. Exit authorities (the
+// completion judge, the `verify_completion` closure, the completion gate) must
+// all read the SAME amended target, or an accepted steer becomes invisible to
+// the authority that decides whether the run may stop: the judge then vetoes a
+// stop the user themselves authorized, and orders work the user withdrew.
+//
+// Derived once, at the judge payload seam, and carried on the evidence
+// snapshot. No consumer re-derives it from raw transcript history.
+import { agent_session_messages } from "std/agent/state"
+
+/**
+ * One accepted mid-run user directive, with the delivery mode that proves the
+ * model saw it before the run reached this decision point.
+ */
+pub type CompletionSteer = {message_id: string, mode: string, content: string}
+
+/**
+ * The completion target a run is currently held to.
+ *
+ * `original_task` is the task the session opened with. `steers` are the
+ * accepted mid-run user directives, oldest first. Later entries supersede
+ * conflicting earlier ones — including requirements frozen at loop start.
+ */
+pub type CompletionObligations = {
+  schema?: "harn.completion_obligations.v1",
+  original_task: string,
+  steers: list<CompletionSteer>,
+}
+
+// `audit_only` messages drain at `loop_exit`, after the last model call. The
+// model never saw them, so they cannot have changed what it was asked to do.
+const __OBLIGATION_DELIVERED_MODES = ["finish_step", "interrupt_immediate"]
+
+// A steer rides in an exit authority's prompt, so it is bounded like every other
+// evidence field. Clipping keeps the head and tail: a steer's operative clause
+// is usually its first or its last sentence.
+const __OBLIGATION_STEER_CHAR_LIMIT: int = 1200
+
+// Rendered newest-last. Older steers are summarized as a count rather than
+// silently dropped, so a truncated block cannot read as a complete one.
+const __OBLIGATION_STEER_RENDER_LIMIT: int = 12
+
+fn __obligation_text(value: unknown) -> string {
+  // Injected transcript content is a JSON value: a plain string from the
+  // in-VM push, but possibly a structured content block from an ACP host.
+  if type_of(value) == "string" {
+    return trim(value)
+  }
+  if value == nil {
+    return ""
+  }
+  return trim(json_stringify(value))
+}
+
+fn __obligation_clip(value: string) -> string {
+  if len(value) <= __OBLIGATION_STEER_CHAR_LIMIT {
+    return value
+  }
+  const tail_chars = __OBLIGATION_STEER_CHAR_LIMIT / 3
+  const head_chars = __OBLIGATION_STEER_CHAR_LIMIT - tail_chars
+  return substring(value, 0, head_chars)
+    + "\n…["
+    + to_string(len(value) - __OBLIGATION_STEER_CHAR_LIMIT)
+    + " chars elided — middle of steer]…\n"
+    + substring(value, len(value) - tail_chars, len(value))
+}
+
+fn __obligation_steer(message: unknown) -> CompletionSteer? {
+  if (message?.role ?? "") != "user" {
+    return nil
+  }
+  const mode = to_string(message?.injectedMode ?? "")
+  if !contains(__OBLIGATION_DELIVERED_MODES, mode) {
+    return nil
+  }
+  const content = __obligation_clip(__obligation_text(message?.content))
+  if content == "" {
+    return nil
+  }
+  return {message_id: to_string(message?.messageId ?? ""), mode: mode, content: content}
+}
+
+/**
+ * completion_obligations_from_messages.
+ *
+ * Derive the run's current completion target from a transcript already in hand.
+ *
+ * A steer is identified structurally, by the typed `injectedMode` the host
+ * bridge stamps on a delivered user message — not by transcript position and
+ * not by matching prose. A session with no accepted steer yields an empty
+ * `steers` list, and every consumer then behaves exactly as it did before this
+ * seam existed.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_obligations_from_messages([], "ship the fix")
+ */
+pub fn completion_obligations_from_messages(
+  messages: any,
+  original_task: string,
+) -> CompletionObligations {
+  let steers: list<CompletionSteer> = []
+  for message in messages ?? [] {
+    const steer = __obligation_steer(message)
+    if steer != nil {
+      steers = steers.appending(steer)
+    }
+  }
+  return {schema: "harn.completion_obligations.v1", original_task: original_task, steers: steers}
+}
+
+/**
+ * agent_completion_obligations.
+ *
+ * Read a live session's transcript and derive its current completion target.
+ * Convenience over `completion_obligations_from_messages` for a caller that
+ * does not already hold the messages; the judge payload seam holds them and
+ * uses the pure form so a run reads its transcript once.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_obligations(harness.agent, session_id, "ship the fix")
+ */
+pub fn agent_completion_obligations(
+  agent: HarnessAgent,
+  session_id: any,
+  original_task: string,
+) -> CompletionObligations {
+  const messages = try {
+    agent_session_messages(agent, session_id)
+  } catch (e) {
+    []
+  }
+  return completion_obligations_from_messages(messages, original_task)
+}
+
+/**
+ * completion_obligations_prompt.
+ *
+ * Render the accepted steering block for an exit authority's prompt, with the
+ * authority framing that makes it decisive rather than conversational.
+ *
+ * Returns `""` when no steer was accepted, so a steer-free run's prompt is
+ * byte-identical to the pre-obligations prompt. That keeps the judge's stable
+ * prefix cacheable across an unsteered run and makes "no steer changes
+ * nothing" structurally true instead of merely tested.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_obligations_prompt({original_task: "x", steers: []})
+ */
+pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> string {
+  const steers = obligations?.steers ?? []
+  if len(steers) == 0 {
+    return ""
+  }
+  const total = len(steers)
+  const omitted = if total > __OBLIGATION_STEER_RENDER_LIMIT {
+    total - __OBLIGATION_STEER_RENDER_LIMIT
+  } else {
+    0
+  }
+  const rendered = if omitted == 0 {
+    steers
+  } else {
+    steers.slice(omitted, total)
+  }
+  let lines: list<string> = []
+  let index = omitted + 1
+  for steer in rendered {
+    lines = lines.appending(to_string(index) + ". " + steer.content)
+    index = index + 1
+  }
+  const omission_note = if omitted == 0 {
+    ""
+  } else {
+    "(" + to_string(omitted) + " earlier steering messages omitted; the most recent are shown)\n"
+  }
+  return "\n\nAccepted user steering, in order (the user sent these AFTER the completion goal"
+    + " above, and the agent received them mid-run):\n"
+    + omission_note
+    + join(lines, "\n")
+    + "\n\nLater user steering supersedes any conflicting earlier requirement, including the"
+    + " completion goal, the rubric, and any requirement row listed above. A steer that narrows,"
+    + " redirects, or cancels work makes the narrowed outcome the completion target: the withdrawn"
+    + " work is no longer owed, and reverting or not doing it is compliance, not a gap. If the"
+    + " latest steering asked the agent to report a finding and stop, a report that answers it is"
+    + " a complete run. When a steer states its own completion condition, that condition IS the"
+    + " completion test — apply it as written. Verification is owed only for work that still"
+    + " stands: a steer that withdrew or forbade work also withdrew the obligation to verify it,"
+    + " so do not continue for missing checks on work the user cancelled. Checks on work that"
+    + " survives the steering are still required. Judge against the goal as amended here, never"
+    + " against the original goal alone."
+}
+
+/**
+ * completion_obligations_digest.
+ *
+ * A stable digest of the amended completion target, for binding a terminal
+ * decision to the obligations it was decided under. Two runs that differ only
+ * in accepted steering must not share an evidence identity.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: completion_obligations_digest({original_task: "x", steers: []})
+ */
+pub fn completion_obligations_digest(obligations: CompletionObligations?) -> string {
+  const steers = obligations?.steers ?? []
+  if len(steers) == 0 {
+    return ""
+  }
+  return "sha256:" + sha256(json_stringify(steers))
+}

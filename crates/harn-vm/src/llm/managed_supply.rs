@@ -273,7 +273,7 @@ pub fn capability_fingerprint(provider: &str, model: &str) -> String {
         object.remove("batch");
         object.retain(|key, _| key != "batch_api" && !key.starts_with("batch_"));
     }
-    let bytes = serde_json::to_vec(&json).expect("capability projection is JSON serializable");
+    let bytes = crate::canonical_json::to_vec(&json);
     blake3::hash(&bytes).to_hex().to_string()
 }
 

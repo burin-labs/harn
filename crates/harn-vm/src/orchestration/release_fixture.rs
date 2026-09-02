@@ -565,7 +565,7 @@ fn stable_event_id(event: &ReleaseFixtureEvent) -> String {
         hasher.update(timestamp.as_bytes());
     }
     hasher.update([0]);
-    hasher.update(event.data.to_string().as_bytes());
+    hasher.update(crate::canonical_json::to_vec(&event.data));
     let hex = hex::encode(hasher.finalize());
     format!(
         "evt_{}_{}",

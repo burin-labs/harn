@@ -90,6 +90,29 @@ cargo_subcommand_is_static() {
   esac
 }
 
+lease_runner_keeps_contended_waits_idle() (
+  local candidate="$1"
+  local probe_root=""
+
+  probe_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-lease-runner-probe.XXXXXX")" || return 1
+  trap 'rm -rf "$probe_root"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  # Harn releases before v0.10.73 watched the SQLite registry directory while
+  # waiting. Their own read/write transactions therefore woke the watcher and
+  # spun until the lease deadline. Exercise the store boundary instead of
+  # version-matching: compatible runners create the dedicated wake file that
+  # separates availability signals from SQLite activity.
+  HARN_HOST_LEASE_ROOT="$probe_root" \
+    "$candidate" host lease status \
+      --host harn-lease-runner-probe \
+      --resource-class rust-heavy \
+      --json >/dev/null 2>&1 \
+    && [[ -f "$probe_root/host-leases.wake" ]]
+)
+
 resolve_lease_runner() {
   local candidate=""
   local can_run_target_binary=1
@@ -130,13 +153,15 @@ resolve_lease_runner() {
   # Windows cannot replace an executable while that same image supervises the
   # Cargo build. Use only an independently installed runner there.
   if [[ "$can_run_target_binary" == "1" && -x "$candidate" ]] \
-    && "$candidate" host lease run cargo --help >/dev/null 2>&1; then
+    && "$candidate" host lease run cargo --help >/dev/null 2>&1 \
+    && lease_runner_keeps_contended_waits_idle "$candidate"; then
     printf '%s\n' "$candidate"
     return
   fi
   candidate="$(command -v harn || true)"
   if [[ -n "$candidate" && -x "$candidate" ]] \
-    && "$candidate" host lease run cargo --help >/dev/null 2>&1; then
+    && "$candidate" host lease run cargo --help >/dev/null 2>&1 \
+    && lease_runner_keeps_contended_waits_idle "$candidate"; then
     printf '%s\n' "$candidate"
   fi
 }

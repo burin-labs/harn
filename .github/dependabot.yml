@@ -97,6 +97,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # The extension compiles against its declared minimum VS Code API.
+    # Move this type package only with a deliberate engines review.
+    ignore:
+      - dependency-name: "@types/vscode"
     cooldown:
       default-days: 7
 

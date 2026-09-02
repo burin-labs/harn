@@ -71,6 +71,7 @@ git -C "$tmp_repo" init --quiet
 git -C "$tmp_repo" config user.name "Release Version Test"
 git -C "$tmp_repo" config user.email "release-version-test@example.com"
 git -C "$tmp_repo" config commit.gpgsign false
+git -C "$tmp_repo" config tag.gpgSign false
 printf '[workspace.package]\nversion = "1.2.3"\n' > "$tmp_repo/Cargo.toml"
 git -C "$tmp_repo" add Cargo.toml
 git -C "$tmp_repo" commit --quiet -m initial

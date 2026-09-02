@@ -97,7 +97,7 @@ impl<R> RawResponseReader<R> {
             if line.last() == Some(&b'\r') {
                 line.pop();
             }
-            if let Ok(response) = serde_json::from_slice(&line) {
+            if let Ok(response) = super::protocol::parse_jsonrpc_message(&line) {
                 self.responses.record(response);
             }
         }
@@ -127,7 +127,7 @@ mod tests {
     use tokio::io::AsyncReadExt;
 
     #[tokio::test]
-    async fn records_complete_responses_across_partial_reads() {
+    async fn records_complete_responses_and_input_order_across_partial_reads() {
         let responses = RawResponseLog::default();
         let marker = responses.mark();
         let (mut writer, reader) = tokio::io::duplex(8);
@@ -135,7 +135,7 @@ mod tests {
         let write = tokio::spawn(async move {
             tokio::io::AsyncWriteExt::write_all(
                 &mut writer,
-                b"{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"future\":true}}\n",
+                b"{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"resultType\":\"input_required\",\"inputRequests\":{\"form\":{\"method\":\"elicitation/create\",\"params\":{\"mode\":\"form\",\"message\":\"Choose\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{\"zeta\":{\"type\":\"string\"},\"alpha\":{\"type\":\"integer\"}}}}}}}}\n",
             )
             .await
             .unwrap();
@@ -143,9 +143,13 @@ mod tests {
         let mut sink = Vec::new();
         reader.read_to_end(&mut sink).await.unwrap();
         write.await.unwrap();
+        let result = responses
+            .result_after(marker)
+            .expect("one complete response");
         assert_eq!(
-            responses.result_after(marker),
-            Ok(serde_json::json!({"future": true}))
+            result["inputRequests"]["form"]["params"]
+                [super::super::protocol::REQUESTED_SCHEMA_PROPERTY_ORDER],
+            serde_json::json!(["zeta", "alpha"])
         );
     }
 

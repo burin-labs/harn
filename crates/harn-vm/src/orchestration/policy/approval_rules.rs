@@ -1487,8 +1487,8 @@ fn dedup(values: &mut Vec<String>) {
 }
 
 fn stable_json_digest(value: &JsonValue) -> String {
-    let canonical = serde_json::to_string(value).unwrap_or_default();
-    let digest = Sha256::digest(canonical.as_bytes());
+    let canonical = crate::canonical_json::to_vec(value);
+    let digest = Sha256::digest(&canonical);
     hex::encode(digest)
 }
 

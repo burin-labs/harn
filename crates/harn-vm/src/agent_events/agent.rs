@@ -70,6 +70,18 @@ pub struct FinalWrapupUnconsumedToolCall {
     pub evidence_line: String,
 }
 
+/// Who wrote a purpose label.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PurposeLabelSource {
+    /// The agent wrote the label itself, in the same turn that proposed
+    /// the calls. No extra model call.
+    #[default]
+    Declared,
+    /// A harness-side labeler summarized calls that already ran.
+    Inferred,
+}
+
 /// Auditable decision for one call in a model-proposed tool batch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolBatchDispositionReceipt {
@@ -1056,6 +1068,27 @@ pub enum AgentEvent {
         session_id: String,
         receipt: ToolBatchDispositionReceipt,
     },
+    /// A plain-language heading for a run of tool calls — "Searching for
+    /// GitHub issues", "Clearing caches". Presentation metadata only: it
+    /// never gates, reorders, or delays dispatch, and no label at all is
+    /// the normal case rather than an error.
+    PurposeLabel {
+        session_id: String,
+        label: String,
+        source: PurposeLabelSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iteration: Option<usize>,
+        /// Calls the label covers. Empty on the declared path, where the
+        /// label is emitted before the batch mints its ids; clients group
+        /// by arrival order there. Populated on the inferred path, which
+        /// labels calls that already ran.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tool_call_ids: Vec<String>,
+        /// How many calls the declaring turn proposed, so a client can
+        /// tell a heading over five calls from a heading over none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_count: Option<usize>,
+    },
     /// Emitted by `std/cache::with_cache` (both the generic and LLM
     /// forms) when a cached lookup returns a hit. Carries the
     /// content-addressed key, the backend that served the value, and a
@@ -1327,6 +1360,7 @@ impl AgentEvent {
             | Self::PlanDocumentUpdated { session_id, .. }
             | Self::OrchestrationDecision { session_id, .. }
             | Self::ProgressReported { session_id, .. }
+            | Self::PurposeLabel { session_id, .. }
             | Self::CompassRoutingDecision { session_id, .. }
             | Self::AgentScratchpadReorganization { session_id, .. }
             | Self::Artifact { session_id, .. }

@@ -1,3 +1,4 @@
+import "std/agent/loop_call_budget"
 import "std/agent/loop_support"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
@@ -14,7 +15,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
   let stop_reason = state.stop_reason
   let terminal_write_unverified = state.terminal_write_unverified
   let stall_state = state.stall_state
-  let terminal_verify_reserve_remaining = state.terminal_verify_reserve_remaining
+  let call_budget = state.call_budget
   let verify_attempts = state.verify_attempts
   let verify_completion_judge_invocations = state.verify_completion_judge_invocations
   let verify_completion_judge_vetoes = state.verify_completion_judge_vetoes
@@ -22,7 +23,6 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
   let current_max = state.current_max
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
-  let terminal_callback_continues = state.terminal_callback_continues
   let terminal_error = state.terminal_error
   if final_status == "" && state.iteration >= current_max && stop_reason == nil {
     final_status = "budget_exhausted"
@@ -130,8 +130,9 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
         terminal_status: final_status,
       },
     )
-    if terminal_verify_reserve_remaining > 0 && verify_attempts < state.max_verify_attempts {
-      terminal_verify_reserve_remaining = terminal_verify_reserve_remaining - 1
+    if __agent_loop_grant_allowed(call_budget, "verification")
+      && verify_attempts < state.max_verify_attempts {
+      call_budget = __agent_loop_record_grant(call_budget, "verification")
       agent_emit_event(
         harness.agent,
         session.session_id,
@@ -139,7 +140,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
         {
           reserveKind: reserve_kind,
           phase: "grant",
-          reserve_remaining: terminal_verify_reserve_remaining,
+          reserve_remaining: __agent_loop_grants_remaining(call_budget, "verification"),
           iteration: state.iteration,
           prior_status: final_status,
         },
@@ -153,7 +154,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
           action: "continue",
           final_status: final_status,
           stop_reason: stop_reason,
-          terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+          call_budget: call_budget,
           verify_attempts: verify_attempts,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
           verify_completion_judge_vetoes: verify_completion_judge_vetoes,
@@ -165,8 +166,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
     stop_reason = reserve_kind + "_failed"
   }
   if final_status != "" && state.suspend_result == nil && terminal_error == nil
-    && terminal_callback_continues
-      == 0
+    && __agent_loop_grant_allowed(call_budget, "terminal_report")
     && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
     const terminal_outcome = agent_compute_terminal_callback(
       harness.agent,
@@ -183,7 +183,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
       },
     )
     if terminal_outcome.kind == "continue" {
-      terminal_callback_continues = terminal_callback_continues + 1
+      call_budget = __agent_loop_record_grant(call_budget, "terminal_report")
       opts = __apply_post_turn_options(opts, terminal_outcome)
       const old_limit = current_max
       const extra = __agent_loop_terminal_callback_extend_by(state.budget)
@@ -216,7 +216,6 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
           opts: opts,
           final_status: final_status,
           stop_reason: stop_reason,
-          terminal_callback_continues: terminal_callback_continues,
           current_max: current_max,
           budget_decisions: budget_decisions,
           budget_exhausted_emitted: budget_exhausted_emitted,
@@ -230,14 +229,13 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
       final_status: final_status,
       stop_reason: stop_reason,
       terminal_write_unverified: terminal_write_unverified,
-      terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+      call_budget: call_budget,
       verify_attempts: verify_attempts,
       verify_completion_judge_invocations: verify_completion_judge_invocations,
       verify_completion_judge_vetoes: verify_completion_judge_vetoes,
       current_max: current_max,
       budget_exhausted_emitted: budget_exhausted_emitted,
       budget_decisions: budget_decisions,
-      terminal_callback_continues: terminal_callback_continues,
       terminal_error: terminal_error,
       feedback_history: feedback_history,
     }

@@ -3,7 +3,9 @@
 This corpus pins the public `harn.run_view.v1` and `harn.session_view.v1`
 projection boundary. The `records/` files are sanitized run-record inputs; the
 `expected/` files are deterministic projection snapshots generated from the
-shared `harn-vm` builder.
+shared `harn-vm` builder. The corpus includes execution identity, ordered spans,
+public flight-recording metadata, explicit evidence gaps, and a local artifact
+path that must be absent from public projections.
 
 Run the drift check with:
 

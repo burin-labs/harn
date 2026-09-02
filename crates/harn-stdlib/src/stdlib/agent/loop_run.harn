@@ -14,6 +14,7 @@ import {
   agent_loop_post_turn_transition,
 } from "std/agent/loop_post_turn"
 import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
+import "std/agent/loop_purpose_labels"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
@@ -74,14 +75,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     const __reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
     let terminal_write_unverified = false
     let made_source_write = false
-    let terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify
-      || __reserve_cfg.zero_write_terminal_verify {
-      __reserve_cfg.reserved_terminal_verify_iterations
-    } else {
-      0
-    }
-    let terminal_callback_continues = 0
-    let call_budget = __agent_loop_call_budget_new(opts, terminal_verify_reserve_remaining)
+    // One owner of the three terminal grant allowances (verification, recovery,
+    // terminal reporting) and of how many of each this run has left.
+    let call_budget = __agent_loop_call_budget_new(opts, __reserve_cfg)
     // Session-scoped ownership of long-running handles keeps polling out of the
     // model loop. Normalize thresholds and wording once here (harn#4456);
     // linked hosts predating `command_wait` receive the defaults.
@@ -145,7 +141,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           .read_only_streak
         stall_state = stall_state
           + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
-        const pending_prefill = agent_take_one_shot_prefill(opts)
+        const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
         opts = pending_prefill.options
         const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
         agent_emit_event(
@@ -192,6 +188,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           command_hold_cap_tokens = nil
         }
         const turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
+        turn_opts = turn_opts + {purpose_labels: opts?.purpose_labels}
         agent_stage(
           harness.agent,
           session.session_id,
@@ -397,6 +394,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           turn_opts?.tools,
           turn_opts,
         )
+        __purpose_label_publish(harness.agent, session, projected, iteration_index, tool_calls)
         const parse_feedback = __agent_loop_record_parse_feedback(
           harness,
           session.session_id,
@@ -790,7 +788,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             tool_calls,
             stall_hard_stop_rescues,
             stall_recovery_evidence_revision,
+            call_budget.reserve.recovery,
           ) {
+            call_budget = __agent_loop_record_grant(call_budget, "recovery")
             stall_hard_stop_rescues = stall_hard_stop_rescues + 1
             stall_recovery_evidence_revision = __agent_loop_recovery_evidence_revision(
               stall_warning,
@@ -970,12 +970,14 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             stall_warning,
             stall_hard_stop_rescues,
             stall_recovery_evidence_revision,
+            call_budget.reserve.recovery,
           )
           const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(
             stall_warning,
             tool_calls,
             stall_hard_stop_rescues,
             stall_recovery_evidence_revision,
+            call_budget.reserve.recovery,
           )
           __agent_loop_emit_thrash_recovery_checkpoint(
             harness.agent,
@@ -1393,7 +1395,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           reserve_cfg: __reserve_cfg,
           terminal_write_unverified: terminal_write_unverified,
           made_source_write: made_source_write,
-          terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+          call_budget: call_budget,
           verify_attempts: verify_attempts,
           max_verify_attempts: max_verify_attempts,
           verify_completion_judge_invocations: verify_completion_judge_invocations,
@@ -1404,7 +1406,6 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           budget: budget,
           budget_exhausted_emitted: budget_exhausted_emitted,
           budget_decisions: budget_decisions,
-          terminal_callback_continues: terminal_callback_continues,
           suspend_result: suspend_result,
           terminal_error: terminal_error,
           last_turn_parse_dropped: last_turn_parse_dropped,
@@ -1419,14 +1420,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       stop_reason = terminal_boundary.stop_reason
       terminal_write_unverified = terminal_boundary.terminal_write_unverified
       stall_state = terminal_boundary.stall_state
-      terminal_verify_reserve_remaining = terminal_boundary.terminal_verify_reserve_remaining
+      call_budget = terminal_boundary.call_budget
       verify_attempts = terminal_boundary.verify_attempts
       verify_completion_judge_invocations = terminal_boundary.verify_completion_judge_invocations
       verify_completion_judge_vetoes = terminal_boundary.verify_completion_judge_vetoes
       current_max = terminal_boundary.current_max
       budget_exhausted_emitted = terminal_boundary.budget_exhausted_emitted
       budget_decisions = terminal_boundary.budget_decisions
-      terminal_callback_continues = terminal_boundary.terminal_callback_continues
       terminal_error = terminal_boundary.terminal_error
       feedback_history = terminal_boundary.feedback_history ?? feedback_history
       if terminal_boundary.action == "continue" {

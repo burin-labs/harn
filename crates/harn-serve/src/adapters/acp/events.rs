@@ -1404,7 +1404,8 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
-            event @ (AgentEvent::ProgressReported { .. }
+            event @ (AgentEvent::PurposeLabel { .. }
+            | AgentEvent::ProgressReported { .. }
             | AgentEvent::CompassRoutingDecision { .. }
             | AgentEvent::AgentScratchpadReorganization { .. }
             | AgentEvent::FeedbackInjected { .. }

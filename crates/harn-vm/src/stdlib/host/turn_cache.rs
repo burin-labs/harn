@@ -154,8 +154,8 @@ pub(crate) fn invalidation_scope(capability: &str, operation: &str) -> Invalidat
 /// Cache key for a turn-stable host call. Keyed on capability, operation, and a
 /// canonical fingerprint of the params so `project.metadata_get` caches per
 /// distinct argument set while no-arg reads retain the cheap fast path.
-/// serde_json's `Map` is key-sorted here (no `preserve_order` feature), so the
-/// fingerprint is stable.
+/// Dynamic object insertion order is not semantic, so the fingerprint uses
+/// the runtime's canonical JSON owner.
 fn cache_key(capability: &str, operation: &str, params: &DictMap) -> String {
     if params.is_empty() {
         return format!("{capability}.{operation}");
@@ -163,7 +163,7 @@ fn cache_key(capability: &str, operation: &str, params: &DictMap) -> String {
     let json = crate::llm::helpers::vm_value_to_json(&VmValue::dict(params.clone()));
     format!(
         "{capability}.{operation}#{}",
-        serde_json::to_string(&json).unwrap_or_default()
+        crate::canonical_json::to_string(&json)
     )
 }
 
