@@ -153,8 +153,9 @@ case "$pycache_root" in
     exit 1
     ;;
 esac
-if [[ -e "$pycache_root" ]]; then
-  echo "audit gate leaked its positive-fire Python bytecode root: $pycache_root" >&2
+gate_runtime_root="${pycache_root%/python-pyc}"
+if [[ -e "$gate_runtime_root" ]]; then
+  echo "audit gate leaked its positive-fire runtime root: $gate_runtime_root" >&2
   exit 1
 fi
 
@@ -354,6 +355,16 @@ if AUDIT_GATES_CONCURRENCY=3 \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit-fail.out" 2>&1; then
   echo "audit_gates masked a failing audit fanout" >&2
   cat "$tmp_root/audit-fail.out" >&2
+  exit 1
+fi
+failed_pycache_root="$(awk -F '\t' 'NR == 1 { sub(/^PYTHONPYCACHEPREFIX=/, "", $5); print $5 }' "$record")"
+if [[ -z "$failed_pycache_root" ]]; then
+  echo "failing audit gate did not exercise the Python bytecode path" >&2
+  exit 1
+fi
+failed_gate_runtime_root="${failed_pycache_root%/python-pyc}"
+if [[ -e "$failed_gate_runtime_root" ]]; then
+  echo "failing audit gate leaked its runtime root: $failed_gate_runtime_root" >&2
   exit 1
 fi
 
