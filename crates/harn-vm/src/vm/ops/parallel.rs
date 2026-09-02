@@ -704,7 +704,13 @@ impl super::super::Vm {
                 }
                 continue;
             }
-            match task.handle.await {
+            let task_id = task.wait_task_id.clone();
+            let joined = super::call_support::finish_task_join(
+                task.handle.await,
+                task_id,
+                self.agent_cleanup_runtimes(),
+            );
+            match joined {
                 Ok(Ok((_result, output))) => {
                     self.output.push_str(&output);
                 }

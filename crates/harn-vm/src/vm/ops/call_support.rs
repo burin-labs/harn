@@ -1,5 +1,22 @@
 use crate::value::{VmJoinHandle, VmTaskHandle, VmValue};
 
+pub(super) type VmTaskJoinResult =
+    Result<Result<(VmValue, String), crate::value::VmError>, tokio::task::JoinError>;
+
+/// Preserve the durable lifecycle owner whenever a joined task did not
+/// complete successfully. Every join path delegates this decision here so a
+/// newly added await/cancel surface cannot silently strand the task's journal.
+pub(super) fn finish_task_join(
+    joined: VmTaskJoinResult,
+    task_id: String,
+    runtimes: crate::agent_lifecycle_cleanup::CleanupRuntimes,
+) -> VmTaskJoinResult {
+    if !matches!(&joined, Ok(Ok(_))) {
+        schedule_task_cleanup(task_id, runtimes);
+    }
+    joined
+}
+
 /// Stop a task from a synchronous unwind boundary, then finish its durable
 /// agent lifecycle on an inherited runtime child. The journal and writer lease
 /// remain visible if cleanup fails, so absence never masquerades as success.
@@ -83,15 +100,10 @@ impl AwaitingTask {
     /// handle resolves. A failed join still needs lifecycle cleanup, but the
     /// completed handle must never be polled a second time by the detached
     /// cleanup path.
-    pub(super) async fn join(
-        mut self,
-    ) -> Result<Result<(VmValue, String), crate::value::VmError>, tokio::task::JoinError> {
+    pub(super) async fn join(mut self) -> VmTaskJoinResult {
         let joined = (&mut self.task.as_mut().expect("awaiting task present").handle).await;
         let task = self.task.take().expect("awaiting task present after join");
-        if !matches!(&joined, Ok(Ok(_))) {
-            schedule_task_cleanup(task.wait_task_id, self.runtimes.clone());
-        }
-        joined
+        finish_task_join(joined, task.wait_task_id, self.runtimes.clone())
     }
 }
 
@@ -102,6 +114,10 @@ impl Drop for AwaitingTask {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_cleanup_tests.rs"]
+mod tests;
 
 pub(super) enum StepPreHookAction {
     Allow(Vec<VmValue>),

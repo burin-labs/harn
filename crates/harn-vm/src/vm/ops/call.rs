@@ -492,6 +492,11 @@ impl super::super::Vm {
                     tokio::pin!(timeout);
                     tokio::select! {
                         joined = &mut handle => {
+                            let joined = super::call_support::finish_task_join(
+                                joined,
+                                task_runtime_id.clone(),
+                                self.agent_cleanup_runtimes(),
+                            );
                             match joined {
                                 Ok(Ok((result, output))) => {
                                     self.output.push_str(&output);
