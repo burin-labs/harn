@@ -14,7 +14,7 @@ Deterministic verification (established by the runtime, not by you):
 Latest assistant text:
 {{ last_text }}
 
-Decide whether this agent loop may yield to the user now. Consider the original request, latest assistant prose, and the bounded action evidence together. The packet retains the latest effect-bearing and verification actions, omits read-only exploration, and reports any older actions it omitted. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
+Decide whether this agent loop may yield to the user now. Consider the original request, latest assistant prose, and the bounded action evidence together. The packet retains the latest effect-bearing and verification actions, reports any older actions it omitted, and carries the turn's read-only calls in `research_summary` as name, target, and a one-line result digest. Read-only research is evidence. When the request resolves to "there is nothing to build here", or to work that was correctly withdrawn, the calls that establish it are read-only by nature and are the whole justification for stopping; do not treat their absence from `actions` as an absence of work. `research_summary.omitted_count` is how many further reads exist that carry no record here. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
 
 Judge the work, not its wire format. Response markers, sentinels, envelopes, and layout are enforced elsewhere; a missing or malformed marker is never a reason to continue.
 
