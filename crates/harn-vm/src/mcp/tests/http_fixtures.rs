@@ -38,7 +38,7 @@ async fn fixtures_installed_after_connect_answer_inbound_elicitation() {
             handle
                 .set_capability_fixtures(accepting_elicit_fixtures("from-fixture"))
                 .await;
-            install_sampling_mock().await;
+            let _sampling_mock = install_sampling_mock().await;
 
             let result = call_mcp_tool(
                 &handle,
@@ -62,8 +62,6 @@ async fn fixtures_installed_after_connect_answer_inbound_elicitation() {
                 responses["elicitation"]["content"]["answer"],
                 serde_json::json!("from-fixture")
             );
-
-            clear_sampling_mock().await;
         })
         .await;
 }
@@ -75,7 +73,7 @@ async fn reinstalling_fixtures_replaces_the_answer_without_reconnecting() {
         .run_until(async {
             let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
             let handle = stable_http_handle(&base_url).await;
-            install_sampling_mock().await;
+            let _sampling_mock = install_sampling_mock().await;
 
             handle
                 .set_capability_fixtures(accepting_elicit_fixtures("first"))
@@ -97,7 +95,7 @@ async fn reinstalling_fixtures_replaces_the_answer_without_reconnecting() {
 
             // A second install must be observed by the same live client. The
             // sampling mock is single-shot, so re-arm it for the second round.
-            install_sampling_mock().await;
+            arm_sampling_mock().await;
             handle
                 .set_capability_fixtures(accepting_elicit_fixtures("second"))
                 .await;
@@ -115,8 +113,6 @@ async fn reinstalling_fixtures_replaces_the_answer_without_reconnecting() {
                 serde_json::json!("second"),
                 "reinstalling fixtures must take effect on the existing client"
             );
-
-            clear_sampling_mock().await;
         })
         .await;
 }

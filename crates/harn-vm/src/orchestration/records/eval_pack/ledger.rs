@@ -385,8 +385,7 @@ fn eval_ledger_row_identity(row: &EvalLedgerRow) -> Result<String, VmError> {
         "harness_config_fingerprint": row.harness_config_fingerprint,
         "trial": row.trial,
     });
-    let bytes = serde_json::to_vec(&material)
-        .map_err(|e| VmError::Runtime(format!("eval ledger identity encode error: {e}")))?;
+    let bytes = crate::canonical_json::to_vec(&material);
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 

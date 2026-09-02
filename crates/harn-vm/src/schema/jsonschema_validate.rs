@@ -31,7 +31,7 @@ fn compile_validator(schema: &serde_json::Value) -> CompiledValidator {
     if !schema_is_cacheable(schema) {
         return build_validator(schema);
     }
-    let serialized = serde_json::to_vec(schema).expect("JSON values always serialize");
+    let serialized = crate::canonical_json::to_vec(schema);
     if serialized.len() > MAX_CACHED_SCHEMA_BYTES {
         return build_validator(schema);
     }
@@ -647,11 +647,14 @@ mod tests {
 
     #[test]
     fn compiled_validator_cache_reuses_validators() {
-        let schema = serde_json::json!({"type": "string", "minLength": 2});
-        let CompiledValidator::Ready(first) = compile_validator(&schema) else {
+        let first_schema: serde_json::Value =
+            serde_json::from_str(r#"{"type":"string","minLength":2}"#).unwrap();
+        let second_schema: serde_json::Value =
+            serde_json::from_str(r#"{"minLength":2,"type":"string"}"#).unwrap();
+        let CompiledValidator::Ready(first) = compile_validator(&first_schema) else {
             panic!("valid schema did not compile");
         };
-        let CompiledValidator::Ready(second) = compile_validator(&schema) else {
+        let CompiledValidator::Ready(second) = compile_validator(&second_schema) else {
             panic!("cached schema did not compile");
         };
         assert!(Arc::ptr_eq(&first, &second));

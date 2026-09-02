@@ -1111,7 +1111,7 @@ pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     tool_name.hash(&mut hasher);
-    let args_str = serde_json::to_string(args).unwrap_or_default();
+    let args_str = crate::canonical_json::to_string(args);
     args_str.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }

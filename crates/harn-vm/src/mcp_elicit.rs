@@ -187,6 +187,12 @@ pub(crate) async fn dispatch_inbound_elicitation(
             crate::value::intern_key("requestedSchema"),
             json_to_vm_value(&requested_schema),
         );
+        if let Some(property_order) = params.get(crate::mcp::REQUESTED_SCHEMA_PROPERTY_ORDER) {
+            bridge_params.insert(
+                crate::value::intern_key(crate::mcp::REQUESTED_SCHEMA_PROPERTY_ORDER),
+                json_to_vm_value(property_order),
+            );
+        }
     }
     if let Some(url) = params.get("url") {
         bridge_params.insert(crate::value::intern_key("url"), json_to_vm_value(url));
@@ -351,6 +357,48 @@ mod tests {
     fn normalize_inbound_envelope_decline_for_null() {
         let v = normalize_inbound_envelope(JsonValue::Null);
         assert_eq!(v["action"], json!("decline"));
+    }
+
+    #[tokio::test]
+    async fn inbound_elicitation_forwards_explicit_property_order_to_host() {
+        let fixtures = crate::harness::CapabilityFixtureState::default();
+        fixtures.respond(
+            "mcp",
+            "elicit",
+            Ok(crate::stdlib::json_to_vm_value(
+                &json!({"action": "decline"}),
+            )),
+            None,
+            None,
+            false,
+        );
+        let response = dispatch_inbound_elicitation(
+            "test-server",
+            &json!({
+                "id": "input-form",
+                "params": {
+                    "mode": "form",
+                    "message": "Choose",
+                    "requestedSchema": {"type": "object", "properties": {}},
+                    (crate::mcp::REQUESTED_SCHEMA_PROPERTY_ORDER): ["zeta", "alpha"]
+                }
+            }),
+            Some(&fixtures),
+        )
+        .await;
+        assert_eq!(response["result"]["action"], json!("decline"));
+
+        let calls = fixtures.calls();
+        assert_eq!(calls.len(), 1);
+        let params = calls[0].args[0].as_dict().expect("host params dict");
+        let property_order = params
+            .get(crate::mcp::REQUESTED_SCHEMA_PROPERTY_ORDER)
+            .expect("explicit property order reaches host");
+        assert_eq!(
+            crate::llm::helpers::vm_value_to_json(property_order),
+            json!(["zeta", "alpha"])
+        );
+        fixtures.clear();
     }
 
     #[tokio::test]
