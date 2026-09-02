@@ -1,0 +1,37 @@
+// Run: harn test tests/agent/call_budget_reserve_test.harn
+//
+// Unit coverage for #7619's typed seams: the remaining-call measurement and the
+// single owner of the calls reserved for verification, recovery, and terminal
+// reporting. No agent_loop, no mock LLM, no inference.
+import { agent_loop_call_reserve, agent_loop_remaining_calls } from "std/agent/control"
+
+/** A measured zero and an unavailable measurement are different facts. */
+pipeline test_remaining_calls_separates_measured_zero_from_unavailable(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(agent_loop_remaining_calls(8, 3), 5)
+  // At and past the limit the measurement is a real, measured zero.
+  assert_eq(agent_loop_remaining_calls(8, 8), 0)
+  assert_eq(agent_loop_remaining_calls(8, 12), 0)
+  // No limit to measure against: unavailable, NOT zero. Returning 0 here would
+  // make an unmeasured loop look exhausted.
+  assert_eq(agent_loop_remaining_calls(nil, 3), nil)
+}
+
+/**
+ * One owner names the calls held back for verification, recovery, and terminal
+ * reporting.
+ */
+pipeline test_call_reserve_has_one_owner(harness: Harness, task: unknown) {
+  const reserve = agent_loop_call_reserve({})
+  assert(reserve.verification >= 0)
+  assert(reserve.recovery >= 0)
+  assert(reserve.terminal_report >= 0)
+  assert_eq(
+    reserve.total,
+    reserve.verification + reserve.recovery + reserve.terminal_report,
+    "the total must be the sum its owner computed, not a separately maintained number",
+  )
+  assert(reserve.total > 0, "something must be reserved or the reserve is decorative")
+}
