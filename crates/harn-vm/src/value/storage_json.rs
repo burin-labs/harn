@@ -10,10 +10,10 @@
 
 use crate::value::{VmError, VmValue};
 
-/// Serialize `val` to JSON for persistence: scalars/list/dict/struct are
-/// preserved (a struct as its field map),
-/// `Decimal` becomes a precision-preserving string (read back via
-/// `decimal(...)`), and any non-data value kind becomes `null`.
+/// Serialize `val` to JSON for persistence: scalars, list, dict, and struct are
+/// preserved (a struct as its field map), `Decimal` becomes a
+/// precision-preserving string (read back via `decimal(...)`), and any non-data
+/// value kind becomes `null`.
 pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmError> {
     Ok(match val {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
@@ -50,9 +50,14 @@ pub(crate) fn vm_to_storage_json(val: &VmValue) -> Result<serde_json::Value, VmE
         // as a dict instead of as nil. A Harness nested inside a struct still
         // fails closed, because this recurses through the same conversion.
         VmValue::StructInstance(_) => {
-            let obj = val
+            // `struct_fields_map` answers `Some` for every `StructInstance`, so
+            // this cannot fire. It panics rather than defaulting because an
+            // empty map here would persist `{}` and put us back where we
+            // started: a dropped write that reads back as a plausible value.
+            let fields = val
                 .struct_fields_map()
-                .unwrap_or_default()
+                .expect("a StructInstance always yields a field map");
+            let obj = fields
                 .iter()
                 .map(|(k, v)| Ok((k.to_string(), vm_to_storage_json(v)?)))
                 .collect::<Result<serde_json::Map<String, serde_json::Value>, VmError>>()?;
