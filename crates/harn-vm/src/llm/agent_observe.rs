@@ -115,15 +115,16 @@ pub(crate) use raw_provider_capture::{
     RawProviderResponseFailureCapture,
 };
 
+#[cfg(test)]
+pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
     record_capability_snapshot_definition, record_served_message_definition,
     served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
-    current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
-    remove_llm_transcript_dir, swap_llm_transcript_ambient, LlmTranscriptAmbient,
-    TranscriptDirFrame,
+    current_transcript_path, push_llm_transcript_dir, remove_llm_transcript_dir,
+    swap_llm_transcript_ambient, LlmTranscriptAmbient, TranscriptDirFrame,
 };
 
 fn next_call_id() -> String {

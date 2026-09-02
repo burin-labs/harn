@@ -567,6 +567,7 @@ pub(crate) fn swap_current_session_stack(
     CURRENT_SESSION_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), replacement))
 }
 
+#[cfg(test)]
 pub(crate) fn pop_current_session() {
     CURRENT_SESSION_STACK.with(|stack| {
         let _ = stack.borrow_mut().pop();

@@ -153,6 +153,7 @@ pub(crate) fn push_llm_transcript_dir(dir: &str) -> Option<TranscriptDirFrame> {
     Some(frame)
 }
 
+#[cfg(test)]
 pub(crate) fn pop_llm_transcript_dir() {
     TRANSCRIPT_DIR_STACK.with(|stack| {
         stack.borrow_mut().pop();
