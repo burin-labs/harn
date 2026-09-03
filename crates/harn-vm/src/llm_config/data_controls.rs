@@ -95,6 +95,45 @@ pub enum TrainingDefault {
     Unspecified,
 }
 
+/// A per-model override of the provider's training posture.
+///
+/// Some providers do not sell one posture per account or per request. They
+/// sell it per model id: the same weights are published twice, once at list
+/// price with no training, and once heavily discounted in exchange for
+/// permission to train on the traffic. Meta's `-contributor` routes are the
+/// first of these in the catalog.
+///
+/// That fact cannot live on [`DataControlsDef`], because it varies *within*
+/// one provider, and it cannot be expressed as a [`DataControlScope`] either:
+/// there is no header or body field to set (`per_request` would force us to
+/// invent an undocumented one), the posture is not chosen on the account
+/// (`account`), and a control plainly does exist (`none` would hide it).
+///
+/// So it lives here, on the model row, and it overrides its provider. A row
+/// that says nothing inherits the provider's declaration, which keeps the
+/// common case, where a provider's posture is uniform, a single declaration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelDataControlsDef {
+    /// Whether this specific route trains on API traffic. Overrides the
+    /// provider's `training_default`.
+    pub training_default: TrainingDefault,
+    /// Overrides the provider's `retention_default` when the route differs.
+    /// Usually absent: the discount is normally about training, not storage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention_default: Option<RetentionDefault>,
+    /// ISO date this row was last read against the provider's own docs.
+    pub checked_on: String,
+    /// The provider's published page for this route's data terms. At least one
+    /// HTTPS source, same rule as the provider-level declaration: a privacy
+    /// claim in this catalog always cites where it came from.
+    pub sources: Vec<String>,
+    /// One line a host may surface verbatim, e.g. the provider's own wording
+    /// for what it does with the traffic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// The wire dialect a control is documented for.
 ///
 /// Some providers expose a retention field on one of their APIs and not

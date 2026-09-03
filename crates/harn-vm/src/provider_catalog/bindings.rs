@@ -136,6 +136,14 @@ export interface HarnProviderDataControls {
   request_controls?: HarnProviderDataControl[]
 }
 
+export interface HarnModelDataControls {
+  training_default: "trains" | "does_not_train" | "unspecified"
+  retention_default?: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+}
+
 export interface HarnProviderDataControl {
   location: "body" | "header"
   name: string
@@ -173,6 +181,7 @@ export interface HarnAliasToolCalling {
 export interface HarnCatalogModel {
   id: string
   name: string
+  data_controls?: HarnModelDataControls
   display_name: string
   blurb?: string
   provider: string
@@ -569,6 +578,22 @@ public struct HarnProviderDataControls: Codable, Sendable, Equatable {
     }
 }
 
+public struct HarnModelDataControls: Codable, Sendable, Equatable {
+    public let trainingDefault: String
+    public let retentionDefault: String?
+    public let checkedOn: String
+    public let sources: [String]
+    public let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case trainingDefault = "training_default"
+        case retentionDefault = "retention_default"
+        case checkedOn = "checked_on"
+        case sources
+        case note
+    }
+}
+
 public struct HarnProviderDataControl: Codable, Sendable, Equatable {
     public let location: String
     public let name: String
@@ -746,6 +771,7 @@ public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
 public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
+    public let dataControls: HarnModelDataControls?
     public let displayName: String
     public let blurb: String?
     public let provider: String
@@ -805,6 +831,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case dataControls = "data_controls"
         case displayName = "display_name"
         case blurb
         case provider

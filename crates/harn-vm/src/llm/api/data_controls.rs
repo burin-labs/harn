@@ -134,6 +134,56 @@ impl DataControlsPlan {
     }
 }
 
+/// Why a route is refused under the strict posture, as a sentence a host can
+/// show a person without rewording a privacy claim.
+///
+/// Applying "every declared per-request control" is not the same as achieving
+/// the strict posture. On a route the provider trains on by default and
+/// exposes no control for, there are zero controls to apply, so the request
+/// would go out unchanged, the receipt would read `no_control_available`, and
+/// the traffic would be trained on anyway. That is the absence-reads-as-
+/// success failure this whole module exists to prevent, so the strict posture
+/// refuses the call instead of quietly proceeding.
+///
+/// The refusal is deliberately narrow. It fires only when the effective
+/// declaration says `trains` outright. `unspecified` and an unresearched
+/// provider do not refuse, because "nobody has checked" must not silently
+/// acquire the force of "we checked and it trains"; those keep reporting
+/// themselves through the receipt.
+pub(crate) fn training_refusal(
+    provider: &str,
+    model: &str,
+    posture: DataPosture,
+) -> Option<String> {
+    if posture != DataPosture::StrictestAvailable {
+        return None;
+    }
+    if crate::llm_config::effective_training_default(provider, model)
+        != Some(crate::llm_config::TrainingDefault::Trains)
+    {
+        return None;
+    }
+    let sources = crate::llm_config::model_data_controls(model)
+        .map(|controls| controls.sources)
+        .or_else(|| {
+            crate::llm_config::provider_config(provider)
+                .and_then(|definition| definition.data_controls)
+                .map(|controls| controls.sources)
+        })
+        .unwrap_or_default();
+    let citation = sources
+        .first()
+        .map(|url| format!(" See {url}."))
+        .unwrap_or_default();
+    Some(format!(
+        "data_controls: refusing to call {model} on {provider}. The catalog records that this \
+         route trains on API traffic, and it publishes no per-request control that would stop \
+         it, so the strictest_available posture cannot be honored here. Choose a route that \
+         does not train, or ask for the default posture to proceed knowing the traffic is \
+         trained on.{citation}"
+    ))
+}
+
 /// Resolve the caller's posture against the registry into the writes this
 /// request owes and the receipt describing them.
 ///

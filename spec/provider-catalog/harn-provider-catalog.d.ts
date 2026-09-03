@@ -107,6 +107,14 @@ export interface HarnProviderDataControls {
   request_controls?: HarnProviderDataControl[]
 }
 
+export interface HarnModelDataControls {
+  training_default: "trains" | "does_not_train" | "unspecified"
+  retention_default?: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+}
+
 export interface HarnProviderDataControl {
   location: "body" | "header"
   name: string
@@ -144,6 +152,7 @@ export interface HarnAliasToolCalling {
 export interface HarnCatalogModel {
   id: string
   name: string
+  data_controls?: HarnModelDataControls
   display_name: string
   blurb?: string
   provider: string

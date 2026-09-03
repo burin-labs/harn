@@ -273,3 +273,127 @@ fn a_nested_control_replaces_a_non_object_on_its_path() {
 
     assert_eq!(body["provider"]["zdr"], json!(true));
 }
+
+// ── Training-tier refusal ───────────────────────────────────────────────────
+//
+// The strict posture's promise is that the traffic is not trained on. On a
+// route with no per-request control, "apply every declared control" applies
+// nothing, so without a refusal the call would go out unchanged and the
+// receipt would read `no_control_available` — a strict request that silently
+// achieved nothing. These pin the refusal, and, just as importantly, pin what
+// must NOT refuse.
+
+#[test]
+fn strict_posture_refuses_a_model_row_that_declares_training() {
+    let refusal = training_refusal(
+        "meta",
+        "muse-spark-1.3-contributor",
+        DataPosture::StrictestAvailable,
+    )
+    .expect("the contributor tier trains and must be refused under the strict posture");
+
+    assert!(
+        refusal.contains("muse-spark-1.3-contributor"),
+        "the refusal must name the route being refused: {refusal}"
+    );
+    // The person reading this has to be able to check the claim themselves.
+    assert!(
+        refusal.contains("https://"),
+        "the refusal must cite the source backing the training claim: {refusal}"
+    );
+}
+
+/// Negative control for the test above. Without this, a `training_refusal`
+/// that refused unconditionally would pass the positive case green.
+#[test]
+fn strict_posture_allows_the_standard_tier_of_the_same_provider() {
+    assert_eq!(
+        training_refusal("meta", "muse-spark-1.3", DataPosture::StrictestAvailable),
+        None,
+        "the standard tier does not train and must still route"
+    );
+}
+
+/// The direction of the model-level override, pinned. A row classified
+/// backwards passes any gate that only asks "is every row classified?".
+#[test]
+fn the_two_meta_tiers_are_classified_in_opposite_directions() {
+    use crate::llm_config::{effective_training_default, TrainingDefault};
+
+    assert_eq!(
+        effective_training_default("meta", "muse-spark-1.3-contributor"),
+        Some(TrainingDefault::Trains),
+    );
+    assert_eq!(
+        effective_training_default("meta", "muse-spark-1.3"),
+        Some(TrainingDefault::DoesNotTrain),
+    );
+}
+
+/// The model row overrides its provider rather than merely coexisting with it.
+/// Meta's provider-level declaration says `does_not_train`, so a contributor
+/// row that failed to override would read as safe.
+#[test]
+fn a_model_row_overrides_its_providers_declaration() {
+    use crate::llm_config::{effective_training_default, provider_config, TrainingDefault};
+
+    let provider_level = provider_config("meta")
+        .and_then(|definition| definition.data_controls)
+        .expect("meta declares provider-level data controls")
+        .training_default;
+    assert_eq!(provider_level, TrainingDefault::DoesNotTrain);
+
+    assert_eq!(
+        effective_training_default("meta", "muse-spark-1.3-contributor"),
+        Some(TrainingDefault::Trains),
+        "the model row must win over the provider's declaration"
+    );
+}
+
+/// The second negative control control asked for: this closes a pre-existing
+/// exposure rather than only covering the row this change added. Both
+/// providers were already classified as training on API traffic in the
+/// catalog, with nothing stopping a strict run from routing to them.
+#[test]
+fn strict_posture_refuses_providers_already_classified_as_training() {
+    for (provider, model) in [
+        ("deepseek", "deepseek-v4-pro"),
+        ("cohere", "command-a-plus-05-2026"),
+    ] {
+        assert!(
+            training_refusal(provider, model, DataPosture::StrictestAvailable).is_some(),
+            "{provider} is classified as training on API traffic and must be refused"
+        );
+    }
+}
+
+/// The refusal is scoped to the posture that asked for it. Under the shipped
+/// `default` posture nothing is refused, because the caller never claimed the
+/// traffic would go untrained.
+#[test]
+fn the_default_posture_refuses_nothing() {
+    assert_eq!(
+        training_refusal("meta", "muse-spark-1.3-contributor", DataPosture::Default),
+        None,
+    );
+    assert_eq!(
+        training_refusal("deepseek", "deepseek-v4-pro", DataPosture::Default),
+        None,
+    );
+}
+
+/// "Nobody has checked" must not acquire the force of "we checked and it
+/// trains". An unresearched provider keeps reporting itself through the
+/// receipt's `provider_unresearched` outcome instead of failing the call.
+#[test]
+fn an_unresearched_provider_is_not_refused() {
+    assert_eq!(
+        training_refusal(
+            "nvidia",
+            "some-unresearched-route",
+            DataPosture::StrictestAvailable
+        ),
+        None,
+        "an unresearched provider reports through the receipt, it does not refuse"
+    );
+}
