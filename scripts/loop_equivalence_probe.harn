@@ -1,0 +1,209 @@
+// Cross-binary behavioural equivalence probe for the agent run loop.
+//
+// Run it on two binaries and diff the output. Identical output is evidence that
+// a refactor of the run loop changed no observable behaviour, which a pass/fail
+// count cannot give you: a suite can stay green while event order, counts, or
+// receipt contents move.
+//
+//   harn run scripts/loop_equivalence_probe.harn > before.txt   # base binary
+//   harn run scripts/loop_equivalence_probe.harn > after.txt    # changed binary
+//   diff before.txt after.txt
+//
+// READ THIS BEFORE TRUSTING A ZERO DIFF. An earlier version of this probe
+// reported a false regression, and the failure mode is a confident wrong
+// answer rather than an error:
+//
+//  1. Session ids must be unique per run. With fixed ids the second run
+//     inherits the first run's transcripts from the persisted session store,
+//     so the two streams differ by ACCUMULATED STATE and not by code. The tell
+//     is a case diverging that the change under test never touches.
+//  2. Isolating HOME does NOT fix that. The store does not live under HOME.
+//  3. Unique ids leak into content digests, so digests and uuids are
+//     normalized here. Everything else, including every count, is compared.
+//  4. Always run the same binary twice first. If that self-differs, the probe
+//     is contaminated and any A/B result from it is meaningless.
+//
+// The suite guards points 3 and 4 in `tests/agent/loop_equivalence_probe_test.harn`,
+// which also proves this normalizer still detects a one-character change, so
+// the probe cannot pass vacuously.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import "std/agent/workers"
+import { llm_done, llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Blank the fields that legitimately differ between two runs of the same
+ * binary: wall-clock durations, uuids, and the content digests computed over
+ * the run-unique session id. Everything else is left intact so a real change
+ * still shows up.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: loop_equivalence_normalize("{\"duration_ms\":12}")
+ */
+pub fn loop_equivalence_normalize(line: string) -> string {
+  let out = regex_replace("[0-9a-f]{64}", "HASH", line)
+  out = regex_replace("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "UUID", out)
+  return regex_replace("_ms\":[-0-9.eE]+", "_ms\":0", out)
+}
+
+fn probe_edit_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "edit",
+    "Apply a source edit.",
+    {
+      handler: { _args ->
+        agent_tool_handler_result(
+          "write applied",
+          {mutation_status: "applied", changed_paths: ["src/artifact.harn"]},
+        )
+      },
+      parameters: {content: {type: "string", required: true}},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+fn probe_case(
+  harness: Harness,
+  label: string,
+  script: list,
+  opts: AgentSpec,
+  task: string,
+) -> list<string> {
+  let lines: list<string> = []
+  with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        opts.session_id,
+        fn() { return agent_loop(harness, task, nil, opts) },
+      )
+      lines = lines + [label + " status=" + to_string(captured.result?.status)]
+      lines = lines + [label + " count=" + to_string(len(captured.events))]
+      for event in captured.events {
+        lines = lines + [loop_equivalence_normalize(json_stringify(event))]
+      }
+    },
+  )
+  return lines
+}
+
+/**
+ * The three streams the probe compares. A run that completes through the judge,
+ * a run the judge sends back once, and a run that suspends. The suspending case
+ * is the one that exercises the await-resumption turn, so a change there cannot
+ * hide behind two cases that never reach it.
+ *
+ * @effects: [llm, agent, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: loop_equivalence_streams(harness)
+ */
+pub fn loop_equivalence_streams(harness: Harness) -> list<string> {
+  let lines: list<string> = []
+  lines = lines
+    + probe_case(
+      harness,
+      "completed",
+      [llm_done(), {text: json_stringify({verdict: "done", detail: "The work is complete."})}],
+      {
+        provider: "mock",
+        session_id: "equiv-completed-" + harness.random.uuid(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        verify_completion_judge: {provider: "mock"},
+      },
+      "Say hello.",
+    )
+  lines = lines
+    + probe_case(
+      harness,
+      "judge-continue",
+      [
+        {text: "", tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "first"}}]},
+        llm_done(),
+        {text: json_stringify({verdict: "continue", detail: "Exercise the behavior."})},
+        llm_text("Second pass. ##DONE##"),
+        {text: json_stringify({verdict: "done", detail: "Now complete."})},
+      ],
+      {
+        provider: "mock",
+        session_id: "equiv-judge-continue-" + harness.random.uuid(),
+        tools: probe_edit_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        verify_completion_judge: {provider: "mock"},
+      },
+      "Create and exercise the requested behavior.",
+    )
+  return lines + loop_equivalence_await_stream(harness)
+}
+
+/** The suspending run, which needs a background worker rather than a bare loop. */
+pub fn loop_equivalence_await_stream(harness: Harness) -> list<string> {
+  let lines: list<string> = []
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_1",
+            name: "agent_await_resumption",
+            arguments: {
+              reason: "waiting on review",
+              conditions: {timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"}},
+            },
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+    ],
+    { ->
+      const session_id = "equiv-await-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() {
+          const handle = sub_agent_run(
+            harness,
+            "Park until a reviewer responds.",
+            {
+              provider: "mock",
+              background: true,
+              session_id: session_id,
+              tool_format: "native",
+              max_iterations: 3,
+            },
+          )
+          return wait_agent(harness.agent, handle)
+        },
+      )
+      lines = lines + ["await-suspend status=" + to_string(captured.result?.status)]
+      lines = lines + ["await-suspend count=" + to_string(len(captured.events))]
+      for event in captured.events {
+        lines = lines + [loop_equivalence_normalize(json_stringify(event))]
+      }
+    },
+  )
+  return lines
+}
+
+pipeline default(harness: Harness) {
+  for line in loop_equivalence_streams(harness) {
+    harness.stdio.println(line)
+  }
+}
