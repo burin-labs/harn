@@ -1,0 +1,3 @@
+effect_unconfigured_judge_refuses_and_records_it=true
+effect_unconfigured_judge_never_uses_the_actors_model=true
+negative_a_configured_judge_still_grades_on_its_own_model=true
