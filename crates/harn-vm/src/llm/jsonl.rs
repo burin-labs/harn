@@ -649,6 +649,7 @@ const USAGE_FIELDS: &[&str] = &[
     "cache_read_tokens",
     "cache_write_tokens",
     "cache_creation_input_tokens",
+    "total_tokens",
 ];
 
 fn parse_llm_mock_usage(value: Option<&serde_json::Value>) -> Result<LlmMockUsage, String> {
@@ -662,11 +663,36 @@ fn parse_llm_mock_usage(value: Option<&serde_json::Value>) -> Result<LlmMockUsag
         .as_object()
         .ok_or_else(|| "`usage` must be an object".to_string())?;
     validate_v1_object_fields(object, "usage", USAGE_FIELDS)?;
+    let input_tokens = optional_i64_field(object, "input_tokens")?
+        .or(optional_i64_field(object, "prompt_tokens")?);
+    let output_tokens = optional_i64_field(object, "output_tokens")?
+        .or(optional_i64_field(object, "completion_tokens")?);
+    // `total_tokens` has no slot on the mock: the total is derived from the
+    // input and output counts downstream. Accepting it silently would drop a
+    // number the author wrote, so honour it as a constraint instead. A total
+    // that cannot be checked against a scripted split is rejected rather than
+    // ignored, which keeps the failure loud at the fixture that wrote it.
+    if let Some(total) = optional_i64_field(object, "total_tokens")? {
+        match (input_tokens, output_tokens) {
+            (Some(input), Some(output)) if input + output != total => {
+                return Err(format!(
+                    "`usage.total_tokens` is {total} but `input_tokens` + `output_tokens` is {}",
+                    input + output
+                ));
+            }
+            (Some(_), Some(_)) => {}
+            _ => {
+                return Err(
+                    "`usage.total_tokens` needs both `input_tokens` and `output_tokens`; \
+                     the mock derives the total and cannot split it"
+                        .to_string(),
+                );
+            }
+        }
+    }
     Ok(LlmMockUsage {
-        input_tokens: optional_i64_field(object, "input_tokens")?
-            .or(optional_i64_field(object, "prompt_tokens")?),
-        output_tokens: optional_i64_field(object, "output_tokens")?
-            .or(optional_i64_field(object, "completion_tokens")?),
+        input_tokens,
+        output_tokens,
         cache_read_tokens: optional_i64_field(object, "cache_read_tokens")?,
         cache_write_tokens: optional_i64_field(object, "cache_write_tokens")?
             .or(optional_i64_field(object, "cache_creation_input_tokens")?),
@@ -951,7 +977,6 @@ mod tests {
         assert!(call.get("args").is_none(), "legacy alias is canonicalized");
     }
 
-    #[test]
     /// harn#7860 falsifier. A scripted zero-token completion must stay zero.
     /// Before this, `usage` was accepted by the parser and dropped, so the
     /// entry fell through to the thirty-token default and the response the
@@ -1006,6 +1031,36 @@ mod tests {
         let bare =
             parse_llm_mock_value(&serde_json::json!({"text": "hi"})).expect("a bare entry parses");
         assert_eq!((bare.input_tokens, bare.output_tokens), (None, None));
+    }
+
+    /// `total_tokens` is real provider vocabulary that existing fixtures write,
+    /// but the mock derives the total and has no slot for it. Accepting it and
+    /// dropping it would repeat the defect this parser change closes, so it is
+    /// honoured as a constraint on the scripted split.
+    #[test]
+    fn a_scripted_total_is_checked_against_the_split_it_names() {
+        let agreed = parse_llm_mock_value(&serde_json::json!({
+            "usage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18},
+        }))
+        .expect("a total agreeing with the split parses");
+        assert_eq!(
+            (agreed.input_tokens, agreed.output_tokens),
+            (Some(11), Some(7))
+        );
+
+        let contradiction = parse_llm_mock_value(&serde_json::json!({
+            "usage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 99},
+        }))
+        .expect_err("a total contradicting the split must not be dropped");
+        assert!(contradiction.contains("total_tokens"), "{contradiction}");
+
+        // A total with nothing to check it against is rejected rather than
+        // silently ignored: the mock cannot split one number into two.
+        let unsplittable = parse_llm_mock_value(&serde_json::json!({
+            "usage": {"total_tokens": 18},
+        }))
+        .expect_err("an uncheckable total must fail at the fixture that wrote it");
+        assert!(unsplittable.contains("total_tokens"), "{unsplittable}");
     }
 
     #[test]
