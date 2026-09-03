@@ -9,6 +9,10 @@ import { agent_dispatch_tool_call } from "std/agent/primitives"
  * to the display rendering, reaching the classifier as an unparseable string
  * like `{ok: false, error: boom}`, and every one of them was reported `ok`.
  *
+ * `status_error` is the known residual: its only failure signal is a status
+ * string, which the structured path deliberately does not key off, so it is
+ * still reported ok. It is pinned here so a later fix flips it deliberately.
+ *
  * The raising handler is the control: it was already classified correctly, and
  * it must stay that way. The `{ok: true}` handler is the negative control —
  * this path must not manufacture failures.
