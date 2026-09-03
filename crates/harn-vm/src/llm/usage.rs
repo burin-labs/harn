@@ -306,14 +306,13 @@ impl LlmUsage {
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
             served_fast: usages.iter().any(|usage| usage.served_fast),
-            // `Unknown` is reserved for a call where nothing priced. Anything
-            // partly measured reads `partial`, so a reader can tell a blackout
-            // from a gap.
-            accounting_status: if certainty.usage_unknown_calls == 0
-                && certainty.unpriced_calls == 0
-            {
+            // `Unknown` is reserved for a call where nothing was measured.
+            // A mix reads `partial`, so a reader can tell a blackout from a
+            // gap and a measured sibling is never blacked out by an
+            // unmeasured one.
+            accounting_status: if certainty.usage_unknown_calls == 0 {
                 UsageAccountingStatus::Reported
-            } else if certainty.provider_call_count > certainty.unpriced_calls {
+            } else if certainty.provider_call_count > certainty.usage_unknown_calls {
                 UsageAccountingStatus::Partial
             } else {
                 UsageAccountingStatus::Unknown
@@ -523,10 +522,12 @@ impl LlmUsage {
             ),
             cache_hit: result.cache_read_tokens > 0,
             served_fast: result.served_fast,
-            // One physical request cannot be partly accounted: it either
-            // priced or it did not. `usage_unknown_calls` below still records
-            // the separate question of whether the provider reported counts.
-            accounting_status: if cost_usd.is_some() {
+            // This field answers whether the provider reported the usage, not
+            // whether the call priced. One physical request cannot be partly
+            // reported, so `Partial` never arises here; it is the aggregate of
+            // several requests that can be part measured. The pricing split is
+            // carried separately by `unpriced_attempts` below.
+            accounting_status: if usage_known || authoritative_cost.is_some() {
                 UsageAccountingStatus::Reported
             } else {
                 UsageAccountingStatus::Unknown
