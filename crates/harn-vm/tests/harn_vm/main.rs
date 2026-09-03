@@ -20,6 +20,7 @@ mod support;
 
 mod agent_call_stage_attribution;
 mod agent_fanout;
+mod agent_loop_boundary_terminal;
 mod agent_loop_final_wrapup;
 mod agent_loop_output_schema;
 mod agent_loop_steering_seams;
