@@ -136,7 +136,23 @@ pub fn enter_nested_execution_policy(
     label: &str,
 ) -> Result<NestedExecutionGuard, VmError> {
     let parent = current_execution_policy();
-    let parent_limit = parent.as_ref().and_then(|p| p.recursion_limit);
+    let top_level_agent_loop = parent.is_none() && matches!(kind, NestedExecutionKind::AgentLoop);
+    // A top-level `agent_loop` is where the runtime's own default budget has to
+    // enter, because it is the outermost descent and there is nobody above it
+    // to have supplied one. Without this the limit is `None` at every level:
+    // nothing decrements, nothing ever reaches zero, and an agent that keeps
+    // delegating descends until the native stack is exhausted and the process
+    // aborts. The default was declared and carried by the workflow ceiling, and
+    // simply never reached the agent path.
+    //
+    // It belongs here rather than on the carrier built below, where an earlier
+    // attempt put it: that carrier's `recursion_limit` is overwritten with the
+    // computed child limit a few lines down, so a default set there is erased
+    // before it is ever read.
+    let parent_limit = parent.as_ref().and_then(|p| p.recursion_limit).or_else(|| {
+        top_level_agent_loop
+            .then_some(crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth)
+    });
 
     if matches!(parent_limit, Some(0)) {
         emit_descent_event(kind, label, parent_limit, None, true);
@@ -154,7 +170,6 @@ pub fn enter_nested_execution_policy(
 
     emit_descent_event(kind, label, parent_limit, child_limit, false);
 
-    let top_level_agent_loop = parent.is_none() && matches!(kind, NestedExecutionKind::AgentLoop);
     let pushed = if child_limit.is_some() || top_level_agent_loop {
         let mut carrier = parent.unwrap_or_else(|| {
             if top_level_agent_loop {
@@ -198,9 +213,6 @@ pub fn enter_nested_execution_policy(
 fn top_level_agent_loop_policy() -> CapabilityPolicy {
     CapabilityPolicy {
         sandbox_profile: SandboxProfile::OsHardened,
-        recursion_limit: Some(
-            crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth,
-        ),
         ..CapabilityPolicy::default()
     }
 }
@@ -412,14 +424,27 @@ mod tests {
         assert!(current_execution_policy().is_none());
     }
 
+    /// The top-level carrier hardens the sandbox *and* seeds the descent
+    /// budget.
+    ///
+    /// This case previously asserted `recursion_limit == None` here, which
+    /// codified the defect: with no budget at the outermost descent there was
+    /// nothing to decrement, so no depth ever refused and a delegating agent
+    /// ran until the native stack aborted the process. The carrier now starts
+    /// one slot down from the declared default, because entering the top-level
+    /// loop is itself the first descent.
     #[test]
-    fn top_level_agent_loop_pushes_os_hardened_carrier_without_budget() {
+    fn top_level_agent_loop_pushes_os_hardened_carrier_with_the_default_budget() {
         clear_execution_policy_stacks();
         let guard =
             enter_nested_execution_policy(None, NestedExecutionKind::AgentLoop, "session-secure")
                 .unwrap();
         let pushed = current_execution_policy().unwrap();
-        assert_eq!(pushed.recursion_limit, None);
+        assert_eq!(
+            pushed.recursion_limit,
+            Some(crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth - 1),
+            "a top-level agent_loop must seed the default descent budget"
+        );
         assert_eq!(
             pushed.sandbox_profile,
             crate::orchestration::SandboxProfile::OsHardened
