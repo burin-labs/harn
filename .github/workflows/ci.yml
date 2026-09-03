@@ -1292,6 +1292,78 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Refuses a stack frame that grew, and refuses outright any frame inside the
+  # band that overflows a worker stack. It is a separate lane rather than a step
+  # in the Rust lint job because the census needs clippy's `stack-size-threshold`
+  # lowered, which changes clippy's fingerprint: folding it in would force a
+  # second full workspace clippy pass *inside* the lint lane and extend that
+  # lane's wall time by roughly its own length. Running beside it costs nothing
+  # on the critical path.
+  stack-frames:
+    name: Stack frame budget
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      gate_ok: ${{ steps.stack-frames-ok.outputs.ok }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      HARN_RUNNER_TIER: github-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          components: clippy
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          # Its own key: this lane's artifacts are fingerprinted under a
+          # different clippy config than the lint lane's and would otherwise
+          # evict them.
+          shared-key: stack-frames
+          cache-on-failure: true
+          cache-bin: false
+          cache-workspace-crates: "true"
+      # The census depends on nothing any other job produces, so it runs before
+      # this lane waits for the shared CLI. The wait then overlaps a compile
+      # that would otherwise have delayed the job's start.
+      - name: Collect the stack-frame census
+        run: |
+          mkdir -p .harn-tmp
+          ./scripts/ci/collect_stack_frames.sh .harn-tmp/stack-frame-census.json
+      - name: Wait for shared Harn binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download portable Harn CLI
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify portable Harn CLI
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Judge frames against their budgets
+        run: >-
+          "$HARN_BIN" run scripts/check_stack_frames.harn --
+          --census .harn-tmp/stack-frame-census.json
+          --today "$(date -u +%F)"
+      - name: Mark stack-frame proof
+        id: stack-frames-ok
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+
   ci-walltime-report:
     name: Write CI timing report
     # This report describes prior completed merge-group runs, so it does not
@@ -2320,6 +2392,7 @@ jobs:
         rust-cache-refresh,
         rust-test,
         rust-security,
+        stack-frames,
         harn-audit,
         ci-walltime-report,
         audit-scripts,
@@ -2417,6 +2490,22 @@ jobs:
           fi
           if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$lint_ok" != "true" ]; then
             echo "::error::Rust lint proof is missing."
+            exit 1
+          fi
+
+          # The stack-frame budget. A skip is tolerated only when the changes
+          # filter says no Rust was touched; when Rust was touched the lane must
+          # have published its proof flag, so a skipped or cancelled job cannot
+          # stand in for a census that was never taken.
+          stack_frames_result="${{ needs['stack-frames'].result }}"
+          stack_frames_ok="${{ needs['stack-frames'].outputs.gate_ok }}"
+          echo "Stack frame budget: $stack_frames_result (gate_ok=$stack_frames_ok)"
+          if [ "$stack_frames_result" != "success" ] && [ "$stack_frames_result" != "skipped" ]; then
+            echo "::error::Stack frame budget failed."
+            exit 1
+          fi
+          if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$stack_frames_ok" != "true" ]; then
+            echo "::error::Stack frame proof is missing."
             exit 1
           fi
 

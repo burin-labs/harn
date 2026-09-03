@@ -55,7 +55,16 @@ fn gemini_routes_default_to_generate_content() {
 #[test]
 fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
     clear_user_overrides();
-    for model in ["gemini-3.6-flash", "gemini-3.5-flash-lite"] {
+    // 3.8 Flash is listed first so the loop proves the claim that matters for
+    // it: Google's endpoint ACCEPTS temperature / top_p / top_k with a 200,
+    // and the only thing keeping them off the wire is this strip. Both the
+    // bare id and the `models/` REST resource name must route the same way.
+    for model in [
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+    ] {
         let caps = lookup("gemini", model);
         assert_eq!(
             caps.live_endpoint_family,

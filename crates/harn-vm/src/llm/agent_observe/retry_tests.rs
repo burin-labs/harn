@@ -876,7 +876,7 @@ async fn transcript_event_carries_canonical_session_run_association() {
     )
     .await
     .expect("prepare journal");
-    crate::agent_sessions::open_or_create(Some("correlated-session".to_string()));
+    crate::agent_sessions::open_or_create_for_test(Some("correlated-session".to_string()));
     crate::agent_sessions::install_journal("correlated-session", prepared.state)
         .expect("install journal");
     crate::agent_sessions::push_current_session("correlated-session".to_string());

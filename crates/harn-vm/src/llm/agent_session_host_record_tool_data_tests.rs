@@ -6,8 +6,9 @@ use crate::value::{VmDictExt, VmValue};
 #[test]
 fn dispatched_escalation_result_records_native_role_and_facts_on_text_locked_session() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("record-native-under-text-lock".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "record-native-under-text-lock".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
 
@@ -67,7 +68,7 @@ fn dispatched_escalation_result_records_native_role_and_facts_on_text_locked_ses
 fn dispatched_text_channel_result_omits_absent_data() {
     reset_agent_session_host_state();
     let session_id =
-        crate::agent_sessions::open_or_create(Some("record-text-homogeneous".to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some("record-text-homogeneous".to_string()));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "moonshot", "moonshot/kimi-k2.7-code-highspeed");
 
@@ -117,8 +118,9 @@ fn dispatched_text_channel_result_omits_absent_data() {
 #[test]
 fn dispatched_result_projects_mutation_facts_into_typed_transcript_receipt() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("record-structured-mutation-facts".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "record-structured-mutation-facts".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "moonshot", "moonshot/kimi-k2.7-code-highspeed");
 
@@ -160,7 +162,7 @@ fn dispatched_result_projects_mutation_facts_into_typed_transcript_receipt() {
 #[test]
 fn dispatched_dynamic_result_projects_nested_mutation_facts_into_typed_receipt() {
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some(
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
         "record-nested-structured-mutation-facts".to_string(),
     ));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
@@ -217,8 +219,9 @@ fn dispatched_dynamic_result_projects_nested_mutation_facts_into_typed_receipt()
 #[test]
 fn dispatched_typed_handler_result_preserves_typed_data() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("record-typed-handler-data".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "record-typed-handler-data".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "mock", "fixture-fast");
 
@@ -260,8 +263,9 @@ fn dispatched_typed_handler_result_preserves_typed_data() {
 #[test]
 fn dispatched_idempotent_result_preserves_satisfied_unchanged_outcome() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("record-idempotent-mutation-facts".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "record-idempotent-mutation-facts".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "mock", "fixture-fast");
 

@@ -115,14 +115,16 @@ pub(crate) use raw_provider_capture::{
     RawProviderResponseFailureCapture,
 };
 
+#[cfg(test)]
+pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
     record_capability_snapshot_definition, record_served_message_definition,
     served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
-    current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
-    swap_llm_transcript_ambient, LlmTranscriptAmbient,
+    current_transcript_path, push_llm_transcript_dir, remove_llm_transcript_dir,
+    swap_llm_transcript_ambient, LlmTranscriptAmbient, TranscriptDirFrame,
 };
 
 fn next_call_id() -> String {
@@ -275,7 +277,9 @@ use retry_request::{
     escalate_options_output_budget,
 };
 use transcript_observability::*;
-pub(crate) use transcript_observability::{append_llm_observability_entry, record_template_render};
+pub(crate) use transcript_observability::{
+    append_llm_observability_entry, append_llm_observability_entry_to_dir, record_template_render,
+};
 /// Extract retry-after delay from an error message if present.
 ///
 /// Supports both forms defined by RFC 7231 §7.1.3:
@@ -422,7 +426,24 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 /// Capability proving that the transcript request event was emitted before a
 /// single-route provider primitive can run. Only this module can construct the
 /// token; logical callers must use the observed API entry points.
-pub(crate) struct ObservedAttemptToken(());
+#[derive(Clone)]
+pub(crate) struct ObservedAttemptToken {
+    session_id: Option<String>,
+}
+
+impl ObservedAttemptToken {
+    fn for_current_session() -> Self {
+        Self {
+            session_id: super::agent_runtime::current_agent_session_id(),
+        }
+    }
+
+    pub(super) fn record_provider_dispatch(&self) {
+        if let Some(session_id) = self.session_id.as_deref() {
+            super::agent_session_host::record_provider_dispatch(session_id);
+        }
+    }
+}
 
 /// Make one LLM call with full observability: call-id generation, bridge
 /// notifications (call_start / call_progress / call_end), span annotation,
@@ -565,7 +586,7 @@ pub(crate) async fn observed_llm_call(
             &effective_tool_format,
             opts,
         )?;
-        let observed_attempt = ObservedAttemptToken(());
+        let observed_attempt = ObservedAttemptToken::for_current_session();
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
