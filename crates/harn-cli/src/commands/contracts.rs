@@ -95,7 +95,7 @@ fn builtin_contract_value(_args: &ContractsOutputArgs) -> serde_json::Value {
         }));
     }
     json!({
-        "version": 2,
+        "version": 3,
         "builtins": rows,
     })
 }
@@ -104,6 +104,7 @@ fn contract_json(contract: BuiltinContract) -> serde_json::Value {
     json!({
         "exposure": exposure_json(contract.exposure),
         "effects": contract.effects.iter().map(effect_json).collect::<Vec<_>>(),
+        "runtime_control_plane": contract.is_runtime_control_plane(),
     })
 }
 
@@ -263,12 +264,30 @@ pub(crate) async fn handle_contracts_command(args: ContractsArgs) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_builtin_meta::CapabilityId;
+
+    #[test]
+    fn contract_json_projects_runtime_control_plane_classification() {
+        const RESOURCES: &[ResourceSelector] = &[ResourceSelector::Constant("agent-sessions")];
+        const EFFECTS: &[harn_builtin_meta::EffectSpec] = &[harn_builtin_meta::EffectSpec::new(
+            EffectKind::State,
+            EffectAccess::Mutate,
+            RESOURCES,
+        )];
+        let contract =
+            BuiltinContract::harness_runtime_control_plane(CapabilityId::Agent, "open", EFFECTS);
+        assert_eq!(contract_json(contract)["runtime_control_plane"], true);
+        assert_eq!(
+            contract_json(BuiltinContract::PURE)["runtime_control_plane"],
+            false
+        );
+    }
 
     #[test]
     fn builtin_export_projects_typed_exposure_and_effect_contracts() {
         harn_vm::stdlib::force_link();
         let value = builtin_contract_value(&ContractsOutputArgs { pretty: false });
-        assert_eq!(value["version"], 2);
+        assert_eq!(value["version"], 3);
 
         let builtins = value["builtins"].as_array().expect("builtin rows");
         let fs_read = builtins

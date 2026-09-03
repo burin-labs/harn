@@ -37,7 +37,7 @@ pipeline main(harness: Harness) {
       const call = harness.llm.mock_calls()[0]
       const last = call.messages[len(call.messages) - 1]
       harness.stdio.println(last.role)
-      harness.stdio.println(contains(last.content, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "<context-directives speaker=\"person\">"))
       harness.stdio.println(contains(last.content, "authority=\"contract\""))
       harness.stdio.println(contains(last.content, "openai reminder"))
       harness.stdio.println(call.system == nil || !contains(call.system, "openai reminder"))

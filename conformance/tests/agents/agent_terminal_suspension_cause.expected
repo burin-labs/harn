@@ -1,0 +1,7 @@
+kind=suspended
+reason=suspended
+message=Workspace is untrusted, so the edit was refused
+detail=resume_when=on_event:workspace_trusted
+open_kind=suspended
+open_message=waiting on the operator
+open_detail=<absent>

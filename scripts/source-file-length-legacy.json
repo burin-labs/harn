@@ -17,7 +17,6 @@
     "crates/harn-serve/src/adapters/acp/events/tests.rs",
     "crates/harn-serve/src/adapters/acp/tests/modes.rs",
     "crates/harn-serve/src/adapters/acp/tests/sessions.rs",
-    "crates/harn-serve/src/adapters/api/mod.rs",
     "crates/harn-serve/src/core.rs",
     "crates/harn-serve/src/exports.rs",
     "crates/harn-vm/src/agent_sessions_tests.rs",

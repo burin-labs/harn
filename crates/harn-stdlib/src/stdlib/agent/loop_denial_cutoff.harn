@@ -1,6 +1,7 @@
 import "std/agent/loop_result_status"
 import "std/agent/loop_turn_options"
 import { agent_emit_event, agent_session_record_usage } from "std/agent/state"
+import { agent_tool_handler_result_denial } from "std/agent/tool_lifecycle"
 
 pub type AgentPostDispatchUsage = {
   tokens_used: int,
@@ -38,7 +39,13 @@ fn __tool_result_denial(result: dict) {
   if type_of(result?.result?.denial) == "dict" {
     return result.result.denial
   }
-  return nil
+  // A handler that ran and then refused reports its denial one level deeper,
+  // under the handler result's `data`. Both shapes above are what the VM
+  // writes when it refuses to dispatch at all; without this third probe a
+  // refusal a tool reported about itself is invisible here, and a repeatable
+  // refusal — a consent gate says no to the identical command every time — is
+  // exactly what this cutoff exists to stop.
+  return agent_tool_handler_result_denial(result)
 }
 
 /**
