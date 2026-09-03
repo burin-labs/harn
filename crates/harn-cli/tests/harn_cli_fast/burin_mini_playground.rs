@@ -917,3 +917,73 @@ fn windows_run_tool_env_probe_through_execute_playground_inputs() {
          uses) could not resolve 'node' via `where node`\n{full_dump}"
     );
 }
+
+/// TEMPORARY PROBE-ONLY TEST (harn#7993). DELETE THIS TEST in the fix push
+/// once the command-shape question below is answered — it exists only to
+/// force a full diagnostic dump into a Windows CI log this round.
+///
+/// Round 2 established: the run-tool seam, cwd, and env are fine —
+/// `windows_run_tool_env_probe_through_execute_playground_inputs`'s
+/// `where node` PASSED on the same box the 5 real fixtures FAILED on with
+/// `node scripts/verify-comment.js` -> "'node' is not recognized". Same
+/// seam, same env, same cwd; only the command SHAPE differs: the failing
+/// fixture's `run` command is bare `node ...`, spawned through
+/// `crate::shells::default_shell_invocation`'s outer shell, while the probe
+/// wrapped everything in an explicit inner `cmd.exe /D /C`.
+///
+/// This test runs 7 commands through the identical seam
+/// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
+/// `run_captured_spawn`) to isolate exactly which layer of that shape
+/// matters: a bare `node --version` (matches the real failure's shape);
+/// the same wrapped in `cmd.exe /D /C` and in `cmd.exe /C` (no `/D`, to
+/// check AutoRun); `where node`; `echo %PATH%` and `echo %PATHEXT%` as BARE
+/// commands (so we see what the OUTER shell's own child inherits, with no
+/// inner cmd in between); and an absolute-path node invocation. It also
+/// prints `default_shell_invocation` for the real fixture's exact command
+/// string, so the outer program/args/default_args are on record rather than
+/// inferred from shells.rs source reading.
+///
+/// Always panics (never green) so nextest's `failure-output =
+/// "immediate-final"` guarantees the dump prints in full regardless of
+/// whether any individual probe command happened to succeed — this test's
+/// job is visibility, not a pass/fail verdict.
+#[cfg(windows)]
+#[test]
+fn windows_only_temporary_command_shape_probe_delete_after_harn_7993() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_command_shape_probe.jsonl",
+    );
+    let stdout = match &outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let transcript_dump = if report_path.exists() {
+        let report = read_json(&report_path);
+        dump_run_tool_transcript(&report)
+    } else {
+        format!(
+            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
+            report_path.display()
+        )
+    };
+    let fixture_command = "node scripts/verify-comment.js";
+    let shell_invocation_dump = match harn_vm::shells::default_shell_invocation(fixture_command) {
+        Ok(invocation) => format!("{invocation:?}"),
+        Err(error) => format!("default_shell_invocation error: {error}"),
+    };
+    panic!(
+        "probe-only diagnostic dump (harn#7993 round 2 — DELETE THIS TEST in \
+         the fix push, it is designed to always fail)\n\
+         === windows_only_temporary_command_shape_probe_delete_after_harn_7993 ===\n\
+         default_shell_invocation({fixture_command:?}) = {shell_invocation_dump}\n\
+         playground stdout/error:\n{stdout}\n\
+         run tool transcript (7 commands: bare node --version; cmd /D /C node \
+         --version; cmd /C node --version; where node; bare echo %PATH%; bare \
+         echo %PATHEXT%; absolute-path node.exe):\n{transcript_dump}\n\
+         === end probe ==="
+    );
+}
