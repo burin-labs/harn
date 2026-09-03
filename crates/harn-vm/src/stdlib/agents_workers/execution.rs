@@ -54,7 +54,9 @@ fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::R
 
 const WORKER_SESSION_ID_METADATA_KEY: &str = "worker_session_id";
 
-fn worker_stage_session_id(node: &crate::orchestration::WorkflowNode) -> Option<String> {
+pub(in super::super) fn worker_stage_session_id(
+    node: &crate::orchestration::WorkflowNode,
+) -> Option<String> {
     node.raw_model_policy
         .as_ref()
         .and_then(|value| value.as_dict())
