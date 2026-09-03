@@ -607,6 +607,7 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	./scripts/tests/pr_title_convention_test.sh
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
