@@ -1031,7 +1031,11 @@ pub fn agent_command_tools(
           annotations: __agent_host_annotations(
             opts,
             key,
-            {kind: "execute", side_effect_level: "read_only"},
+            {
+              kind: "execute",
+              side_effect_level: "read_only",
+              completion_evidence_role: "verification",
+            },
           ),
           handler: { args ->
             __agent_host_render(
@@ -1068,7 +1072,11 @@ pub fn agent_command_tools(
           annotations: __agent_host_annotations(
             opts,
             key,
-            {kind: "execute", side_effect_level: "read_only"},
+            {
+              kind: "execute",
+              side_effect_level: "read_only",
+              completion_evidence_role: "verification",
+            },
           ),
           handler: { args ->
             __agent_host_render(
