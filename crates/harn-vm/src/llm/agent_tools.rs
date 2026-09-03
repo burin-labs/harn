@@ -1451,6 +1451,11 @@ mod tests {
             serde_json::json!({"ok": false, "error": "boom"}),
             serde_json::json!({"success": false, "message": "rejected"}),
             serde_json::json!({"isError": true, "message": "mcp shape"}),
+            // Classifying the structured value covers the failure `status`
+            // string too, which no rule about what to keep structured could
+            // have reached without holding open every dict that reports
+            // progress.
+            serde_json::json!({"status": "error", "message": "nope"}),
         ];
         for shape in failure_shapes {
             // A plain dict, not a typed struct — what a `tool_define` handler
