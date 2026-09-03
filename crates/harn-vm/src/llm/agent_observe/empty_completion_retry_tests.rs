@@ -953,3 +953,100 @@ fn billed_noncommittal_error() -> crate::value::VmError {
          with no dispatchable tool call or answer (upstream contract violation)",
     )))
 }
+
+/// harn#7912 falsifier. A retried zero-token empty attempt must not make the
+/// whole call read as unpriced.
+///
+/// The discarded attempt reported no tokens on any axis, so it measured zero
+/// rather than failing to measure. Folding its raw `unknown` ledger made one
+/// empty retry null `cost_usd` beside a populated `known_cost_usd`, and a cost
+/// governor treats an unpriced call by consuming its entire ceiling, so a call
+/// that recovered cleanly could stop the run.
+///
+/// The assertion is a delta against the single-call baseline rather than an
+/// absolute: the fake route carries no pricing, so every completed attempt is
+/// unpriced on its own. What must hold is that the DISCARDED attempt adds
+/// nothing.
+#[test]
+fn a_retried_empty_attempt_does_not_add_an_unpriced_call() {
+    current_thread_runtime().block_on(async {
+        reset_agent_trace_state();
+        let baseline = {
+            let _guard =
+                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("answered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])));
+            observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                .await
+                .expect("clean call")
+                .usage()
+        };
+
+        let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(
+            FakeLlmTurn::stream(vec![
+                FakeLlmEvent::Token("answered".into()),
+                FakeLlmEvent::Done(FakeStopReason::EndTurn),
+            ]),
+        ));
+        let retried = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+            .await
+            .expect("empty completion retry should recover")
+            .usage();
+
+        assert_eq!(
+            retried.provider_call_count, 2,
+            "the physical attempt count still records both requests"
+        );
+        assert_eq!(
+            retried.unpriced_calls, baseline.unpriced_calls,
+            "a discarded zero-token attempt must not add an unpriced call"
+        );
+        assert_eq!(
+            retried.usage_unknown_calls, baseline.usage_unknown_calls,
+            "a discarded zero-token attempt must not add an unknown-usage call"
+        );
+        reset_agent_trace_state();
+    });
+}
+
+/// The control that keeps the fix honest. An actionless turn that DID report
+/// tokens is real spend, so its ledger must survive being discarded. Without
+/// this, zeroing every retried attempt would pass the falsifier above while
+/// hiding measured spend from the governor.
+#[test]
+fn a_retried_attempt_that_reported_tokens_keeps_counting() {
+    current_thread_runtime().block_on(async {
+        reset_agent_trace_state();
+        let baseline = {
+            let _guard =
+                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("answered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])));
+            observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                .await
+                .expect("clean call")
+                .usage()
+        };
+
+        let _guard =
+            install_fake_llm_script(FakeLlmScript::new().push(errored_actionless_turn()).push(
+                FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("answered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ]),
+            ));
+        let retried = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+            .await
+            .expect("actionless completion retry should recover")
+            .usage();
+
+        let discarded = retried.usage_unknown_calls - baseline.usage_unknown_calls;
+        assert_eq!(
+            discarded, 1,
+            "an actionless attempt that reported tokens still counts as its own call"
+        );
+        reset_agent_trace_state();
+    });
+}

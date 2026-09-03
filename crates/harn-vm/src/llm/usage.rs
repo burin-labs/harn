@@ -207,6 +207,20 @@ impl LlmUsage {
         }
     }
 
+    /// Whether this ledger carries no token counts at all.
+    ///
+    /// Distinct from an attempt whose counts happen to be zero on one axis: a
+    /// provider that reported nothing on every axis measured nothing, and a
+    /// discarded attempt in that state can be folded as a known zero rather
+    /// than as an unpriced call that voids its siblings.
+    pub(crate) fn reports_no_tokens(&self) -> bool {
+        self.input_tokens == 0
+            && self.output_tokens == 0
+            && self.cache_read_tokens == 0
+            && self.cache_write_tokens == 0
+            && self.reported_total_tokens.is_none()
+    }
+
     pub(crate) fn unknown_attempt() -> Self {
         Self::unknown_attempts(1)
     }
