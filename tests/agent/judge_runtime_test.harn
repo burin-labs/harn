@@ -1037,7 +1037,6 @@ pipeline test_declared_role_decides_whether_a_poll_reaches_the_judge(_task: any)
     !contains(before_names, "poll_command"),
     "without a declared role the poll classifies \"other\" and fills no slot; if it now appears, this control has stopped measuring the defect: ${json_stringify(before_names)}",
   )
-
   // Exactly the annotation `host_tools.harn` ships now.
   const declared = {
     tools: [
@@ -1055,7 +1054,8 @@ pipeline test_declared_role_decides_whether_a_poll_reaches_the_judge(_task: any)
   }
   const after = __judge_evidence_projection(messages, declared)
   const after_names = after.packet.actions.map({ action -> action.name }).to_list()
-  const after_roles = after.packet.actions.map({ action -> action.semantics.evidence_role }).to_list()
+  const after_roles = after.packet.actions.map({ action -> action.semantics.evidence_role })
+    .to_list()
   assert(
     contains(after_names, "poll_command"),
     "the declared poll must reach the judge as selected evidence, got ${json_stringify(after_names)}",
