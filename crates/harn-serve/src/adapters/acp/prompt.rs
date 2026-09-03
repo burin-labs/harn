@@ -46,10 +46,13 @@ impl AcpServer {
             SessionBudget::Unlimited => None,
             SessionBudget::Custom(spec) => Some(spec),
         };
-        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+        if let Err(error) = harn_vm::agent_sessions::open_or_create_with_actor_chain(
             Some(session_id.clone()),
             self.actor_chain(),
-        );
+        ) {
+            self.send_session_open_error(id, &error);
+            return;
+        }
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
         if let Err(message) = self.sync_session_root_from_workspace_anchor(&session_id) {
             self.send_prompt_error(id, &message);
