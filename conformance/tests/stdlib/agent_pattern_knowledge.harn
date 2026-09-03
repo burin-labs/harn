@@ -48,6 +48,54 @@ pipeline default(harness: Harness) {
         options,
       )
       harness.stdio.println(contains(context.body, "Loaded learned skills"))
+      // `task_domain_words` falsifier: a task-signal term supplied by the host
+      // (Burin's task_named_language_ids/task_intent_skill_evidence, for one
+      // caller) narrows which learned skills a lexical-overlap hit is allowed
+      // to serve, mirroring the false-positive lane-context-III measured on a
+      // real served prompt -- a repo-meta learned skill sharing only generic
+      // words with an unrelated task, never the task's actual domain.
+      harness.fs.mkdir(path_join(root, ".claude", "skills", "swift-error-handling"))
+      harness.fs.write_text(
+        path_join(root, ".claude", "skills", "swift-error-handling", "SKILL.md"),
+        "---\nname: swift-error-handling\ndescription: \"Swift error handling patterns for scripts\"\nwhen-to-use: \"\"\nuser-invocable: true\ndisable-model-invocation: false\nallowed-tools: []\ncategory: Command\ntags: [learned, manual]\n---\n\nHandle Swift errors with do/catch and typed error enums.\n",
+      )
+      harness.fs.mkdir(path_join(root, ".claude", "skills", "review-harn-pipelines"))
+      harness.fs.write_text(
+        path_join(root, ".claude", "skills", "review-harn-pipelines", "SKILL.md"),
+        "---\nname: review-harn-pipelines\ndescription: \"Review examples that must show the new file's conventions\"\nwhen-to-use: \"\"\nuser-invocable: true\ndisable-model-invocation: false\nallowed-tools: []\ncategory: Command\ntags: [learned, manual]\n---\n\nCheck examples, files, and new conventions before landing a pipeline review.\n",
+      )
+      const swift_task =
+        "Author Examples/uptime.swift, a standalone Swift script. Use the examples that must show the new file's conventions."
+      // Direction one: no task-domain signal supplied keeps today's behavior
+      // unchanged -- both skills match on plain lexical overlap.
+      const undomained = pattern_learning_context(harness, "s4", swift_task, 3, options)
+      harness.stdio.println(contains(undomained.body, "swift-error-handling"))
+      harness.stdio.println(contains(undomained.body, "review-harn-pipelines"))
+      // Direction two: the host names "swift" as the task's domain. The
+      // review-harn-pipelines hit shares no domain word with the task -- its
+      // overlap is "examples", "must", "new", "file", none of them "swift" --
+      // so it must be dropped; the genuinely Swift-relevant skill stays.
+      const swift_domained = pattern_learning_context(
+        harness,
+        "s5",
+        swift_task,
+        3,
+        options + {task_domain_words: ["swift"]},
+      )
+      harness.stdio.println(contains(swift_domained.body, "swift-error-handling"))
+      harness.stdio.println(contains(swift_domained.body, "review-harn-pipelines"))
+      // Direction three: the host also names the review skill's own domain.
+      // Naming a domain a candidate genuinely shares keeps it -- this is not
+      // a blanket suppression of every non-Swift card.
+      const both_domained = pattern_learning_context(
+        harness,
+        "s6",
+        swift_task,
+        3,
+        options + {task_domain_words: ["swift", "examples"]},
+      )
+      harness.stdio.println(contains(both_domained.body, "swift-error-handling"))
+      harness.stdio.println(contains(both_domained.body, "review-harn-pipelines"))
       pattern_learning_set_enabled(harness, false, options)
       const status = pattern_learning_status(harness, options)
       harness.stdio.println(status.enabled)

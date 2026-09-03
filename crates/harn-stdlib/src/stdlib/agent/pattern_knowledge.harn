@@ -1024,7 +1024,39 @@ fn pattern_learning_observe_inner(
   }
 }
 
-fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
+fn pl_normalized_domain_words(value: any) -> list {
+  let seen = []
+  let out = []
+  if type_of(value) != "list" {
+    return out
+  }
+  for entry in value {
+    const word = to_string(entry ?? "").trim().lower()
+    if word && !seen.contains(word) {
+      seen = seen + [word]
+      out = out + [word]
+    }
+  }
+  return out
+}
+
+/**
+ * Score one learned skill against a query's significant words.
+ *
+ * `task_domain_words` is the host's own task-signal, not a second opinion
+ * computed here: the host's own task-intent or language matcher already
+ * decided what this task is genuinely about, and passes those terms
+ * through unchanged. When it is non-empty, a lexical hit only counts if the
+ * matched word is also one the host flagged as a real domain term, not an
+ * incidental overlap on a word this module's own stopword list happens not
+ * to cover (a repository-meta learned skill sharing generic words like
+ * "file" or "new" with an unrelated task, for one measured example). When
+ * it is empty -- the host found no task domain to name -- scoring is
+ * unchanged from before this field existed: any nonzero lexical overlap
+ * counts. This narrows only on positive host signal; it never turns a match
+ * back on that today's overlap check would have rejected.
+ */
+fn pl_score_skill(skill_entry: dict, query_words: list, task_domain_words: list = []) -> dict {
   if len(query_words) == 0 {
     return {learned_skill: skill_entry, score: 0.0, reason: "project learned skill"}
   }
@@ -1041,6 +1073,17 @@ fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
   }
   if len(overlap) == 0 {
     return {}
+  }
+  if len(task_domain_words) > 0 {
+    let domain_overlap = []
+    for word in overlap {
+      if task_domain_words.contains(word) {
+        domain_overlap = domain_overlap + [word]
+      }
+    }
+    if len(domain_overlap) == 0 {
+      return {}
+    }
   }
   return {
     learned_skill: skill_entry,
@@ -1073,7 +1116,14 @@ fn pl_insert_match(matches: list, item: dict) -> list {
 }
 
 /**
- * Rank accepted learned skills against a query string using deterministic lexical overlap.
+ * Rank accepted learned skills against a query string using deterministic
+ * lexical overlap.
+ *
+ * `options?.task_domain_words` is an optional host-supplied signal: the
+ * terms the host's own task-intent or language matcher already decided
+ * this task is genuinely about. When present, see `pl_score_skill` for how
+ * it narrows a match; when absent, ranking is exactly the lexical-overlap
+ * behavior this function has always had.
  *
  * @effects: [fs.read]
  * @errors: []
@@ -1086,9 +1136,10 @@ pub fn pattern_learning_skill_matches(
   options: any = nil,
 ) -> list {
   const query_words = pl_significant_words(query)
+  const task_domain_words = pl_normalized_domain_words(options?.task_domain_words)
   let matches = []
   for skill_entry in pattern_learning_accepted_skills(fs, options) {
-    matches = pl_insert_match(matches, pl_score_skill(skill_entry, query_words))
+    matches = pl_insert_match(matches, pl_score_skill(skill_entry, query_words, task_domain_words))
   }
   return matches[0:min(max(0, limit), len(matches))]
 }
