@@ -16,6 +16,15 @@ threshold="${2:-100000}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+# Clippy REPLAYS cached diagnostics. A crate already built in the ordinary
+# target directory reports whatever threshold that build used, so a census
+# taken there silently under-measures every warm crate and banks a baseline
+# that CI, which builds cold, then refuses. The census gets its own target
+# directory so its lowered-threshold analysis is never shared with a normal
+# build in either direction.
+census_target_dir="${CARGO_TARGET_DIR:-$repo_root/target}/stack-frame-census"
+mkdir -p "$census_target_dir"
+
 conf_dir="$(mktemp -d)"
 trap 'rm -rf "$conf_dir"' EXIT
 if [ -f clippy.toml ]; then
@@ -30,7 +39,7 @@ printf 'stack-size-threshold = %s\n' "$threshold" >> "$conf_dir/clippy.toml"
 # lint lane and keeps its own ceiling. The only pass condition here is the
 # non-null control below.
 set +e
-CLIPPY_CONF_DIR="$conf_dir" RUSTFLAGS="" cargo clippy --workspace --all-targets \
+CLIPPY_CONF_DIR="$conf_dir" CARGO_TARGET_DIR="$census_target_dir" RUSTFLAGS="" cargo clippy --workspace --all-targets \
   --message-format=json > "$raw_out"
 cargo_status=$?
 set -e

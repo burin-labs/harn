@@ -25,6 +25,12 @@
       "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
     },
     {
+      "path": "crates/harn-cli/src/commands/supervisor.rs",
+      "max_bytes": 504584,
+      "expires": "2026-12-01",
+      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
+    },
+    {
       "expires": "2026-12-01",
       "max_bytes": 490471,
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs",
@@ -33,7 +39,7 @@
   ],
   "files": [
     {
-      "max_bytes": 218775,
+      "max_bytes": 226983,
       "path": "crates/harn-cli/src/cli/runs.rs"
     },
     {
@@ -41,15 +47,19 @@
       "path": "crates/harn-cli/src/commands/agents_conformance.rs"
     },
     {
-      "max_bytes": 181378,
+      "max_bytes": 198442,
       "path": "crates/harn-cli/src/commands/app.rs"
     },
     {
-      "max_bytes": 125214,
+      "max_bytes": 136734,
       "path": "crates/harn-cli/src/commands/bench.rs"
     },
     {
-      "max_bytes": 100108,
+      "max_bytes": 100238,
+      "path": "crates/harn-cli/src/commands/canon.rs"
+    },
+    {
+      "max_bytes": 108244,
       "path": "crates/harn-cli/src/commands/chat.rs"
     },
     {
@@ -57,199 +67,227 @@
       "path": "crates/harn-cli/src/commands/connect.rs"
     },
     {
-      "max_bytes": 178510,
+      "max_bytes": 194782,
       "path": "crates/harn-cli/src/commands/demo.rs"
     },
     {
-      "max_bytes": 148006,
+      "max_bytes": 158302,
       "path": "crates/harn-cli/src/commands/doctor.rs"
     },
     {
-      "max_bytes": 306349,
+      "max_bytes": 330757,
       "path": "crates/harn-cli/src/commands/eval_coding_agent.rs"
     },
     {
-      "max_bytes": 127283,
+      "max_bytes": 135419,
       "path": "crates/harn-cli/src/commands/eval_coding_agent/live_verify.rs"
     },
     {
-      "max_bytes": 272082,
+      "max_bytes": 296490,
       "path": "crates/harn-cli/src/commands/eval_context.rs"
     },
     {
-      "max_bytes": 180821,
+      "max_bytes": 197093,
       "path": "crates/harn-cli/src/commands/eval_prompt.rs"
     },
     {
-      "max_bytes": 268124,
+      "max_bytes": 292532,
       "path": "crates/harn-cli/src/commands/eval_tool_calls.rs"
+    },
+    {
+      "max_bytes": 100843,
+      "path": "crates/harn-cli/src/commands/init.rs"
     },
     {
       "max_bytes": 131366,
       "path": "crates/harn-cli/src/commands/local/mod.rs"
     },
     {
-      "max_bytes": 116924,
+      "max_bytes": 116996,
       "path": "crates/harn-cli/src/commands/mcp/call.rs"
     },
     {
-      "max_bytes": 212971,
+      "max_bytes": 215275,
       "path": "crates/harn-cli/src/commands/mcp/mod.rs"
     },
     {
-      "max_bytes": 163107,
+      "max_bytes": 169731,
       "path": "crates/harn-cli/src/commands/mcp/serve/protocol.rs"
     },
     {
-      "max_bytes": 155471,
+      "max_bytes": 164111,
       "path": "crates/harn-cli/src/commands/mcp/serve/resources.rs"
     },
     {
-      "max_bytes": 201809,
+      "max_bytes": 212609,
       "path": "crates/harn-cli/src/commands/mcp/serve/tools.rs"
     },
     {
-      "max_bytes": 282703,
+      "max_bytes": 307111,
       "path": "crates/harn-cli/src/commands/models/batch.rs"
     },
     {
-      "max_bytes": 198885,
+      "max_bytes": 215157,
       "path": "crates/harn-cli/src/commands/models/batch/execution.rs"
     },
     {
-      "max_bytes": 234893,
+      "max_bytes": 103277,
+      "path": "crates/harn-cli/src/commands/models/list.rs"
+    },
+    {
+      "max_bytes": 253877,
       "path": "crates/harn-cli/src/commands/models/lora.rs"
     },
     {
-      "max_bytes": 101181,
+      "max_bytes": 109317,
       "path": "crates/harn-cli/src/commands/models/lora/export.rs"
     },
     {
-      "max_bytes": 105421,
+      "max_bytes": 113557,
       "path": "crates/harn-cli/src/commands/models/lora/manifest.rs"
     },
     {
-      "max_bytes": 184432,
+      "max_bytes": 102195,
+      "path": "crates/harn-cli/src/commands/models/lora/preflight.rs"
+    },
+    {
+      "max_bytes": 200704,
       "path": "crates/harn-cli/src/commands/models/lora/promote.rs"
     },
     {
-      "max_bytes": 108543,
+      "max_bytes": 116679,
       "path": "crates/harn-cli/src/commands/models/lora/train.rs"
     },
     {
-      "max_bytes": 308110,
+      "max_bytes": 332518,
       "path": "crates/harn-cli/src/commands/models/mod.rs"
     },
     {
-      "max_bytes": 120405,
+      "max_bytes": 128541,
       "path": "crates/harn-cli/src/commands/models/test.rs"
     },
     {
-      "max_bytes": 127979,
+      "max_bytes": 138347,
       "path": "crates/harn-cli/src/commands/orchestrator/dlq.rs"
     },
     {
-      "max_bytes": 195466,
+      "max_bytes": 201994,
       "path": "crates/harn-cli/src/commands/orchestrator/harness/lifecycle.rs"
     },
     {
-      "max_bytes": 490705,
+      "max_bytes": 101145,
+      "path": "crates/harn-cli/src/commands/orchestrator/harness/reload.rs"
+    },
+    {
+      "max_bytes": 510433,
       "path": "crates/harn-cli/src/commands/orchestrator/mod.rs"
     },
     {
-      "max_bytes": 162156,
+      "max_bytes": 168780,
       "path": "crates/harn-cli/src/commands/orchestrator/queue.rs"
     },
     {
-      "max_bytes": 162212,
+      "max_bytes": 103980,
+      "path": "crates/harn-cli/src/commands/package_scaffold.rs"
+    },
+    {
+      "max_bytes": 171188,
       "path": "crates/harn-cli/src/commands/playground.rs"
     },
     {
-      "max_bytes": 184422,
+      "max_bytes": 200694,
       "path": "crates/harn-cli/src/commands/provider.rs"
     },
     {
-      "max_bytes": 329247,
+      "max_bytes": 359079,
       "path": "crates/harn-cli/src/commands/provider_option_probe.rs"
     },
     {
-      "max_bytes": 182228,
+      "max_bytes": 198500,
       "path": "crates/harn-cli/src/commands/provider_report.rs"
     },
     {
-      "max_bytes": 185979,
+      "max_bytes": 202251,
       "path": "crates/harn-cli/src/commands/providers.rs"
     },
     {
-      "max_bytes": 368240,
+      "max_bytes": 392816,
       "path": "crates/harn-cli/src/commands/repl.rs"
     },
     {
-      "max_bytes": 173830,
+      "max_bytes": 190102,
       "path": "crates/harn-cli/src/commands/replay.rs"
     },
     {
-      "max_bytes": 207891,
+      "max_bytes": 226875,
       "path": "crates/harn-cli/src/commands/replay_offline_coding.rs"
     },
     {
-      "max_bytes": 121079,
+      "max_bytes": 131375,
       "path": "crates/harn-cli/src/commands/routes.rs"
     },
     {
-      "max_bytes": 303344,
+      "max_bytes": 327608,
       "path": "crates/harn-cli/src/commands/run/mcp_serve.rs"
     },
     {
-      "max_bytes": 186303,
+      "max_bytes": 205287,
       "path": "crates/harn-cli/src/commands/run/mod.rs"
     },
     {
-      "max_bytes": 175494,
+      "max_bytes": 191766,
       "path": "crates/harn-cli/src/commands/run/watch.rs"
     },
     {
-      "max_bytes": 112219,
+      "max_bytes": 112291,
       "path": "crates/harn-cli/src/commands/run_review.rs"
     },
     {
-      "max_bytes": 332395,
+      "max_bytes": 104989,
+      "path": "crates/harn-cli/src/commands/runs_export_training.rs"
+    },
+    {
+      "max_bytes": 349747,
       "path": "crates/harn-cli/src/commands/serve.rs"
     },
     {
-      "max_bytes": 484712,
+      "max_bytes": 504584,
       "path": "crates/harn-cli/src/commands/supervisor.rs"
     },
     {
-      "max_bytes": 379122,
+      "max_bytes": 403698,
       "path": "crates/harn-cli/src/commands/test/conformance.rs"
     },
     {
-      "max_bytes": 363501,
+      "max_bytes": 388077,
       "path": "crates/harn-cli/src/commands/test/mod.rs"
     },
     {
-      "max_bytes": 284578,
+      "max_bytes": 308986,
       "path": "crates/harn-cli/src/commands/test_bench.rs"
     },
     {
-      "max_bytes": 173658,
+      "max_bytes": 189930,
       "path": "crates/harn-cli/src/commands/time.rs"
     },
     {
-      "max_bytes": 124500,
+      "max_bytes": 133020,
       "path": "crates/harn-cli/src/commands/tool/registry.rs"
     },
     {
-      "max_bytes": 183548,
+      "max_bytes": 103051,
+      "path": "crates/harn-cli/src/commands/tool/scaffold.rs"
+    },
+    {
+      "max_bytes": 194132,
       "path": "crates/harn-cli/src/commands/trigger/replay.rs"
     },
     {
-      "max_bytes": 177189,
+      "max_bytes": 193461,
       "path": "crates/harn-cli/src/dispatch.rs"
     },
     {
-      "max_bytes": 141543,
+      "max_bytes": 156159,
       "path": "crates/harn-cli/src/package/extensions.rs"
     },
     {
@@ -257,43 +295,55 @@
       "path": "crates/harn-cli/src/package/lockfile/build.rs"
     },
     {
-      "max_bytes": 228376,
+      "max_bytes": 243736,
       "path": "crates/harn-cli/src/source_exec.rs"
     },
     {
-      "max_bytes": 175555,
+      "max_bytes": 191443,
       "path": "crates/harn-cli/src/test_runner.rs"
     },
     {
-      "max_bytes": 118862,
+      "max_bytes": 103170,
+      "path": "crates/harn-cli/src/test_runner/execution.rs"
+    },
+    {
+      "max_bytes": 129710,
       "path": "crates/harn-cli/tests/harn_cli_fast/test_bench_cli.rs"
     },
     {
-      "max_bytes": 241109,
+      "max_bytes": 259349,
       "path": "crates/harn-serve/src/adapter.rs"
     },
     {
-      "max_bytes": 162866,
+      "max_bytes": 171122,
       "path": "crates/harn-serve/src/adapters/acp/dispatch.rs"
     },
     {
-      "max_bytes": 101308,
+      "max_bytes": 110764,
       "path": "crates/harn-serve/src/adapters/acp/execute.rs"
     },
     {
-      "max_bytes": 434412,
+      "max_bytes": 104480,
+      "path": "crates/harn-serve/src/adapters/acp/prompt.rs"
+    },
+    {
+      "max_bytes": 470892,
       "path": "crates/harn-serve/src/core.rs"
     },
     {
-      "max_bytes": 105228,
+      "max_bytes": 109404,
       "path": "crates/harn-vm/src/llm/agent_config.rs"
     },
     {
-      "max_bytes": 490471,
+      "max_bytes": 355592,
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs"
     },
     {
-      "max_bytes": 141014,
+      "max_bytes": 164585,
+      "path": "crates/harn-vm/src/llm/agent_host_tool_dispatch.rs"
+    },
+    {
+      "max_bytes": 145214,
       "path": "crates/harn-vm/src/llm/agent_tools.rs"
     },
     {
@@ -301,11 +351,11 @@
       "path": "crates/harn-vm/src/llm/api/transport.rs"
     },
     {
-      "max_bytes": 126065,
+      "max_bytes": 128225,
       "path": "crates/harn-vm/src/llm/call.rs"
     },
     {
-      "max_bytes": 234367,
+      "max_bytes": 234439,
       "path": "crates/harn-vm/src/llm/call/preflight.rs"
     },
     {
@@ -313,55 +363,59 @@
       "path": "crates/harn-vm/src/llm/helpers/options/mod.rs"
     },
     {
-      "max_bytes": 105244,
+      "max_bytes": 109420,
       "path": "crates/harn-vm/src/llm/mod.rs"
     },
     {
-      "max_bytes": 148909,
+      "max_bytes": 165613,
       "path": "crates/harn-vm/src/llm/permissions.rs"
     },
     {
-      "max_bytes": 111454,
+      "max_bytes": 111526,
       "path": "crates/harn-vm/src/llm/routing/execution/mod.rs"
     },
     {
-      "max_bytes": 140297,
+      "max_bytes": 146393,
       "path": "crates/harn-vm/src/llm/stream_builtins.rs"
     },
     {
-      "max_bytes": 145986,
+      "max_bytes": 152250,
       "path": "crates/harn-vm/src/llm/structured_envelope.rs"
     },
     {
-      "max_bytes": 289865,
+      "max_bytes": 290081,
       "path": "crates/harn-vm/src/mcp/builtins.rs"
     },
     {
-      "max_bytes": 113136,
+      "max_bytes": 113208,
       "path": "crates/harn-vm/src/mcp/mod.rs"
     },
     {
-      "max_bytes": 120247,
+      "max_bytes": 120319,
       "path": "crates/harn-vm/src/mcp_host.rs"
     },
     {
-      "max_bytes": 105358,
+      "max_bytes": 105430,
       "path": "crates/harn-vm/src/mcp_sampling.rs"
     },
     {
-      "max_bytes": 125601,
+      "max_bytes": 143745,
       "path": "crates/harn-vm/src/mcp_server/server.rs"
     },
     {
-      "max_bytes": 102258,
+      "max_bytes": 112698,
       "path": "crates/harn-vm/src/orchestration/compact_lifecycle.rs"
     },
     {
-      "max_bytes": 131650,
+      "max_bytes": 131722,
       "path": "crates/harn-vm/src/orchestration/run_review.rs"
     },
     {
-      "max_bytes": 100770,
+      "max_bytes": 102812,
+      "path": "crates/harn-vm/src/orchestration/settlement_agent.rs"
+    },
+    {
+      "max_bytes": 111210,
       "path": "crates/harn-vm/src/orchestration/workflow.rs"
     },
     {
@@ -369,52 +423,68 @@
       "path": "crates/harn-vm/src/provider_catalog/schema.rs"
     },
     {
-      "max_bytes": 108795,
+      "max_bytes": 100807,
+      "path": "crates/harn-vm/src/stdlib/agents/resume.rs"
+    },
+    {
+      "max_bytes": 106282,
+      "path": "crates/harn-vm/src/stdlib/agents_workers/execution.rs"
+    },
+    {
+      "max_bytes": 108867,
       "path": "crates/harn-vm/src/stdlib/project_enrich.rs"
     },
     {
-      "max_bytes": 118307,
+      "max_bytes": 118379,
       "path": "crates/harn-vm/src/stdlib/review.rs"
     },
     {
-      "max_bytes": 103601,
+      "max_bytes": 103673,
       "path": "crates/harn-vm/src/stdlib/tools.rs"
     },
     {
-      "max_bytes": 165286,
+      "max_bytes": 167374,
       "path": "crates/harn-vm/src/stdlib/workflow/host.rs"
     },
     {
-      "max_bytes": 132396,
+      "max_bytes": 102488,
+      "path": "crates/harn-vm/src/stdlib/workflow/stage.rs"
+    },
+    {
+      "max_bytes": 138660,
       "path": "crates/harn-vm/src/stdlib/workflow/state.rs"
     },
     {
-      "max_bytes": 258627,
+      "max_bytes": 260787,
       "path": "crates/harn-vm/src/triggers/dispatcher/attempt_loop.rs"
     },
     {
-      "max_bytes": 108626,
+      "max_bytes": 109130,
       "path": "crates/harn-vm/src/triggers/dispatcher/flow_gates.rs"
     },
     {
-      "max_bytes": 131966,
+      "max_bytes": 137078,
       "path": "crates/harn-vm/src/triggers/dispatcher/handlers.rs"
     },
     {
-      "max_bytes": 130795,
+      "max_bytes": 146923,
       "path": "crates/harn-vm/src/vm/iter.rs"
     },
     {
-      "max_bytes": 328597,
+      "max_bytes": 349189,
       "path": "crates/harn-vm/src/vm/methods/harness/dispatch.rs"
     },
     {
-      "max_bytes": 145573,
+      "max_bytes": 158101,
       "path": "crates/harn-vm/src/vm/methods/harness/native.rs"
     },
     {
-      "max_bytes": 221777,
+      "max_bytes": 260081,
       "path": "crates/harn-vm/src/vm/methods/list.rs"
+    },
+    {
+      "max_bytes": 108884,
+      "path": "crates/harn-vm/tests/harn_vm/host_tool_batch_overlap.rs"
     }
   ],
   "near_ceiling_fraction": 0.05,
