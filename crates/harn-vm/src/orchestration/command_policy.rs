@@ -118,7 +118,19 @@ pub(crate) enum CommandDispatchOrigin {
     ReviewedGitPushWithLease,
 }
 
-struct HookDepthGuard;
+/// Enter one of the VM's own command-policy hooks (`pre`, `consent`).
+///
+/// The depth this raises is what distinguishes Harn's policy machinery running
+/// from ordinary tool work, so capability enforcement can let the consent gate
+/// ask its host without the calling tool having to declare a `permission`
+/// capability it has no other use for. `AmbientExecutionScope` swaps the depth
+/// per task, so it is correct across an `.await`.
+pub(crate) fn enter_command_policy_hook() -> HookDepthGuard {
+    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow_mut() += 1);
+    HookDepthGuard
+}
+
+pub(crate) struct HookDepthGuard;
 
 impl Drop for HookDepthGuard {
     fn drop(&mut self) {
@@ -1128,8 +1140,7 @@ async fn invoke_command_hook(
             "command policy hook requires an async builtin VM context".to_string(),
         ));
     };
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow_mut() += 1);
-    let _guard = HookDepthGuard;
+    let _guard = enter_command_policy_hook();
     let arg = crate::stdlib::json_to_vm_value(payload);
     vm.call_closure_pub(closure, &[arg]).await
 }
