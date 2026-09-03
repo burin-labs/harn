@@ -515,6 +515,11 @@ lint-harn:
 	@$(HARN_CMD) check --strict-types scripts
 	@echo "=== Linting bundled demo scenarios ==="
 	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
+# Three more roots of ordinary Harn that nothing walked. Each was measured at
+# zero findings before being adopted, so this line is a gate rather than a
+# migration: they are clean today and now have to stay that way.
+	@echo "=== Linting shipped persona templates, wasm demos and evals ==="
+	@$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
 	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 	tmp=$$(mktemp); \
