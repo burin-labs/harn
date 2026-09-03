@@ -74,16 +74,33 @@ async fn prompt(
         }))
         .expect("send session/prompt");
 
-    for _ in 0..64 {
-        let message = recv_json(response_rx).await;
-        if answer_host_capabilities(request_tx, &message) {
-            continue;
+    let mut seen_methods = Vec::new();
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let line = response_rx
+                .recv()
+                .await
+                .expect("ACP response channel closed");
+            let message: serde_json::Value = serde_json::from_str(&line).expect("ACP JSON line");
+            if answer_host_capabilities(request_tx, &message) {
+                seen_methods.push("host/capabilities".to_string());
+                continue;
+            }
+            if message["id"] == id {
+                return message;
+            }
+            seen_methods.push(
+                message["method"]
+                    .as_str()
+                    .unwrap_or("<response-with-another-id>")
+                    .to_string(),
+            );
         }
-        if message["id"] == id {
-            return message;
-        }
-    }
-    panic!("timed out waiting for session/prompt response {id}");
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("timed out waiting for session/prompt response {id}; saw {seen_methods:?}")
+    })
 }
 
 /// The falsifier for the served-path blocker, driven over the real ACP wire in
@@ -189,6 +206,10 @@ pipeline default(harness: Harness) {
                  result={}",
                 durable["error"],
                 durable["result"]
+            );
+            assert!(
+                !dir.path().join("ceiling-probe.txt").exists(),
+                "the rejected workspace write reached the filesystem"
             );
 
             drop(request_tx);

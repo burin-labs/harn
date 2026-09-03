@@ -1,13 +1,5 @@
 use super::*;
 
-struct MockModeGuard;
-
-impl Drop for MockModeGuard {
-    fn drop(&mut self) {
-        harn_vm::llm::clear_cli_llm_mock_mode();
-    }
-}
-
 async fn create_session(app: &Router) -> String {
     let response = app
         .clone()
@@ -105,27 +97,24 @@ async fn submit_and_wait(
     let task: Value = serde_json::from_slice(&body).expect("task json");
     let task_id = task["id"].as_str().expect("task id");
 
-    loop {
-        let event = events.recv().await.expect("task terminal event");
-        if event.task_id.as_deref() == Some(task_id)
-            && matches!(event.event.as_str(), "task.completed" | "task.failed")
-        {
-            return event;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let event = events.recv().await.expect("task terminal event");
+            if event.task_id.as_deref() == Some(task_id)
+                && matches!(event.event.as_str(), "task.completed" | "task.failed")
+            {
+                return event;
+            }
         }
-    }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for terminal event for task {task_id}"))
 }
 
 /// The Agents API route that reported the original failure, plus a negative
 /// control proving the default session still carries its read-only ceiling.
 #[tokio::test]
 async fn default_agents_api_task_reaches_a_model_turn_and_refuses_a_workspace_write() {
-    let mock = harn_vm::llm::parse_llm_mock_value(
-        &json!({"text": "all done", "model": "served-proof", "provider": "mock"}),
-    )
-    .expect("mock fixture");
-    harn_vm::llm::install_cli_llm_mocks(vec![mock]);
-    let _mock_mode = MockModeGuard;
-
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("agent.harn");
     std::fs::write(
@@ -146,9 +135,12 @@ pipeline main(harness: Harness) {
 "#,
     )
     .expect("write pipeline");
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    // Pin the workspace root explicitly. `for_pipeline` intentionally honors
+    // the process-wide `HARN_PROJECT_ROOT`; allowing ambient test state to
+    // redirect this root would make the file-absence control below vacuous.
+    let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string());
+    config.workspace_root = dir.path().to_path_buf();
+    let server = ApiServer::new(config);
     let state = server.state;
     let mut events = state.events_tx.subscribe();
     let app = api_router(state);
@@ -175,5 +167,9 @@ pipeline main(harness: Harness) {
     assert!(
         failure.contains("exceeds the active effect ceiling"),
         "the control must fail at the read-only ceiling, not for an unrelated reason: {failure}"
+    );
+    assert!(
+        !dir.path().join("ceiling-probe.txt").exists(),
+        "the rejected workspace write reached the filesystem"
     );
 }

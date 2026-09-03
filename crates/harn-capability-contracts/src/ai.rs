@@ -1130,18 +1130,16 @@ capability_method!(
 capability_method!(
     agent_add_root,
     "harness.agent.add_root",
-    ["state.write@arg0"],
+    ["state.write@arg0", "fs.read@arg1"],
     "__cap_agent_add_root(id: string, root: string, opts?: dict) -> dict",
-    "Add a session workspace root.",
-    runtime_control_plane
+    "Add a session workspace root."
 );
 capability_method!(
     agent_remove_root,
     "harness.agent.remove_root",
-    ["state.mutate@arg0"],
+    ["state.mutate@arg0", "fs.read@arg1"],
     "__cap_agent_remove_root(id: string, root: string) -> dict",
-    "Remove a session workspace root.",
-    runtime_control_plane
+    "Remove a session workspace root."
 );
 capability_method!(
     agent_list_roots,

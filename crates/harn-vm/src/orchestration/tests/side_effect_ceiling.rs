@@ -358,6 +358,10 @@ fn trusted_bridge_depth_exempts_harness_state_reads_like_bridged_builtins() {
 ///   * `harness.agent.worker_*` / `pool_*` — delegated workers, which carry
 ///     `worker.*` effects. Spawning a sub-agent is a real resource
 ///     escalation, not loop bookkeeping.
+///   * `harness.agent.add_root` / `remove_root` — workspace-topology changes
+///     that observe a caller-supplied path. Their contracts declare `fs.read`
+///     as well as session state, so the user-world ladder continues to govern
+///     them rather than treating a workspace-authority change as bookkeeping.
 ///
 /// `seed_from_jsonl` is out for the same reason: it reads an arbitrary file.
 fn agent_session_control_plane_writes() -> Vec<&'static str> {
@@ -571,6 +575,51 @@ fn the_marker_does_not_open_durable_agent_state() {
         leaked.is_empty(),
         "`runtime_control_plane` must not become a durable-state write grant; \
          these were admitted under a read_only ceiling: {leaked:#?}"
+    );
+}
+
+/// Changing the set of mounted workspace roots is not mere bookkeeping. The
+/// implementation observes a caller-supplied path before changing session
+/// state, so both effects must remain visible and the user-world ladder must
+/// continue to govern the operation.
+#[test]
+fn workspace_topology_changes_are_not_runtime_control_plane() {
+    for method in ["add_root", "remove_root"] {
+        let contract = crate::stdlib::capability_method_manifest_entry(
+            harn_builtin_meta::CapabilityId::Agent,
+            method,
+        )
+        .expect("declared workspace-root method")
+        .contract;
+        assert!(
+            !contract.is_runtime_control_plane(),
+            "{method} observes a caller-supplied path and must stay governed by the ladder"
+        );
+        assert!(
+            contract.effects.iter().any(|effect| {
+                effect.kind == harn_builtin_meta::EffectKind::Fs
+                    && effect.access == harn_builtin_meta::EffectAccess::Read
+            }),
+            "{method} must expose its filesystem observation to capability checks and receipts"
+        );
+    }
+
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        ..Default::default()
+    });
+    let denied = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Agent,
+        "add_root",
+        &[
+            crate::value::VmValue::String("session-1".into()),
+            crate::value::VmValue::String("/outside".into()),
+        ],
+    );
+    pop_execution_policy();
+    assert!(
+        denied.is_err(),
+        "a read-only ceiling must not authorize a workspace-topology change: {denied:?}"
     );
 }
 
