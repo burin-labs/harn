@@ -611,11 +611,10 @@ a ` ```mermaid ` fence.
 
 ### Linking issues
 
-A pull request that resolves an issue says which of the issue's listed sub-asks
-it closes. Use `Closes #N items: 1, 3` when the issue enumerates sub-asks, and
-`Single-ask: #N` when it does not. Close an issue only once every listed sub-ask
-is verified on `main`. If a sub-ask survives the pull request, rescope the issue
-or file the remainder so the work keeps an owner.
+A pull request that resolves an issue writes `Closes #N`, adding `items: 1, 3`
+only when the issue enumerates its sub-asks. Close an issue only once every
+listed sub-ask is verified on `main`. If a sub-ask survives the pull request,
+rescope the issue or file the remainder so the work keeps an owner.
 
 Keep write-ups repository-agnostic, per
 [Keep write-ups repository-agnostic](#keep-write-ups-repository-agnostic).
