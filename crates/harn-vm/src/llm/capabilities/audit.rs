@@ -478,6 +478,7 @@ preferred_tool_format = "native"
             vec![(
                 "acme-good-1".to_string(),
                 crate::llm_config::ModelDef {
+                    data_controls: None,
                     name: "Acme Good".to_string(),
                     display_name: None,
                     blurb: None,

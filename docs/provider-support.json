@@ -244,6 +244,15 @@
       "auth_style": "none"
     },
     {
+      "id": "meta",
+      "display_name": "Meta",
+      "featured": false,
+      "env": [
+        "META_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
       "id": "minimax",
       "display_name": "Minimax",
       "featured": false,
@@ -1746,6 +1755,61 @@
       "local_setup_notes": [
         "Set `LOCAL_LLM_BASE_URL` and either `LOCAL_LLM_MODEL` or an explicit Harn model selector, then run `harn provider ready local`."
       ]
+    },
+    {
+      "id": "meta",
+      "display_name": "Meta",
+      "catalog_provider": "meta",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "META_API_KEY"
+      ],
+      "recommended": {
+        "selector": "meta:muse-spark-1.2-contributor",
+        "provider": "meta",
+        "model": "muse-spark-1.2-contributor",
+        "display_name": "Muse Spark 1.2 (contributor tier)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"meta\"",
+          "model = \"muse-spark-1.2-contributor\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
+        "serving_tiers": [],
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
     },
     {
       "id": "minimax",
