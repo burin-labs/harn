@@ -465,6 +465,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"invalid_response",
 	"model_unavailable",
 	"empty_generation",
+	"billing_limit",
 	"output_budget_exhausted",
 	"unknown",
 }

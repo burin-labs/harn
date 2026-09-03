@@ -14,6 +14,6 @@ json.has_streak=true
 json.has_tool_fence=true
 json.no_tool_call_tag=true
 json.no_user_response_tag=true
-rejected.status=done
+rejected.status=completion_unverified
 rejected.has_failure=true
 rejected.no_streak=true

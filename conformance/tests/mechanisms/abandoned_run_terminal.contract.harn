@@ -1,0 +1,186 @@
+// MECHANISM CONTRACT (onramp tier): a run that gave up seals a different
+// terminal than a run that finished.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — a run reaches its own end having attempted tool calls without a
+//              single one succeeding;
+//   effect   — the terminal kind is `completion_unverified` and the evidence
+//              that convicted it rides beside the run's own stop reason,
+//              which is kept verbatim;
+//   negative — a run whose tool succeeded, and a run that used no tools at
+//              all, both still seal a natural terminal and carry no record.
+//
+// Why this contract exists. The vocabulary for an unverified completion
+// already existed on both sides of the bridge and already projected to a
+// failed lifecycle. What did not exist was anything that DECIDED it on the
+// ordinary path, so a run whose only tool always threw produced a terminal
+// byte-identical to a run that did the work (harn#7915). The negatives carry
+// most of the weight here: a rule that convicted a quiet run would be a worse
+// defect than the one it fixes.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn refusing_toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a UTF-8 file.",
+    {
+      handler: { _args ->
+        throw "write_file: this workspace is read-only"
+      },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  return tools
+}
+
+fn working_toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a UTF-8 file.",
+    {
+      handler: { _args -> "wrote 1 file" },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  return tools
+}
+
+fn base_opts(session: any, tools: any) {
+  return {
+    provider: "mock",
+    tools: tools,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    turn_end_condition: nil,
+    max_iterations: 4,
+    final_wrapup: false,
+    session_id: session,
+    stall_diagnostics: {enabled: false},
+  }
+}
+
+fn abandon_count(events: any) {
+  return len(
+    events.filter({ event -> event.type == "loop_control_decision" && event.action == "abandon" }),
+  )
+}
+
+fn abandoned_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: "/tmp/contract-7915.txt"}, "write-1"),
+      llm_text("I could not create the file; this workspace is read-only. ##DONE##"),
+    ],
+    { ->
+      const session = "contract-abandoned-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Create /tmp/contract-7915.txt containing the word hello. Then stop.",
+          nil,
+          base_opts(session, refusing_toolset()),
+        ) },
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_abandoned_run_is_not_a_natural_terminal",
+        captured.result.terminal.kind == "completion_unverified"
+          && captured.result.terminal.lifecycle_state == "failed"
+          && captured.result.terminal.run_record_status == "failed"
+          && abandon_count(captured.events) == 1,
+      )
+      // The composition clause. The run's own reason survives verbatim and the
+      // evidence sits beside it, so a reader gets both facts instead of one
+      // written over the other.
+      contract_effect(
+        harness.stdio,
+        "effect_evidence_composes_beside_the_runs_own_reason",
+        captured.result.abandonment?.cause == "no_tool_call_succeeded"
+          && captured.result.abandonment?.natural_stop_reason
+            == captured.result.stop_reason
+          && captured.result.abandonment?.attempted_tool_calls == 1
+          && captured.result.abandonment?.succeeded_tool_calls == 0,
+      )
+    },
+  )
+}
+
+fn successful_tool_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: "/tmp/contract-7915.txt"}, "write-1"),
+      llm_text("I created the file. ##DONE##"),
+    ],
+    { ->
+      const session = "contract-finished-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Create /tmp/contract-7915.txt containing the word hello. Then stop.",
+          nil,
+          base_opts(session, working_toolset()),
+        ) },
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_a_successful_tool_call_is_not_abandonment",
+        captured.result.terminal.kind != "natural"
+          || captured.result.abandonment != nil
+          || abandon_count(captured.events) > 0,
+      )
+    },
+  )
+}
+
+fn no_tools_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Paris is the capital of France. ##DONE##")],
+    { ->
+      const session = "contract-quiet-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "What is the capital of France?",
+          nil,
+          base_opts(session, refusing_toolset()),
+        ) },
+      )
+      // Absence of tool use is not evidence of abandonment. A rule that
+      // convicted here would fail every question-answering run in the product.
+      contract_negative(
+        harness.stdio,
+        "negative_a_run_that_used_no_tools_is_not_abandonment",
+        captured.result.terminal.kind != "natural"
+          || captured.result.abandonment != nil
+          || abandon_count(captured.events) > 0,
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  abandoned_case(harness)
+  successful_tool_case(harness)
+  no_tools_case(harness)
+}

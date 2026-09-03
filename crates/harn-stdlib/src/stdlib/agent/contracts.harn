@@ -38,11 +38,13 @@ pub type AgentLlmSummary = {
   cache_write_tokens: int,
   accounting_status: "reported" | "partial" | "unknown",
   known_cost_usd: float,
+  projected_cost_usd?: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
   ...rest,
 }
 
+/* Worst case for the run; nil when some call has no bound at all. */
 pub type AgentToolSummary = {
   calls: list,
   successful: list<string>,
@@ -198,6 +200,33 @@ pub type AgentRecapAvailability = {state: "available", snapshot: AgentRecapSnaps
   | {state: "unavailable", reason: AgentRecapUnavailableReason}
 
 /**
+ * Why the loop judged that a run which reached its own end did not do the work
+ * (harn#7915).
+ *
+ * Present ONLY on a convicted run, so its absence is not a verdict of success;
+ * it means the rule did not fire. It rides beside `terminal` rather than inside
+ * it: `terminal.kind` is `completion_unverified` on a convicted run and stays
+ * the field a host branches on, while `stop_reason` keeps whatever the run
+ * itself said, verbatim.
+ *
+ * `attempted_tool_calls` and `succeeded_tool_calls` are CALL counts. They are
+ * deliberately not the lengths of `tools.successful` / `tools.rejected`, which
+ * deduplicate by tool name and answer a different question.
+ *
+ * The decision belongs to the agent loop's terminal region, which is the only
+ * place that holds the evidence. A result obtained from
+ * `HarnessAgent.session_finalize` directly therefore never carries this field,
+ * because no loop ran to decide it — not because the run was judged complete.
+ */
+pub type AgentAbandonment = {
+  cause: "no_tool_call_succeeded" | "required_tool_missing",
+  natural_stop_reason: string,
+  attempted_tool_calls: int,
+  succeeded_tool_calls: int,
+  last_rejection_category: string?,
+}
+
+/**
  * Canonical result returned by `agent_loop` and `HarnessAgent.session_finalize`.
  *
  * `terminal` is the stable decision surface. `final_status`, `stop_reason`,
@@ -212,6 +241,7 @@ pub type AgentResult = {
   acp_stop_reason: string,
   terminal_class: string?,
   terminal: AgentTerminalOutcome,
+  abandonment?: AgentAbandonment,
   error: any,
   text: string,
   visible_text: string,

@@ -222,6 +222,7 @@ export const LLM_ERROR_REASONS = [
   "invalid_response",
   "model_unavailable",
   "empty_generation",
+  "billing_limit",
   "output_budget_exhausted",
   "unknown",
 ] as const

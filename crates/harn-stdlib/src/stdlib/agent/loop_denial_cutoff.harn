@@ -11,6 +11,7 @@ pub type AgentPostDispatchUsage = {
   output_tokens?: int,
   cache_read_tokens: int,
   cache_write_tokens: int,
+  projected_cost_usd?: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
 }

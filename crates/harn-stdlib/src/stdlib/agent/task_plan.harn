@@ -910,7 +910,7 @@ fn __task_plan_compile_node(node_id: any, node: any, budget_policy: any) {
 fn __task_plan_compile_nodes(plan: dict) {
   let compiled = {}
   const budget_policy = __task_plan_loop_budget_policy(plan)
-  for entry in plan?.nodes ?? {} {
+  for entry in (plan?.nodes ?? {}) {
     compiled = compiled
       + {[entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy)}
   }
@@ -1023,7 +1023,7 @@ pub fn task_plan_compile(plan: dict) {
  */
 pub fn task_plan_render_mermaid(plan: dict) {
   let lines = ["flowchart TD"]
-  for entry in plan?.nodes ?? {} {
+  for entry in (plan?.nodes ?? {}) {
     const node_id = entry.key
     const node = entry.value
     const kind = node?.kind ?? "stage"

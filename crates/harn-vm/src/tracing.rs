@@ -1161,6 +1161,7 @@ mod tests {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
+            unpriced: None,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("anthropic", "claude-sonnet-4")
@@ -1196,6 +1197,11 @@ mod tests {
             provider_call_count: 1,
             unpriced_calls: 1,
             usage_unknown_calls: 0,
+            unpriced: Some(Box::new(crate::llm::usage::UnpricedFacts {
+                tokens: 6,
+                reason: crate::llm::usage::UnpricedReason::PricingUnknown,
+                projection_usd: None,
+            })),
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("local", "local-model")

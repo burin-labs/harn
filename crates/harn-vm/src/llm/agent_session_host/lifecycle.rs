@@ -185,7 +185,10 @@ async fn host_agent_session_init(
             task: message.clone(),
             tokens_used: 0,
             cost_used: 0.0,
+            projected_cost_used: 0.0,
+            priced_calls: 0,
             unpriced_calls: 0,
+            unprojectable_calls: 0,
             usage_unknown_calls: 0,
             input_tokens: 0,
             output_tokens: 0,
@@ -633,15 +636,24 @@ pub(super) async fn host_agent_session_finalize(
             "output_tokens": session.output_tokens,
             "cache_read_tokens": session.cache_read_tokens,
             "cache_write_tokens": session.cache_write_tokens,
+            // Only a session that priced nothing at all blacks out. A
+            // priced call beside an unpriced one is a real measurement, and
+            // reporting it as no measurement is the defect #7912 named.
             "accounting_status": if session.unpriced_calls == 0 && session.usage_unknown_calls == 0 {
                 "reported"
-            } else if session.cost_used > 0.0 || session.tokens_used > 0 {
+            } else if session.priced_calls > 0 {
                 "partial"
             } else {
                 "unknown"
             },
             "known_cost_usd": session.cost_used,
+            "projected_cost_usd": if session.unprojectable_calls == 0 {
+                Some(session.projected_cost_used)
+            } else {
+                None
+            },
             "unpriced_calls": session.unpriced_calls,
+            "unprojectable_calls": session.unprojectable_calls,
             "usage_unknown_calls": session.usage_unknown_calls,
         },
         "tools": {
@@ -654,13 +666,19 @@ pub(super) async fn host_agent_session_finalize(
         "recap": recap,
         "trace": trace_summary,
         "tokens_used": session.tokens_used,
-        "cost_usd": if session.unpriced_calls == 0 {
+        "cost_usd": if session.unpriced_calls == 0 || session.priced_calls > 0 {
             Some(session.cost_used)
         } else {
             None
         },
         "known_cost_usd": session.cost_used,
+        "projected_cost_usd": if session.unprojectable_calls == 0 {
+            Some(session.projected_cost_used)
+        } else {
+            None
+        },
         "unpriced_calls": session.unpriced_calls,
+        "unprojectable_calls": session.unprojectable_calls,
         "usage_unknown_calls": session.usage_unknown_calls,
         "provider_call_count": session.provider_call_count,
         "session_id": session.session_id,
