@@ -426,7 +426,26 @@ pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("state", TY_STRING),
 ]);
 
-const LLM_ACCOUNTING_STATUS: Ty = Ty::Union(&[Ty::LitString("reported"), Ty::LitString("unknown")]);
+const LLM_ACCOUNTING_STATUS: Ty = Ty::Union(&[
+    Ty::LitString("reported"),
+    Ty::LitString("partial"),
+    Ty::LitString("unknown"),
+]);
+
+/// One provider request that produced no price, with the reason it did not.
+pub const LLM_UNPRICED_ATTEMPT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("reason", LLM_UNPRICED_REASON),
+    ShapeFieldDescriptor::new("input_tokens", TY_INT),
+    ShapeFieldDescriptor::new("output_tokens", TY_INT),
+    ShapeFieldDescriptor::new("reported_total_tokens", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::new("projected_cost_usd", TY_FLOAT_OR_NIL),
+]);
+
+const LLM_UNPRICED_REASON: Ty = Ty::Union(&[
+    Ty::LitString("no_price_table"),
+    Ty::LitString("zero_usage_reported"),
+    Ty::LitString("provider_unreported"),
+]);
 
 /// Physical provider requests made for one logical `llm_call`.
 pub const LLM_PROVIDER_ATTEMPTS: Ty = Ty::Shape(&[
@@ -460,6 +479,9 @@ pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("provider_attempts", LLM_PROVIDER_ATTEMPTS),
     ShapeFieldDescriptor::new("served_fast", TY_BOOL),
     ShapeFieldDescriptor::new("accounting_status", LLM_ACCOUNTING_STATUS),
+    ShapeFieldDescriptor::new("projected_cost_usd", TY_FLOAT),
+    ShapeFieldDescriptor::new("unprojectable_attempts", TY_INT),
+    ShapeFieldDescriptor::new("unpriced_attempts", Ty::List(&LLM_UNPRICED_ATTEMPT)),
     ShapeFieldDescriptor::optional("provider_telemetry", TY_DICT),
 ]);
 

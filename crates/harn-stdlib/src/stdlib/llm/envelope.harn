@@ -87,9 +87,31 @@ pub type LlmUsage = {
    */
   provider_attempts?: LlmProviderAttempts,
   served_fast: bool,
-  /* Optional only for replay compatibility with recordings made before this field existed. */
-  accounting_status?: "reported" | "unknown",
+  /*
+   * Optional only for replay compatibility with recordings made before this
+   * field existed. "partial" means some requests were measured and some were
+   * not; "unknown" is reserved for a call where nothing was measured.
+   */
+  accounting_status?: "reported" | "partial" | "unknown",
+  /*
+   * known_cost_usd plus a worst-case projection for every unpriced attempt.
+   * This is the number a spend governor consumes.
+   */
+  projected_cost_usd: float,
+  /* Unpriced attempts whose route has no price table, so they project zero. */
+  unprojectable_attempts: int,
+  unpriced_attempts: list<LlmUnpricedAttempt>,
   provider_telemetry?: dict,
+}
+
+/* One provider request that produced no price, with the reason it did not. */
+pub type LlmUnpricedAttempt = {
+  reason: "no_price_table" | "zero_usage_reported" | "provider_unreported",
+  input_tokens: int,
+  output_tokens: int,
+  reported_total_tokens?: int,
+  /* Null when the route has no price table, so no projection is possible. */
+  projected_cost_usd?: float,
 }
 
 /**

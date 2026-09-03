@@ -1318,11 +1318,23 @@ mod tests {
         let usage = LlmUsage::aggregate_with_unknown_attempts(&[completed], 2);
 
         assert_eq!(usage.known_cost_usd, 0.25);
-        assert_eq!(usage.cost_usd, None);
+        // The priced receipt survives its unmeasured siblings. Nulling this
+        // would report that nothing was measured on a call where something
+        // was.
+        assert_eq!(usage.cost_usd, Some(0.25));
         assert_eq!(usage.provider_call_count, 3);
         assert_eq!(usage.unpriced_calls, 2);
         assert_eq!(usage.usage_unknown_calls, 2);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
+        assert_eq!(usage.unpriced_attempts.len(), 2);
+        assert!(usage
+            .unpriced_attempts
+            .iter()
+            .all(|attempt| attempt.reason == UnpricedReason::ProviderUnreported),);
+        // No response arrived, so there is nothing to project from and the
+        // projection stays a floor rather than pretending to be a ceiling.
+        assert_eq!(usage.unprojectable_attempts, 2);
+        assert_eq!(usage.projected_cost_usd, 0.25);
     }
 
     #[test]
@@ -1409,9 +1421,25 @@ mod tests {
         let vm_usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(usage.to_vm_dict(&result.attempts).into()));
 
-        assert_eq!(usage.cost_usd, None);
-        assert_eq!(vm_usage["accounting_status"], "unknown");
-        assert_eq!(vm_usage["cost_usd"], serde_json::Value::Null);
+        // The call that reported nothing is recorded as an unpriced attempt
+        // with its reason, not folded into a free zero. The priced siblings
+        // stay readable beside it, which is what keeps a spend governor from
+        // consuming its whole ceiling on a call that mostly succeeded.
+        assert_eq!(vm_usage["accounting_status"], "partial");
+        assert_eq!(usage.unprojectable_attempts, 0);
+        let unreported = usage
+            .unpriced_attempts
+            .iter()
+            .filter(|attempt| attempt.reason == UnpricedReason::ProviderUnreported)
+            .count();
+        assert!(
+            unreported >= 1,
+            "the attempt that reported no usage must be enumerated, not absorbed",
+        );
+        assert_eq!(
+            vm_usage["unpriced_attempts"][0]["reason"],
+            "provider_unreported"
+        );
     }
 
     #[test]
