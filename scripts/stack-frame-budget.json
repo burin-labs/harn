@@ -25,13 +25,13 @@
       "path": "crates/harn-cli/src/commands/orchestrator/mod.rs",
       "max_bytes": 490705,
       "expires": "2026-12-01",
-      "why": "Inside the near-ceiling band when the gate landed. Tracked for boxing or splitting; see the follow-up issue."
+      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
     },
     {
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs",
       "max_bytes": 490185,
       "expires": "2026-12-01",
-      "why": "Inside the near-ceiling band when the gate landed. Tracked for boxing or splitting; see the follow-up issue."
+      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
     }
   ],
   "files": [
