@@ -356,6 +356,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
     }
     let data_controls = crate::llm::api::data_controls::resolve(
         &opts.provider,
+        &opts.model,
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
     );

@@ -8,14 +8,21 @@ use super::*;
 use serde_json::json;
 
 fn base_body() -> serde_json::Value {
-    json!({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    json!({"model": MODEL_WITH_NO_DECLARATION, "messages": [{"role": "user", "content": "hi"}]})
 }
+
+/// The cases below are about the provider's per-request controls, so they
+/// route through a model id that carries no declaration of its own and
+/// therefore inherits its provider's. The route-level override has its own
+/// cases at the bottom of this file.
+const MODEL_WITH_NO_DECLARATION: &str = "m";
 
 #[test]
 fn default_posture_leaves_the_request_byte_identical() {
     let mut body = base_body();
     let plan = resolve(
         "openai",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::Default,
     );
@@ -37,6 +44,7 @@ fn strict_posture_puts_openai_store_false_on_the_wire() {
     let mut body = base_body();
     let plan = resolve(
         "openai",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::StrictestAvailable,
     );
@@ -64,6 +72,7 @@ fn strict_posture_on_a_provider_with_no_control_says_so() {
     let mut body = base_body();
     let plan = resolve(
         "anthropic",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::AnthropicSse,
         DataPosture::StrictestAvailable,
     );
@@ -91,6 +100,7 @@ fn an_unknown_provider_reads_as_unresearched_not_as_no_control() {
     let mut body = base_body();
     let plan = resolve(
         "provider-that-does-not-exist",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::StrictestAvailable,
     );
@@ -113,6 +123,7 @@ fn openrouter_writes_both_effects_into_a_nested_provider_object() {
     let mut body = base_body();
     let plan = resolve(
         "openrouter",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::StrictestAvailable,
     );
@@ -137,6 +148,7 @@ fn a_nested_path_merges_into_an_existing_provider_object() {
     body["provider"] = json!({"order": ["a"]});
     resolve(
         "openrouter",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::StrictestAvailable,
     )
@@ -154,6 +166,7 @@ fn gemini_store_applies_only_to_the_interactions_dialect() {
     let mut generate_content = base_body();
     let plan = resolve(
         "gemini",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::GeminiJson,
         DataPosture::StrictestAvailable,
     );
@@ -167,6 +180,7 @@ fn gemini_store_applies_only_to_the_interactions_dialect() {
     let mut interactions = base_body();
     let plan = resolve(
         "gemini",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::GeminiInteractionsSse,
         DataPosture::StrictestAvailable,
     );
@@ -220,7 +234,13 @@ fn every_stream_protocol_maps_to_a_declared_dialect() {
         let dialect = dialect_of(protocol);
         let mut body = base_body();
         // Any dialect must survive a strict-posture pass without panicking.
-        resolve("openai", dialect, DataPosture::StrictestAvailable).write_body(&mut body);
+        resolve(
+            "openai",
+            MODEL_WITH_NO_DECLARATION,
+            dialect,
+            DataPosture::StrictestAvailable,
+        )
+        .write_body(&mut body);
     }
 }
 
@@ -229,6 +249,7 @@ fn the_receipt_serializes_with_the_outcome_spelled_out() {
     let mut body = base_body();
     let plan = resolve(
         "anthropic",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::AnthropicSse,
         DataPosture::StrictestAvailable,
     );
@@ -249,6 +270,7 @@ fn a_declared_control_overwrites_a_conflicting_caller_value() {
     body["store"] = json!(true);
     let plan = resolve(
         "openai",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::StrictestAvailable,
     );
@@ -266,6 +288,7 @@ fn a_nested_control_replaces_a_non_object_on_its_path() {
     body["provider"] = json!("openai");
     resolve(
         "openrouter",
+        MODEL_WITH_NO_DECLARATION,
         DataControlDialect::OpenAiSse,
         DataPosture::StrictestAvailable,
     )
@@ -396,4 +419,87 @@ fn an_unresearched_provider_is_not_refused() {
         None,
         "an unresearched provider reports through the receipt, it does not refuse"
     );
+}
+
+// ── What the receipt reports ────────────────────────────────────────────────
+
+/// A receipt that named only the provider would report Meta's provider-level
+/// line, "not used to improve our products", on a route that is trained on.
+/// The receipt is what a host, a transcript, and an eval trial all read, so it
+/// has to answer for the route that actually ran.
+#[test]
+fn the_receipt_reports_the_routes_own_training_posture_not_its_providers() {
+    let contributor = resolve(
+        "meta",
+        "muse-spark-1.3-contributor",
+        DataControlDialect::OpenAiSse,
+        DataPosture::Default,
+    )
+    .receipt;
+
+    assert_eq!(contributor.model, "muse-spark-1.3-contributor");
+    assert_eq!(
+        contributor.training_default,
+        Some(crate::llm_config::TrainingDefault::Trains),
+        "the receipt must carry the route's declaration, not the provider's"
+    );
+    let note = contributor
+        .note
+        .expect("the contributor row carries its own note");
+    assert!(
+        note.contains("train"),
+        "the note surfaced for this route must be the route's own: {note}"
+    );
+
+    let standard = resolve(
+        "meta",
+        "muse-spark-1.3",
+        DataControlDialect::OpenAiSse,
+        DataPosture::Default,
+    )
+    .receipt;
+    assert_eq!(
+        standard.training_default,
+        Some(crate::llm_config::TrainingDefault::DoesNotTrain),
+        "the standard tier of the same provider must read the other way"
+    );
+}
+
+/// A route with no declaration at either level reports `None` rather than
+/// borrowing a neighbour's answer. "Nobody has checked" stays distinguishable
+/// from "we checked and it does not train".
+#[test]
+fn an_unresearched_route_reports_no_training_posture_at_all() {
+    let receipt = resolve(
+        "provider-that-does-not-exist",
+        MODEL_WITH_NO_DECLARATION,
+        DataControlDialect::OpenAiSse,
+        DataPosture::StrictestAvailable,
+    )
+    .receipt;
+
+    assert_eq!(receipt.outcome, DataControlsOutcome::ProviderUnresearched);
+    assert_eq!(receipt.training_default, None);
+}
+
+/// The reported posture is the one that applied, so a deployment that ships
+/// the strict posture cannot be misread as one that never asked.
+#[test]
+fn the_reported_posture_is_the_one_that_applied() {
+    for (posture, expected) in [
+        (DataPosture::Default, "default"),
+        (DataPosture::StrictestAvailable, "strictest_available"),
+    ] {
+        assert_eq!(
+            resolve(
+                "openai",
+                MODEL_WITH_NO_DECLARATION,
+                DataControlDialect::OpenAiSse,
+                posture,
+            )
+            .receipt
+            .requested_posture,
+            expected
+        );
+    }
 }
