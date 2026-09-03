@@ -221,6 +221,7 @@ pub(super) fn probe_request_payload_for_format(
         parallel_tool_calls: None,
         provider_contract_probe: None,
         fast: false,
+        reasoning_mode: None,
         output_format: OutputFormat::Text,
         output_schema: None,
         schema_stream_abort: false,

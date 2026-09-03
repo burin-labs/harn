@@ -600,6 +600,7 @@ mod tests {
             parallel_tool_calls: None,
             provider_contract_probe: None,
             fast: false,
+            reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::JsonSchema {
                 schema: serde_json::json!({"type": "object"}),
                 strict: true,

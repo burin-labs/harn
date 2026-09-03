@@ -418,6 +418,7 @@ fn catalog_model(
     let embedding_model = model.is_embedding_model();
     CatalogModel {
         aliases,
+        data_controls: model.data_controls.clone(),
         blurb: model.blurb.clone(),
         logical_model: model.logical_model.clone(),
         equivalence_group: model.equivalence_group.clone(),
@@ -511,6 +512,7 @@ fn catalog_model(
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),
         serving_tiers: model.serving_tiers.clone(),
+        reasoning_modes: model.reasoning_modes.clone(),
         released: model.released.clone(),
         row_kind: model.row_kind,
         current_snapshot: model.current_snapshot.clone(),

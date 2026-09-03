@@ -6,6 +6,32 @@ import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 
 /*
+ * The typed cause of a suspension, for the host that has to tell a person why
+ * the run stopped and what would let it continue.
+ *
+ * `agent_await_resumption` validates the reason and the resume conditions at
+ * the call that produces them, and the suspend record keeps both. This hands
+ * that record to the finalize seam unchanged rather than re-deriving a summary
+ * the loop already has. A run that did not park contributes nothing, and so
+ * does a park with no declared reason, so an absent record always means there
+ * was no cause to carry and never that one was dropped.
+ */
+fn __agent_loop_suspension_record(suspend_result: any) -> dict? {
+  if suspend_result == nil {
+    return nil
+  }
+  const reason = trim(to_string(suspend_result?.reason ?? ""))
+  if reason == "" {
+    return nil
+  }
+  return {
+    reason: reason,
+    initiator: to_string(suspend_result?.initiator ?? ""),
+    conditions: suspend_result?.conditions,
+  }
+}
+
+/*
  * Terminal bookkeeping lives outside the turn engine so the engine can stay
  * focused on one iteration's control flow. The state record is deliberately
  * assembled by loop_run: it keeps this boundary explicit without making the
@@ -102,6 +128,7 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
       stop_reason: __agent_loop_sealed_stop_reason(stop_reason, final_status),
       iterations: state.iteration,
       error: terminal_error,
+      suspension: __agent_loop_suspension_record(suspend_result),
     },
   )
   return {result: result, budget_decisions: budget_decisions, output_contract: output_contract}

@@ -75,11 +75,13 @@ pub(super) fn test_equivalent_model_with_context(
     context_window: u64,
 ) -> ModelDef {
     ModelDef {
+        data_controls: None,
         name: format!("{provider} equivalent model"),
         display_name: None,
         blurb: None,
         provider: provider.to_string(),
         context_window,
+        reasoning_modes: Vec::new(),
         logical_model: None,
         equivalence_group: Some(group.to_string()),
         served_variant: None,

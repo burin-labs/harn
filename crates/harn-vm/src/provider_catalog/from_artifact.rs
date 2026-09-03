@@ -173,11 +173,13 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         stream_timeout: model.stream_timeout,
         capabilities: model.capability_tags.clone(),
         pricing: model.pricing.clone(),
+        data_controls: model.data_controls.clone(),
         deprecated: model.deprecation.status == DeprecationStatus::Deprecated,
         deprecation_note: model.deprecation.note.clone(),
         sunset_date: model.deprecation.sunset_date.clone(),
         superseded_by: model.deprecation.superseded_by.clone(),
         serving_tiers: model.serving_tiers.clone(),
+        reasoning_modes: model.reasoning_modes.clone(),
         quality_tags: model.quality_tags.clone(),
         availability: match model.availability {
             ModelAvailabilityStatus::Serverless => llm_config::ModelAvailability::Serverless,

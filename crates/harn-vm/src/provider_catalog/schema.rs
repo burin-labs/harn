@@ -56,6 +56,22 @@ pub fn schema_value() -> Value {
                 },
                 "additionalProperties": false
             },
+            // A route-level override of the provider's posture, for providers
+            // that sell it per model id. No `control_scope`: the choice is the
+            // model id itself, not a header, a body field, or an account
+            // setting.
+            "model_data_controls": {
+                "type": "object",
+                "required": ["training_default", "checked_on", "sources"],
+                "properties": {
+                    "training_default": {"enum": ["trains", "does_not_train", "unspecified"]},
+                    "retention_default": {"enum": ["retained", "not_retained", "abuse_monitoring_only", "unspecified"]},
+                    "checked_on": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+                    "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
+                    "note": {"type": "string"}
+                },
+                "additionalProperties": false
+            },
             "data_controls": {
                 "type": "object",
                 "required": ["control_scope", "retention_default", "training_default", "checked_on", "sources"],
@@ -250,6 +266,7 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "name": {"type": "string", "minLength": 1},
+                    "data_controls": {"$ref": "#/$defs/model_data_controls"},
                     "display_name": {"type": "string", "minLength": 1},
                     "blurb": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
@@ -290,6 +307,10 @@ pub fn schema_value() -> Value {
                     "serving_tiers": {
                         "type": "array",
                         "items": {"$ref": "#/$defs/serving_tier"}
+                    },
+                    "reasoning_modes": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/reasoning_mode"}
                     },
                     "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
                     "row_kind": {"enum": ["snapshot", "selector"]},
@@ -558,6 +579,37 @@ pub fn schema_value() -> Value {
                         "uniqueItems": true
                     },
                     "beta_header": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "reasoning_mode": {
+                "type": "object",
+                "required": ["id", "economics"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "economics": {"enum": ["discounted", "standard", "premium"]},
+                    "request": {"$ref": "#/$defs/reasoning_mode_request"},
+                    "token_multiplier": {"type": "number", "exclusiveMinimum": 0},
+                    "status": {"type": "string"},
+                    "latency": {"type": "string", "minLength": 1},
+                    "suitable_workloads": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    "unsuitable_workloads": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    "note": {"type": "string"}
+                },
+                "additionalProperties": false
+            },
+            "reasoning_mode_request": {
+                "type": "object",
+                "required": ["param_path", "value"],
+                "properties": {
+                    "param_path": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string", "minLength": 1}
+                    },
+                    "value": {"type": "string", "minLength": 1},
+                    "response_values": {"type": "array", "items": {"type": "string", "minLength": 1}}
                 },
                 "additionalProperties": false
             },

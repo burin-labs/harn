@@ -6,11 +6,13 @@ fn calculate_cost_uses_catalog_model_pricing() {
     overlay.models.insert(
         "gpt-4o-mini".to_string(),
         crate::llm_config::ModelDef {
+            data_controls: None,
             name: "Test GPT-4o Mini".to_string(),
             display_name: None,
             blurb: None,
             provider: "openai".to_string(),
             context_window: 128_000,
+            reasoning_modes: Vec::new(),
             logical_model: None,
             equivalence_group: None,
             served_variant: None,
@@ -110,11 +112,13 @@ fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
     overlay.models.insert(
         "gpt-4o-mini".to_string(),
         crate::llm_config::ModelDef {
+            data_controls: None,
             name: "Test GPT-4o Mini".to_string(),
             display_name: None,
             blurb: None,
             provider: "openai".to_string(),
             context_window: 128_000,
+            reasoning_modes: Vec::new(),
             logical_model: None,
             equivalence_group: None,
             served_variant: None,

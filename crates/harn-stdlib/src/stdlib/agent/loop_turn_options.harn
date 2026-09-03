@@ -1134,3 +1134,118 @@ pub fn agent_direct_llm_options(
       _system_fragments: turn_prompt.fragments,
     }
 }
+
+/**
+ * True when a served turn committed nothing the loop can act on.
+ *
+ * Reads the VM's typed `outcome.kind`, which already accounts for both native
+ * and text-protocol tool calls, rather than re-deriving emptiness from text
+ * length or a stop-reason vocabulary. The native tool-call count is a second,
+ * independent guard so a turn that produced a dispatchable call can never be
+ * read as empty even if the outcome field is absent.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_loop_turn_committed_nothing(llm_result: any, tool_call_count: int) -> bool {
+  if tool_call_count > 0 {
+    return false
+  }
+  return to_string(llm_result?.outcome?.kind ?? "") == "empty"
+}
+
+/**
+ * Re-class a served turn that committed nothing as a provider failure.
+ *
+ * A turn with no content, no tool call, and no thinking gives the loop nothing
+ * to act on, and every recovery for that condition has already fired by the
+ * time the result arrives: the runtime's built-in empty-completion retries, and
+ * the caller's retry budget, which re-dispatches a billed-empty response and
+ * hands back the last one when it is spent. Advancing would open another turn
+ * on a provider that has stopped producing value.
+ *
+ * Demoting here rather than terminating in the loop body means the run ends
+ * through the one seam that already owns provider-failure terminals, so the
+ * usage record, the provider-error event, and the stop decision stay in a
+ * single place. The error mirrors the field shape the VM's own
+ * empty-generation error carries, so both terminals resolve the same closed
+ * terminal class downstream: `server_error` is what classifies it, and
+ * `empty_generation` is the existing code and reason for this condition.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_loop_demote_empty_turn(call: dict, turn_llm_opts: dict) -> dict {
+  if !(call?.ok ?? false) {
+    return call
+  }
+  const llm_result = call?.value
+  if !agent_loop_turn_committed_nothing(llm_result, len(llm_result?.tool_calls ?? [])) {
+    return call
+  }
+  return {
+    ok: false,
+    status: "provider_error",
+    stop_reason: "empty_generation",
+    error: {
+      category: "server_error",
+      code: "empty_generation",
+      reason: "empty_generation",
+      completion_kind: "empty_generation",
+      message: "The provider committed no content, tool call, or thinking on this turn.",
+      provider: to_string(turn_llm_opts?.provider ?? ""),
+      model: to_string(turn_llm_opts?.model ?? ""),
+    },
+  }
+}
+
+/**
+ * The line a rejected closing turn is reduced to. Fixed text, so nothing here
+ * is a per-run prose decision: the adjudicator's own directive says what the
+ * next attempt must fix, and this only records that a draft was withdrawn.
+ */
+pub const AGENT_LOOP_REJECTED_TURN_MARKER: string =
+  "[withdrawn: this closing report was rejected; see the directive that follows]"
+
+/**
+ * Retire the trailing assistant turn when an adjudicator has just rejected it
+ * and the loop is about to ask for another one.
+ *
+ * A rejected turn left whole is re-read by the model on every later round, so a
+ * run vetoed N times pays for N drafts it was already told not to keep. The
+ * adjudicator's directive is the carry-forward; the draft is not.
+ *
+ * `replacement` decides how the turn is retired, and the difference is not
+ * cosmetic. Dropping it outright shortens the transcript, which moves the turn
+ * boundary the pending directive is anchored to and delays that directive by a
+ * full round — the model would be asked to try again without being told why.
+ * Passing a replacement keeps the turn count stable, so the directive still
+ * lands on the next round. Drop only where no directive is owed.
+ *
+ * The role guard is the safety contract, not politeness. A turn whose tool
+ * calls were dispatched is followed by its tool results, so it is never the
+ * trailing message: this can only retire a bare assistant turn, which orphans
+ * nothing.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __agent_loop_pop_rejected_assistant_turn(
+  agent: HarnessAgent,
+  session_id: any,
+  replacement: string = "",
+) -> bool {
+  const messages = agent_session_messages(agent, session_id)
+  if len(messages) == 0 {
+    return false
+  }
+  const last = messages[len(messages) - 1]
+  if last?.role != "assistant" {
+    return false
+  }
+  const popped = agent_session_pop_last_assistant(agent, session_id)
+  if replacement != "" {
+    agent.inject(session_id, {role: "assistant", content: replacement})
+  }
+  return popped
+}

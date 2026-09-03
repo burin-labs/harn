@@ -721,6 +721,9 @@
           "minLength": 1,
           "type": "string"
         },
+        "data_controls": {
+          "$ref": "#/$defs/model_data_controls"
+        },
         "deprecation": {
           "$ref": "#/$defs/deprecation"
         },
@@ -796,6 +799,12 @@
         },
         "reasoning": {
           "$ref": "#/$defs/reasoning"
+        },
+        "reasoning_modes": {
+          "items": {
+            "$ref": "#/$defs/reasoning_mode"
+          },
+          "type": "array"
         },
         "released": {
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
@@ -957,6 +966,47 @@
         "result_ordering",
         "partial_failure",
         "cancellation"
+      ],
+      "type": "object"
+    },
+    "model_data_controls": {
+      "additionalProperties": false,
+      "properties": {
+        "checked_on": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "retention_default": {
+          "enum": [
+            "retained",
+            "not_retained",
+            "abuse_monitoring_only",
+            "unspecified"
+          ]
+        },
+        "sources": {
+          "items": {
+            "pattern": "^https://",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "training_default": {
+          "enum": [
+            "trains",
+            "does_not_train",
+            "unspecified"
+          ]
+        }
+      },
+      "required": [
+        "training_default",
+        "checked_on",
+        "sources"
       ],
       "type": "object"
     },
@@ -1509,6 +1559,91 @@
         "none_supported",
         "interleaved_supported",
         "preserve_thinking"
+      ],
+      "type": "object"
+    },
+    "reasoning_mode": {
+      "additionalProperties": false,
+      "properties": {
+        "economics": {
+          "enum": [
+            "discounted",
+            "standard",
+            "premium"
+          ]
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "latency": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/reasoning_mode_request"
+        },
+        "status": {
+          "type": "string"
+        },
+        "suitable_workloads": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token_multiplier": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "unsuitable_workloads": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "economics"
+      ],
+      "type": "object"
+    },
+    "reasoning_mode_request": {
+      "additionalProperties": false,
+      "properties": {
+        "param_path": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "response_values": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "param_path",
+        "value"
       ],
       "type": "object"
     },

@@ -546,7 +546,9 @@ labels. Pick the surface a reader would look in first:
 | `[Parser]` | `harn-lexer`, `harn-parser`, `harn-ir`, type checking, diagnostics | `area/parser`, `area/typechecker` |
 | `[VM]` | `harn-vm`, `harn-kernel`, bytecode, values, the runtime evaluator | `area/vm` |
 | `[Stdlib]` | `harn-stdlib`, `harn-hostlib`, builtins, `.harn.prompt` assets | `area/stdlib` |
-| `[Agent]` | Agent loop, transcripts, context assembly, compaction, judges, providers | `area/learning`, `area/personas`, `area/supervision` |
+| `[Agent]` | Agent loop, transcripts, context assembly, compaction, judges | `area/learning`, `area/personas`, `area/supervision` |
+| `[LLM]` | `harn-vm/src/llm`, provider clients, capabilities, turn options | `area/vm` |
+| `[Models]` | The model catalog, aliases, and per-model capability entries | `area/vm` |
 | `[CLI]` | `harn-cli`, `harn-fmt`, `harn-lint`, `harn-lsp`, `harn-dap`, editors | `area/cli` |
 | `[Modules]` | `harn-modules`, imports, packages, version pinning | `area/modules`, `package-management` |
 | `[Orchestrator]` | `harn serve`, triggers, connectors, flow control, sandboxing | `area/orchestrator`, `area/triggers`, `area/connectors`, `area/flow-control`, `area/sandbox` |

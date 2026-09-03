@@ -400,18 +400,6 @@ pub fn __scope_classifier_record_skip_turn(
   return text
 }
 
-pub fn __agent_loop_pop_structural_veto_turn(agent: HarnessAgent, session_id: any) {
-  const messages = agent_session_messages(agent, session_id)
-  if len(messages) == 0 {
-    return false
-  }
-  const last = messages[len(messages) - 1]
-  if last?.role != "assistant" {
-    return false
-  }
-  return agent_session_pop_last_assistant(agent, session_id)
-}
-
 /**
  * Build the one-shot directive injected as a final system fragment when the
  * loop terminates mid-tool-use. It tells the model the turn/budget is spent,

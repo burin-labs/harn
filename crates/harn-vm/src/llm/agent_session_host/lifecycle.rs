@@ -482,6 +482,13 @@ pub(super) async fn host_agent_session_finalize(
         session.last_llm_stop_reason.as_deref(),
     );
     let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
+    // The loop's suspend record is the only place the cause of a suspension is
+    // typed. Parse it once here, at the seam that owns the finalize status
+    // shape, so the terminal says what the run is waiting for instead of
+    // repeating the word `suspended`.
+    let suspension = crate::agent_events::AgentTerminalSuspension::from_status_value(
+        opt_json(&status_dict, "suspension").as_ref(),
+    );
     // Classify once at the loop boundary; the bridge carries this exact value to ACP.
     let terminal_outcome = crate::agent_events::terminal_outcome_for_finalize(
         &canonical_status,
@@ -489,7 +496,8 @@ pub(super) async fn host_agent_session_finalize(
         terminal_class,
         terminal_error.is_some(),
     )
-    .with_error(terminal_error.as_ref());
+    .with_error(terminal_error.as_ref())
+    .with_suspension(suspension.as_ref());
     if finalization_stage < super::AgentFinalizationStage::TerminalErrorAppended {
         if let Some(error) = terminal_error.as_ref() {
             let transcript_event = crate::llm::helpers::transcript_event(

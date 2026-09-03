@@ -107,6 +107,14 @@ export interface HarnProviderDataControls {
   request_controls?: HarnProviderDataControl[]
 }
 
+export interface HarnModelDataControls {
+  training_default: "trains" | "does_not_train" | "unspecified"
+  retention_default?: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+}
+
 export interface HarnProviderDataControl {
   location: "body" | "header"
   name: string
@@ -144,6 +152,7 @@ export interface HarnAliasToolCalling {
 export interface HarnCatalogModel {
   id: string
   name: string
+  data_controls?: HarnModelDataControls
   display_name: string
   blurb?: string
   provider: string
@@ -207,6 +216,7 @@ export interface HarnCatalogModel {
   strengths?: string[]
   benchmarks?: Record<string, number>
   serving_tiers?: HarnModelServingTier[]
+  reasoning_modes?: HarnModelReasoningMode[]
   released?: string
   row_kind?: "snapshot" | "selector"
   current_snapshot?: string
@@ -328,6 +338,25 @@ export interface HarnCompletionReview {
   scrutiny: "standard" | "light"
   max_judge_calls?: number
   evidence: string
+}
+
+export interface HarnModelReasoningModeRequest {
+  param_path: string[]
+  value: string
+  response_values?: string[]
+}
+
+export interface HarnModelReasoningMode {
+  id: string
+  label?: string
+  economics: "discounted" | "standard" | "premium"
+  request?: HarnModelReasoningModeRequest
+  token_multiplier?: number
+  status?: string
+  latency?: string
+  suitable_workloads?: string[]
+  unsuitable_workloads?: string[]
+  note?: string
 }
 
 export interface HarnModelServingTierRequest {

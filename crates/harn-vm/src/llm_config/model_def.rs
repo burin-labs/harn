@@ -7,6 +7,8 @@ use chrono::{NaiveDate, TimeZone as _, Utc};
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+use super::ModelDataControlsDef;
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct HealthcheckDef {
     pub method: String,
@@ -785,6 +787,72 @@ pub struct ServingTierDef {
     pub note: Option<String>,
 }
 
+/// Provider request knob that selects a non-default reasoning mode.
+///
+/// Unlike [`ServingTierRequestDef`], the knob is addressed by a nested path
+/// rather than a flat field: OpenAI spells pro mode `reasoning.mode = "pro"`,
+/// which shares the `reasoning` object with `reasoning.effort`. Writing a
+/// flat `param` here would clobber the effort the caller asked for.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ReasoningModeRequestDef {
+    /// Dotted request path that opts into the mode, outermost segment first
+    /// (for example `["reasoning", "mode"]`). Intermediate objects are
+    /// created when absent and never replaced when present.
+    pub param_path: Vec<String>,
+    /// Value to send at `param_path` (for example `pro`).
+    pub value: String,
+    /// Values the provider may echo for this mode in its response. Defaults
+    /// to the request value when omitted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_values: Vec<String>,
+}
+
+/// Optional non-default reasoning execution mode for a model. Off by default:
+/// its presence only describes provider capability, and callers must opt in
+/// explicitly through the declared knob.
+///
+/// The economics differ in kind from a serving tier. A premium serving tier
+/// raises the per-token RATE; a premium reasoning mode keeps the rate and
+/// raises the token COUNT, because the provider bills the extra work it does
+/// at the model's standard rates. `token_multiplier` therefore records
+/// observed spend inflation, not a price change, and `pricing` is absent by
+/// design.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ReasoningModeDef {
+    /// Stable mode id, e.g. `pro`.
+    pub id: String,
+    /// Human-readable display label for CLI/catalog renderers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Economic shape relative to the default reasoning mode. Reuses the
+    /// serving-tier vocabulary so renderers have one word list to handle.
+    pub economics: ServingTierEconomics,
+    /// Request knob for modes selected per request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<ReasoningModeRequestDef>,
+    /// Approximate multiple of billed tokens versus the default mode on
+    /// comparable work, when measured. This is spend inflation at unchanged
+    /// rates; see the type docs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_multiplier: Option<f64>,
+    /// Lifecycle of the mode: "ga" | "beta" | "research_preview" |
+    /// "deprecated".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// Latency expectation for humans and planners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency: Option<String>,
+    /// Workloads this mode is suitable for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suitable_workloads: Vec<String>,
+    /// Workloads this mode should generally avoid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsuitable_workloads: Vec<String>,
+    /// Free-text note: constraints, endpoint requirements, caveats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// A named model-fallback ladder declared in the catalog under
 /// `[model_ladders.<name>]`. A `models`/`ladder` option on `llm_call`
 /// lowers a ladder onto the first-class `routing_policy` chain: each step
@@ -926,6 +994,12 @@ pub struct ModelDef {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub pricing: Option<ModelPricing>,
+    /// Per-route override of the provider's training/retention posture, for
+    /// providers that sell the posture per model id rather than per account or
+    /// per request. Absent means "inherit the provider's declaration", which
+    /// is the answer for almost every row.
+    #[serde(default)]
+    pub data_controls: Option<ModelDataControlsDef>,
     // Serialized only when true. A field that always serializes cannot tell
     // "the author never mentioned it" from "the author wrote the default",
     // which is how a whole-row overlay copy silently un-deprecates a route it
@@ -955,6 +1029,14 @@ pub struct ModelDef {
     /// synchronous serving path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serving_tiers: Vec<ServingTierDef>,
+    /// Non-default reasoning execution modes exposed by the provider, such as
+    /// OpenAI's `reasoning.mode = "pro"`. Off by default — see
+    /// [`ReasoningModeDef`]. Distinct from [`ServingTierDef`]: a serving tier
+    /// changes how fast the SAME work is served, while a reasoning mode
+    /// changes how MUCH work the model does before answering. The two are
+    /// independent knobs and a request may set both.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_modes: Vec<ReasoningModeDef>,
     /// Loose catalog annotations for selectors and UI. Conventional tags
     /// include `avoid_reviewer` for routes that should not be auto-selected as
     /// independent reviewers even when they are routable and cheap.

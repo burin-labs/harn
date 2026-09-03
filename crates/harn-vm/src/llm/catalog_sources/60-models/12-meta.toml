@@ -1,0 +1,113 @@
+# Meta Muse Spark ─ Meta Model API (https://api.meta.ai/v1), OpenAI-compatible.
+#
+# Rate card, verified 2026-09-02 against dev.meta.ai/docs/pricing-rate-limits:
+#   standard    $1.25 in / $0.15 cached / $4.25 out per MTok, 3,000 rpm
+#   contributor $0.10 in / $0.002 cached / $0.20 out per MTok,   100 rpm
+# Every generation shares its tier's rate card, so 1.1, 1.2 and 1.3 carry the
+# same standard prices. Do not "correct" one row toward another generation.
+#
+# Context window is 1,048,576, as the docs spell it, not a rounded 1,000,000.
+#
+# THE CONTRIBUTOR ROWS ARE NOT A VOLUME DISCOUNT. Meta publishes the same
+# model twice; the cheaper id buys the discount with permission to train on
+# your prompts and completions. That is declared per row in
+# `[models.<id>.data_controls]`, which overrides the provider's declaration,
+# and `strictest_available` refuses to route to a row declaring `trains`.
+#
+# Wire facts below were verified with live calls on 2026-09-02, not inferred:
+#   - native OpenAI-shape tool calls (finish_reason "tool_calls", verified)
+#   - prompt caching real (usage reported cached_tokens > 0, verified)
+#   - reasoning is native and NOT optional; usage always reports
+#     reasoning_tokens
+#   - `reasoning_effort` is ACCEPTED but appears inert: "low" and "high" spent
+#     an identical 197 reasoning tokens on the same trivial prompt. No effort
+#     levels are declared here, because a lever that does not move is worse
+#     than an absent one. Re-probe before adding them.
+#
+# Sizing quirk worth knowing: the model spends heavily on reasoning before it
+# emits anything. "What is 2+2" returned "4" only after 274 reasoning tokens,
+# and a 16-token cap returned finish_reason "length" with null content. Any
+# caller or smoke fixture must budget max_tokens in the thousands.
+
+[models."muse-spark-1.3"]
+name = "Muse Spark 1.3"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.3".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
+
+[models."muse-spark-1.3-contributor"]
+name = "Muse Spark 1.3 (contributor tier)"
+provider = "meta"
+wire_model = "muse-spark-1.3-contributor"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+rate_limits = { rpm = 100 }
+
+[models."muse-spark-1.3-contributor".data_controls]
+training_default = "trains"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+
+[models."muse-spark-1.2"]
+name = "Muse Spark 1.2"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.2".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
+
+[models."muse-spark-1.2-contributor"]
+name = "Muse Spark 1.2 (contributor tier)"
+provider = "meta"
+wire_model = "muse-spark-1.2-contributor"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+rate_limits = { rpm = 100 }
+
+[models."muse-spark-1.2-contributor".data_controls]
+training_default = "trains"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+
+# 1.1 has no contributor counterpart; Meta lists it only on the standard tier.
+[models."muse-spark-1.1"]
+name = "Muse Spark 1.1"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+strengths = ["reasoning", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.1".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."

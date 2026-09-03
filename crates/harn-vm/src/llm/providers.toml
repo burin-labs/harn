@@ -91,6 +91,18 @@ sources = [
   "https://api-docs.deepseek.com/api/create-chat-completion",
 ]
 
+# Both fields verified against live responses, not against the docs alone: a
+# non-streaming call reported prompt_tokens_details.cached_tokens = 113 on a
+# repeated prefix, and a stream=true call with stream_options.include_usage
+# delivered a terminal chunk carrying the same usage shape.
+[[usage_accounting_audit.verified]]
+provider = "meta"
+checked_on = "2026-09-02"
+fields = ["cache", "stream"]
+sources = [
+  "https://dev.meta.ai/docs/overview/",
+]
+
 [[usage_accounting_audit.verified]]
 provider = "fireworks"
 checked_on = "2026-08-26"
@@ -495,6 +507,33 @@ source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of
 last_verified = "2026-07-09"
 
 [providers.dashscope.healthcheck]
+method = "GET"
+path = "/models"
+
+# Meta Model API — Meta's first-party hosted endpoint for the Muse family,
+# documented as drop-in compatible with the OpenAI SDK, so it reuses the
+# existing OpenAI chat-completions dialect rather than carrying an adapter of
+# its own. Bearer auth, /v1/models for the healthcheck.
+#
+# Note that this replaces the wound-down Llama API; Llama weights themselves
+# are served by the third-party providers already in this catalog.
+#
+# Meta publishes each Muse Spark generation under TWO model ids at two very
+# different prices. The cheaper `-contributor` id is a training grant, not a
+# volume discount, and each row declares that for itself in
+# `[models.<id>.data_controls]`.
+[providers.meta]
+display_name = "Meta"
+cache_usage_accounting = true
+stream_usage_accounting = true
+base_url = "https://api.meta.ai/v1"
+base_url_env = "META_BASE_URL"
+auth_style = "bearer"
+auth_env = "META_API_KEY"
+chat_endpoint = "/chat/completions"
+latency_p50_ms = 1900
+
+[providers.meta.healthcheck]
 method = "GET"
 path = "/models"
 
@@ -1304,6 +1343,28 @@ training_default = "does_not_train"
 checked_on = "2026-08-30"
 sources = ["https://platform.openai.com/docs/api-reference/chat"]
 note = "Generic user-configured OpenAI-compatible endpoint. The wire contract it speaks documents no retention control beyond store, which a local server is not required to honor."
+
+# Meta sells the training posture per MODEL ID, not per request and not on the
+# account: `muse-spark-1.3` is priced at list and not trained on, while
+# `muse-spark-1.3-contributor` is ~12x cheaper on input and ~21x on output in
+# exchange for permission to train on the traffic.
+#
+# So the provider-level row records the posture that applies when a caller
+# names a standard route, and each `-contributor` row overrides it in
+# `[models.<id>.data_controls]`. `control_scope` is `none` because that is
+# literally true of a request: there is no header or body field to set. It is
+# NOT a claim that no control exists — the control is the model id, and the
+# model rows carry it.
+[providers.meta.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = [
+  "https://developer.meta.com/ai/products/meta-model-api/",
+  "https://developer.meta.com/ai/models/muse-spark/",
+]
+note = "Standard routes are documented as not used to improve Meta's products. The separately priced -contributor routes ARE, and each declares that on its own model row."
 
 # --- source: 12-local-runtime/lifecycle.toml ---
 # Local runtime lifecycle metadata for `harn local`.
@@ -3051,6 +3112,15 @@ serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "ga", latency = "up to 2.5x faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
+# `reasoning.mode = "pro"` is a per-request execution mode, NOT a serving tier
+# and NOT a separate model. It is listed here rather than under
+# `serving_tiers` because the two knobs differ in kind: a serving tier changes
+# how fast the same work is served and is priced by a different per-token
+# rate, while a reasoning mode changes how much work happens at unchanged
+# rates. They are independent and a request may set both.
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
+]
 
 [models."gpt-5.6-terra"]
 name = "GPT-5.6 Terra"
@@ -3069,6 +3139,9 @@ serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 4.00, output_per_mtok = 24.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 1.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
+]
 
 [models."gpt-5.6-luna"]
 name = "GPT-5.6 Luna"
@@ -3086,6 +3159,9 @@ complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "
 serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 0.40, output_per_mtok = 2.40, cache_read_per_mtok = 0.04, cache_write_per_mtok = 0.50 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 0.10, output_per_mtok = 0.60, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
 ]
 
 # GPT-5.5 — current OpenAI frontier (Responses + Chat Completions).
@@ -3639,6 +3715,121 @@ architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe 
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
+
+# --- source: 60-models/12-meta.toml ---
+# Meta Muse Spark ─ Meta Model API (https://api.meta.ai/v1), OpenAI-compatible.
+#
+# Rate card, verified 2026-09-02 against dev.meta.ai/docs/pricing-rate-limits:
+#   standard    $1.25 in / $0.15 cached / $4.25 out per MTok, 3,000 rpm
+#   contributor $0.10 in / $0.002 cached / $0.20 out per MTok,   100 rpm
+# Every generation shares its tier's rate card, so 1.1, 1.2 and 1.3 carry the
+# same standard prices. Do not "correct" one row toward another generation.
+#
+# Context window is 1,048,576, as the docs spell it, not a rounded 1,000,000.
+#
+# THE CONTRIBUTOR ROWS ARE NOT A VOLUME DISCOUNT. Meta publishes the same
+# model twice; the cheaper id buys the discount with permission to train on
+# your prompts and completions. That is declared per row in
+# `[models.<id>.data_controls]`, which overrides the provider's declaration,
+# and `strictest_available` refuses to route to a row declaring `trains`.
+#
+# Wire facts below were verified with live calls on 2026-09-02, not inferred:
+#   - native OpenAI-shape tool calls (finish_reason "tool_calls", verified)
+#   - prompt caching real (usage reported cached_tokens > 0, verified)
+#   - reasoning is native and NOT optional; usage always reports
+#     reasoning_tokens
+#   - `reasoning_effort` is ACCEPTED but appears inert: "low" and "high" spent
+#     an identical 197 reasoning tokens on the same trivial prompt. No effort
+#     levels are declared here, because a lever that does not move is worse
+#     than an absent one. Re-probe before adding them.
+#
+# Sizing quirk worth knowing: the model spends heavily on reasoning before it
+# emits anything. "What is 2+2" returned "4" only after 274 reasoning tokens,
+# and a 16-token cap returned finish_reason "length" with null content. Any
+# caller or smoke fixture must budget max_tokens in the thousands.
+
+[models."muse-spark-1.3"]
+name = "Muse Spark 1.3"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.3".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
+
+[models."muse-spark-1.3-contributor"]
+name = "Muse Spark 1.3 (contributor tier)"
+provider = "meta"
+wire_model = "muse-spark-1.3-contributor"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+rate_limits = { rpm = 100 }
+
+[models."muse-spark-1.3-contributor".data_controls]
+training_default = "trains"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+
+[models."muse-spark-1.2"]
+name = "Muse Spark 1.2"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.2".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
+
+[models."muse-spark-1.2-contributor"]
+name = "Muse Spark 1.2 (contributor tier)"
+provider = "meta"
+wire_model = "muse-spark-1.2-contributor"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+rate_limits = { rpm = 100 }
+
+[models."muse-spark-1.2-contributor".data_controls]
+training_default = "trains"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+
+# 1.1 has no contributor counterpart; Meta lists it only on the standard tier.
+[models."muse-spark-1.1"]
+name = "Muse Spark 1.1"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+strengths = ["reasoning", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.1".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
 
 # --- source: 60-models/20-open-weight-openrouter.toml ---
 # Open-weight executor candidates (<$2/Mtok with function calling). Use

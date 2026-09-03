@@ -191,6 +191,7 @@ pub type HarnProviderCatalogModel = {
   completion_review?: HarnProviderCatalogCompletionReview,
   context_window: int,
   current_snapshot?: string,
+  data_controls?: HarnProviderCatalogModelDataControls,
   deprecation: HarnProviderCatalogDeprecation,
   display_name: string,
   embedding_dim?: int,
@@ -212,6 +213,7 @@ pub type HarnProviderCatalogModel = {
   quality_tags: list<string>,
   rate_limits?: HarnProviderCatalogRateLimits,
   reasoning: HarnProviderCatalogReasoning,
+  reasoning_modes?: list<HarnProviderCatalogReasoningMode>,
   released?: string,
   row_kind?: "snapshot" | "selector",
   runtime_context_window?: int,
@@ -238,6 +240,14 @@ pub type HarnProviderCatalogModelBatchSupport = {
   security_notes?: list<string>,
   turnaround_hours?: int,
   wire_format: "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai" | "bedrock",
+}
+
+pub type HarnProviderCatalogModelDataControls = {
+  checked_on: string,
+  note?: string,
+  retention_default?: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified",
+  sources: list<string>,
+  training_default: "trains" | "does_not_train" | "unspecified",
 }
 
 pub type HarnProviderCatalogModelEligibilityMeasurement = {
@@ -366,6 +376,25 @@ pub type HarnProviderCatalogReasoning = {
   modes: list<string>,
   none_supported: bool,
   preserve_thinking: bool,
+}
+
+pub type HarnProviderCatalogReasoningMode = {
+  economics: "discounted" | "standard" | "premium",
+  id: string,
+  label?: string,
+  latency?: string,
+  note?: string,
+  request?: HarnProviderCatalogReasoningModeRequest,
+  status?: string,
+  suitable_workloads?: list<string>,
+  token_multiplier?: float,
+  unsuitable_workloads?: list<string>,
+}
+
+pub type HarnProviderCatalogReasoningModeRequest = {
+  param_path: list<string>,
+  response_values?: list<string>,
+  value: string,
 }
 
 pub type HarnProviderCatalogRoutingRoute = {

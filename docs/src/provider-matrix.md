@@ -134,6 +134,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `local` | `*qwen3*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `gemma-4*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `*` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `meta` | `muse-spark-*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m3*` | `any` | `adaptive` | `none` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m2.7*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `minimax` | `minimax-m2.5*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -391,6 +392,11 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `local` | `gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-e2b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-e4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.2-contributor` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.3-contributor` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5-highspeed` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

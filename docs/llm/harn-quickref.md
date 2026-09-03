@@ -2394,15 +2394,17 @@ preserves provider prompt prefixes; compaction remains the deliberate prefix
 break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives>` envelope in its own trailing user message. Its directives
+`<context-directives speaker="...">` envelope in its own trailing user message.
+The speaker is `harness` when any directive in it came from harness machinery
+and `person` when every directive stands in for the person. Its directives
 are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
 order. Finite directives render `ttl_turns="N"`; they apply only to the N
 assistant turns immediately after the message where they first appear, and a
 later historical copy does not renew that lifetime. Internal tags, dedupe keys,
 and runtime signatures are not rendered.
 The system prompt remains byte-stable as reminders change. Persisted
-`role_hint` values remain accepted for replay compatibility but do not control
-placement or voice.
+`role_hint` values remain accepted for replay compatibility and select the
+envelope speaker, but do not control placement or the wire role.
 
 Sub-agent handoffs carry a filtered `reminder_propagation` list.
 `propagate: "all"` reaches descendants, `"session"` reaches direct

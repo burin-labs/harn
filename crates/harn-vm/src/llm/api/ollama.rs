@@ -845,11 +845,13 @@ mod tests {
         overlay.models.insert(
             "qwen-test".to_string(),
             crate::llm_config::ModelDef {
+                data_controls: None,
                 name: "Qwen Test".to_string(),
                 display_name: None,
                 blurb: None,
                 provider: "ollama".to_string(),
                 context_window: 100_000,
+                reasoning_modes: Vec::new(),
                 logical_model: None,
                 equivalence_group: None,
                 served_variant: None,
@@ -966,11 +968,13 @@ mod tests {
         overlay.models.insert(
             "qwen-test".to_string(),
             crate::llm_config::ModelDef {
+                data_controls: None,
                 name: "Qwen Test".to_string(),
                 display_name: None,
                 blurb: None,
                 provider: "ollama".to_string(),
                 context_window: 100_000,
+                reasoning_modes: Vec::new(),
                 logical_model: None,
                 equivalence_group: None,
                 served_variant: None,
@@ -1236,11 +1240,13 @@ mod tests {
         overlay.models.insert(
             "devstral-small-2:24b".to_string(),
             crate::llm_config::ModelDef {
+                data_controls: None,
                 name: "Devstral Small 2 24B".to_string(),
                 display_name: None,
                 blurb: None,
                 provider: "ollama".to_string(),
                 context_window: 262_144,
+                reasoning_modes: Vec::new(),
                 logical_model: None,
                 equivalence_group: None,
                 served_variant: None,

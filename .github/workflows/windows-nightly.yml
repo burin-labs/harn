@@ -28,6 +28,17 @@ on:
     # waiting when contributors start their day.
     - cron: "0 7 * * *"
   workflow_dispatch:
+  pull_request:
+    # Only the code these lanes actually exercise. A fragment- or docs-only
+    # pull request cannot change what a workspace test run proves, so it does
+    # not pay for one, and the release's evidence reader treats a lane it never
+    # needed as satisfied rather than missing.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/windows-nightly.yml"
+      - ".github/workflows/macos-nightly.yml"
 
 permissions:
   contents: read
@@ -91,7 +102,11 @@ jobs:
           target-dir: ${{ env.CARGO_TARGET_DIR }}
           cache-on-failure: true
           cache-bin: false
-          save: true
+          # This job is the sole writer for `workspace-windows`. A pull request
+          # run is a restore-only consumer: writing here would mint one
+          # immutable cache generation per pull request in a 10 GiB namespace
+          # that is already contended.
+          save: ${{ github.event_name != 'pull_request' }}
       - name: Restore Windows workspace warm artifact
         id: windows-warm-restore
         if: ${{ startsWith(github.ref_name, 'release-certify/') }}

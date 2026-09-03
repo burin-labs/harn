@@ -38,6 +38,7 @@ pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tool_governance;
 mod agent_tools;
+pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;
@@ -132,6 +133,7 @@ pub(crate) fn effort_probe_ungated() -> bool {
 pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
     !effort_probe_ungated()
 }
+pub(crate) mod reasoning_modes;
 pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;

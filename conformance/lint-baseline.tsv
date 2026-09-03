@@ -8,6 +8,8 @@
 36	agents/agent_loop_intra_turn_resource_fail_fast.harn	HARN-LNT-025
 17	agents/agent_loop_monologue_actuation.harn	HARN-LNT-025
 1	agents/agent_loop_native_missing_tool_call_recovery.harn	HARN-LNT-018
+1	agents/agent_loop_native_mock_tool_call_dispatch.harn	HARN-LNT-075
+1	agents/agent_loop_native_unreliable_prompt_wire_parity.harn	HARN-LNT-075
 6	agents/agent_loop_options.harn	HARN-LNT-025
 4	agents/agent_path_scope_guard.harn	HARN-LNT-025
 5	agents/agent_session_current_id.harn	HARN-LNT-025
@@ -18,6 +20,7 @@
 2	agents/agent_sub_agent_anchor.harn	HARN-LNT-025
 14	agents/approval_reviewer.harn	HARN-LNT-025
 1	agents/approval_reviewer.harn	HARN-LNT-049
+2	agents/approval_reviewer.harn	HARN-LNT-075
 1	agents/approval_reviewer_loop.harn	HARN-LNT-014
 1	agents/approval_reviewer_loop.harn	HARN-LNT-049
 4	agents/artifact_emit.harn	HARN-LNT-018
@@ -37,6 +40,7 @@
 5	agents/thrash_hard_stop_recovery.harn	HARN-LNT-018
 7	agents/tool_precheck.harn	HARN-LNT-025
 2	agents/tool_precheck.harn	HARN-LNT-049
+1	agents/tool_precheck.harn	HARN-LNT-075
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018
 3	agents/workflow_executor_agent_loop.harn	HARN-LNT-018
@@ -110,6 +114,7 @@
 1	scenarios/approval_policy_auto_deny.harn	HARN-LNT-016
 1	scenarios/approval_policy_write_path.harn	HARN-LNT-016
 1	scenarios/best_of_n_inside_agent_loop.harn	HARN-LNT-018
+1	scenarios/gemini_native_tool_calls_agent_loop.harn	HARN-LNT-075
 6	scenarios/http_server_stdlib.harn	HARN-LNT-025
 1	scenarios/http_server_stdlib.harn	HARN-LNT-029
 1	scenarios/llm_budget_recommend_max_output.harn	HARN-LNT-014
@@ -129,9 +134,11 @@
 2	scenarios/orchestrator_worker_claim_expiry_requeue.harn	HARN-LNT-025
 1	scenarios/orchestrator_worker_enqueue_drain.harn	HARN-LNT-025
 5	scenarios/tool_binder_pipeline.harn	HARN-LNT-018
+1	scenarios/tool_call_receipts_local_sink.harn	HARN-LNT-075
 1	scenarios/tool_middleware_primitives.harn	HARN-LNT-018
 1	scenarios/tool_middleware_with_handoff_artifact.harn	HARN-LNT-018
 9	scenarios/tool_ref_basic.harn	HARN-LNT-025
+1	scenarios/tool_search_custom_strategy.harn	HARN-LNT-075
 2	scenarios/tool_surface_validate.harn	HARN-CAP-005
 1	scenarios/tool_surface_validate.harn	__CHECK_FAILED__
 6	stdlib/agent_best_of_n.harn	HARN-LNT-016
