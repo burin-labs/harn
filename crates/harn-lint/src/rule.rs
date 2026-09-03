@@ -100,6 +100,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MutableCaptureAcrossParallel),
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
+        Box::new(UntypedToolHandlerResult),
         Box::new(ApiDesign),
     ];
     // Ids address rules for per-rule config and `disable_rules`, so they
@@ -270,6 +271,12 @@ program_rule!(
     "reminder-provider-count",
     ast,
     crate::rules::reminder_provider_count::check_reminder_provider_count
+);
+program_rule!(
+    UntypedToolHandlerResult,
+    "untyped-tool-handler-result",
+    ast,
+    crate::rules::tool_handler_result::check_untyped_tool_handler_result
 );
 /// Attenuation needs more than the AST.
 ///

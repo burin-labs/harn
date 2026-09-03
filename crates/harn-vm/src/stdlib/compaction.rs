@@ -71,6 +71,7 @@ pub(crate) fn reset_compaction_state() {
 #[harn_builtin(
     exposure = "harness.agent.compaction_policy",
     effects = ["state.mutate@dynamic"],
+    runtime_control_plane = true,
     sig = "compaction.policy(opts: dict) -> dict", category = "compaction"
 )]
 fn compaction_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

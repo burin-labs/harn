@@ -1,0 +1,4 @@
+effect_handler_reported_denial_cuts_at_two=true
+effect_harness_infra_terminal=true
+negative_retryable_handler_denial_not_cut=true
+negative_successful_handler_result_not_cut=true

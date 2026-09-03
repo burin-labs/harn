@@ -738,6 +738,7 @@ fn render_with_provenance_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 #[harn_builtin(
     exposure = "harness.agent.prompt_mark_rendered",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "prompt_mark_rendered(prompt_id: string) -> int",
     category = "strings"
 )]
