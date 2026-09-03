@@ -9,7 +9,7 @@ mod completion;
 mod context_window;
 pub mod data_controls;
 mod dialect;
-mod errors;
+pub(crate) mod errors;
 mod ollama;
 mod openai_normalize;
 pub(crate) mod options;
