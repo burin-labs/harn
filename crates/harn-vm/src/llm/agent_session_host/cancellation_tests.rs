@@ -6,6 +6,28 @@ use serde_json::json;
 
 use crate::value::VmDictExt;
 
+/// Block the calling thread until detached recovery settles.
+///
+/// The source runtime that scheduled recovery is already gone, so the wait
+/// needs a runtime of its own. It is driven by the cleanup progress signal
+/// subscribed before the triggering drop, and its bound fails the test rather
+/// than passing it when recovery never runs.
+fn settle_detached_cleanup(
+    mut progress: tokio::sync::watch::Receiver<u64>,
+    settled: impl FnMut() -> bool,
+    what: &str,
+) {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("cleanup verification runtime")
+        .block_on(crate::agent_lifecycle_cleanup::settle_cleanup(
+            &mut progress,
+            settled,
+            what,
+        ));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn ordinary_init_failure_persists_terminal_before_releasing_owned_session() {
     crate::agent_sessions::reset_session_store();
@@ -220,6 +242,7 @@ fn detached_task_abort_survives_the_source_runtime_shutdown() {
     let mut options = crate::value::DictMap::new();
     options.put_str("root", root.path().to_string_lossy().as_ref());
     let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
     let source_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -264,16 +287,14 @@ fn detached_task_abort_survives_the_source_runtime_shutdown() {
     });
     drop(source_runtime);
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while crate::agent_sessions::has_journal(session_id)
-        || crate::agent_sessions::exists(session_id)
-    {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "process-owned cleanup must outlive the source runtime"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    settle_detached_cleanup(
+        cleanup_progress,
+        || {
+            !crate::agent_sessions::has_journal(session_id)
+                && !crate::agent_sessions::exists(session_id)
+        },
+        "process-owned cleanup must outlive the source runtime",
+    );
     assert!(cancel_token.load(Ordering::SeqCst));
     assert!(!crate::agent_sessions::has_journal(session_id));
     assert!(!crate::agent_sessions::exists(session_id));
@@ -290,6 +311,7 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
     let task_id = "task_root";
     let mut options = crate::value::DictMap::new();
     options.put_str("root", root.path().to_string_lossy().as_ref());
+    let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
     let source_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -320,16 +342,16 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
     });
     drop(source_runtime);
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while crate::agent_sessions::has_journal(session_id)
-        || crate::agent_sessions::exists(session_id)
-    {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "top-level cleanup must transfer to the process-owned runtime"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    settle_detached_cleanup(
+        cleanup_progress,
+        || {
+            !crate::agent_sessions::has_journal(session_id)
+                && !crate::agent_sessions::exists(session_id)
+        },
+        "top-level cleanup must transfer to the process-owned runtime",
+    );
+    assert!(!crate::agent_sessions::has_journal(session_id));
+    assert!(!crate::agent_sessions::exists(session_id));
     let verification_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -388,9 +410,19 @@ fn dropping_an_inline_vm_does_not_cancel_the_parent_lifecycle() {
         )
         .expect("claim parent lifecycle");
 
+        // Whether a drop transfers recovery is decided synchronously inside
+        // `cancel_spawned_tasks`, so the claim is "this drop scheduled
+        // nothing", not "nothing had happened yet". Counting the transfers
+        // states that exactly; waiting for an interval that elapsed cannot,
+        // because an interval always elapses.
+        let spawns_before = crate::vm::subtask::lifecycle_cleanup_spawn_count();
         let inline = parent.child_vm_inline();
         drop(inline);
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert_eq!(
+            crate::vm::subtask::lifecycle_cleanup_spawn_count(),
+            spawns_before,
+            "a transient inline execution context must not schedule recovery for its parent"
+        );
         assert!(
             crate::agent_sessions::has_journal(session_id),
             "a transient inline execution context must not activate its parent's reservation"
@@ -443,15 +475,14 @@ fn dropping_one_execution_does_not_cancel_same_task_in_shared_runtimes() {
             super::super::seed_host_session_provider_model(session_id, "mock", "fixture");
         }
 
+        let mut cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
         drop(first);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while crate::agent_sessions::exists("shared-runtime-first") {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "first cleanup timed out"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        crate::agent_lifecycle_cleanup::settle_cleanup(
+            &mut cleanup_progress,
+            || !crate::agent_sessions::exists("shared-runtime-first"),
+            "dropping the first execution must release its own session",
+        )
+        .await;
         assert!(
             crate::agent_sessions::has_journal("shared-runtime-second"),
             "cleanup must retain an unrelated execution with the same task id and runtimes"
@@ -471,6 +502,7 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
     let root = tempfile::tempdir().expect("temp root");
     let session_id = "pending-cleanup-original-execution";
     let task_id = "task_cancelled_before_execution_reuse";
+    let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
     let source_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -513,14 +545,12 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
     });
     drop(source_runtime);
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while crate::agent_sessions::exists(session_id) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "cleanup must retain the cancelled task's original execution identity"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    settle_detached_cleanup(
+        cleanup_progress,
+        || !crate::agent_sessions::exists(session_id),
+        "cleanup must retain the cancelled task's original execution identity",
+    );
+    assert!(!crate::agent_sessions::exists(session_id));
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
 }

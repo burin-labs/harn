@@ -281,7 +281,21 @@ where
             .build()
             .expect("build Harn lifecycle cleanup runtime")
     });
+    LIFECYCLE_CLEANUP_SPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     runtime.spawn(future)
+}
+
+/// Count of detached recovery tasks handed to the process-owned runtime.
+///
+/// Whether an execution transfers cleanup is decided synchronously as it
+/// drops, so this counter is the exact observable for "this drop scheduled no
+/// recovery" — a claim no amount of waiting can establish.
+static LIFECYCLE_CLEANUP_SPAWNS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(test)]
+pub(crate) fn lifecycle_cleanup_spawn_count() -> u64 {
+    LIFECYCLE_CLEANUP_SPAWNS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Spawn a long-lived child that inherits execution policy but owns an

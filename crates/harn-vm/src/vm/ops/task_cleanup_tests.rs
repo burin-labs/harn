@@ -30,17 +30,24 @@ async fn install_claimed_journal(
     .expect("claim lifecycle");
 }
 
-async fn assert_cleanup_released(session_id: &str) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
-    while crate::agent_sessions::has_journal(session_id)
-        || crate::agent_sessions::exists(session_id)
-    {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "task join left the lifecycle reservation visible for `{session_id}`"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+/// Wait on the recovery boundary itself. `progress` is subscribed before the
+/// join that triggers cleanup, so no signal is missed, and the bound inside
+/// `settle_cleanup` fails the test when recovery never releases the
+/// reservation.
+async fn assert_cleanup_released(
+    mut progress: tokio::sync::watch::Receiver<u64>,
+    session_id: &str,
+) {
+    crate::agent_lifecycle_cleanup::settle_cleanup(
+        &mut progress,
+        || {
+            !crate::agent_sessions::has_journal(session_id)
+                && !crate::agent_sessions::exists(session_id)
+        },
+        &format!("task join left the lifecycle reservation visible for `{session_id}`"),
+    )
+    .await;
+    assert!(!crate::agent_sessions::has_journal(session_id));
     assert!(!crate::agent_sessions::exists(session_id));
 }
 
@@ -62,6 +69,7 @@ async fn scoped_first_child_failure_releases_its_lifecycle_owner() {
     let task_id = "task_scope_failed_child";
     install_claimed_journal(&vm, root.path(), session_id, task_id).await;
 
+    let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
     vm.spawned_tasks.insert(
         "public-scope-child".to_string(),
         failed_task(task_id, "scope boom"),
@@ -77,7 +85,7 @@ async fn scoped_first_child_failure_releases_its_lifecycle_owner() {
         .await
         .expect_err("scope must propagate its first child failure");
     assert_eq!(error.to_string(), "Runtime error: scope boom");
-    assert_cleanup_released(session_id).await;
+    assert_cleanup_released(cleanup_progress, session_id).await;
     crate::agent_sessions::reset_session_store();
     crate::llm::agent_session_host::reset_agent_session_host_state();
 }
@@ -93,6 +101,7 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
     let task_id = "task_graceful_cancel_failed_child";
     install_claimed_journal(&vm, root.path(), session_id, task_id).await;
 
+    let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
     vm.spawned_tasks.insert(
         "public-graceful-child".to_string(),
         failed_task(task_id, "graceful boom"),
@@ -114,7 +123,7 @@ async fn graceful_cancel_early_failure_releases_its_lifecycle_owner() {
         VmValue::EnumVariant(variant) if variant.is_variant("Result", "Err")
     ));
     assert!(result.display().contains("graceful boom"));
-    assert_cleanup_released(session_id).await;
+    assert_cleanup_released(cleanup_progress, session_id).await;
     crate::agent_sessions::reset_session_store();
     crate::llm::agent_session_host::reset_agent_session_host_state();
 }

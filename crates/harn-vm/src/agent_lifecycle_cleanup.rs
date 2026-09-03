@@ -67,6 +67,7 @@ impl LifecycleRegistry {
 
     fn release(&mut self, key: &LifecycleKey) {
         self.entries.remove(key);
+        note_cleanup_progress();
     }
 
     fn activate_task(&mut self, runtime: &RuntimeKey, task_id: &str) -> CleanupActivation {
@@ -123,6 +124,30 @@ impl From<&LifecycleKey> for RuntimeKey {
             host_runtime: key.host_runtime,
         }
     }
+}
+
+/// Process-wide progress signal for detached lifecycle recovery.
+///
+/// Recovery runs on a process-owned runtime that outlives the execution that
+/// scheduled it, so an observer has no handle to join. This channel carries a
+/// monotonic generation that advances whenever a reservation is released or a
+/// scheduled cleanup future finishes. Subscribing before the work that
+/// triggers cleanup, then re-reading the observable after each change, is an
+/// exact wait on the recovery boundary rather than a wall-clock poll.
+fn cleanup_progress() -> &'static tokio::sync::watch::Sender<u64> {
+    static PROGRESS: OnceLock<tokio::sync::watch::Sender<u64>> = OnceLock::new();
+    PROGRESS.get_or_init(|| tokio::sync::watch::channel(0).0)
+}
+
+fn note_cleanup_progress() {
+    cleanup_progress().send_modify(|generation| *generation = generation.wrapping_add(1));
+}
+
+/// Observe lifecycle recovery from the moment of subscription. A receiver
+/// taken before the triggering drop cannot miss the signal that follows it.
+#[cfg(test)]
+pub(crate) fn subscribe_cleanup_progress() -> tokio::sync::watch::Receiver<u64> {
+    cleanup_progress().subscribe()
 }
 
 fn registry() -> &'static Mutex<LifecycleRegistry> {
@@ -262,8 +287,49 @@ pub(crate) fn schedule(task_id: String, runtimes: CleanupRuntimes) {
                 tokio::time::sleep,
             )
             .await;
+            // The last observable state change of a recovery pass. Publishing
+            // it here means a waiter that re-reads the observable after this
+            // signal sees the settled result, never a half-applied one.
+            note_cleanup_progress();
         },
     });
+}
+
+/// Bound on how long a test waits for detached recovery to settle. This is a
+/// hang backstop, not a race window: the wait is driven by
+/// [`subscribe_cleanup_progress`], so expiry means recovery never happened.
+#[cfg(test)]
+pub(crate) const CLEANUP_SETTLE_LIMIT: Duration = Duration::from_secs(10);
+
+/// Wait until `settled` observes the recovery outcome, driven by cleanup
+/// progress rather than wall-clock polling.
+///
+/// `progress` must be subscribed before the work that triggers cleanup.
+/// Expiry is an assertion failure naming `what`, so a wait that resolves for
+/// the wrong reason — or never resolves — fails the test instead of passing
+/// it.
+#[cfg(test)]
+pub(crate) async fn settle_cleanup(
+    progress: &mut tokio::sync::watch::Receiver<u64>,
+    mut settled: impl FnMut() -> bool,
+    what: &str,
+) {
+    let outcome = tokio::time::timeout(CLEANUP_SETTLE_LIMIT, async {
+        loop {
+            if settled() {
+                return;
+            }
+            progress
+                .changed()
+                .await
+                .expect("cleanup progress sender is process-static and never dropped");
+        }
+    })
+    .await;
+    assert!(
+        outcome.is_ok(),
+        "{what}: detached lifecycle recovery never settled within {CLEANUP_SETTLE_LIMIT:?}"
+    );
 }
 
 async fn retry_task_cleanup<Cleanup, CleanupFuture, Sleep, SleepFuture>(
