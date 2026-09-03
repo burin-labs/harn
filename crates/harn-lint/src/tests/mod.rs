@@ -168,6 +168,7 @@ mod secret_scan_rules;
 mod shadowing;
 mod stdlib_metadata;
 mod stdlib_return_types;
+mod tool_handler_result;
 mod unnecessary_cast;
 mod unnecessary_parentheses;
 mod unreachable;

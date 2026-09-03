@@ -34,6 +34,89 @@ pub(crate) fn swift_enum_with_deprecations(
     out
 }
 
+/// Members the open-enum struct declares itself. A wire value that camelCases
+/// onto one of these would shadow the struct's own surface, so the generator
+/// refuses rather than emitting Swift that does not compile.
+const SWIFT_OPEN_ENUM_RESERVED_MEMBERS: &[&str] =
+    &["rawValue", "allCases", "isKnown", "description", "init"];
+
+/// A Swift open string enum: a `RawRepresentable` struct whose static members
+/// are the generated vocabulary and whose initializer never fails, so a wire
+/// value this binding does not name round-trips verbatim instead of failing to
+/// decode.
+///
+/// The closed `enum` form emitted by [`swift_enum`] is the wrong shape for a
+/// producer-owned vocabulary. Decoding a `String`-raw-value enum throws
+/// `DataCorrupted` for a case it does not name, so one kind a newer Harn adds
+/// does not degrade a field — it fails the whole containing payload, and a host
+/// pinned to an older binding loses the entire terminal outcome. This mirrors
+/// the Rust binding's `Unrecognized(String)` escape.
+pub(crate) fn swift_open_enum(name: &str, doc: &str, values: &[String]) -> String {
+    for value in values {
+        let member = swift_case_name(value);
+        assert!(
+            !SWIFT_OPEN_ENUM_RESERVED_MEMBERS.contains(&member.as_str()),
+            "wire value `{value}` in `{name}` collides with the open-enum member `{member}`"
+        );
+    }
+
+    let mut out = String::new();
+    for line in doc.lines() {
+        out.push_str("/// ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(
+        "/// Open vocabulary: the static members are the values this binding was generated\n\
+         /// from, and any other wire string is preserved verbatim so a newer Harn never\n\
+         /// breaks an older consumer.\n",
+    );
+    out.push_str(&format!(
+        "public struct {name}: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, \
+         CustomStringConvertible {{\n"
+    ));
+    out.push_str("    public let rawValue: String\n\n");
+    out.push_str(
+        "    public init(rawValue: String) {\n        self.rawValue = rawValue\n    }\n\n",
+    );
+    out.push_str(
+        "    public init(from decoder: any Decoder) throws {\n\
+         \x20       self.rawValue = try decoder.singleValueContainer().decode(String.self)\n\
+         \x20   }\n\n",
+    );
+    out.push_str(
+        "    public func encode(to encoder: any Encoder) throws {\n\
+         \x20       var container = encoder.singleValueContainer()\n\
+         \x20       try container.encode(rawValue)\n\
+         \x20   }\n\n",
+    );
+    for value in values {
+        out.push_str("    public static let ");
+        out.push_str(&swift_case_name(value));
+        out.push_str(" = Self(rawValue: ");
+        out.push_str(&json_string_literal(value));
+        out.push_str(")\n");
+    }
+    out.push_str(
+        "\n    /// Every value this binding was generated from, in wire order. A value\n\
+         \x20   /// outside it is valid and preserved; it is simply not listed here.\n",
+    );
+    out.push_str("    public static let allCases: [Self] = [\n");
+    for value in values {
+        out.push_str("        ");
+        out.push_str(&json_string_literal(value));
+        out.push_str(",\n");
+    }
+    out.push_str("    ].map { Self(rawValue: $0) }\n\n");
+    out.push_str(
+        "    /// Whether this value is part of the vocabulary this binding was generated from.\n\
+         \x20   public var isKnown: Bool { Self.allCases.contains(self) }\n\n",
+    );
+    out.push_str("    public var description: String { rawValue }\n");
+    out.push_str("}\n\n");
+    out
+}
+
 pub(crate) fn swift_case_name(value: &str) -> String {
     let mut out = String::new();
     for (index, part) in value

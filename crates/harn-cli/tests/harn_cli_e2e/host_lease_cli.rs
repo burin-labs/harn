@@ -527,3 +527,277 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
         .expect("inspect released rust-heavy resource");
     assert!(state.active.is_none());
 }
+
+/// The #7829 falsifier at the process boundary.
+///
+/// Three pre-acquire outcomes that used to be one receipt: a worker killed
+/// with SIGTERM, a worker killed with SIGKILL, and a wait that genuinely
+/// expired. The first two must name their signal; the third must not be a
+/// start failure at all.
+#[cfg(unix)]
+#[test]
+fn a_killed_pre_acquire_worker_names_its_signal_and_a_timeout_does_not() {
+    let hold_and_kill = |signal: &str| -> harn_hostlib::HostLeaseRunReceipt {
+        let temp = TempDir::new().expect("create temp directory");
+        let workspace = temp.path().join("workspace");
+        let target_dir = temp.path().join("target");
+        let lease_root = temp.path().join("leases");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        let workspace = workspace.to_string_lossy().to_string();
+        let target_dir = target_dir.to_string_lossy().to_string();
+        let lease_root = lease_root.to_string_lossy().to_string();
+
+        let held = run_harn_e2e(
+            &[
+                "host",
+                "lease",
+                "acquire",
+                "--host",
+                "kill-fixture",
+                "--resource-class",
+                "rust-heavy",
+                "--owner",
+                "holder",
+                "--no-expiry",
+                "--owner-pid",
+                &std::process::id().to_string(),
+                "--json",
+            ],
+            &[(harn_hostlib::HOST_LEASE_ROOT_ENV, lease_root.as_str())],
+        );
+        assert_eq!(held.exit_code, 0, "acquire stderr: {}", held.stderr);
+
+        // A wait long enough that expiry cannot be what ends this run.
+        let mut supervisor = test_util::process::harn_e2e_command()
+            .args([
+                "host",
+                "lease",
+                "run",
+                "cargo",
+                "--owner",
+                "killed-runner",
+                "--host",
+                "kill-fixture",
+                "--wait-ms",
+                "600000",
+            ])
+            .arg("--workspace")
+            .arg(&workspace)
+            .arg("--target-dir")
+            .arg(&target_dir)
+            .args(["--", "check"])
+            .env(harn_hostlib::HOST_LEASE_ROOT_ENV, &lease_root)
+            .env("CARGO_TARGET_DIR", &target_dir)
+            .env_remove("CARGO_BUILD_BUILD_DIR")
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn supervised run");
+
+        // Block on the worker announcing its own wait, so the kill lands during
+        // the wait rather than before the run receipt exists.
+        let mut stderr = std::io::BufReader::new(
+            supervisor
+                .stderr
+                .take()
+                .expect("supervised run pipes stderr"),
+        );
+        let mut seen: Vec<String> = Vec::new();
+        wait_until_worker_is_queued(&mut stderr, &mut seen);
+
+        let receipts = temp.path().join("leases/receipts");
+        let run_id = queued_run_id(&receipts);
+        let worker_pid = queued_worker_pid(&run_id);
+
+        let killed = std::process::Command::new("kill")
+            .args([signal, &worker_pid.to_string()])
+            .status()
+            .expect("signal the worker");
+        assert!(killed.success(), "kill {signal} did not succeed");
+
+        // Drain the rest of the pipe so the supervisor never blocks writing.
+        let mut rest = String::new();
+        let _ = std::io::Read::read_to_string(&mut stderr, &mut rest);
+        seen.extend(rest.lines().map(str::to_string));
+
+        let status = supervisor.wait().expect("supervisor reaps its worker");
+        assert_eq!(
+            status.code(),
+            Some(75),
+            "a killed worker must use the supervisor status"
+        );
+        read_run_receipt(&receipts, &run_id)
+    };
+
+    for (signal, expected) in [("-TERM", 15), ("-KILL", 9)] {
+        let receipt = hold_and_kill(signal);
+        let harn_hostlib::HostLeaseRunState::StartFailed {
+            error, worker_exit, ..
+        } = &receipt.status
+        else {
+            panic!("a killed worker was not recorded as a start failure: {receipt:?}");
+        };
+        assert_eq!(
+            *error,
+            harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire
+        );
+        assert_eq!(
+            worker_exit.as_ref().and_then(|exit| exit.signal),
+            Some(expected),
+            "kill {signal} did not record its signal: {receipt:?}"
+        );
+    }
+
+    // The negative control: an expired wait is a different terminal state, so
+    // "killed" and "waited too long" can never be read as the same outcome.
+    let temp = TempDir::new().expect("create temp directory");
+    let workspace = temp.path().join("workspace");
+    let target_dir = temp.path().join("target");
+    let lease_root = temp.path().join("leases");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let workspace = workspace.to_string_lossy().to_string();
+    let target_dir = target_dir.to_string_lossy().to_string();
+    let lease_root = lease_root.to_string_lossy().to_string();
+    let held = run_harn_e2e(
+        &[
+            "host",
+            "lease",
+            "acquire",
+            "--host",
+            "timeout-fixture",
+            "--resource-class",
+            "rust-heavy",
+            "--owner",
+            "holder",
+            "--no-expiry",
+            "--owner-pid",
+            &std::process::id().to_string(),
+            "--json",
+        ],
+        &[(harn_hostlib::HOST_LEASE_ROOT_ENV, lease_root.as_str())],
+    );
+    assert_eq!(held.exit_code, 0, "acquire stderr: {}", held.stderr);
+    let timed_out = run_harn_e2e(
+        &[
+            "host",
+            "lease",
+            "run",
+            "cargo",
+            "--owner",
+            "expiring-runner",
+            "--host",
+            "timeout-fixture",
+            "--wait-ms",
+            "1500",
+            "--workspace",
+            workspace.as_str(),
+            "--target-dir",
+            target_dir.as_str(),
+            "--",
+            "check",
+        ],
+        &[
+            (harn_hostlib::HOST_LEASE_ROOT_ENV, lease_root.as_str()),
+            ("CARGO_TARGET_DIR", target_dir.as_str()),
+        ],
+    );
+    assert_eq!(
+        timed_out.exit_code, 75,
+        "timeout stderr: {}",
+        timed_out.stderr
+    );
+    let receipt = first_run_receipt(&temp.path().join("leases/receipts"));
+    assert!(
+        matches!(
+            receipt.status,
+            harn_hostlib::HostLeaseRunState::Deferred { .. }
+        ),
+        "an expired wait was recorded as something other than deferred: {receipt:?}"
+    );
+    assert!(
+        timed_out.stderr.contains("state=deferred"),
+        "an expired wait printed no terminal state: {}",
+        timed_out.stderr
+    );
+}
+
+/// Block on the worker's own "waiting for the lease" line.
+///
+/// This is an event wait, not a poll: the read blocks until the worker writes
+/// that line, which it emits on its first deferral. Reaching end of stream
+/// without it panics, so a worker that never queued can never be mistaken for
+/// one that queued instantly.
+#[cfg(unix)]
+fn wait_until_worker_is_queued(
+    stderr: &mut dyn std::io::BufRead,
+    seen: &mut Vec<String>,
+) -> String {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = stderr.read_line(&mut line).expect("read worker stderr");
+        assert!(
+            read != 0,
+            "worker stderr ended before it reported waiting for the lease: {seen:?}"
+        );
+        seen.push(line.trim_end().to_string());
+        if line.contains("Waiting for rust-heavy lease") {
+            return line.trim_end().to_string();
+        }
+    }
+}
+
+/// Resolve the queued worker's PID once the wait line proves it is alive.
+///
+/// The non-vacuity check is the panic: an empty match fails the test rather
+/// than letting a kill that hit nothing look like a kill that was delivered.
+#[cfg(unix)]
+fn queued_worker_pid(run_id: &str) -> u32 {
+    let found = std::process::Command::new("pgrep")
+        .args(["-f", run_id])
+        .output()
+        .expect("pgrep the worker");
+    let pids: Vec<u32> = String::from_utf8_lossy(&found.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .filter(|pid| *pid != std::process::id())
+        .collect();
+    *pids.last().unwrap_or_else(|| {
+        panic!("no live process carried run id {run_id} after it reported waiting")
+    })
+}
+
+/// Read the receipt the worker has already proven it wrote.
+#[cfg(unix)]
+fn queued_run_id(receipts: &std::path::Path) -> String {
+    let entries = fs::read_dir(receipts).expect("read durable run receipts");
+    for entry in entries.flatten() {
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(receipt) = serde_json::from_slice::<harn_hostlib::HostLeaseRunReceipt>(&bytes)
+        else {
+            continue;
+        };
+        if receipt.queue.is_some() {
+            return receipt.run_id;
+        }
+    }
+    panic!("worker reported waiting but no receipt carried a queue row");
+}
+
+#[cfg(unix)]
+fn read_run_receipt(receipts: &std::path::Path, run_id: &str) -> harn_hostlib::HostLeaseRunReceipt {
+    let path = receipts.join(format!("{run_id}.json"));
+    serde_json::from_slice(&fs::read(&path).expect("read run receipt")).expect("parse run receipt")
+}
+
+#[cfg(unix)]
+fn first_run_receipt(receipts: &std::path::Path) -> harn_hostlib::HostLeaseRunReceipt {
+    let path = fs::read_dir(receipts)
+        .expect("read run receipts")
+        .next()
+        .expect("one run receipt")
+        .expect("read receipt entry")
+        .path();
+    serde_json::from_slice(&fs::read(path).expect("read run receipt")).expect("parse run receipt")
+}

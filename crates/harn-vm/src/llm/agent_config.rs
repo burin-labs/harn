@@ -374,6 +374,7 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 #[harn_builtin(
     exposure = "harness.agent.inject_feedback",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     category = "agent.host"
 )]
@@ -414,6 +415,7 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
 #[harn_builtin(
     exposure = "harness.agent.inject_host_event",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "agent_inject_host_event(session_id: string, injection: dict) -> dict",
     category = "agent.host"
 )]

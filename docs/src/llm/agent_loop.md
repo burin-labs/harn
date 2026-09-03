@@ -112,7 +112,7 @@ surviving reason-coded messages and every suppression (duplicate,
 stop/continue contradiction, or unchanged next step) before model-visible
 feedback is injected. Injection persists each message as a typed `corrective`
 directive, not a synthetic user transcript turn. At the provider boundary it
-shares the single `<context-directives>` envelope, fixed trailing slot,
+shares the single `<context-directives speaker="harness">` envelope, fixed trailing slot,
 authority ordering, and normalized-content deduplication used by structural
 reminders. Feedback kinds remain available in `feedback_injected` events and
 directive tags but are not exposed to the model.

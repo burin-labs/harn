@@ -98,6 +98,14 @@ fn __agent_host_annotations(options: dict?, key: string, defaults: dict) {
   return defaults + shared + local
 }
 
+fn __agent_host_handle_annotations(options: dict?, key: string) {
+  return __agent_host_annotations(
+    options,
+    key,
+    {kind: "execute", side_effect_level: "read_only", completion_evidence_role: "verification"},
+  )
+}
+
 fn __agent_host_file_annotations(options: dict?, key: string, kind: string) {
   return __agent_host_annotations(
     options,
@@ -1028,11 +1036,7 @@ pub fn agent_command_tools(
             session_id: {type: "string", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(
-            opts,
-            key,
-            {kind: "execute", side_effect_level: "read_only"},
-          ),
+          annotations: __agent_host_handle_annotations(opts, key),
           handler: { args ->
             __agent_host_render(
               harness.tools.wait_command(__agent_host_wait_command_request(args, key, 0)),
@@ -1065,11 +1069,7 @@ pub fn agent_command_tools(
             session_id: {type: "string", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(
-            opts,
-            key,
-            {kind: "execute", side_effect_level: "read_only"},
-          ),
+          annotations: __agent_host_handle_annotations(opts, key),
           handler: { args ->
             __agent_host_render(
               harness.tools.wait_command(
