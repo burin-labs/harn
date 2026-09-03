@@ -284,6 +284,28 @@ pub const WINDOWS_CACHE_TARGET_DIR = "$" + "{{ env.CARGO_TARGET_DIR }}"
 pub const WINDOWS_RELEASE_CERTIFY_CACHE_GUARD = "$"
   + "{{ !startsWith(github.ref_name, 'release-certify/') }}"
 
+/**
+ * A producer that also runs on pull requests must not write there: each write
+ * mints an immutable cache generation and the shared namespace is 10 GiB.
+ */
+pub const PULL_REQUEST_RESTORE_ONLY_SAVE = "$"
+  + "{{ github.event_name != 'pull_request' }}"
+
+/** The release build's own opt-in switch for writing its per-target cache. */
+pub const RELEASE_CACHE_SAVE_SWITCH = "$"
+  + "{{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}"
+
+/**
+ * Every conditional a declared cache writer may put on `save`.
+ *
+ * An allowlist rather than "anything that is not the string false", because an
+ * expression this checker cannot evaluate is indistinguishable from one that
+ * never saves. Without this the gate reports a healthy writer for a producer
+ * whose save was quietly conditioned on something nobody checked, which is the
+ * shape where a missing observation reads as a satisfied one.
+ */
+pub const RECOGNISED_SAVE_GUARDS = [PULL_REQUEST_RESTORE_ONLY_SAVE, RELEASE_CACHE_SAVE_SWITCH]
+
 pub const WINDOWS_WARM_PACK_MARKER = "windows_workspace_warm_artifact.sh pack"
 
 pub const WINDOWS_WARM_RESTORE_MARKER = "windows_workspace_warm_artifact.sh download-and-restore"
@@ -739,9 +761,26 @@ pub fn step_uses(step: dict) -> string {
   return trim(step?.uses ?? "")
 }
 
+/**
+ * Whether this cache step actually writes the shared cache.
+ *
+ * `true` counts, and so does any conditional on the recognised list, each of
+ * which leaves the writer writing on the events that matter. Any other
+ * expression is refused. Reading an unrecognised expression as "saves" is the
+ * failure this exists to prevent: a producer whose save is conditioned on
+ * something nobody checked can silently stop writing while the gate keeps
+ * reporting a writer.
+ */
 pub fn save_requested(step: dict) -> bool {
   const value = step?.with?.save
-  return value != nil && lowercase(trim(to_string(value))) != "false"
+  if value == nil {
+    return false
+  }
+  const literal = lowercase(trim(to_string(value)))
+  if literal == "true" {
+    return true
+  }
+  return RECOGNISED_SAVE_GUARDS.contains(trim(to_string(value)))
 }
 
 pub fn writer_allowed(
