@@ -54,12 +54,10 @@ pipeline default(harness: Harness) {
     AFTER_IT_FINISHED,
   )
   harness.stdio.println("printed_before_attach_is_found=" + to_string(late.matched))
-
   // Control: matching a live command still works, so a failure above is about
   // the attach race and not about pattern matching.
   const live = wait_after(harness.tools, harness.clock, "sleep 1; echo BUILD_OK", "BUILD_OK", 0)
   harness.stdio.println("printed_while_running_is_found=" + to_string(live.matched))
-
   // Combined output is the default source, and a finished command's receipt
   // does not populate it, so a stderr-only command is the case that catches a
   // fix which only looked at stdout.
@@ -71,7 +69,6 @@ pipeline default(harness: Harness) {
     AFTER_IT_FINISHED,
   )
   harness.stdio.println("stderr_before_attach_is_found=" + to_string(on_stderr.matched))
-
   // Negative: a command that printed something else must still report no
   // match. Without this clause, answering "matched" unconditionally passes.
   const other = wait_after(
@@ -82,7 +79,6 @@ pipeline default(harness: Harness) {
     AFTER_IT_FINISHED,
   )
   harness.stdio.println("absent_pattern_still_reports_no_match=" + to_string(!other.matched))
-
   // Negative: a command that printed nothing at all is the other way to be
   // wrong, and it is the one an empty-buffer search gets right by accident.
   const silent = wait_after(harness.tools, harness.clock, "true", "BUILD_OK", AFTER_IT_FINISHED)
