@@ -254,7 +254,6 @@ fn __convergence_guard_finalization(reason: string, evidence: dict) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
-
 /**
  * The worst-case cost a ceiling spends against, or nil when nothing bounds it.
  *

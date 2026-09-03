@@ -481,11 +481,11 @@ pub fn __agent_loop_budget_exhaustion(
   // failing closed on it.
   const projected_spend = aggregates.projected_cost_usd
   if budget?.total_cost_usd != nil
-    && (if projected_spend != nil {
+    && if projected_spend != nil {
       projected_spend >= budget.total_cost_usd
     } else {
       aggregates.unpriced_calls > 0 || aggregates.cost_usd >= budget.total_cost_usd
-    }) {
+    } {
     return aggregates
       + {exhausted: true, kind: "total_cost", iteration: iteration, max_iterations: max_iterations}
   }
