@@ -319,7 +319,14 @@ mod tests {
         let guard =
             enter_nested_execution_policy(requested, NestedExecutionKind::AgentLoop, "session-a")
                 .unwrap();
-        assert_eq!(guard.parent_limit, None);
+        // The runtime default is now in force even with nothing on the stack,
+        // so the parent limit is the default rather than absent. What this case
+        // is actually about is unchanged: a caller asking for a tighter budget
+        // than the ambient one still gets exactly what it asked for.
+        assert_eq!(
+            guard.parent_limit,
+            Some(crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth)
+        );
         assert_eq!(guard.child_limit, Some(3));
         assert_eq!(current_execution_policy().unwrap().recursion_limit, Some(3));
         assert_eq!(
