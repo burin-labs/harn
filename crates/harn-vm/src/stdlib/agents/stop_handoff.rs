@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::agents_workers::{
     active_worker_registry, emit_worker_event, persist_worker_state_snapshot, with_worker_state,
     worker_event_snapshot, worker_stage_session_id, worker_summary, WorkerConfig,
-    WorkerExecutionProfile, WorkerState,
+    WorkerExecutionProfile, WorkerExecutionResult, WorkerState,
 };
 use super::{is_nil, resume::*};
 use crate::agent_events::WorkerEvent;
