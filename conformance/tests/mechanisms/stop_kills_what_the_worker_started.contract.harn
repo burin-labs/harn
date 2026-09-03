@@ -20,7 +20,7 @@
 // that never actually started, and its dead process looked exactly like a clean
 // kill: absence read as success. Nothing here may conclude anything about the
 // stop unless the job was observed running first.
-import { agent_lifecycle_tools, agent_stop, sub_agent_run, wait_agent } from "std/agent/workers"
+import { agent_lifecycle_tools, agent_stop, sub_agent_run } from "std/agent/workers"
 import { command_run } from "std/command"
 import { with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
@@ -94,7 +94,42 @@ fn job_tools(harness: Harness, pid_file: string) {
       returns: {type: "object"},
     },
   )
+  // Keeps the worker RUNNING while the parent probes and stops it. A worker
+  // that parks instead is suspended, and a suspension checkpoints its session,
+  // which reclaims its handles for an entirely legitimate reason. The contract
+  // would then read green without a stop ever having been exercised.
+  tools = tool_define(
+    tools,
+    "keep_working",
+    "Do a little work and return.",
+    {
+      handler: { _args ->
+        harness.clock.sleep_ms(300)
+        return "still working"
+      },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
   return tools
+}
+
+/** One scripted turn that calls `keep_working`, so the worker stays busy. */
+fn keep_working_turns(count: int) -> list {
+  let turns = []
+  let n = 0
+  while n < count {
+    turns = turns
+      + [
+        {
+          tool_calls: [{id: "work_" + to_string(n), name: "keep_working", arguments: {}}],
+          input_tokens: 2,
+          output_tokens: 2,
+        },
+      ]
+    n = n + 1
+  }
+  return turns
 }
 
 pipeline default(harness: Harness) {
@@ -120,18 +155,8 @@ pipeline default(harness: Harness) {
         input_tokens: 5,
         output_tokens: 6,
       },
-      {
-        tool_calls: [
-          {
-            id: "park_1",
-            name: "agent_await_resumption",
-            arguments: {reason: "waiting for the parent to stop this worker"},
-          },
-        ],
-        input_tokens: 7,
-        output_tokens: 8,
-      },
-    ],
+    ]
+      + keep_working_turns(60),
     { ->
       const worker = sub_agent_run(
         harness,
@@ -140,14 +165,15 @@ pipeline default(harness: Harness) {
           provider: "mock",
           background: true,
           tool_format: "native",
-          max_iterations: 4,
-          token_budget: 50,
+          max_iterations: 80,
+          token_budget: 5000,
           tools: agent_lifecycle_tools(harness.agent, job_tools(harness, child_pid_file)),
-          allowed_tools: ["start_long_job", "agent_await_resumption"],
+          allowed_tools: ["start_long_job", "keep_working"],
           session_id: "stop-kills-worker",
         },
       )
-      const parked = wait_agent(harness.agent, worker)
+      // Deliberately NOT `wait_agent`: the worker must still be running when
+      // it is stopped. Poll for the pid the job records instead.
       const child_pid = recorded_pid(harness, child_pid_file)
 
       // Liveness first. Every clause below is meaningless without it.
@@ -157,7 +183,11 @@ pipeline default(harness: Harness) {
         child_pid != "" && pid_is_alive(harness, child_pid),
       )
 
-      agent_stop(harness.agent, worker, {graceful: true, reason: "operator pressed stop"})
+      const stopped_summary = agent_stop(
+        harness.agent,
+        worker,
+        {graceful: true, reason: "operator pressed stop"},
+      )
 
       contract_effect(
         harness.stdio,
@@ -165,11 +195,11 @@ pipeline default(harness: Harness) {
         pid_gone_within(harness, child_pid, 10000),
       )
 
-      // The stop is still a stop: the worker reached a terminal state.
+      // The stop is still a stop: the worker left the running state.
       contract_effect(
         harness.stdio,
         "effect_worker_reached_a_terminal_state",
-        parked.status != "running",
+        stopped_summary?.worker?.status != "running",
       )
 
       contract_negative(
