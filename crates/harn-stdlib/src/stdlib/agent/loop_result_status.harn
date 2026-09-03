@@ -80,6 +80,46 @@ pub fn __tool_result_ok(result: dict) -> bool {
 }
 
 /**
+ * The outcomes a tool call can end in that the AGENT did not choose.
+ *
+ * A call the user cancelled, or one the loop abandoned while exiting, is not
+ * evidence about whether the agent gave up: someone else ended it. Counting
+ * either as a failed attempt would attribute a user's cancel to the model, and
+ * a run whose only tool call the user cancelled would be reported as abandoned
+ * by the agent.
+ */
+const __AGENT_TOOL_NOT_THE_AGENTS_OUTCOME = ["cancelled", "abandoned_at_loop_exit"]
+
+/**
+ * The typed error category of a failing tool result, from STRUCTURED fields
+ * only: the outer envelope's category, else the nested host body's. Never a
+ * substring match on rendered prose.
+ *
+ * Returns `unclassified` for a result that failed carrying no typed category,
+ * so a reader can tell "failed with no category" from "did not fail" instead
+ * of both arriving as nothing.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __tool_result_failure_category(result: dict) -> string? {
+  if type_of(result) != "dict" || __tool_result_ok(result) {
+    return nil
+  }
+  const nested = result?.result
+  const nested_cat = if type_of(nested) == "dict" {
+    agent_tool_lifecycle_error_category(nested?.error_category ?? nested?.error)
+  } else {
+    nil
+  }
+  const resolved = agent_tool_result_outcome(result).error_category ?? nested_cat
+  if resolved == nil {
+    return "unclassified"
+  }
+  return to_string(resolved)
+}
+
+/**
  * How many tool calls a dispatch made and how many of them worked.
  *
  * Deliberately NOT derivable from the session's `successful_tools_seen` and
@@ -88,6 +128,9 @@ pub fn __tool_result_ok(result: dict) -> bool {
  * printed one while calling it the other would be a mislabeled instrument, and
  * telling two abandoned runs apart is the whole point of this evidence.
  *
+ * Calls that ended in an outcome the agent did not choose are counted in
+ * neither total, so they cannot convict and cannot acquit.
+ *
  * @effects: []
  * @errors: []
  */
@@ -95,8 +138,15 @@ pub fn __dispatch_call_tally(dispatch: AgentToolDispatch) -> dict {
   let attempted = 0
   let succeeded = 0
   for result in __dispatch_results_list(dispatch) {
+    if type_of(result) != "dict" {
+      continue
+    }
+    const category = __tool_result_failure_category(result)
+    if category != nil && contains(__AGENT_TOOL_NOT_THE_AGENTS_OUTCOME, category) {
+      continue
+    }
     attempted = attempted + 1
-    if type_of(result) == "dict" && __tool_result_ok(result) {
+    if __tool_result_ok(result) {
       succeeded = succeeded + 1
     }
   }
@@ -104,12 +154,10 @@ pub fn __dispatch_call_tally(dispatch: AgentToolDispatch) -> dict {
 }
 
 /**
- * The typed error category of the last failing result in a dispatch.
+ * The typed category of the last counted failure in a dispatch.
  *
- * Read from the same structured fields as `__tool_result_ok`, never from
- * rendered prose. `unclassified` is returned when a result failed but carried
- * no typed category, so a reader can tell "failed with no category" from "did
- * not fail" instead of both arriving as nothing.
+ * Skips the same outcomes the tally skips, so the reported category always
+ * names something the counts actually reflect.
  *
  * @effects: []
  * @errors: []
@@ -117,19 +165,9 @@ pub fn __dispatch_call_tally(dispatch: AgentToolDispatch) -> dict {
 pub fn __dispatch_last_rejection_category(dispatch: AgentToolDispatch) -> string? {
   let category = nil
   for result in __dispatch_results_list(dispatch) {
-    if type_of(result) == "dict" && !__tool_result_ok(result) {
-      const nested = result?.result
-      const nested_cat = if type_of(nested) == "dict" {
-        agent_tool_lifecycle_error_category(nested?.error_category ?? nested?.error)
-      } else {
-        nil
-      }
-      const resolved = agent_tool_result_outcome(result).error_category ?? nested_cat
-      category = if resolved == nil {
-        "unclassified"
-      } else {
-        to_string(resolved)
-      }
+    const resolved = __tool_result_failure_category(result)
+    if resolved != nil && !contains(__AGENT_TOOL_NOT_THE_AGENTS_OUTCOME, resolved) {
+      category = resolved
     }
   }
   return category

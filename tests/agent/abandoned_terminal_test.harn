@@ -10,6 +10,7 @@
 // silent when the evidence is absent: a run that used no tools, and a run whose
 // tool worked, must both still finish naturally.
 import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { AgentSpec } from "std/agent/options"
 import { assert_nil, assert_not_nil, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
@@ -245,6 +246,54 @@ pipeline test_a_refused_call_then_an_answer_reports_its_evidence(
       // nothing, so "failed with no category" cannot be confused with "did not
       // fail".
       assert_not_nil(result.abandonment.last_rejection_category)
+    },
+  )
+}
+
+/**
+ * The sixth arm, and the one that keeps the rule from blaming the agent for
+ * something a person did.
+ *
+ * The user cancels the only tool call. Nothing succeeded and the run then
+ * answers and stops, so on call counts alone this looks exactly like the first
+ * arm. It is not: the agent did not choose that outcome, and reporting it as
+ * abandonment would attribute a user's cancel to the model.
+ */
+pipeline test_a_user_cancelled_call_is_not_the_agents_abandonment(
+  harness: Harness,
+  task: unknown,
+) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a UTF-8 file.",
+    {
+      handler: { _args ->
+        agent_tool_handler_result(
+          "cancelled",
+          {command_status: "cancelled", error_category: "cancelled"},
+        )
+      },
+      parameters: {path: {type: "string"}},
+      returns: {type: "object"},
+      annotations: {kind: "write"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: "/tmp/cancelled.txt"}, "write-1"),
+      llm_text("The write was cancelled, so I stopped. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Create /tmp/cancelled.txt. Stop if it is cancelled.",
+        nil,
+        spec("cancelled-" + harness.random.uuid(), tools),
+      )
+      assert_nil(result?.abandonment)
     },
   )
 }
