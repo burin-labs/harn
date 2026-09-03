@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { sub_agent_run } from "std/agent/workers"
 import { with_llm_script } from "std/testing"
 import { workflow_execute } from "std/workflow/execute"
@@ -38,19 +39,15 @@ pipeline main(harness: Harness) {
     harness.llm,
     [{tool_calls: [{id: "delegate_1", name: "delegate", arguments: {}}]}],
     { ->
-      const parent = agent_loop(
-        harness,
-        "Ask the tool to delegate.",
-        nil,
-        {
-          provider: "mock",
-          tools: delegated_tools(harness),
-          allowed_tools: ["delegate"],
-          tool_format: "native",
-          max_iterations: 1,
-          policy: {recursion_limit: 0},
-        },
-      )
+      const parent_options: AgentSpec = {
+        provider: "mock",
+        tools: delegated_tools(harness),
+        allowed_tools: ["delegate"],
+        tool_format: "native",
+        max_iterations: 1,
+        policy: {recursion_limit: 0},
+      }
+      const parent = agent_loop(harness, "Ask the tool to delegate.", nil, parent_options)
       harness.stdio.println(contains(parent?.tools?.successful ?? [], "delegate"))
       harness.stdio.println(len(parent?.tools?.rejected ?? []) == 0)
       const flow = workflow_graph(
@@ -84,6 +81,9 @@ pipeline main(harness: Harness) {
       harness.stdio.println(artifact?.stop_reason == "nested_execution_budget_exhausted")
       harness.stdio.println(artifact?.error?.category == "budget_exceeded")
       harness.stdio.println(contains(artifact?.error?.message ?? "", "workflow_stage: act"))
+      harness.stdio.println(
+        len(transcript_events_by_kind(artifact?.transcript, "agent_run_terminal")) == 1,
+      )
     },
   )
 }

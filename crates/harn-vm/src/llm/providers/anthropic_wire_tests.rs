@@ -84,7 +84,8 @@ fn live_computer_screenshot_reaches_anthropic_body_without_producer_data() {
     let src_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
     crate::llm::agent_session_host::reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("cu-live-diag".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("cu-live-diag".to_string()));
     crate::llm::agent_session_host::seed_host_session_provider_model(
         &session_id,
         "anthropic",

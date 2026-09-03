@@ -458,7 +458,7 @@ mod tests {
         let _clock = crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(
             1_700_000_000_123,
         ));
-        let session_id = crate::agent_sessions::open_or_create(Some(
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(
             "permission-activity-event-test".to_string(),
         ));
         let live_events = Arc::new(StdMutex::new(Vec::new()));
