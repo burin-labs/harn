@@ -29,6 +29,7 @@
 // line keyed by `call.turn.iteration`, so a mock that silently replayed turn 0
 // would change the line set rather than pass quietly.
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { agent_session_messages } from "std/agent/state"
 import { contract_effect } from "./lib/mechanism_contract"
 
@@ -58,7 +59,9 @@ fn any_copies(messages: any, marker: string) -> int {
 }
 
 pipeline default(harness: Harness, task: unknown) {
-  const session = "judge-continue-context-carry"
+  // A fresh id per run. The session store is durable, so a fixed id makes the
+  // golden depend on whatever an earlier run of this file left behind.
+  const session = "judge-continue-context-carry-" + harness.random.uuid()
   const caller = { call ->
     harness.stdio.println(
       "turn=" + to_string(call?.turn?.iteration ?? -1) + " prior_drafts="
@@ -84,24 +87,20 @@ pipeline default(harness: Harness, task: unknown) {
     }
     return ""
   }
-  const result = agent_loop(
-    harness,
-    "Write the closing report.",
-    nil,
-    {
-      provider: "mock",
-      model: "context-carry",
-      session_id: session,
-      llm_caller: caller,
-      loop_until_done: true,
-      turn_end_condition: false,
-      max_iterations: 6,
-      tool_format: "text",
-      done_sentinel: "##DONE##",
-      final_wrapup: false,
-      verify_completion: gate,
-    },
-  )
+  const spec: AgentSpec = {
+    provider: "mock",
+    model: "context-carry",
+    session_id: session,
+    llm_caller: caller,
+    loop_until_done: true,
+    turn_end_condition: false,
+    max_iterations: 6,
+    tool_format: "text",
+    done_sentinel: "##DONE##",
+    final_wrapup: false,
+    verify_completion: gate,
+  }
+  const result = agent_loop(harness, "Write the closing report.", nil, spec)
   const messages = agent_session_messages(harness.agent, session)
   contract_effect(harness.stdio, "run_completed", to_string(result?.status) == "done")
   contract_effect(
