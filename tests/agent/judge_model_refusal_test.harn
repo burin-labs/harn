@@ -1,0 +1,125 @@
+// Run: harn test tests/agent/judge_model_refusal_test.harn
+//
+// harn#7937: the completion and step judges resolved their model as
+// `judge_cfg.model ?? opts.model`, and `opts` is the ACTOR's turn options. An
+// unconfigured judge therefore graded the run on the model that produced it,
+// which is not a check. It is the same model asked the same question twice,
+// and it is the mechanical cause of a cheap judge accepting a blocked run as
+// done (harn#7910).
+//
+// The instrument is the admission receipt, which now records which model
+// graded the run. Asserting that a verdict is absent would be weaker: absence
+// is also what a skipped judge, a capped judge, and a broken fixture look
+// like. Asserting the recorded model id says which model was actually asked.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+const ACTOR_MODEL = "actor-model-7937"
+const JUDGE_MODEL = "judge-model-7937"
+
+fn admissions(events: any) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_judge_admission.v1"
+    },
+  )
+    .to_list()
+}
+
+fn judge_models(events: any) -> list {
+  return admissions(events).map({ event -> event.checkpoint?.judge_model }).to_list()
+}
+
+/**
+ * The defect, with the actor's model set and no judge model configured.
+ *
+ * The judge must refuse and must not be dispatched on ACTOR_MODEL. The
+ * assertion is on the model id the run recorded, so a refusal that quietly
+ * still called the actor's model would fail here even though no verdict came
+ * back.
+ */
+pipeline test_an_unconfigured_judge_never_grades_on_the_actors_model(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("I finished the task. ##DONE##")],
+    { ->
+      const session = "judge-unconfigured-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: ACTOR_MODEL,
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Do the task and stop.", nil, opts) },
+      )
+      const models = judge_models(captured.events)
+      // The whole point: the actor's model never appears as a judge model.
+      assert_false(
+        models.contains(ACTOR_MODEL),
+        "an unconfigured judge must not be dispatched on the actor's own model",
+      )
+      // And the refusal is recorded, so this is a measured absence and not an
+      // absence of measurement.
+      const refusals = admissions(captured.events).filter(
+        { event -> event.checkpoint?.outcome == "model_unconfigured" },
+      )
+        .to_list()
+      assert_eq(len(refusals), 1, "the refusal must be on the record")
+      assert_eq(refusals[0].checkpoint.judge_model_source, "unconfigured")
+      assert_eq(refusals[0].checkpoint.admitted, false)
+    },
+  )
+}
+
+/**
+ * The positive control, and the reason the arm above is not vacuous.
+ *
+ * Same run, same actor model, one setting added. A judge model IS recorded, it
+ * is the configured one, and it is not the actor's. Without this arm, an
+ * assertion that the actor's model never appears would also pass on a build
+ * where the judge never runs at all.
+ */
+pipeline test_a_configured_judge_grades_on_its_own_model(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I finished the task. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+    ],
+    { ->
+      const session = "judge-configured-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: ACTOR_MODEL,
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        verify_completion_judge: {provider: "mock", model: JUDGE_MODEL, max_invocations: 1},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Do the task and stop.", nil, opts) },
+      )
+      const models = judge_models(captured.events)
+      assert(
+        models.contains(JUDGE_MODEL),
+        "a configured judge must record the model it graded with",
+      )
+      assert_false(models.contains(ACTOR_MODEL), "and it is never the actor's model")
+    },
+  )
+}

@@ -179,6 +179,68 @@ pub fn __judge_apply_llm_overrides(llm_opts: dict, judge_cfg: dict) -> dict {
  * @errors: []
  * @api_stability: internal
  */
+/**
+ * The setting that names the model a judge grades with.
+ *
+ * One string, defined once, because it appears in the refusal a caller reads
+ * and in the receipt a host inspects, and those two must not drift.
+ */
+const __JUDGE_MODEL_SETTING = "model"
+
+/**
+ * The model this judge will grade with, or `nil` when none is configured.
+ *
+ * Resolution order is judge configuration, then a catalog-level judge-role
+ * default. There is NO third rung. It deliberately never falls back to
+ * `opts.model`, which is the ACTOR's model for this run: a run graded by the
+ * model that produced it is not a check, it is the same model asked the same
+ * question twice, and it is the mechanical cause of a cheap judge accepting a
+ * blocked run as done (harn#7937, harn#7910).
+ *
+ * The catalog rung is a lookup, not an invention: it returns the model the
+ * catalog publishes for the judge role, and `nil` when the catalog publishes
+ * none. Today no catalog row declares one, so this rung is always `nil` and
+ * every unconfigured judge refuses. That is the intended behavior and not a
+ * gap: a silent default chosen here would be exactly the guess this fix
+ * exists to remove.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_resolve_model(judge_cfg)
+ */
+pub fn __judge_resolve_model(judge_cfg: dict) -> string? {
+  const configured = trim(to_string(judge_cfg?.[__JUDGE_MODEL_SETTING] ?? ""))
+  if configured != "" {
+    return configured
+  }
+  const role_default = trim(to_string(judge_cfg?.role_default_model ?? ""))
+  if role_default != "" {
+    return role_default
+  }
+  return nil
+}
+
+/**
+ * What a caller is told when no judge model is configured.
+ *
+ * Names the setting and the reason, so the reader does not have to guess which
+ * of three judge configurations is missing one, and does not read the refusal
+ * as a transient failure worth retrying.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_model_unconfigured_message("agent.completion_judge")
+ */
+pub fn __judge_model_unconfigured_message(checkpoint_name: string) -> string {
+  return checkpoint_name
+    + " did not run: no judge model is configured. Set `"
+    + __JUDGE_MODEL_SETTING
+    + "` on this judge's configuration (verify_completion_judge, turn_end_condition, or step_judge). "
+    + "A judge deliberately does not inherit the run's own model: a run graded by the model that produced it is not a check."
+}
+
 pub fn __judge_run_checkpoint(
   harness: Harness,
   request: JudgeCheckpointRequest,
@@ -191,6 +253,34 @@ pub fn __judge_run_checkpoint(
   const user = request.user
   const schema = request.schema
   const base = opts?.llm_options ?? {}
+  // Resolve the judge's model BEFORE anything else this function does. A
+  // refusal has to happen before the deadline receipt, the window event, and
+  // the provider call, or the run pays for a judge that was never eligible to
+  // grade it.
+  const judge_model = __judge_resolve_model(judge_cfg)
+  if judge_model == nil {
+    const refusal = {
+      schema: "harn.completion_judge_admission.v1",
+      checkpoint_name: checkpoint_name,
+      admitted: false,
+      judge_model: nil,
+      judge_model_source: "unconfigured",
+      outcome: "model_unconfigured",
+    }
+    if checkpoint_name == "agent.completion_judge" {
+      agent_emit_event(harness.agent, payload.session_id, "typed_checkpoint", refusal)
+    }
+    return {
+      checkpoint: {
+        ok: false,
+        status: "model_unconfigured",
+        error: __judge_model_unconfigured_message(checkpoint_name),
+        receipt: refusal,
+      },
+      duration_ms: 0,
+      admission: refusal,
+    }
+  }
   const mock_scope = if checkpoint_name == "agent.completion_judge" {
     "completion.judge"
   } else if checkpoint_name == "agent.step_judge" {
@@ -247,6 +337,11 @@ pub fn __judge_run_checkpoint(
       provider_timeout_ms: provider_timeout_ms,
       prompt_chars: len(system) + len(user),
       prompt_token_estimate: ceil((len(system) + len(user)) / 4.0),
+      // Which model actually graded this run, on the receipt a host already
+      // reads. Without it, "the judge agreed" cannot be told apart from "the
+      // actor agreed with itself" after the fact.
+      judge_model: judge_model,
+      judge_model_source: "judge_config",
     }
   if checkpoint_name == "agent.completion_judge" {
     agent_emit_event(harness.agent, payload.session_id, "typed_checkpoint", admission)
@@ -272,7 +367,7 @@ pub fn __judge_run_checkpoint(
   const llm_opts = __judge_apply_llm_overrides(
     base
       + {
-        model: judge_cfg?.model ?? opts?.model,
+        model: judge_model,
         provider: judge_cfg?.provider ?? opts?.provider,
         output: {schema: schema, strict: true, validation: "error"},
         session_id: payload.session_id,
@@ -944,6 +1039,10 @@ const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
  */
 pub fn __judge_checkpoint_unavailable(checkpoint: dict) -> bool {
   return checkpoint?.status == "admission_refused"
+    // A missing setting never becomes present on a retry, and a bounded
+    // retry loop that treats it as readable spends three refusals to reach
+    // the same answer.
+    || checkpoint?.status == "model_unconfigured"
     || checkpoint?.status == "timeout"
     || checkpoint?.error_category == "timeout"
     || checkpoint?.error?.status == "timeout"
