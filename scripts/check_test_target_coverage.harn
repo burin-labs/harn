@@ -1,0 +1,197 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+// Test roots whose files are enumerated one by one inside a Makefile recipe
+// rather than discovered by walking the directory. A file added to one of
+// these roots passes locally and never runs in CI until somebody edits the
+// recipe, so the omission is silent in exactly the direction that matters.
+// Roots the recipe runs wholesale (`harn test <root>/`) need no entry here:
+// discovery already covers them.
+const HAND_LISTED_TEST_ROOTS = [
+  {
+    root: "tests/stdlib",
+    suffix: ".harn",
+    target: "test-harn-scripts",
+    reason: "Focused stdlib owners are listed individually so each runs as its own case.",
+  },
+]
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+/**
+ * The recipe body for `target`: every tab-indented line after the rule header,
+ * stopping at the first line that belongs to something else.
+ */
+pub fn makefile_target_block(makefile_text: string, target: string) -> string {
+  let collecting = false
+  let out: list<string> = []
+  for line in makefile_text.lines() {
+    if !collecting {
+      if line.starts_with(target + ":") {
+        collecting = true
+      }
+      continue
+    }
+    if line.trim() == "" {
+      continue
+    }
+    if !line.starts_with("\t") {
+      break
+    }
+    out = out + [line]
+  }
+  return join(out, "\n")
+}
+
+/**
+ * True when the recipe hands the whole directory to the test runner, in which
+ * case discovery owns the root and no enumeration gate applies.
+ */
+pub fn runs_root_wholesale(block: string, root: string) -> bool {
+  for line in block.lines() {
+    for token in line.split(" ") {
+      const bare = token.trim()
+      if bare == root || bare == root + "/" {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+pub fn unlisted_test_files(block: string, root: string, file_names: list<string>) -> list<string> {
+  if runs_root_wholesale(block, root) {
+    return []
+  }
+  let out: list<string> = []
+  for name in file_names {
+    if !block.contains(root + "/" + name) {
+      out = out + [root + "/" + name]
+    }
+  }
+  return out.sort()
+}
+
+fn test_files_in(fs: HarnessFs, root_dir: string, suffix: string) -> list<string> {
+  if !fs.exists(root_dir) {
+    return []
+  }
+  let names: list<string> = []
+  for name in fs.list_dir(root_dir) {
+    if name.ends_with(suffix) {
+      names = names + [name]
+    }
+  }
+  return names.sort()
+}
+
+pub fn check_test_target_coverage(fs: HarnessFs, root: string = "") -> dict {
+  const resolved_root = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  const makefile_text = fs.read_text(path_join(resolved_root, "Makefile"))
+  let covered = []
+  let violations = []
+  for entry in HAND_LISTED_TEST_ROOTS {
+    const block = makefile_target_block(makefile_text, to_string(entry.target))
+    const names = test_files_in(
+      fs,
+      path_join(resolved_root, to_string(entry.root)),
+      to_string(entry.suffix),
+    )
+    const unlisted = unlisted_test_files(block, to_string(entry.root), names)
+    for path in unlisted {
+      violations = violations
+        + [{path: path, target: to_string(entry.target), reason: to_string(entry.reason)}]
+    }
+    covered = covered
+      + [
+        {
+          root: to_string(entry.root),
+          target: to_string(entry.target),
+          scanned: len(names),
+          unlisted: len(unlisted),
+        },
+      ]
+  }
+  let scanned_total = 0
+  for row in covered {
+    scanned_total = scanned_total + to_int(row.scanned)
+  }
+  return {
+    root: resolved_root,
+    roots: covered,
+    violations: violations,
+    scanned_count: scanned_total,
+    violation_count: len(violations),
+  }
+}
+
+fn render_report(report: dict) -> string {
+  // Report the scanned count on the pass line too: a gate that walked an empty
+  // or mis-rooted directory would otherwise print the same clean verdict as a
+  // gate that actually looked at every file.
+  if report.violation_count == 0 {
+    return "test target coverage passed: "
+      + to_string(report.scanned_count)
+      + " hand-listed test file(s) scanned; every one is run by its CI target."
+  }
+  let lines = [
+    "test target coverage failed: " + to_string(report.violation_count)
+      + " test file(s) exist but no CI target runs them",
+    "",
+    "Add each file to its Makefile target, or run the directory wholesale so discovery owns it.",
+  ]
+  for violation in report.violations {
+    lines = lines
+      + [
+        "- " + to_string(violation.path) + " (not listed in `" + to_string(violation.target) + "`)",
+      ]
+  }
+  return join(lines, "\n")
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_test_target_coverage",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_test_target_coverage.harn -- [--json] [--root PATH]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const report = check_test_target_coverage(harness.fs, to_string(parsed?.root ?? ""))
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    const out = render_report(report)
+    if report.violation_count == 0 {
+      harness.stdio.println(out)
+    } else {
+      harness.stdio.eprintln(out)
+    }
+  }
+  if report.violation_count > 0 {
+    harness.runtime.exit(1)
+  }
+  return nil
+}

@@ -1,0 +1,139 @@
+import { with_temp_dir } from "std/testing"
+import "../check_test_target_coverage.harn"
+
+const RECIPE_PREFIX = "\t@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test "
+
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !fs.exists(current) {
+      fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
+  return nil
+}
+
+/**
+ * Build a fixture repo: `names` become real files under tests/stdlib, and only
+ * `listed` are enumerated in the test-harn-scripts recipe.
+ */
+fn fixture(fs: HarnessFs, root: string, names: list<string>, listed: list<string>) -> nil {
+  for name in names {
+    write_text(fs, root, path_join("tests/stdlib", name), "// fixture\n")
+  }
+  let lines = ["test-harn-scripts:"]
+  for name in listed {
+    lines = lines + [RECIPE_PREFIX + "tests/stdlib/" + name]
+  }
+  // A following target proves the recipe scan stops at the rule boundary.
+  lines = lines + ["", "some-other-target:", RECIPE_PREFIX + "tests/stdlib/decoy_test.harn", ""]
+  write_text(fs, root, "Makefile", join(lines, "\n"))
+  return nil
+}
+
+@test
+pipeline test_an_unlisted_test_file_fails_the_gate_by_name(harness: Harness, task: unknown) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      fixture(
+        harness.fs,
+        root,
+        ["alpha_test.harn", "beta_test.harn", "gamma_test.harn"],
+        ["alpha_test.harn", "gamma_test.harn"],
+      )
+      const report = check_test_target_coverage(harness.fs, root)
+      assert_eq(report.violation_count, 1)
+      assert_eq(report.violations[0].path, "tests/stdlib/beta_test.harn")
+      assert_eq(report.violations[0].target, "test-harn-scripts")
+      // The pass line reports the same scan, so a green verdict cannot come
+      // from a walk that found nothing.
+      assert_eq(report.scanned_count, 3)
+    },
+  )
+}
+
+@test
+pipeline test_a_fully_listed_root_passes(harness: Harness, task: unknown) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const names = ["alpha_test.harn", "beta_test.harn", "gamma_test.harn"]
+      fixture(harness.fs, root, names, names)
+      const report = check_test_target_coverage(harness.fs, root)
+      assert_eq(report.violation_count, 0)
+      assert_eq(report.scanned_count, 3)
+    },
+  )
+}
+
+@test
+pipeline test_a_file_listed_only_under_another_target_still_fails(harness: Harness, task: unknown) {
+  // decoy_test.harn is named by `some-other-target`, never by the target that
+  // CI runs. A recipe scan that ran past the rule boundary would read this as
+  // covered and the file would keep shipping unrun.
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      fixture(harness.fs, root, ["alpha_test.harn", "decoy_test.harn"], ["alpha_test.harn"])
+      const report = check_test_target_coverage(harness.fs, root)
+      assert_eq(report.violation_count, 1)
+      assert_eq(report.violations[0].path, "tests/stdlib/decoy_test.harn")
+    },
+  )
+}
+
+@test
+pipeline test_a_root_run_wholesale_needs_no_enumeration(harness: Harness, task: unknown) {
+  // Discovery already covers a directory handed to the runner whole, so the
+  // gate must not demand redundant per-file lines.
+  const block = "\t@$(HARN_CMD) test tests/stdlib/ --parallel"
+  assert_eq(runs_root_wholesale(block, "tests/stdlib"), true)
+  assert_eq(unlisted_test_files(block, "tests/stdlib", ["alpha_test.harn", "beta_test.harn"]), [])
+}
+
+@test
+pipeline test_recipe_block_stops_at_the_next_rule(harness: Harness, task: unknown) {
+  const makefile = join(
+    [
+      "test-harn-scripts:",
+      "\t@harn test tests/stdlib/alpha_test.harn",
+      "",
+      "other-target:",
+      "\t@harn test tests/stdlib/beta_test.harn",
+    ],
+    "\n",
+  )
+  const block = makefile_target_block(makefile, "test-harn-scripts")
+  assert_eq(block.contains("alpha_test.harn"), true)
+  assert_eq(block.contains("beta_test.harn"), false)
+}
+
+@test
+pipeline test_the_live_repository_lists_every_stdlib_test(harness: Harness, task: unknown) {
+  // Guards the real tree, not a fixture: this is the assertion that would have
+  // caught mock_scripted_usage_test.harn shipping unrun.
+  const report = check_test_target_coverage(harness.fs)
+  assert_eq(report.violation_count, 0)
+  assert_eq(report.scanned_count > 0, true)
+}

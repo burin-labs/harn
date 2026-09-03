@@ -9,12 +9,8 @@
 // Deterministic: mock LLM script, no sleeps, no API calls.
 import { with_llm_script } from "std/testing"
 
-fn call_once(harness: Harness) -> dict {
-  return harness.llm.call(
-    "Inspect the target file.",
-    nil,
-    {provider: "mock", model: "mock-model"},
-  )
+fn call_once(llm: HarnessLlm) -> dict {
+  return llm.call("Inspect the target file.", nil, {provider: "mock", model: "mock-model"})
 }
 
 /**
@@ -27,7 +23,7 @@ pipeline test_a_scripted_empty_is_an_unbilled_empty(harness: Harness, _task: unk
     harness.llm,
     [{text: "", usage: {completion_tokens: 0, prompt_tokens: 0}}],
     { ->
-      const response = call_once(harness)
+      const response = call_once(harness.llm)
       assert_eq(
         response?.usage?.output_tokens,
         0,
@@ -52,7 +48,7 @@ pipeline test_an_unscripted_usage_keeps_the_default(harness: Harness, _task: unk
     harness.llm,
     [{text: "Mock answer."}],
     { ->
-      const response = call_once(harness)
+      const response = call_once(harness.llm)
       assert(
         (to_int(response?.usage?.output_tokens) ?? 0) > 0,
         "an entry that scripts no usage must keep its default counts: ${json_stringify(response?.usage)}",

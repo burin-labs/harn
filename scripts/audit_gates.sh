@@ -131,6 +131,7 @@ GATES=(
   check-provider-catalog-drift
   check-ported-handler-loc
   check-source-file-lengths
+  check-test-target-coverage
   check-python-boundary
   check-harn-syntax-sensitive-scans
   check-loud-boundaries
