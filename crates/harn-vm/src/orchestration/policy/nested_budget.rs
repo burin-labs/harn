@@ -179,9 +179,28 @@ pub fn enter_nested_execution_policy(
     })
 }
 
+/// The carrier a top-level `agent_loop` installs when nothing else is on the
+/// stack.
+///
+/// It carries the default nested-execution budget for the same reason the
+/// workflow ceiling does: a descent that no caller bounded must still be
+/// bounded. Without it, `parent_limit` is `None` at every level, the guard
+/// above never refuses, and an agent that keeps delegating descends until the
+/// native stack is exhausted and the process aborts. The budget was declared
+/// and honored by workflows, and simply never reached the agent path.
+///
+/// The depth here is only a real bound if a descent that deep still fits in
+/// [`crate::runtime_stack::RUNTIME_STACK_SIZE`]. That relationship is not
+/// arithmetic anyone can eyeball, so it is pinned by behavior instead: the
+/// conformance case that descends at this default asserts a typed refusal, and
+/// goes red if either constant drifts far enough to make the refusal
+/// undeliverable.
 fn top_level_agent_loop_policy() -> CapabilityPolicy {
     CapabilityPolicy {
         sandbox_profile: SandboxProfile::OsHardened,
+        recursion_limit: Some(
+            crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth,
+        ),
         ..CapabilityPolicy::default()
     }
 }
