@@ -735,9 +735,10 @@ fn wait_until_worker_is_queued(
     loop {
         line.clear();
         let read = stderr.read_line(&mut line).expect("read worker stderr");
-        if read == 0 {
-            panic!("worker stderr ended before it reported waiting for the lease: {seen:?}");
-        }
+        assert!(
+            read != 0,
+            "worker stderr ended before it reported waiting for the lease: {seen:?}"
+        );
         seen.push(line.trim_end().to_string());
         if line.contains("Waiting for rust-heavy lease") {
             return line.trim_end().to_string();
