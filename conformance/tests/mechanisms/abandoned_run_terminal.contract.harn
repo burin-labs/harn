@@ -73,9 +73,7 @@ fn base_opts(session: any, tools: any) {
 
 fn abandon_count(events: any) {
   return len(
-    events.filter(
-      { event -> event.type == "loop_control_decision" && event.action == "abandon" },
-    ),
+    events.filter({ event -> event.type == "loop_control_decision" && event.action == "abandon" }),
   )
 }
 

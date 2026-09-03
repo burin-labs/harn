@@ -10,8 +10,8 @@
 // silent when the evidence is absent: a run that used no tools, and a run whose
 // tool worked, must both still finish naturally.
 import { agent_loop } from "std/agent/loop"
-import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { AgentSpec } from "std/agent/options"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { assert_nil, assert_not_nil, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn read_only_tools() {
@@ -107,10 +107,7 @@ pipeline test_a_run_whose_only_tool_always_fails_does_not_finish_naturally(
  * Same prompt, same tool name, same script shape; the only difference is that
  * the handler succeeds. This run MUST still be natural.
  */
-pipeline test_a_run_whose_tool_succeeds_still_finishes_naturally(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_a_run_whose_tool_succeeds_still_finishes_naturally(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [
@@ -138,10 +135,7 @@ pipeline test_a_run_whose_tool_succeeds_still_finishes_naturally(
  * run. Absence of tool use is not evidence of abandonment, and a rule that
  * convicted here would fail every question-answering run in the product.
  */
-pipeline test_a_run_that_used_no_tools_still_finishes_naturally(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_a_run_that_used_no_tools_still_finishes_naturally(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [llm_text("Paris is the capital of France. ##DONE##")],
@@ -221,10 +215,7 @@ pipeline test_a_failed_call_followed_by_a_successful_one_finishes_naturally(
  * lengths of the deduplicated name lists, which is why one attempted call is
  * reported as one and not as one distinct tool.
  */
-pipeline test_a_refused_call_then_an_answer_reports_its_evidence(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_a_refused_call_then_an_answer_reports_its_evidence(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
     [
@@ -259,10 +250,7 @@ pipeline test_a_refused_call_then_an_answer_reports_its_evidence(
  * arm. It is not: the agent did not choose that outcome, and reporting it as
  * abandonment would attribute a user's cancel to the model.
  */
-pipeline test_a_user_cancelled_call_is_not_the_agents_abandonment(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_a_user_cancelled_call_is_not_the_agents_abandonment(harness: Harness, task: unknown) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
