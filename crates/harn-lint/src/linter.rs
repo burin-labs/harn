@@ -26,6 +26,7 @@ mod discarded_result;
 mod execution_safety;
 pub(crate) mod harness_facts;
 mod parameters;
+mod predicates;
 mod program;
 mod spans;
 mod type_facts;
@@ -275,45 +276,6 @@ impl<'a> Linter<'a> {
         harn_vm::stdlib::stdlib_builtin_names()
             .into_iter()
             .collect()
-    }
-
-    pub(super) fn in_test_pipeline(&self) -> bool {
-        self.test_pipeline_depth > 0
-    }
-
-    /// Whether an `assert` here is a test assert.
-    ///
-    /// [`in_test_pipeline`](Self::in_test_pipeline) is lexical and sees only a
-    /// `pipeline test_*` body, so a helper `fn` that a test pipeline calls
-    /// reads as production control flow no matter where it lives. Keying the
-    /// rule on the enclosing function rather than on the file is what made
-    /// every assert in a test helper a finding, which is a false positive by
-    /// construction: a file under a test root is a test file in all of it.
-    ///
-    /// A file linted without a path (stdin, an embedded snippet) keeps the
-    /// old behaviour, because there is nothing to read a root from.
-    pub(super) fn in_test_source(&self) -> bool {
-        self.in_test_pipeline()
-            || self
-                .file_path
-                .as_deref()
-                .is_some_and(crate::is_test_source_path)
-    }
-
-    pub(super) fn is_test_pipeline_name(name: &str) -> bool {
-        name == "test" || name.starts_with("test_")
-    }
-
-    pub(super) fn is_entry_pipeline_name(name: &str) -> bool {
-        matches!(name, "default" | "main" | "auto")
-    }
-
-    pub(super) fn is_assert_builtin(name: &str) -> bool {
-        matches!(name, "assert" | "assert_eq" | "assert_ne")
-    }
-
-    pub(super) fn is_approval_record_builtin(name: &str) -> bool {
-        name == "request_approval"
     }
 
     /// Warn when a public stdlib `pub fn` is missing one or more of the
