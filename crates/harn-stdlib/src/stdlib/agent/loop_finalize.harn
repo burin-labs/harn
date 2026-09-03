@@ -5,7 +5,7 @@ import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 
-/**
+/*
  * The typed cause of a suspension, for the host that has to tell a person why
  * the run stopped and what would let it continue.
  *
