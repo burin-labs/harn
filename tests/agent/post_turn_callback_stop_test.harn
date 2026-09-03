@@ -30,7 +30,7 @@ pipeline test_post_turn_policy_stop_can_explicitly_bypass_completion_verify(
           max_iterations: 4,
           done_sentinel: "##DONE##",
           verify_completion: { info ->
-            let count = harness.runtime.shared_snapshot(verify_calls)
+            const count = harness.runtime.shared_snapshot(verify_calls)
             harness.runtime.shared_set(verify_calls, count.value + 1)
             if info.stop_reason == "pace_cutoff" {
               return "policy stops must not be completion-verified"
@@ -90,7 +90,7 @@ pipeline test_post_turn_policy_stop_can_request_completion_verify(harness: Harne
           done_sentinel: "##DONE##",
           verify_completion: { info ->
             if info.stop_reason == "pace_cutoff" {
-              let count = harness.runtime.shared_snapshot(policy_verify_calls)
+              const count = harness.runtime.shared_snapshot(policy_verify_calls)
               harness.runtime.shared_set(policy_verify_calls, count.value + 1)
               return "policy requested one verification pass"
             }

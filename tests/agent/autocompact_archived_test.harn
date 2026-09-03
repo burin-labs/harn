@@ -1,18 +1,20 @@
-// Run: harn test tests/agent/autocompact_archived_test.harn
-//
-// Regression tests for the single-message-compaction archive accounting in
-// `std/agent/autocompact`. The compaction engine drains `archived_count`
-// messages and inserts exactly one summary, so a compaction that archives
-// exactly one message leaves `len(before) == len(after)`. The old `.harn`
-// layer inferred "did compaction happen?" from that length delta, so an
-// archive-exactly-one compaction read as `archived == 0`: the engine's
-// shrunk transcript was discarded, and on the emergency-overflow path a
-// RECOVERABLE context_overflow was misreported as terminal (the loop
-// `break`s on `archived <= 0`).
-//
-// `transcript_auto_compact` now returns `{ messages, archived, summary }`
-// with the engine's true archived count and the inserted summary text, so the
-// length-delta inference is gone.
+/**
+ * Run: harn test tests/agent/autocompact_archived_test.harn
+ *
+ * Regression tests for the single-message-compaction archive accounting in
+ * `std/agent/autocompact`. The compaction engine drains `archived_count`
+ * messages and inserts exactly one summary, so a compaction that archives
+ * exactly one message leaves `len(before) == len(after)`. The old `.harn`
+ * layer inferred "did compaction happen?" from that length delta, so an
+ * archive-exactly-one compaction read as `archived == 0`: the engine's
+ * shrunk transcript was discarded, and on the emergency-overflow path a
+ * RECOVERABLE context_overflow was misreported as terminal (the loop
+ * `break`s on `archived <= 0`).
+ *
+ * `transcript_auto_compact` now returns `{ messages, archived, summary }`
+ * with the engine's true archived count and the inserted summary text, so the
+ * length-delta inference is gone.
+ */
 pipeline test_archive_exactly_one_reports_archived(harness: Harness, task: unknown) {
   // keep_first 1 + keep_last 1 over 3 messages drains exactly the single
   // middle message and inserts one summary -> len(before) == len(after) == 3,
