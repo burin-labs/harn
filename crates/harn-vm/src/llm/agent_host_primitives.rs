@@ -25,10 +25,10 @@ use denial_results::{
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
-    emit_permission_event, emit_permission_event_with_policy, emit_runtime_auto_approved_activity,
-    emit_runtime_denied_activity, emit_runtime_resolved_activity,
-    emit_runtime_unavailable_activity, request_host_permission, HostPermissionOutcome,
-    HostPermissionRequest,
+    emit_auto_review_granted_activity, emit_permission_event, emit_permission_event_with_policy,
+    emit_runtime_auto_approved_activity, emit_runtime_denied_activity,
+    emit_runtime_resolved_activity, emit_runtime_unavailable_activity, request_host_permission,
+    HostPermissionOutcome, HostPermissionRequest,
 };
 use primitive_args::{
     option_int as agent_primitive_option_int, option_str as agent_primitive_option_str,
@@ -1107,20 +1107,38 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // AFTER the policy has decided and the trifecta gate has had its say, so
     // the reviewer sees the FINAL refusal and cannot pre-empt a gate that had
     // not run yet. Body lives in the owning module.
-    if crate::orchestration::maybe_grant_by_auto_review(
+    let auto_review_granted = crate::orchestration::maybe_grant_by_auto_review(
         Some(&ctx),
         approval.as_mut(),
         &tool_name,
         &tool_args,
         &session_id,
     )
-    .await
-    {
+    .await;
+    if auto_review_granted {
         approval_status = Some("auto_review_granted");
     }
 
     match approval {
         None => {}
+        // A reviewer grant is recorded as the reviewer's, ahead of the generic
+        // allow arm and without its audit-signal condition. Otherwise the only
+        // trace of an answered `ask` says `runtime_policy`, which is the layer
+        // that could NOT decide it, and the run cannot answer whether a
+        // reviewer was consulted at all -- indistinguishable from a run that
+        // had none.
+        Some(decision) if auto_review_granted => {
+            emit_permission_event_with_policy(
+                &session_id,
+                "PermissionGrant",
+                &tool_name,
+                &tool_args,
+                &decision.reason,
+                true,
+                Some(decision.receipt.clone()),
+            );
+            emit_auto_review_granted_activity(&session_id, &tool_id, &tool_name, &decision);
+        }
         Some(decision) if decision.is_allow() && decision.has_audit_signal() => {
             emit_permission_event_with_policy(
                 &session_id,
@@ -2842,6 +2860,9 @@ mod parse_tool_call_id_tests;
 
 #[cfg(test)]
 mod approval_unavailable_tests;
+
+#[cfg(test)]
+mod auto_review_decider_tests;
 #[cfg(test)]
 mod schema_argument_dispatch_tests;
 #[cfg(test)]
