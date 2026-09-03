@@ -291,7 +291,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_p
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_current_worker
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_effective_llm_options
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_enable_equivalent_failover
-crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_finalize_failed
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_llm_overrides
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_ordinary_turn_llm_options
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_route_options
