@@ -57,7 +57,14 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let fallback_index = 0
     let successful_tools_seen = []
     let rejected_tools_seen = []
+    // Per-CALL tallies, kept beside the name lists rather than derived from
+    // them: `__merge_tool_names` deduplicates by name, so those lengths are
+    // distinct-tool counts and would mislabel a call count if reported as one.
+    let tool_calls_attempted = 0
+    let tool_calls_succeeded = 0
+    let last_tool_rejection_category = nil
     let suspend_result = nil
+    let abandonment = nil
     let stall_state = agent_stall_initial_state()
     let stall_enabled_seen = false
     let stall_prev_dispatch = nil
@@ -1056,6 +1063,11 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           rejected_tools_seen,
           __tool_names_by_status(dispatch, false),
         )
+        const call_tally = __dispatch_call_tally(dispatch)
+        tool_calls_attempted = tool_calls_attempted + call_tally.attempted
+        tool_calls_succeeded = tool_calls_succeeded + call_tally.succeeded
+        last_tool_rejection_category = __dispatch_last_rejection_category(dispatch)
+          ?? last_tool_rejection_category
         const post_dispatch = __agent_loop_post_dispatch(
           harness,
           session.session_id,
@@ -1233,6 +1245,9 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           stall_state: stall_state,
           successful_tools_seen: successful_tools_seen,
           rejected_tools_seen: rejected_tools_seen,
+          tool_calls_attempted: tool_calls_attempted,
+          tool_calls_succeeded: tool_calls_succeeded,
+          last_tool_rejection_category: last_tool_rejection_category,
           feedback_history: feedback_history,
         },
       )
@@ -1249,6 +1264,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       budget_exhausted_emitted = terminal_boundary.budget_exhausted_emitted
       budget_decisions = terminal_boundary.budget_decisions
       terminal_error = terminal_boundary.terminal_error
+      abandonment = terminal_boundary.abandonment
       feedback_history = terminal_boundary.feedback_history ?? feedback_history
       if terminal_boundary.action == "continue" {
         continue
@@ -1280,7 +1296,11 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     const finalized = __agent_loop_finalize(harness, message, session, final_state)
     session_finalized = true
     const projection_state = final_state
-      + {budget_decisions: finalized.budget_decisions, output_contract: finalized.output_contract}
+      + {
+        budget_decisions: finalized.budget_decisions,
+        output_contract: finalized.output_contract,
+        abandonment: abandonment,
+      }
     const final_result = __agent_loop_project_terminal_result(
       harness,
       finalized.result,

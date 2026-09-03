@@ -160,9 +160,17 @@ pipeline test_retryable_denial_does_not_cut(harness: Harness, task: unknown) {
       assert_eq(len(denials), 2)
       assert_eq(denials[0].raw_output.denial.retryable, true)
       assert_eq(denials[1].raw_output.denial.retryable, true)
-      assert_eq(captured.result.status, "done")
       assert_eq(len(harness.llm.mock_calls()), 3)
       assert_eq(len(cutoff_receipts(captured.events)), 0)
+      // This case's subject is the denial cutoff, and the two lines above are
+      // it: the loop kept going and no cutoff receipt was written. The status
+      // is a different mechanism's answer. Both edits were denied, nothing
+      // else was called, and the model then announced it had recovered — so
+      // the run reached its end having attempted tool calls without one
+      // succeeding, which harn#7915 convicts. It used to read `done`, which is
+      // the exact record that issue exists to stop producing.
+      assert_eq(captured.result.status, "completion_unverified")
+      assert_eq(captured.result.abandonment.cause, "no_tool_call_succeeded")
     },
   )
 }
