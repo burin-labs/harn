@@ -287,7 +287,8 @@ pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completi
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 3,
-        verify_completion_judge: {model: "mock-judge", 
+        verify_completion_judge: {
+          model: "mock-judge",
           provider: "mock",
           max_invocations: 1,
           requirement_contract: requirement_contract(),
@@ -346,7 +347,8 @@ pipeline test_complete_requirement_report_accepts_on_public_completion_seam(
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 2,
-        verify_completion_judge: {model: "mock-judge", 
+        verify_completion_judge: {
+          model: "mock-judge",
           provider: "mock",
           max_invocations: 1,
           requirement_contract: artifact_contract(),
@@ -537,7 +539,8 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 3,
-        verify_completion_judge: {model: "mock-judge", 
+        verify_completion_judge: {
+          model: "mock-judge",
           provider: "mock",
           max_invocations: 1,
           requirement_contract: artifact_contract(),
@@ -742,7 +745,8 @@ fn no_write_judge_opts(session: string, cap: int) -> AgentSpec {
     loop_until_done: true,
     done_sentinel: "##DONE##",
     max_iterations: cap,
-    verify_completion_judge: {model: "mock-judge", 
+    verify_completion_judge: {
+      model: "mock-judge",
       provider: "mock",
       max_invocations: 1,
       requirement_contract: no_write_contract(),

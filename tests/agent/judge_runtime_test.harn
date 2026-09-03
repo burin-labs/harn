@@ -610,7 +610,8 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
             done_sentinel: "##DONE##",
             max_iterations: 2,
             deadline_ms: 1,
-            verify_completion_judge: {model: "mock-judge", 
+            verify_completion_judge: {
+              model: "mock-judge",
               provider: "mock",
               max_invocations: 1,
               operation_timeout_ms: 100,

@@ -106,7 +106,10 @@ pipeline default(harness: Harness) {
       replacement: "completion judges always fail closed",
     },
     {
-      options: {provider: "mock", turn_end_condition: {model: "mock-judge", fail_open_on_error: true}},
+      options: {
+        provider: "mock",
+        turn_end_condition: {model: "mock-judge", fail_open_on_error: true},
+      },
       removed: "turn_end_condition.fail_open_on_error",
       replacement: "completion judges always fail closed",
     },
@@ -121,7 +124,10 @@ pipeline default(harness: Harness) {
       replacement: "completion judges always fail closed",
     },
     {
-      options: {provider: "mock", verify_completion_judge: {model: "mock-judge", fail_open_on_error: true}},
+      options: {
+        provider: "mock",
+        verify_completion_judge: {model: "mock-judge", fail_open_on_error: true},
+      },
       removed: "verify_completion_judge.fail_open_on_error",
       replacement: "completion judges always fail closed",
     },
