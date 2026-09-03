@@ -20,7 +20,12 @@ pipeline default(harness: Harness) {
       harness.stdio.println(structured.visible_text)
       const calls = harness.llm.mock_calls()
       harness.stdio.println(len(calls))
+      harness.stdio.println(structured.provider_call_count)
       assert(len(calls) == 2, "verifier profile should retry schema-invalid output")
+      assert(
+        structured.provider_call_count == 2,
+        "terminal schema repair must count both physical provider dispatches",
+      )
       assert(
         calls[0].output_format.kind == "text",
         "ordinary agent_loop turns must not force provider structured-output mode",

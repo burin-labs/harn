@@ -680,18 +680,37 @@ impl super::super::Vm {
             return Ok(());
         };
         let mut first_error: Option<VmError> = None;
+        let mut cleanup_error: Option<VmError> = None;
         for id in &scope.task_ids {
             let Some(task) = self.spawned_tasks.remove(id) else {
                 continue; // already awaited / cancelled
             };
             if first_error.is_some() {
-                // A sibling already failed: cancel the rest without awaiting.
-                task.cancel_token
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                task.handle.abort();
+                // A sibling already failed: stop and durably terminalize every
+                // remaining task before the nursery exits.
+                let runtime_task_id = task.wait_task_id.clone();
+                if let Err(error) =
+                    super::call_support::abort_task_and_wait(task, self.execution_id()).await
+                {
+                    crate::events::log_warn(
+                        "task_scope.cancel_cleanup",
+                        &format!("durable sibling cleanup remains pending: {error}"),
+                    );
+                    super::call_support::schedule_task_cleanup(
+                        runtime_task_id,
+                        self.agent_cleanup_runtimes(),
+                    );
+                    cleanup_error.get_or_insert(error);
+                }
                 continue;
             }
-            match task.handle.await {
+            let task_id = task.wait_task_id.clone();
+            let joined = super::call_support::finish_task_join(
+                task.handle.await,
+                task_id,
+                self.agent_cleanup_runtimes(),
+            );
+            match joined {
                 Ok(Ok((_result, output))) => {
                     self.output.push_str(&output);
                 }
@@ -701,9 +720,13 @@ impl super::super::Vm {
                 }
             }
         }
-        match first_error {
-            Some(e) => Err(e),
-            None => Ok(()),
+        match (first_error, cleanup_error) {
+            (Some(primary), Some(cleanup)) => Err(VmError::Runtime(format!(
+                "{primary}; sibling terminal cleanup failed and remains scheduled: {cleanup}"
+            ))),
+            (Some(e), None) => Err(e),
+            (None, Some(e)) => Err(e),
+            (None, None) => Ok(()),
         }
     }
 

@@ -937,7 +937,8 @@ mod tests {
     }
 
     fn enter_session(id: &str) -> harn_vm::agent_sessions::CurrentSessionGuard {
-        harn_vm::agent_sessions::open_or_create(Some(id.to_string()));
+        harn_vm::agent_sessions::open_or_create(Some(id.to_string()))
+            .expect("open fixture session");
         harn_vm::agent_sessions::enter_current_session(id.to_string())
     }
 

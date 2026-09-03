@@ -1,4 +1,8 @@
 blocked
 user_prompt_submit_blocked
 policy violation: secret in prompt
+true
+true
+blocked
+true
 done

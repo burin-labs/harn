@@ -137,6 +137,42 @@ harn_debug_binary_path() {
   harn_debug_named_binary_path harn
 }
 
+# Cargo compiles each binary into `<profile>/deps/<name>-<hash>` and then
+# uplifts a copy to `<profile>/<name>`. Only the uplifted copy is a resolution
+# target; the deps artifacts tell us whether a compile actually happened.
+harn_binary_deps_dir() {
+  local bin="$1"
+  printf '%s/deps\n' "${bin%/*}"
+}
+
+# True when Cargo left a compiled artifact for this binary under `deps/` even
+# though the uplifted copy the resolver looks for is absent. Distinguishes a
+# missing link from a missing build.
+harn_compiled_binary_artifact_exists() {
+  local bin="$1"
+  local deps_dir=""
+  local name="${bin##*/}"
+  local suffix=""
+  local candidate=""
+  deps_dir="$(harn_binary_deps_dir "$bin")"
+  case "$name" in
+    *.exe)
+      name="${name%.exe}"
+      suffix=".exe"
+      ;;
+  esac
+  for candidate in "$deps_dir/$name"-*"$suffix"; do
+    # A `.d` sidecar is emitted next to the artifact and is not executable.
+    case "$candidate" in
+      *.d) continue ;;
+    esac
+    if [[ -f "$candidate" && -x "$candidate" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 harn_require_executable_bin() {
   local bin="$1"
   if [[ ! -x "$bin" ]]; then
@@ -442,6 +478,15 @@ harn_resolve_binary() (
       return 0
     fi
     echo "error: no fresh worktree harn binary found at $bin" >&2
+    if harn_compiled_binary_artifact_exists "$bin"; then
+      # Cargo compiled the binary but its uplifted copy at the profile root is
+      # gone, so this is a missing link rather than a missing build. Say which,
+      # because "no binary found" reads as a compile failure and sends the
+      # reader to rebuild something that is already built.
+      echo "note: compiled artifacts for this binary exist under $(harn_binary_deps_dir "$bin")," >&2
+      echo "note: but the uplifted copy at $bin is missing. The build produced the" >&2
+      echo "note: artifact and did not leave the link the gate resolves." >&2
+    fi
     echo "hint: set HARN_BIN or run scripts/ci_warm_harn_bin.sh, then retry." >&2
     return 1
   fi
