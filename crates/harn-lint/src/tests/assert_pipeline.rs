@@ -65,7 +65,7 @@ require task != nil, "task is required"
 // A helper `fn` under a test root, holding the exact shape that produced
 // sixteen findings across nine files: the assert is lexically outside any
 // `pipeline test_*`, so the rule read it as production control flow.
-const TEST_HELPER_SOURCE: &str = r#"
+const TEST_HELPER_SOURCE: &str = r"
 fn expect_two(value: int) {
 assert_eq(value, 2)
 }
@@ -73,7 +73,7 @@ assert_eq(value, 2)
 pipeline test_math(task) {
 expect_two(1 + 1)
 }
-"#;
+";
 
 #[test]
 fn assert_in_a_helper_under_a_test_root_is_allowed() {
