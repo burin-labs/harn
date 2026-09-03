@@ -324,6 +324,19 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
     let namespace = optional_string(entry, "namespace", &format!("tool {name:?}"))?;
     let defer_loading =
         optional_bool(entry, "defer_loading", &format!("tool {name:?}"))?.unwrap_or(false);
+    // A registry entry has exactly two keys that mean "input schema":
+    // `inputSchema` for a complete object-root JSON Schema and legacy
+    // `parameters` for a per-parameter map. `tool_define` normalizes every
+    // config spelling onto those, so any other spelling arriving here is a
+    // schema this function would otherwise drop on the floor, projecting a
+    // tool that declared arguments as one that takes none. Refuse by name.
+    if entry.contains_key("input_schema") {
+        return Err(VmError::Runtime(format!(
+            "tool {name:?} field \"input_schema\" is not read by the registry; a registry \
+             entry spells a complete JSON Schema \"inputSchema\" (tool_define's config \
+             accepts \"input_schema\" and normalizes it)"
+        )));
+    }
     if entry.contains_key("inputSchema") && entry.contains_key("parameters") {
         return Err(VmError::Runtime(format!(
             "tool {name:?} must use either \"inputSchema\" or legacy \"parameters\", not both"
@@ -336,7 +349,29 @@ fn catalog_entry(entry: &VmValue) -> Result<ToolCatalogEntry, VmError> {
                 "tool {name:?} field \"inputSchema\" must be an object-root JSON Schema"
             )))
         }
-        None => params_to_json_schema(entry.get("parameters"))?,
+        None => {
+            // `parameters` owns the per-parameter map alone. An object-root
+            // JSON Schema there reads as parameters literally named "type",
+            // "properties" and "required", so name the real mistake instead of
+            // letting the per-parameter reader complain about one of them.
+            if let Some(VmValue::Dict(params)) = entry.get("parameters") {
+                let object_root = matches!(
+                    params.get("type"),
+                    Some(VmValue::String(kind)) if kind.as_str() == "object"
+                );
+                if object_root && params.contains_key("properties") {
+                    return Err(VmError::Runtime(format!(
+                        "tool {name:?} field \"parameters\" holds an object-root JSON Schema, \
+                         but \"parameters\" is the legacy per-parameter map; declare a complete \
+                         schema under \"inputSchema\" instead"
+                    )));
+                }
+            }
+            params_to_json_schema(entry.get("parameters")).map_err(|error| match error {
+                VmError::Runtime(message) => VmError::Runtime(format!("tool {name:?}: {message}")),
+                other => other,
+            })?
+        }
     };
     let output_schema = optional_schema(entry, "outputSchema", &format!("tool {name:?}"))?;
     let error_schema = optional_schema(entry, "errorSchema", &format!("tool {name:?}"))?;
