@@ -11161,36 +11161,42 @@
       },
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 1.25,
         "output_per_mtok": 4.25,
@@ -11204,7 +11210,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "meta",
       "lineage": "meta",
@@ -11235,36 +11245,42 @@
       },
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 1.25,
         "output_per_mtok": 4.25,
@@ -11278,7 +11294,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "meta",
       "lineage": "meta",
@@ -11311,36 +11331,42 @@
       },
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.1,
         "output_per_mtok": 0.2,
@@ -11354,7 +11380,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "meta",
       "lineage": "meta",
@@ -11387,36 +11417,42 @@
       },
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 1.25,
         "output_per_mtok": 4.25,
@@ -11430,7 +11466,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "meta",
       "lineage": "meta",
@@ -11463,36 +11503,42 @@
       },
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.1,
         "output_per_mtok": 0.2,
@@ -11506,7 +11552,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "meta",
       "lineage": "meta",
@@ -28958,10 +29008,16 @@
       "label": "Muse Spark 1.1",
       "family": "meta",
       "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
-        "structured_output_mode:none",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
-        "tools"
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -28972,10 +29028,16 @@
       "label": "Muse Spark 1.2",
       "family": "meta",
       "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
-        "structured_output_mode:none",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
-        "tools"
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -28986,10 +29048,16 @@
       "label": "Muse Spark 1.2 (contributor tier)",
       "family": "meta",
       "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
-        "structured_output_mode:none",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
-        "tools"
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -29000,10 +29068,16 @@
       "label": "Muse Spark 1.3",
       "family": "meta",
       "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
-        "structured_output_mode:none",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
-        "tools"
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
@@ -29014,10 +29088,16 @@
       "label": "Muse Spark 1.3 (contributor tier)",
       "family": "meta",
       "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
-        "structured_output_mode:none",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
-        "tools"
+        "thinking",
+        "tools",
+        "vision"
       ]
     },
     {
