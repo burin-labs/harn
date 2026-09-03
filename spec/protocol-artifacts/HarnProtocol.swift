@@ -1889,6 +1889,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
     public static let invalidResponse = Self(rawValue: "invalid_response")
     public static let modelUnavailable = Self(rawValue: "model_unavailable")
     public static let emptyGeneration = Self(rawValue: "empty_generation")
+    public static let billingLimit = Self(rawValue: "billing_limit")
     public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
     public static let unknown = Self(rawValue: "unknown")
 
@@ -1906,6 +1907,7 @@ public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable,
         "invalid_response",
         "model_unavailable",
         "empty_generation",
+        "billing_limit",
         "output_budget_exhausted",
         "unknown",
     ].map { Self(rawValue: $0) }
