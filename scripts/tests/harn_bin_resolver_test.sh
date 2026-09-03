@@ -1338,6 +1338,52 @@ if [[ -s "$record" ]]; then
   exit 1
 fi
 
+# Negative control for the missing-link note below: with no compiled artifact
+# under deps/, the resolver must NOT claim a link is missing. Without this the
+# note could be unconditional and the case below would pass vacuously.
+if grep -Fq "the uplifted copy at" "$tmp_root/env-no-build-missing.err"; then
+  echo "missing-build error wrongly reported a missing uplifted link" >&2
+  cat "$tmp_root/env-no-build-missing.err" >&2
+  exit 1
+fi
+
+# A compiled artifact under deps/ with no uplifted copy is a missing LINK, not
+# a missing build. "no binary found" alone reads as a compile failure and sends
+# the reader to rebuild something that is already built, so the resolver has to
+# name which of the two it saw.
+link_target="$tmp_root/missing-link-target"
+mkdir -p "$link_target/debug/deps"
+printf '#!/bin/sh\nexit 0\n' > "$link_target/debug/deps/harn-0123456789abcdef"
+chmod +x "$link_target/debug/deps/harn-0123456789abcdef"
+: > "$link_target/debug/deps/harn-0123456789abcdef.d"
+: > "$record"
+if CARGO_TARGET_DIR="$link_target" \
+  FAKE_CARGO_RECORD="$record" \
+  HARN_BIN_NO_BUILD=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/env-no-build-missing-link.out" \
+  2> "$tmp_root/env-no-build-missing-link.err"; then
+  echo "HARN_BIN_NO_BUILD accepted a binary that only exists under deps/" >&2
+  exit 1
+fi
+if ! grep -Fq "the uplifted copy at" "$tmp_root/env-no-build-missing-link.err"; then
+  echo "missing uplifted link was reported as a missing build" >&2
+  cat "$tmp_root/env-no-build-missing-link.err" >&2
+  exit 1
+fi
+if ! grep -Fq "compiled artifacts for this binary exist under" \
+  "$tmp_root/env-no-build-missing-link.err"; then
+  echo "missing-link error did not name the deps directory it found" >&2
+  cat "$tmp_root/env-no-build-missing-link.err" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  echo "HARN_BIN_NO_BUILD invoked cargo while reporting a missing link" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
 if HARN_BIN_NO_BUILD=typo "$repo_root/scripts/harn_bin.sh" --print \
   > "$tmp_root/env-no-build-invalid.out" \
   2> "$tmp_root/env-no-build-invalid.err"; then
