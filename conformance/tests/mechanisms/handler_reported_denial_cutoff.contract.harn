@@ -1,0 +1,214 @@
+// MECHANISM CONTRACT (onramp tier): a handler-reported permanent denial is a
+// failed call.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — a tool handler runs, refuses internally, and reports a typed
+//              non-retryable denial through `agent_tool_handler_result`, twice
+//              with identical arguments;
+//   effect   — the loop emits the typed cutoff receipt and terminates as
+//              harness-owned infrastructure, exactly as it does for a denial
+//              the VM wrote before dispatch;
+//   negative — a retryable handler-reported denial does not cut, and neither
+//              does an ordinary successful handler result.
+//
+// Why this contract exists. The two readers that decide "was this call
+// refused" both stopped one level short of the handler result's `data`, so a
+// refusal a handler reported about itself was invisible: the denial probe did
+// not find it, and the ok-guard then discarded the dispatch as successful. A
+// reader that saw no denial reported "not denied", which is the shape a
+// refused command took when it reached a person as prose only.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+// The refusal a handler reports about its own execution. It carries no
+// top-level `ok` or `success` and no `product_error`, which is the whole
+// point: the only machine-readable evidence that this call was refused is the
+// typed denial itself.
+fn handler_denial(retryable: bool) {
+  return {
+    gate: "approval_policy",
+    capability: "process.run",
+    denied_paths: [],
+    retryable: retryable,
+    reason: "Approval is unavailable for risk class execution_semantics_unresolved.",
+  }
+}
+
+fn refusing_toolset(retryable: bool) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command.",
+    {
+      handler: { args ->
+        agent_tool_handler_result(
+          "Command failed (exit -1)\napproval unavailable: "
+            + "command requires approval for risk class execution_semantics_unresolved",
+          {command_status: "failed", denial: handler_denial(retryable)},
+        )
+      },
+      parameters: {command: {type: "string", description: "Command to run"}},
+      returns: {type: "object"},
+      annotations: {kind: "execute"},
+    },
+  )
+  return tools
+}
+
+fn succeeding_toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command.",
+    {
+      handler: { args ->
+        agent_tool_handler_result(
+          "ok",
+          {command_status: "succeeded", denial: nil},
+        )
+      },
+      parameters: {command: {type: "string", description: "Command to run"}},
+      returns: {type: "object"},
+      annotations: {kind: "execute"},
+    },
+  )
+  return tools
+}
+
+fn run_call(id: string) {
+  return {
+    text: "",
+    tool_calls: [{id: id, name: "run", arguments: {command: "bash scripts/check.sh"}}],
+  }
+}
+
+fn base_opts(session: any, tools: any, extra: dict = {}) {
+  return {
+    provider: "mock",
+    tools: tools,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    turn_end_condition: nil,
+    max_iterations: 4,
+    final_wrapup: false,
+    session_id: session,
+    stall_diagnostics: {enabled: false},
+  }
+    + extra
+}
+
+fn cutoff_count(events: any) {
+  return len(
+    events.filter(
+      { event ->
+        event.type == "typed_checkpoint"
+          && event.checkpoint?.schema
+            == "harn.agent_non_retryable_denial_cutoff.v1"
+      },
+    ),
+  )
+}
+
+fn handler_reported_denial_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [run_call("run-1"), run_call("run-2"), run_call("run-3")],
+    { ->
+      const session = "contract-handler-denial-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Run the check script.",
+          nil,
+          base_opts(session, refusing_toolset(false)),
+        ) },
+      )
+      // The cutoff fires on the second identical refusal, so the model is
+      // asked exactly twice. A third call means the loop kept reissuing a
+      // command that could only be refused again.
+      contract_effect(
+        harness.stdio,
+        "effect_handler_reported_denial_cuts_at_two",
+        cutoff_count(captured.events) == 1 && len(harness.llm.mock_calls()) == 2,
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_harness_infra_terminal",
+        captured.result.terminal_class == "tool_policy_rejected"
+          && captured.result.terminal.owner == "harness",
+      )
+    },
+  )
+}
+
+fn retryable_handler_denial_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [run_call("retry-1"), run_call("retry-2"), llm_text("Recovered. ##DONE##")],
+    { ->
+      const session = "contract-handler-retryable-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Run the check script.",
+          nil,
+          base_opts(session, refusing_toolset(true)),
+        ) },
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_retryable_handler_denial_not_cut",
+        cutoff_count(captured.events) > 0
+          || captured.result.status != "done"
+          || len(harness.llm.mock_calls()) != 3,
+      )
+    },
+  )
+}
+
+fn successful_handler_result_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [run_call("ok-1"), run_call("ok-2"), llm_text("Both runs passed. ##DONE##")],
+    { ->
+      const session = "contract-handler-ok-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Run the check script twice.",
+          nil,
+          base_opts(session, succeeding_toolset()),
+        ) },
+      )
+      // The negative control that keeps the effect clause honest: an
+      // implementation that treated every handler result as a refusal would
+      // pass the trigger and fail here.
+      contract_negative(
+        harness.stdio,
+        "negative_successful_handler_result_not_cut",
+        cutoff_count(captured.events) > 0
+          || captured.result.status != "done"
+          || !contains(captured.result.tools.successful, "run")
+          || len(harness.llm.mock_calls()) != 3,
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  handler_reported_denial_case(harness)
+  retryable_handler_denial_case(harness)
+  successful_handler_result_case(harness)
+}
