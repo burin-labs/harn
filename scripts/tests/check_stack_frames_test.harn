@@ -1,0 +1,151 @@
+import "../check_stack_frames.harn"
+
+/** One clippy JSON diagnostic line, as `--message-format=json` emits it. */
+fn diagnostic(path: string, line: int, bytes: int) -> string {
+  return json_stringify(
+    {
+      reason: "compiler-message",
+      message: {
+        code: {code: "clippy::large_stack_frames"},
+        message: "this function may allocate " + to_string(bytes) + " bytes on the stack",
+        spans: [{file_name: path, line_start: line, is_primary: true}],
+      },
+    },
+  )
+}
+
+fn budget(
+  path: string,
+  max_bytes: int,
+  exceptions: list<StackFrameException> = [],
+) -> StackFrameBudget {
+  return {
+    version: 2,
+    threshold_bytes: 100000,
+    ceiling_bytes: 512000,
+    near_ceiling_fraction: 0.05,
+    comment: [],
+    exceptions: exceptions,
+    files: [{path: path, max_bytes: max_bytes}],
+  }
+}
+
+const TODAY = "2026-09-03"
+
+@test
+pipeline test_worst_frame_keeps_the_largest_per_file(harness: Harness, task: unknown) {
+  const census = [
+    diagnostic("a.rs", 10, 120000),
+    diagnostic("a.rs", 90, 300000),
+    diagnostic("b.rs", 4, 110000),
+    "  not json at all",
+  ]
+    .join("\n")
+  const worst = worst_frame_by_file(census)
+  assert_eq(worst["a.rs"], 300000, "the larger frame in a file wins")
+  assert_eq(worst["b.rs"], 110000, "each file keeps its own worst")
+  assert_eq(len(keys(worst)), 2, "non-JSON noise is ignored, not counted")
+}
+
+@test
+pipeline test_growth_beyond_a_budget_is_refused(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 300001))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  assert_eq(report.violation_count, 1, "one byte over budget is a finding")
+  assert_eq(report.findings[0].kind, "growth", "growth is named as growth")
+  assert_eq(report.findings[0].observed_bytes, 300001, "the report carries the measurement")
+}
+
+@test
+pipeline test_a_frame_at_its_budget_passes(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 300000))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  assert_eq(report.violation_count, 0, "exactly at budget is not growth")
+  assert_eq(report.budgeted_files, 1, "the pass line still reports what it judged")
+}
+
+@test
+pipeline test_a_shrunk_frame_demands_tightening(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 200000))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  assert_eq(report.violation_count, 1, "a shrink must not silently bank slack")
+  assert_eq(report.findings[0].kind, "tighten", "a shrink is named as a tighten")
+}
+
+/**
+ * The absence control. A budgeted file that disappears from the census has
+ * fallen under the collection threshold, and that must read as a finding
+ * rather than as a pass. Without this, deleting a budgeted file's diagnostics
+ * would make the gate green while measuring nothing about it.
+ */
+@test
+pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(
+  harness: Harness,
+  task: unknown,
+) {
+  const worst = worst_frame_by_file(diagnostic("other.rs", 10, 200000))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  const kinds = report.findings.map({ f -> f.kind })
+  assert(contains(kinds, "shrunk_below_threshold"), "an absent budgeted file is a finding")
+  assert_eq(
+    report.findings[0].kind,
+    "shrunk_below_threshold",
+    "absence is named for what it is, not treated as satisfied",
+  )
+  assert_eq(report.findings[0].observed_bytes, nil, "no measurement is reported as none")
+}
+
+@test
+pipeline test_report_text_names_the_file_and_both_numbers(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 300001))
+  const rendered = render_report(judge_stack_frames(worst, budget("a.rs", 300000), TODAY))
+  assert(contains(rendered, "a.rs"), "the failing file is named")
+  assert(contains(rendered, "300001"), "the observed size is printed")
+  assert(contains(rendered, "300000"), "the budget it broke is printed")
+}
+
+/**
+ * A frame crossing the collection floor for the first time must be recorded,
+ * not silently tolerated. An incomplete census is not a gate: a file nobody
+ * listed is a file nobody is watching.
+ */
+@test
+pipeline test_an_unlisted_frame_is_refused(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("newcomer.rs", 10, 150000))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  const kinds = report.findings.map({ f -> f.kind })
+  assert(contains(kinds, "unlisted"), "a file absent from the budget is named")
+}
+
+/**
+ * The band that actually overflows a worker stack is refused outright, so a
+ * generous historical budget cannot license a frame into it.
+ */
+@test
+pipeline test_a_near_ceiling_frame_is_refused_despite_its_budget(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 500000))
+  const report = judge_stack_frames(worst, budget("a.rs", 500000), TODAY)
+  const kinds = report.findings.map({ f -> f.kind })
+  assert(
+    contains(kinds, "near_ceiling"),
+    "a frame inside the ceiling band is refused even when it is exactly at budget",
+  )
+}
+
+@test
+pipeline test_a_live_exception_admits_a_near_ceiling_frame(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 500000))
+  const allowed = [{path: "a.rs", max_bytes: 500000, expires: "2026-12-01", why: "test"}]
+  const report = judge_stack_frames(worst, budget("a.rs", 500000, allowed), TODAY)
+  assert_eq(report.violation_count, 0, "a live exception admits the frame")
+}
+
+/** The expiry has to bite, or an exception is a permanent licence. */
+@test
+pipeline test_an_expired_exception_stops_admitting(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 500000))
+  const allowed = [{path: "a.rs", max_bytes: 500000, expires: "2026-08-01", why: "test"}]
+  const report = judge_stack_frames(worst, budget("a.rs", 500000, allowed), TODAY)
+  const kinds = report.findings.map({ f -> f.kind })
+  assert(contains(kinds, "expired_exception"), "an expired exception is refused")
+}

@@ -855,7 +855,7 @@ async fn append_attaches_current_session_actor_chain() {
     crate::reset_thread_local_state();
     let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
     let actor_chain = ActorChain::new("user:kenneth").pushed("agent:reviewer");
-    let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
+    let session_id = crate::agent_sessions::open_or_create_with_actor_chain_for_test(
         Some("trust-actor-session".to_string()),
         Some(actor_chain.clone()),
     );

@@ -17,6 +17,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.status)
       harness.stdio.println(result.text)
       harness.stdio.println(len(harness.llm.mock_calls()))
+      harness.stdio.println(result.provider_call_count)
     },
   )
   // Explicit opt-out remains available for fail-fast fixtures and callers.
@@ -33,6 +34,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.error.kind)
       harness.stdio.println(result.error.category)
       harness.stdio.println(len(harness.llm.mock_calls()))
+      harness.stdio.println(result.provider_call_count)
     },
   )
 }

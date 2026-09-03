@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 thread_local! {
     /// Last-emitted hashes for the current transcript. These avoid writing
@@ -16,8 +17,38 @@ thread_local! {
     /// Content-addressed provider-visible messages already defined in the
     /// active transcript. Request receipts carry these ids in served order.
     static EMITTED_SERVED_MESSAGE_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
-    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static TRANSCRIPT_DIR_STACK: RefCell<Vec<TranscriptDirFrame>> = const { RefCell::new(Vec::new()) };
 }
+
+static NEXT_TRANSCRIPT_DIR_FRAME_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+/// Opaque ownership receipt for one ambient transcript-directory push.
+#[derive(Clone, Debug)]
+pub(crate) struct TranscriptDirFrame {
+    frame_id: u64,
+    dir: String,
+    active: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl TranscriptDirFrame {
+    fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn revoke(&self) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+impl PartialEq for TranscriptDirFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.frame_id == other.frame_id
+    }
+}
+
+impl Eq for TranscriptDirFrame {}
 
 /// Per-agent transcript routing and deduplication state. It is swapped with
 /// the rest of the ambient execution scope so cancellation or sibling tasks
@@ -29,7 +60,7 @@ pub(crate) struct LlmTranscriptAmbient {
     tool_schemas_hash: Option<u64>,
     capability_snapshot_ids: BTreeSet<String>,
     served_message_ids: BTreeSet<String>,
-    transcript_dirs: Vec<String>,
+    transcript_dirs: Vec<TranscriptDirFrame>,
 }
 
 pub(crate) fn swap_llm_transcript_ambient(
@@ -130,23 +161,58 @@ fn hash_changed(slot: &'static std::thread::LocalKey<RefCell<Option<u64>>>, curr
     })
 }
 
-pub(crate) fn push_llm_transcript_dir(dir: &str) {
+pub(crate) fn push_llm_transcript_dir(dir: &str) -> Option<TranscriptDirFrame> {
     if dir.trim().is_empty() {
-        return;
+        return None;
     }
-    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir.to_string()));
+    let frame = TranscriptDirFrame {
+        frame_id: NEXT_TRANSCRIPT_DIR_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        dir: dir.to_string(),
+        active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+    };
+    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(frame.clone()));
     reset_deduplication();
+    Some(frame)
 }
 
+#[cfg(test)]
 pub(crate) fn pop_llm_transcript_dir() {
     TRANSCRIPT_DIR_STACK.with(|stack| {
-        stack.borrow_mut().pop();
+        if let Some(frame) = stack.borrow_mut().pop() {
+            frame.revoke();
+        }
     });
     reset_deduplication();
 }
 
+pub(crate) fn remove_llm_transcript_dir(frame: TranscriptDirFrame) -> bool {
+    frame.revoke();
+    let removed = TRANSCRIPT_DIR_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        let Some(index) = stack
+            .iter()
+            .position(|candidate| candidate.frame_id == frame.frame_id)
+        else {
+            return false;
+        };
+        stack.remove(index);
+        true
+    });
+    if removed {
+        reset_deduplication();
+    }
+    removed
+}
+
 pub(crate) fn current_transcript_dir() -> Option<String> {
-    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
+    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| {
+        stack
+            .borrow()
+            .iter()
+            .rev()
+            .find(|frame| frame.is_active())
+            .map(|frame| frame.dir.clone())
+    });
     stacked.or_else(|| {
         std::env::var("HARN_LLM_TRANSCRIPT_DIR")
             .ok()
@@ -192,6 +258,45 @@ mod tests {
             "a new pushed scope cannot inherit a prior file's definitions"
         );
         pop_llm_transcript_dir();
+        let _ = swap_llm_transcript_ambient(saved);
+    }
+
+    #[test]
+    fn exact_transcript_removal_preserves_newer_ambient_owner() {
+        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        let outer = push_llm_transcript_dir("/tmp/harn-transcript-shared").expect("outer frame");
+        let inner = push_llm_transcript_dir("/tmp/harn-transcript-shared").expect("inner frame");
+
+        assert!(remove_llm_transcript_dir(outer.clone()));
+        assert_eq!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-shared")
+        );
+        assert!(!remove_llm_transcript_dir(outer));
+        assert!(remove_llm_transcript_dir(inner));
+        assert_eq!(current_transcript_dir(), None);
+
+        let _ = swap_llm_transcript_ambient(saved);
+    }
+
+    #[test]
+    fn removed_transcript_frame_is_revoked_in_cloned_ambient_scope() {
+        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        let frame =
+            push_llm_transcript_dir("/tmp/harn-transcript-revoked").expect("transcript frame");
+        let inherited = LlmTranscriptAmbient {
+            transcript_dirs: TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().clone()),
+            ..LlmTranscriptAmbient::default()
+        };
+
+        assert!(remove_llm_transcript_dir(frame));
+        let previous = swap_llm_transcript_ambient(inherited);
+        assert_ne!(
+            current_transcript_dir().as_deref(),
+            Some("/tmp/harn-transcript-revoked"),
+            "a cloned async scope must not resurrect a terminal transcript owner"
+        );
+        let _ = swap_llm_transcript_ambient(previous);
         let _ = swap_llm_transcript_ambient(saved);
     }
 

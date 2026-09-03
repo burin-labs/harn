@@ -1,8 +1,8 @@
 import { command_wait_normalize } from "std/agent/command_ledger"
 import { AgentLoopBudget } from "std/agent/control"
 import {
-  __agent_loop_finalize_session,
-  __agent_loop_project_final_result,
+  __agent_loop_finalize,
+  __agent_loop_project_terminal_result,
 } from "std/agent/loop_finalize"
 import { __agent_loop_clock_now_ms } from "std/agent/loop_foundation"
 import { __agent_loop_effective_llm_options } from "std/agent/loop_support"
@@ -101,7 +101,7 @@ pub fn agent_loop_complete(
   session: dict,
   state: AgentLoopCompletionState,
 ) -> dict {
-  const finalized = __agent_loop_finalize_session(
+  const finalized = __agent_loop_finalize(
     harness,
     message,
     session,
@@ -128,7 +128,7 @@ pub fn agent_loop_complete(
       turn_end_judge_vetoes: state.turn_end_judge_vetoes,
     },
   )
-  return __agent_loop_project_final_result(
+  return __agent_loop_project_terminal_result(
     harness,
     finalized.result,
     message,
@@ -150,6 +150,7 @@ pub fn agent_loop_complete(
       verify_completion_judge_vetoes: state.verify_completion_judge_vetoes,
       turn_end_judge_invocations: state.turn_end_judge_invocations,
       turn_end_judge_vetoes: state.turn_end_judge_vetoes,
+      output_contract: finalized.output_contract,
     },
   )
 }

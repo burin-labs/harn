@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use super::agents_workers::{
     active_worker_registry, emit_worker_event, persist_worker_state_snapshot, with_worker_state,
-    worker_event_snapshot, worker_summary, WorkerConfig, WorkerExecutionProfile, WorkerState,
+    worker_event_snapshot, worker_stage_session_id, worker_summary, WorkerConfig,
+    WorkerExecutionProfile, WorkerExecutionResult, WorkerState,
 };
 use super::{is_nil, resume::*};
 use crate::agent_events::WorkerEvent;
@@ -528,6 +529,70 @@ pub(super) fn build_stop_handoff_tree(
     })
 }
 
+/// How long a stop waits for an aborted worker task to unwind before tearing
+/// its session down anyway.
+///
+/// The wait exists so the task's own cleanup runs first where it can. The bound
+/// exists because a task parked in a non-cancellable section would otherwise
+/// hold the stop open forever, and a stop that never returns is worse than a
+/// stop that reclaims slightly early: the teardown below is what actually kills
+/// the children, and it must run on every path.
+const WORKER_ABORT_DRAIN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The agent sessions a worker owns, and whose resources die with it.
+///
+/// A sub-agent carries its real session id, the one its transcript, event topic
+/// and — the point here — its background command handles are all keyed under. A
+/// workflow or stage worker owns one session per node, synthesized alongside
+/// the worker id. Anything a stop does not name here keeps running.
+fn worker_owned_session_ids(config: &WorkerConfig) -> Vec<String> {
+    match config {
+        WorkerConfig::SubAgent { spec } => {
+            if spec.session_id.is_empty() {
+                Vec::new()
+            } else {
+                vec![spec.session_id.clone()]
+            }
+        }
+        WorkerConfig::Stage { node, .. } => worker_stage_session_id(node).into_iter().collect(),
+        WorkerConfig::Workflow { graph, .. } => graph
+            .nodes
+            .values()
+            .filter_map(worker_stage_session_id)
+            .collect(),
+    }
+}
+
+/// Terminate what the worker's sessions still own, before its terminal is
+/// written.
+///
+/// Aborting the tokio task ends the loop, not the processes the loop started. A
+/// background `command_run` handle is registered against the agent session that
+/// was current when it ran, and it is reclaimed by the session-end hooks, which
+/// only the normal finalize path fires. A stop bypasses that path by dropping
+/// the future mid-await, so nothing ran and the child outlived the stop: the
+/// run reported `stopped` while its job kept writing. `daemon_stop` already had
+/// the correct shape; this gives every worker stop the same one.
+///
+/// Ordering is part of the contract. The kills happen before the worker event
+/// is emitted, so a reader that sees the terminal can rely on the children
+/// already being gone rather than racing them.
+async fn release_worker_sessions(
+    handle: Option<tokio::task::JoinHandle<Result<WorkerExecutionResult, VmError>>>,
+    session_ids: Vec<String>,
+) {
+    if let Some(handle) = handle {
+        let _ = tokio::time::timeout(WORKER_ABORT_DRAIN, handle).await;
+    }
+    for session_id in session_ids {
+        // Idempotent, and deliberately not fatal: a session that was already
+        // finalized is the normal race, and failing the stop because cleanup
+        // found nothing left to do would turn a healthy stop into an error.
+        let _ =
+            crate::llm::agent_session_host::cancellation::abandon_agent_session(&session_id).await;
+    }
+}
+
 pub(super) async fn finish_worker_with_event(
     ctx: &AsyncBuiltinCtx,
     state: Arc<parking_lot::Mutex<WorkerState>>,
@@ -536,11 +601,13 @@ pub(super) async fn finish_worker_with_event(
     latest_error: Option<String>,
     latest_payload: Option<serde_json::Value>,
 ) -> Result<VmValue, VmError> {
-    let (snapshot, summary, suspension) = {
+    let (snapshot, summary, suspension, aborted_handle, owned_sessions) = {
         let mut worker = state.lock();
         worker.cancel_token.store(true, Ordering::SeqCst);
         worker.suspend_signal.store(false, Ordering::SeqCst);
-        if let Some(handle) = worker.handle.take() {
+        let owned_sessions = worker_owned_session_ids(&worker.config);
+        let aborted_handle = worker.handle.take();
+        if let Some(handle) = aborted_handle.as_ref() {
             handle.abort();
         }
         worker.status = status.to_string();
@@ -565,8 +632,15 @@ pub(super) async fn finish_worker_with_event(
             }
         }
         let summary = worker_summary(&worker)?;
-        (snapshot, summary, suspension)
+        (
+            snapshot,
+            summary,
+            suspension,
+            aborted_handle,
+            owned_sessions,
+        )
     };
+    release_worker_sessions(aborted_handle, owned_sessions).await;
     unregister_suspension_auto_resume(suspension).await?;
     emit_worker_event(Some(ctx), &snapshot, event).await?;
     Ok(summary)

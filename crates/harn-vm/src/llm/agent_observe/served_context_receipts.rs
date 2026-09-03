@@ -845,7 +845,7 @@ mod tests {
 
     #[test]
     fn raw_resume_does_not_inherit_a_stale_projected_turn() {
-        let session_id = crate::agent_sessions::open_or_create(Some(format!(
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(format!(
             "served-context-raw-resume-{}",
             uuid::Uuid::now_v7()
         )));
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn visible_messages_preserve_malformed_lineage_as_unknown() {
-        let session_id = crate::agent_sessions::open_or_create(Some(format!(
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(format!(
             "served-context-malformed-lineage-{}",
             uuid::Uuid::now_v7()
         )));
@@ -904,7 +904,7 @@ mod tests {
 
     #[test]
     fn canonical_directive_is_classified_before_private_metadata_is_stripped() {
-        let session_id = crate::agent_sessions::open_or_create(Some(format!(
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(format!(
             "served-context-directive-{}",
             uuid::Uuid::now_v7()
         )));
@@ -1104,7 +1104,7 @@ mod tests {
         let condensed_memory = compacted.summary;
         assert_eq!(messages[0]["content"], serde_json::json!(&condensed_memory));
 
-        let session_id = crate::agent_sessions::open_or_create(Some(format!(
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(format!(
             "served-context-compaction-{}",
             uuid::Uuid::now_v7()
         )));

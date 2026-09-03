@@ -754,6 +754,8 @@ async fn host_agent_dispatch_tool_call_impl(
     host_agent_dispatch_tool_call(ctx, call, tools.as_ref(), &options).await
 }
 
+use super::agent_host_tool_dispatch::{pin_scoped_tool_dispatch, ToolDispatchRequest};
+
 pub(super) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
@@ -1442,27 +1444,25 @@ pub(super) async fn host_agent_dispatch_tool_call(
     )
     .map(|(handle, guard)| (Some(handle), Some(guard)))
     .unwrap_or((None, None));
-    // Heap-pin the dispatch future. The tool-execution path builds large
-    // per-call state (e.g. `LlmCallOptions`/`LlmRequestPayload`), so keeping
-    // this future inline in the parent frame pushes the enclosing async fn
-    // over clippy's `large_stack_frames` threshold. Boxing moves that state
-    // onto the heap; both await arms below consume the `Pin<Box<_>>` directly.
-    let mut dispatch_future = Box::pin(crate::orchestration::scope_agent_session(
+    // Heap-pin the dispatch future on a frame that dies immediately. The
+    // tool-execution path builds large per-call state (e.g.
+    // `LlmCallOptions`/`LlmRequestPayload`), and both await arms below consume
+    // the `Pin<Box<_>>` directly, but the box alone is not enough: see
+    // `pin_scoped_tool_dispatch`.
+    let mut dispatch_future = pin_scoped_tool_dispatch(
         session_id.clone(),
-        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-            agent_tools::dispatch_tool_execution_with_mcp(
-                Some(&ctx),
-                &tool_name,
-                &tool_args,
-                tools,
-                mcp_clients_ref,
-                bridge.as_ref(),
-                tool_retries,
-                tool_backoff_ms,
-            )
-            .await
-        }),
-    ));
+        tool_id.clone(),
+        ToolDispatchRequest {
+            ctx: &ctx,
+            tool_name: &tool_name,
+            tool_args: &tool_args,
+            tools,
+            mcp_clients: mcp_clients_ref,
+            bridge: bridge.as_ref(),
+            tool_retries,
+            tool_backoff_ms,
+        },
+    );
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
         Some(handle) => {
             // Race the dispatch against the cancellation signal. When the
