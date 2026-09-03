@@ -1,0 +1,5 @@
+printed_before_attach_is_found=true
+printed_while_running_is_found=true
+stderr_before_attach_is_found=true
+absent_pattern_still_reports_no_match=true
+silent_command_still_reports_no_match=true

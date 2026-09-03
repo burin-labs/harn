@@ -14,7 +14,7 @@ fn observe_tools() {
     "Return a deterministic observation.",
     {
       handler: fn(_args) { return "observed-value-42" },
-      parameters: {type: "object", properties: {}},
+      inputSchema: {type: "object", properties: {}},
     },
   )
   return tools
