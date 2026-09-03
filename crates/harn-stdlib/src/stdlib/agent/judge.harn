@@ -51,6 +51,7 @@ import {
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
 pub import {
   CompletionJudgeVerdict,
+  __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
 } from "std/agent/judge_verdict"
@@ -920,7 +921,13 @@ fn __judge_invoke_structured(
   const requirements_pending = requirement_report != nil
     && !requirement_report.complete
     && !declined_unassessed
-  const verdict = requirements_pending ? "continue" : decoded.verdict
+  // A judge that accepts while naming an unmet obligation has contradicted
+  // itself inside one object, and the contradiction is readable without a
+  // model. Taking the verdict and dropping the gap class is how a run that was
+  // blocked from doing its work reaches a host as `done`, `natural`, with no
+  // stop reason. The gap class is the half backed by evidence, so it wins.
+  const gap_contradicts_done = __judge_completion_verdict_contradicts_itself(decoded)
+  const verdict = requirements_pending || gap_contradicts_done ? "continue" : decoded.verdict
   const detail = if unassessed {
     completion_requirement_unassessed_feedback(requirement_report)
   } else if requirements_pending {
@@ -942,6 +949,8 @@ fn __judge_invoke_structured(
       "completion_judge_report_omitted"
     } else if requirements_pending {
       "completion_requirements_pending"
+    } else if gap_contradicts_done {
+      "completion_judge_gap_contradicts_done"
     } else {
       nil
     },

@@ -130,10 +130,12 @@ pub type ToolCatalog = {
 }
 
 type ToolDefinitionConfig = {
-  /** Legacy per-parameter shorthand. Prefer input_schema for new adapters. */
+  /** Legacy per-parameter map. Prefer inputSchema for new adapters. */
   parameters?: dict,
-  /** Complete caller-owned object schema, normalized directly into inputSchema. */
+  /** Complete caller-owned object schema, normalized onto the entry's inputSchema. */
   input_schema?: dict<string, unknown>,
+  /** MCP-style spelling of the same complete schema; declare only one of the three. */
+  inputSchema?: dict<string, unknown>,
   returns?: JsonSchema202012,
   output_schema?: JsonSchema202012,
   error_schema?: JsonSchema202012,
@@ -170,10 +172,12 @@ pub type ToolDefinitionSpec = {
   description?: string,
   desc?: string,
   config?: ToolDefinitionConfig,
-  /** Legacy per-parameter shorthand. Prefer input_schema for new adapters. */
+  /** Legacy per-parameter map. Prefer inputSchema for new adapters. */
   parameters?: dict,
-  /** Complete caller-owned object schema, normalized directly into inputSchema. */
+  /** Complete caller-owned object schema, normalized onto the entry's inputSchema. */
   input_schema?: dict<string, unknown>,
+  /** MCP-style spelling of the same complete schema; declare only one of the three. */
+  inputSchema?: dict<string, unknown>,
   returns?: JsonSchema202012,
   output_schema?: JsonSchema202012,
   error_schema?: JsonSchema202012,

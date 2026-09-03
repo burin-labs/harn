@@ -764,6 +764,44 @@ fn fast_tier_knob_absent_when_off() {
 }
 
 #[test]
+fn native_tools_keep_defer_loading_when_the_search_meta_tool_is_present() {
+    // The direction the unconditional strip destroyed: with the meta-tool in
+    // the array on a route that advertises the capability, `defer_loading` is
+    // a documented Anthropic field and has to reach the wire. Without this
+    // case the sibling above is satisfied by never sending the flag at all,
+    // which is exactly the state this pair replaced.
+    let mut payload = base_payload();
+    payload.model = "claude-opus-4-7".to_string();
+    payload.native_tools = Some(vec![
+        serde_json::json!({
+            "type": "tool_search_tool_bm25_20251119",
+            "name": "tool_search_tool_bm25",
+        }),
+        serde_json::json!({
+            "name": "rarely_used_tool",
+            "description": "Read a rarely needed record",
+            "input_schema": {"type": "object", "properties": {}},
+            "defer_loading": true,
+        }),
+    ]);
+    let body = AnthropicProvider::build_request_body(&payload);
+    let tools = body["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.len(),
+        2,
+        "both the meta-tool and the user tool are sent"
+    );
+    assert_eq!(
+        tools[1]["defer_loading"], true,
+        "a deferred tool must keep its flag when the search meta-tool can surface it"
+    );
+    assert!(
+        tools[0].get("defer_loading").is_none(),
+        "the meta-tool itself is never deferred"
+    );
+}
+
+#[test]
 fn native_tools_strip_harn_internal_extensions() {
     let mut payload = base_payload();
     payload.native_tools = Some(vec![serde_json::json!({
@@ -791,7 +829,14 @@ fn native_tools_strip_harn_internal_extensions() {
         "Anthropic rejects unknown tool fields with HTTP 400; the x-harn-output-schema \
              extension must be stripped before sending"
     );
-    assert!(!sent.contains_key("defer_loading"));
+    // No search meta-tool in this payload, so a deferred schema could never be
+    // surfaced again; the flag is stripped. The paired case below is what keeps
+    // this from being a blanket "never send it".
+    assert!(
+        !sent.contains_key("defer_loading"),
+        "without the search meta-tool a deferred tool has no way back, so the \
+             flag must not ride along"
+    );
     assert!(!sent.contains_key("namespace"));
     assert!(sent.contains_key("input_schema"));
     assert_eq!(sent["input_schema"]["additionalProperties"], false);

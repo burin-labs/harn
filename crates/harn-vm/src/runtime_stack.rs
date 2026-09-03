@@ -26,7 +26,14 @@
 /// shipped binary, so a host that depends on it passes its own tests and then
 /// aborts the whole process — a stack overflow is not a catchable panic — the
 /// first time a customer runs a deep enough script.
-pub const RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
+///
+/// The size is set by the deepest descent the runtime promises to *refuse*
+/// rather than the deepest it expects to run. A nested agent descent costs
+/// roughly 2 MiB of native stack per level, so the previous 16 MiB could carry
+/// only seven levels while the nested-execution budget declares eight: the
+/// refusal was undeliverable, and the process aborted on the level that should
+/// have been denied. A bound the stack cannot reach is not a bound.
+pub const RUNTIME_STACK_SIZE: usize = 32 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests {
