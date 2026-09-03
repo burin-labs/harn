@@ -23,10 +23,12 @@ import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_text, with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
-// The refusal a handler reports about its own execution. It carries no
-// top-level `ok` or `success` and no `product_error`, which is the whole
-// point: the only machine-readable evidence that this call was refused is the
-// typed denial itself.
+/**
+ * The refusal a handler reports about its own execution. It carries no
+ * top-level `ok` or `success` and no `product_error`, which is the whole
+ * point: the only machine-readable evidence that this call was refused is the
+ * typed denial itself.
+ */
 fn handler_denial(retryable: bool) {
   return {
     gate: "approval_policy",
@@ -44,7 +46,7 @@ fn refusing_toolset(retryable: bool) {
     "run",
     "Run a command.",
     {
-      handler: { args ->
+      handler: { _args ->
         agent_tool_handler_result(
           "Command failed (exit -1)\napproval unavailable: "
             + "command requires approval for risk class execution_semantics_unresolved",
@@ -66,11 +68,8 @@ fn succeeding_toolset() {
     "run",
     "Run a command.",
     {
-      handler: { args ->
-        agent_tool_handler_result(
-          "ok",
-          {command_status: "succeeded", denial: nil},
-        )
+      handler: { _args ->
+        agent_tool_handler_result("ok", {command_status: "succeeded", denial: nil})
       },
       parameters: {command: {type: "string", description: "Command to run"}},
       returns: {type: "object"},
