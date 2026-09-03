@@ -1600,15 +1600,12 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // them into `ok:true`: the agent loop reads `ok`/`status`.
             // Prefer the pre-coercion declaration: a dict-returning handler's
             // coerced payload no longer parses (harn#7884).
-            let body_failure = denied.then_some(None).unwrap_or_else(|| {
-                declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
-            });
-            let is_failure = denied || body_failure.is_some();
             let error_category = if denied {
                 Some("tool_rejected")
             } else {
-                body_failure
+                declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
             };
+            let is_failure = error_category.is_some();
             let observation =
                 format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
             let error = is_failure.then(|| rendered.clone());
