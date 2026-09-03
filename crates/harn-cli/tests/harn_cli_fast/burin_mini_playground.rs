@@ -714,19 +714,20 @@ mod stage_summary_tests {
     }
 }
 
-/// DIAGNOSTIC ONLY (harn#7993). Prints, never asserts on, what an
-/// `Inherited`-policy sandboxed `run`-tool child actually sees on this
-/// Windows runner: whether `where node` resolves, what `PATH` it received,
-/// and what directory it started in. Drives the exact seam
+/// DIAGNOSTIC PROBE (harn#7993). Asserts that `where node` resolves inside an
+/// `Inherited`-policy sandboxed `run`-tool child — the exact seam
 /// `burin_mini_comment_file_fixture_run_updates_workspace_copy`'s failing
 /// `node scripts/verify-comment.js` call goes through —
 /// `harness.process.exec` -> `process_command_config` ->
 /// `session_closed_env` -> `crate::security::resolve_env` — under
 /// `RunSandboxOptions::default()`, the same default `Inherited` policy that
-/// test runs under. Delete this once the Windows red above is understood
-/// and fixed; it exists to put the child's own view of its environment
-/// directly in the CI log instead of requiring another round trip through
-/// full playground fixture replay.
+/// test runs under. On failure the panic carries `PATH`, `PATHEXT`,
+/// `ComSpec`, `SystemRoot`, `CD`, and the full env key list the child itself
+/// saw (via `set`), so a red run on this test names the missing/wrong
+/// variable directly instead of requiring a round trip through full
+/// playground fixture replay. Keep this alongside the fixture test as a
+/// standing regression guard once the Windows red above is fixed; it is
+/// cheaper to run and pinpoints the same seam.
 #[cfg(windows)]
 #[test]
 fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
@@ -737,7 +738,7 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
         &script,
         r#"
 fn main(harness: Harness) {
-  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & echo PROBE_PATH=%PATH% & echo PROBE_CD=%CD%")
+  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & set PROBE_WHERE_STATUS=%ERRORLEVEL% & echo PROBE_WHERE_STATUS=%PROBE_WHERE_STATUS% & echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
   harness.stdio.println("PROBE_STATUS=${result.status}")
   harness.stdio.println("PROBE_SUCCESS=${result.success}")
   harness.stdio.println("PROBE_STDOUT_START")
@@ -769,13 +770,35 @@ fn main(harness: Harness) {
         .await
     });
 
-    // No assertions: the point is what prints below, in CI's own log, not a
-    // pass/fail signal. `eprintln!` (not `harness.stdio`) so it survives
-    // even if the script itself never got far enough to print anything.
+    // `eprintln!` (not `harness.stdio`) so the transcript survives even if
+    // the script itself never got far enough to print anything.
     eprintln!(
         "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n\
          exit_code={}\nscript stdout:\n{}\nscript stderr:\n{}\n\
          === end probe ===",
         outcome.exit_code, outcome.stdout, outcome.stderr
     );
+
+    // This drives the SAME sandboxed `run` tool, under the SAME Inherited
+    // policy, that `burin_mini_comment_file_fixture_run_updates_workspace_copy`
+    // uses to invoke `node`. If `where node` fails here, it fails there for
+    // the identical reason — so assert it and fail loudly with every fact
+    // the child saw, instead of leaving that report to print-and-hope.
+    let where_status_ok = outcome
+        .stdout
+        .lines()
+        .any(|line| line.trim() == "PROBE_WHERE_STATUS=0");
+    if !where_status_ok {
+        panic!(
+            "the sandboxed run tool's child could not resolve 'node' via \
+             `where node`, under the SAME Inherited environment policy the \
+             burin-mini playground test uses\n\
+             harness exec exit_code={}\n\
+             full script stdout (contains PATH/PATHEXT/ComSpec/SystemRoot/CD \
+             and the full child env key list, PROBE_ENV_START..PROBE_ENV_END, \
+             as the child itself saw them):\n{}\n\
+             full script stderr:\n{}",
+            outcome.exit_code, outcome.stdout, outcome.stderr
+        );
+    }
 }
