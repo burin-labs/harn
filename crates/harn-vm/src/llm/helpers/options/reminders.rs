@@ -19,30 +19,102 @@ pub(super) fn directive_envelope_instructions() -> &'static str {
         .as_str()
 }
 
+/// Who a directive speaks as once it reaches the model.
+///
+/// Chosen by a total match on [`ReminderRoleHint`], with no default arm, so a
+/// hint added later cannot fall through and silently borrow the person's
+/// voice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirectiveSpeaker {
+    /// Harness machinery: reminder providers, the completion judge, loop
+    /// feedback. Not the person the agent is working for.
+    Harness,
+    /// The person's own instructions, carried in a directive.
+    Person,
+}
+
+impl DirectiveSpeaker {
+    pub(super) fn from_role_hint(role_hint: ReminderRoleHint) -> Self {
+        match role_hint {
+            ReminderRoleHint::System
+            | ReminderRoleHint::Developer
+            | ReminderRoleHint::EphemeralCache => Self::Harness,
+            ReminderRoleHint::UserBlock => Self::Person,
+        }
+    }
+
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Harness => "harness",
+            Self::Person => "person",
+        }
+    }
+
+    /// The wire role the envelope message travels under.
+    ///
+    /// Both variants project onto `user` today, because `user` is the only
+    /// mid-conversation role every provider dialect accepts: Anthropic's
+    /// Messages API rejects any top-level role but `user` and `assistant`
+    /// inside the array, and the OpenAI, Gemini, and local dialects offer no
+    /// mid-array system slot either. So the distinction the model actually
+    /// reads is the envelope's `speaker` attribute plus the audience clause in
+    /// the instruction asset, not this role. The mapping lives here so that a
+    /// dialect which later grows a real harness role changes one function.
+    pub(super) fn transport_role(self) -> &'static str {
+        match self {
+            Self::Harness | Self::Person => "user",
+        }
+    }
+}
+
+/// One envelope carries every pending directive, so a single harness directive
+/// makes the whole envelope harness machinery.
+fn envelope_speaker(rendered: &[RenderedReminder]) -> DirectiveSpeaker {
+    if rendered
+        .iter()
+        .any(|reminder| reminder.speaker == DirectiveSpeaker::Harness)
+    {
+        DirectiveSpeaker::Harness
+    } else {
+        DirectiveSpeaker::Person
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RenderedReminder {
     reminder_id: Option<String>,
     text: String,
+    speaker: DirectiveSpeaker,
 }
 
 impl RenderedReminder {
     #[cfg(test)]
-    pub(super) fn untracked(text: impl Into<String>) -> Self {
+    pub(super) fn untracked(text: impl Into<String>, speaker: DirectiveSpeaker) -> Self {
         Self {
             reminder_id: None,
             text: text.into(),
+            speaker,
         }
     }
 
-    pub(super) fn tracked(reminder_id: impl Into<String>, text: impl Into<String>) -> Self {
+    pub(super) fn tracked(
+        reminder_id: impl Into<String>,
+        text: impl Into<String>,
+        speaker: DirectiveSpeaker,
+    ) -> Self {
         Self {
             reminder_id: Some(reminder_id.into()),
             text: text.into(),
+            speaker,
         }
     }
 
+    /// The role the wire actually used, for the reminder-lifecycle telemetry.
+    /// Both speakers transport as `user`, so this equals the role of the
+    /// envelope this directive rode in. Telemetry must never claim a role the
+    /// wire did not use.
     fn rendered_role(&self) -> String {
-        "user".to_string()
+        self.speaker.transport_role().to_string()
     }
 
     fn rendered_bytes(&self) -> usize {
@@ -67,18 +139,21 @@ pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String
         return None;
     }
     let instructions = directive_envelope_instructions();
+    let speaker = envelope_speaker(rendered).as_str();
     Some(format!(
-        "<context-directives>\n{instructions}\n{}\n</context-directives>",
+        "<context-directives speaker=\"{speaker}\">\n{instructions}\n{}\n</context-directives>",
         blocks.join("\n")
     ))
 }
 
-/// One trailing `user` message carrying the directive envelope.
+/// One trailing message carrying the directive envelope, under the transport
+/// role its speaker projects onto.
 pub(crate) fn directive_envelope_message(
     rendered: &[RenderedReminder],
 ) -> Option<serde_json::Value> {
+    let role = envelope_speaker(rendered).transport_role();
     directive_envelope(rendered).map(|envelope| {
-        let mut message = serde_json::json!({"role": "user", "content": envelope});
+        let mut message = serde_json::json!({"role": role, "content": envelope});
         let reminder_ids: Vec<&str> = rendered
             .iter()
             .filter_map(RenderedReminder::reminder_id)
@@ -95,8 +170,12 @@ pub(crate) fn tracked_directive_envelope_message(
     reminder_id: &str,
     text: &str,
 ) -> serde_json::Value {
-    directive_envelope_message(&[RenderedReminder::tracked(reminder_id, text)])
-        .expect("tracked directive is non-empty")
+    directive_envelope_message(&[RenderedReminder::tracked(
+        reminder_id,
+        text,
+        DirectiveSpeaker::Harness,
+    )])
+    .expect("tracked directive is non-empty")
 }
 
 /// Remove durable placement receipts before a message array reaches any
@@ -137,7 +216,11 @@ pub(crate) fn render_pending_reminders(
     reminders
         .iter()
         .map(|reminder| {
-            RenderedReminder::tracked(reminder.id.clone(), reminder_directive_text(reminder))
+            RenderedReminder::tracked(
+                reminder.id.clone(),
+                reminder_directive_text(reminder),
+                DirectiveSpeaker::from_role_hint(reminder.role_hint),
+            )
         })
         .collect()
 }

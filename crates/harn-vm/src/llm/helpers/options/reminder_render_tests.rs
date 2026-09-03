@@ -1,3 +1,4 @@
+use super::reminders::DirectiveSpeaker;
 use super::*;
 use super::{reminders::*, system_prompt::*};
 use crate::llm::helpers::{DirectiveAuthority, ReminderRoleHint};
@@ -51,6 +52,7 @@ fn every_route_and_legacy_role_hint_use_the_same_directive_shape() {
                 vec![RenderedReminder::tracked(
                     "reminder-1",
                     "<directive authority=\"corrective\">\nremember &lt;this&gt;\n</directive>",
+                    DirectiveSpeaker::from_role_hint(role_hint),
                 )]
             );
         }
@@ -74,6 +76,7 @@ fn finite_lifetime_is_part_of_the_model_facing_directive() {
         vec![RenderedReminder::tracked(
             "reminder-1",
             "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+            DirectiveSpeaker::Harness,
         )]
     );
 }
@@ -83,6 +86,7 @@ fn directive_instance_receipts_are_stripped_before_provider_dispatch() {
     let tracked = RenderedReminder::tracked(
         "reminder-1",
         "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+        DirectiveSpeaker::Harness,
     );
     let mut messages = apply_rendered_reminder_messages(Vec::new(), &[tracked]);
     assert_eq!(
@@ -102,9 +106,10 @@ fn directive_envelope_uses_the_instruction_asset_verbatim() {
         .expect("directive envelope instruction prompt asset");
     let directive = RenderedReminder::untracked(
         "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",
+        DirectiveSpeaker::Harness,
     );
     let expected = format!(
-        "<context-directives>\n{}\n{}\n</context-directives>",
+        "<context-directives speaker=\"harness\">\n{}\n{}\n</context-directives>",
         source.trim_end(),
         directive.text()
     );
@@ -124,7 +129,10 @@ fn system_text_reminders_are_excluded_from_system_string() {
     let prompt = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
-        &[RenderedReminder::untracked("reminder")],
+        &[RenderedReminder::untracked(
+            "reminder",
+            DirectiveSpeaker::Harness,
+        )],
     )
     .expect("system prompt")
     .expect("non-empty prompt");
@@ -133,14 +141,17 @@ fn system_text_reminders_are_excluded_from_system_string() {
     // The directive instead lands in the one trailing user envelope.
     let messages = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
-        &[RenderedReminder::untracked("reminder")],
+        &[RenderedReminder::untracked(
+            "reminder",
+            DirectiveSpeaker::Harness,
+        )],
     );
     let last = messages.last().expect("trailing message");
     assert_eq!(last["role"], "user");
     assert_eq!(
         last["content"],
         format!(
-            "<context-directives>\n{}\nreminder\n</context-directives>",
+            "<context-directives speaker=\"harness\">\n{}\nreminder\n</context-directives>",
             directive_envelope_instructions()
         )
     );
@@ -182,7 +193,7 @@ fn full_host_option_ordering_is_faithful() {
     let prompt = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
-        &[RenderedReminder::untracked("R")],
+        &[RenderedReminder::untracked("R", DirectiveSpeaker::Harness)],
     )
     .expect("system prompt")
     .expect("non-empty prompt");
@@ -217,7 +228,10 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     let turn_n_plus_1 = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
-        &[RenderedReminder::untracked(pressure)],
+        &[RenderedReminder::untracked(
+            pressure,
+            DirectiveSpeaker::Harness,
+        )],
     )
     .expect("system prompt")
     .expect("non-empty prompt");
@@ -232,8 +246,13 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     // not in the system string and not merged into the turn already there.
     let base_messages = || vec![serde_json::json!({"role": "user", "content": "hello"})];
     let msgs_n = apply_rendered_reminder_messages(base_messages(), &[]);
-    let msgs_n_plus_1 =
-        apply_rendered_reminder_messages(base_messages(), &[RenderedReminder::untracked(pressure)]);
+    let msgs_n_plus_1 = apply_rendered_reminder_messages(
+        base_messages(),
+        &[RenderedReminder::untracked(
+            pressure,
+            DirectiveSpeaker::Harness,
+        )],
+    );
     // Turn N: no reminder anywhere in the message array.
     assert!(!serde_json::to_string(&msgs_n)
         .unwrap()
@@ -248,7 +267,7 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     assert_eq!(
         msgs_n_plus_1[1]["content"],
         format!(
-            "<context-directives>\n{}\n{pressure}\n</context-directives>",
+            "<context-directives speaker=\"harness\">\n{}\n{pressure}\n</context-directives>",
             directive_envelope_instructions()
         )
     );
@@ -277,6 +296,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
         messages,
         &[RenderedReminder::untracked(
             "<directive authority=\"contract\">\nR\n</directive>",
+            DirectiveSpeaker::Harness,
         )],
     );
     assert_eq!(out.len(), 5);
@@ -289,7 +309,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
     assert_eq!(
         out[4]["content"],
         [
-            "<context-directives>",
+            "<context-directives speaker=\"harness\">",
             directive_envelope_instructions(),
             "<directive authority=\"contract\">",
             "R",
@@ -305,8 +325,14 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
     let out = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
         &[
-            RenderedReminder::untracked("<directive authority=\"contract\">\nA\n</directive>"),
-            RenderedReminder::untracked("<directive authority=\"corrective\">\nB\n</directive>"),
+            RenderedReminder::untracked(
+                "<directive authority=\"contract\">\nA\n</directive>",
+                DirectiveSpeaker::Harness,
+            ),
+            RenderedReminder::untracked(
+                "<directive authority=\"corrective\">\nB\n</directive>",
+                DirectiveSpeaker::Harness,
+            ),
         ],
     );
     assert_eq!(out.len(), 2);
@@ -314,7 +340,7 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
     assert_eq!(
         out[1]["content"],
         [
-            "<context-directives>",
+            "<context-directives speaker=\"harness\">",
             directive_envelope_instructions(),
             "<directive authority=\"contract\">",
             "A",
