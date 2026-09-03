@@ -30,8 +30,8 @@ mkdir -p .harn-tmp
 # banked before believing it.
 measured="$("$harn_bin" run scripts/check_stack_frames.harn -- \
   --census .harn-tmp/stack-frame-census.json \
-  --today "$(date -u +%F)" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["scanned_files"])')"
-banked="$(python3 -c 'import json; print(len(json.load(open("scripts/stack-frame-budget.json"))["files"]))')"
+  --today "$(date -u +%F)" --json | jq -r '.scanned_files')"
+banked="$(jq -r '.files | length' "$budget")"
 floor=$(( banked * 9 / 10 ))
 if [ "$measured" -lt "$floor" ]; then
   echo "refusing to bank: the census measured $measured files against $banked banked." >&2

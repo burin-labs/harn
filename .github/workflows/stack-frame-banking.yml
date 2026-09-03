@@ -57,6 +57,6 @@ jobs:
       # This job runs on its own schedule, so there is no CI run publishing a
       # shared Harn binary for it to download. It builds the one it needs.
       - name: Build the Harn CLI
-        run: cargo build -p harn-cli --bin harn
+        run: cargo build --locked -p harn-cli --bin harn
       - name: Bank the budget
         run: ./scripts/ci/bank_stack_frames.sh target/debug/harn
