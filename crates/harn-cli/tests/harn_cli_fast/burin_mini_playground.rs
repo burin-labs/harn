@@ -148,9 +148,84 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
         return;
     }
     let stage_summary = summarize_stages(report);
-    panic!(
-        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}\nfull report:\n{report}"
+    // On Windows, a failure here has repeatedly turned out to be a `node`
+    // resolution problem inside the sandboxed `run` tool (harn#7993), and the
+    // standalone diagnostic probe test that used to be the only place this
+    // was visible does not reliably show a PASS/FAIL line under nextest's
+    // `ci` profile (`success-output = "never"` on its siblings, and its own
+    // line has gone missing from at least one real CI run). Driving the same
+    // probe from inside THIS already-failing test's own panic message
+    // guarantees visibility: nextest's `failure-output = "immediate-final"`
+    // always prints a failing test's message in full, with no dependency on
+    // whether a sibling test's own report renders.
+    #[cfg(windows)]
+    let env_probe = format!(
+        "\nwindows env probe (same Inherited-policy run tool, run inline \
+         because this test just failed):\n{}\n",
+        windows_env_probe_dump()
     );
+    #[cfg(not(windows))]
+    let env_probe = String::new();
+    panic!(
+        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}{env_probe}\nfull report:\n{report}"
+    );
+}
+
+/// Run the same `where node & set ...` probe
+/// `windows_only_diagnostic_probe_of_the_sandboxed_run_child_env` runs, in its
+/// own throwaway sandbox, through the same `Inherited`-policy sandboxed `run`
+/// tool. Returns a formatted dump (never panics) so callers can fold it into
+/// their own failure message regardless of whether this probe itself
+/// resolved `node`.
+#[cfg(windows)]
+fn windows_env_probe_dump() -> String {
+    let temp = TempDir::new().unwrap();
+    let sandbox_root = temp.path().to_path_buf();
+    let script = sandbox_root.join("probe.harn");
+    fs::write(
+        &script,
+        r#"
+fn main(harness: Harness) {
+  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & set PROBE_WHERE_STATUS=%ERRORLEVEL% & echo PROBE_WHERE_STATUS=%PROBE_WHERE_STATUS% & echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
+  harness.stdio.println("PROBE_STATUS=${result.status}")
+  harness.stdio.println("PROBE_SUCCESS=${result.success}")
+  harness.stdio.println("PROBE_STDOUT_START")
+  harness.stdio.println(result.stdout)
+  harness.stdio.println("PROBE_STDOUT_END")
+  harness.stdio.println("PROBE_STDERR_START")
+  harness.stdio.println(result.stderr)
+  harness.stdio.println("PROBE_STDERR_END")
+}
+"#,
+    )
+    .unwrap();
+
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        execute_run_with_sandbox_options(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(sandbox_root),
+        )
+        .await
+    });
+
+    let where_status_ok = outcome
+        .stdout
+        .lines()
+        .any(|line| line.trim() == "PROBE_WHERE_STATUS=0");
+    format!(
+        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (contains PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list, PROBE_ENV_START..PROBE_ENV_END, as the child itself saw them):\n{}\nfull script stderr:\n{}",
+        outcome.exit_code, outcome.stdout, outcome.stderr
+    )
 }
 
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
@@ -721,84 +796,27 @@ mod stage_summary_tests {
 /// `harness.process.exec` -> `process_command_config` ->
 /// `session_closed_env` -> `crate::security::resolve_env` — under
 /// `RunSandboxOptions::default()`, the same default `Inherited` policy that
-/// test runs under. On failure the panic carries `PATH`, `PATHEXT`,
-/// `ComSpec`, `SystemRoot`, `CD`, and the full env key list the child itself
-/// saw (via `set`), so a red run on this test names the missing/wrong
-/// variable directly instead of requiring a round trip through full
-/// playground fixture replay. Keep this alongside the fixture test as a
-/// standing regression guard once the Windows red above is fixed; it is
-/// cheaper to run and pinpoints the same seam.
+/// test runs under. `windows_env_probe_dump` does the actual work and never
+/// panics; `assert_report_passes` also calls it inline on a Windows failure
+/// so the diagnostic is guaranteed to appear in a report that is ALREADY
+/// failing (and therefore always shown in full), rather than depending on
+/// this test's own PASS/FAIL line rendering under nextest's `ci` profile.
+/// Keep both alongside the fixture test as a standing regression guard once
+/// the Windows red above is fixed; this one is cheaper to run in isolation
+/// and pinpoints the same seam.
 #[cfg(windows)]
 #[test]
 fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
-    let temp = TempDir::new().unwrap();
-    let sandbox_root = temp.path().to_path_buf();
-    let script = sandbox_root.join("probe.harn");
-    fs::write(
-        &script,
-        r#"
-fn main(harness: Harness) {
-  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & set PROBE_WHERE_STATUS=%ERRORLEVEL% & echo PROBE_WHERE_STATUS=%PROBE_WHERE_STATUS% & echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
-  harness.stdio.println("PROBE_STATUS=${result.status}")
-  harness.stdio.println("PROBE_SUCCESS=${result.success}")
-  harness.stdio.println("PROBE_STDOUT_START")
-  harness.stdio.println(result.stdout)
-  harness.stdio.println("PROBE_STDOUT_END")
-  harness.stdio.println("PROBE_STDERR_START")
-  harness.stdio.println(result.stderr)
-  harness.stdio.println("PROBE_STDERR_END")
-}
-"#,
-    )
-    .unwrap();
-
-    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = harn_state_lock::lock_harn_state_async().await;
-        let _cwd_guard = cwd_lock::lock_cwd_async().await;
-        harn_vm::reset_thread_local_state();
-        execute_run_with_sandbox_options(
-            &script.to_string_lossy(),
-            false,
-            HashSet::new(),
-            Vec::new(),
-            Vec::new(),
-            CliLlmMockMode::Off,
-            None,
-            RunProfileOptions::default(),
-            RunSandboxOptions::default().with_workspace_root(sandbox_root),
-        )
-        .await
-    });
-
+    let dump = windows_env_probe_dump();
     // `eprintln!` (not `harness.stdio`) so the transcript survives even if
-    // the script itself never got far enough to print anything.
+    // the probe script itself never got far enough to print anything.
     eprintln!(
-        "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n\
-         exit_code={}\nscript stdout:\n{}\nscript stderr:\n{}\n\
-         === end probe ===",
-        outcome.exit_code, outcome.stdout, outcome.stderr
+        "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n{dump}\n=== end probe ==="
     );
-
-    // This drives the SAME sandboxed `run` tool, under the SAME Inherited
-    // policy, that `burin_mini_comment_file_fixture_run_updates_workspace_copy`
-    // uses to invoke `node`. If `where node` fails here, it fails there for
-    // the identical reason — so assert it and fail loudly with every fact
-    // the child saw, instead of leaving that report to print-and-hope.
-    let where_status_ok = outcome
-        .stdout
-        .lines()
-        .any(|line| line.trim() == "PROBE_WHERE_STATUS=0");
-    if !where_status_ok {
-        panic!(
-            "the sandboxed run tool's child could not resolve 'node' via \
-             `where node`, under the SAME Inherited environment policy the \
-             burin-mini playground test uses\n\
-             harness exec exit_code={}\n\
-             full script stdout (contains PATH/PATHEXT/ComSpec/SystemRoot/CD \
-             and the full child env key list, PROBE_ENV_START..PROBE_ENV_END, \
-             as the child itself saw them):\n{}\n\
-             full script stderr:\n{}",
-            outcome.exit_code, outcome.stdout, outcome.stderr
-        );
-    }
+    assert!(
+        dump.starts_with("where_node_ok=true"),
+        "the sandboxed run tool's child could not resolve 'node' via \
+         `where node`, under the SAME Inherited environment policy the \
+         burin-mini playground test uses\n{dump}"
+    );
 }

@@ -757,6 +757,10 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
+#[path = "process_program_resolution.rs"]
+mod program_resolution;
+pub(crate) use program_resolution::{resolve_program_path, resolve_program_path_for_spawn};
+
 /// Shared synchronous spawn-and-capture core used by `harness.process.run` and
 /// the `exec_opts`/`exec_at_opts` internal builtins. Honors cwd, an env
 /// overlay (merge or replace via `env_clear`), the live session environment's
@@ -770,11 +774,6 @@ struct CapturedRun {
 /// `crate::op_interrupt` for the mechanism.
 fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let label = spec.label;
-    let mut command = std::process::Command::new(spec.cmd);
-    command.args(spec.args);
-    if let Some(cwd) = spec.cwd {
-        command.current_dir(cwd);
-    }
     // A `replace` request (`env_clear`) is already closed — only the caller's
     // keys survive — so it needs no further narrowing. A `merge` request would
     // otherwise inherit the parent environment wholesale, which under a session
@@ -785,6 +784,15 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     } else {
         session_closed_env_for_command(spec.cmd, spec.env.iter().cloned())?
     };
+    // Resolve a bare program name to an absolute path using the EXACT `PATH`
+    // the child is about to receive, searched here in the parent (harn#7993).
+    let resolved_cmd =
+        resolve_program_path(spec.cmd, &resolved_environment, spec.env_clear, spec.env);
+    let mut command = std::process::Command::new(&resolved_cmd);
+    command.args(spec.args);
+    if let Some(cwd) = spec.cwd {
+        command.current_dir(cwd);
+    }
     if spec.env_clear || resolved_environment.is_some() {
         command.env_clear();
     }
