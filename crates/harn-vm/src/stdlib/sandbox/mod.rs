@@ -77,8 +77,17 @@ pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod replace;
 
-pub use refusal::process_violation_error;
+// Each backend uses exactly one of these: the platform helpers call
+// `unavailable`, Linux installs confinement in `pre_exec` and warns directly.
+#[cfg(target_os = "linux")]
+pub(crate) use refusal::mechanism_skipped_warning;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use refusal::unavailable;
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
+pub use refusal::{
+    process_violation_error, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement,
+};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
 #[cfg(target_os = "windows")]
@@ -1745,31 +1754,6 @@ fn toolchain_cache_default_named_in_denial(
             detail.contains(&root.to_string_lossy().to_ascii_lowercase())
                 && !jail.iter().any(|jail_root| path_is_within(root, jail_root))
         })
-}
-
-/// Helper for backends that can't attach confinement at all (macOS
-/// without `/usr/bin/sandbox-exec`, Windows when called through the
-/// `Command`-returning entry points): either fail loudly under
-/// `OsHardened` / `enforce`, or warn once and proceed direct.
-///
-/// Linux and OpenBSD don't reach this path — they install confinement
-/// in `pre_exec` and surface unavailability through `landlock_profile`
-/// directly. The dead-code lint allow keeps the helper compilable on
-/// targets where no backend uses it.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-pub(crate) fn unavailable(
-    message: &str,
-    profile: SandboxProfile,
-) -> Result<PrepareOutcome, VmError> {
-    match effective_fallback(profile) {
-        SandboxFallback::Off | SandboxFallback::Warn => {
-            warn_once("handler_sandbox_unavailable", message);
-            Ok(PrepareOutcome::Direct)
-        }
-        SandboxFallback::Enforce => Err(sandbox_rejection(format!(
-            "{message}; set {HANDLER_SANDBOX_ENV}=warn or off to run unsandboxed"
-        ))),
-    }
 }
 
 /// Writable workspace roots derived from the active agent session's

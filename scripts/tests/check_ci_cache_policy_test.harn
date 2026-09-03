@@ -1,6 +1,7 @@
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
+  PULL_REQUEST_RESTORE_ONLY_SAVE,
   RELEASE_PATH_FILTER_ACTION,
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
@@ -15,6 +16,7 @@ import {
   release_warm_cache_prune_errors,
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
+  save_requested,
   sccache_action_cache_size_errors,
   windows_pr_native_feedback_errors,
   windows_release_certify_warm_errors,
@@ -1217,4 +1219,23 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
       "build-release-binaries.yml:cache_budget must run ./scripts/report_ci_cache_budget.sh exactly once",
     ),
   )
+}
+
+/**
+ * A cache writer's `save` may be conditional, but only on a guard this checker
+ * recognises. An expression nobody classified is refused rather than read as
+ * "saves": that reading is what would let a sole producer silently stop writing
+ * while the gate went on reporting a healthy writer, which is the exact shape
+ * where a missing observation passes for a satisfied one.
+ */
+pipeline test_cache_save_guard_must_be_recognised(task: any) {
+  assert_eq(save_requested({with: {save: true}}), true)
+  assert_eq(save_requested({with: {save: "true"}}), true)
+  assert_eq(save_requested({with: {save: PULL_REQUEST_RESTORE_ONLY_SAVE}}), true)
+  assert_eq(save_requested({with: {save: false}}), false)
+  assert_eq(save_requested({}), false)
+  // The failure this rule exists for: a plausible-looking guard nobody
+  // declared, which the old string test would have accepted as a writer.
+  const undeclared = "$" + "{{ github.event_name == 'schedule' }}"
+  assert_eq(save_requested({with: {save: undeclared}}), false)
 }

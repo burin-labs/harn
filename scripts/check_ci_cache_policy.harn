@@ -19,6 +19,7 @@ pub import {
   CiCachePolicy,
   CiCacheWriter,
   NATIVE_CACHE_INPUTS,
+  PULL_REQUEST_RESTORE_ONLY_SAVE,
   RELEASE_PATH_FILTER_ACTION,
   ReleaseWarmCachePathPolicy,
   WindowsWorkspaceWarmPolicy,
@@ -31,6 +32,7 @@ pub import {
   release_warm_cache_path_policy_errors,
   release_warm_cache_path_policy_parse,
   release_warm_cache_prune_errors,
+  save_requested,
   setup_harn_cache_action_errors,
 } from "./ci_cache_policy/policy_core.harn"
 
