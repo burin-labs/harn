@@ -9,9 +9,14 @@
 // verification failed still sealed `done` -- so the Windows job was green on a
 // run that had verified nothing (harn#7968).
 //
-// Node is the portable choice here: the workspace is a Node/TypeScript demo,
-// node is on the PATH of every runner this playground executes on, and the
-// invocation needs no shell quoting at all.
+// Node is the portable choice here: the workspace is a Node/TypeScript demo
+// and the invocation needs no shell quoting at all.
+//
+// It is not, on its own, enough. The first Windows run of this verifier still
+// failed, because the harness handed the child a working directory cmd.exe
+// refuses and an environment with no search path in it. Those were defects in
+// the harness rather than in this script, and they are fixed where they live;
+// what this file owns is being runnable once the child is started correctly.
 //
 // It fails closed. A missing file, an unreadable file, or a missing marker all
 // exit non-zero. The one thing this must never do is stay silent about a check

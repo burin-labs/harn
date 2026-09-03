@@ -160,6 +160,48 @@ pub fn execution_root_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// The form of `path` a child process can actually be started in.
+///
+/// Canonicalizing a path on Windows yields the extended-length `\\?\C:\...`
+/// form. That form is correct for the Win32 file APIs and unusable as a
+/// working directory for a shell: `cmd.exe` refuses it as a UNC path, prints
+/// "UNC paths are not supported", and then starts anyway in the Windows
+/// directory. The child is left running somewhere it was never asked to run,
+/// so every workspace-relative path it is given is missing, and the failure
+/// names the missing file rather than the wrong directory.
+///
+/// Stripping the prefix is a no-op on POSIX, where no path begins with it, so
+/// this is applied on every platform rather than behind a `cfg` and the same
+/// seam is exercised wherever the tests run. A true UNC path
+/// (`\\?\UNC\server\share`) is left alone: there is no drive-letter form of
+/// it to fall back to, and rewriting it would name a different location.
+pub(crate) fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
+    match path.to_str().and_then(strip_windows_verbatim_prefix) {
+        Some(stripped) => std::path::PathBuf::from(stripped),
+        None => path,
+    }
+}
+
+/// Strip a `\\?\` prefix from a verbatim **disk** path, or return `None` when
+/// `path` is not one. Split out from [`child_process_cwd`] so the rule is
+/// testable as a pure string transformation on any platform.
+fn strip_windows_verbatim_prefix(path: &str) -> Option<&str> {
+    let rest = path.strip_prefix(r"\\?\")?;
+    let mut chars = rest.chars();
+    // A drive-letter path, and nothing else. `\\?\UNC\...` fails this and is
+    // deliberately left as it is.
+    if !chars.next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    if chars.next()? != ':' {
+        return None;
+    }
+    match chars.next() {
+        Some('\\') | Some('/') | None => Some(rest),
+        Some(_) => None,
+    }
+}
+
 /// Resolve the directory an omitted process `cwd` inherits on the active path.
 ///
 /// Sandboxed execution may deliberately choose the first launchable workspace
@@ -1090,9 +1132,9 @@ fn process_command_config(
     if let Some(dir) = dir {
         let resolved = resolve_command_dir(dir);
         crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
-        config.cwd = Some(resolved);
+        config.cwd = Some(child_process_cwd(resolved));
     } else {
-        config.cwd = Some(inherited_process_cwd()?);
+        config.cwd = Some(child_process_cwd(inherited_process_cwd()?));
         if let Some(context) = current_execution_context() {
             if !context.env.is_empty() {
                 config.env.extend(context.env);

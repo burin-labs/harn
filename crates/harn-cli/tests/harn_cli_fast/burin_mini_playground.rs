@@ -312,7 +312,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("./scripts/verify-rate-limit.sh")
+        Some("node scripts/verify-rate-limit.js")
     );
     for action in [create_action, export_action, wire_action] {
         assert_eq!(action["command"].as_str().unwrap_or(""), "");
@@ -431,7 +431,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("./scripts/verify-rate-limit.sh")
+        Some("node scripts/verify-rate-limit.js")
     );
     assert!(
         !actions.iter().any(|item| item["id"] == "verify_output"),

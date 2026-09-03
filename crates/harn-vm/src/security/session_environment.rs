@@ -545,8 +545,29 @@ impl SessionEnvironment {
         }
     }
 
+    /// The launcher's value for `name`, matched the way the host platform
+    /// matches environment names.
+    ///
+    /// Windows environment names are case-insensitive, and the case a parent
+    /// reports is not the case an allowlist is written in: the variable this
+    /// codebase calls `PATH` arrives from a Windows parent spelled `Path`.
+    /// An exact map lookup therefore misses it, and a child inherits no
+    /// search path at all while every name in the allowlist still looks
+    /// admitted. Fold case on Windows so the allowlist means the same thing
+    /// there that it means on POSIX, where names are case-sensitive and the
+    /// exact lookup is the correct one.
     pub(crate) fn launcher_value(&self, name: &str) -> Option<&str> {
-        self.launcher_snapshot.get(name).map(String::as_str)
+        if let Some(value) = self.launcher_snapshot.get(name) {
+            return Some(value.as_str());
+        }
+        if cfg!(windows) {
+            return self
+                .launcher_snapshot
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.as_str());
+        }
+        None
     }
 
     pub(crate) fn launcher_snapshot(&self) -> &BTreeMap<String, String> {

@@ -191,8 +191,8 @@ requests were not stable enough in this harness during the May 2026 tuning pass.
 - Semantic evaluator helpers live in `lib/eval_common.harn`, and the grader
   entrypoint is `evaluator.harn`.
 - The verify script for the rate-limit task lives at
-  `workspace/scripts/verify-rate-limit.sh`. The slow-verifier variant is
-  `workspace/scripts/verify-slow.sh`; override its delay with
+  `workspace/scripts/verify-rate-limit.js`. The slow-verifier variant is
+  `workspace/scripts/verify-slow.js`; override its delay with
   `MINI_VERIFY_SLEEP_SECONDS`.
 - Repo integration:
   `cargo test -p harn-cli --test burin_mini_playground` exercises the paired
