@@ -7,10 +7,22 @@
     "because the worst frame in a file bounds every other frame in it: a lesser",
     "frame that grew past this number would become the new worst and be caught.",
     "",
-    "Shrink-only. Growth of any listed file is refused. Shrinkage must be banked",
-    "with --write so the budget keeps the ground it gained. A file that crosses",
-    "threshold_bytes for the first time must be added, so the census stays",
-    "complete; an incomplete census is not a gate.",
+    "Growth past a file's number by more than its tolerance band is refused.",
+    "Shrinkage passes and is reported; so does movement inside the band. Banking",
+    "a new baseline happens on main in the stack-frame banking job, never on a",
+    "pull request, so no branch rewrites the measurement it is judged by.",
+    "",
+    "The band is max(tolerance_bytes, number * tolerance_fraction). It is margin,",
+    "not measured noise: the same tree was measured four times, once on a build",
+    "host and three times by this gate's own CI job, and all 112 files agreed to",
+    "the byte. Observed run-to-run variance was zero. The band is held against a",
+    "future toolchain that is less reproducible than this one, and the byte floor",
+    "exists so a frame just over threshold_bytes still gets a usable band.",
+    "",
+    "A budgeted file absent from the census is refused, and that one cannot be",
+    "relaxed. A crate the census failed to measure and a frame that shrank under",
+    "threshold_bytes look identical here, and the first is how this gate shipped",
+    "a baseline too low to hold. Absence must never read as a pass.",
     "",
     "Separately, any frame within near_ceiling_fraction of ceiling_bytes is",
     "refused outright regardless of its budget, because that is the band where a",
@@ -335,7 +347,7 @@
       "path": "crates/harn-vm/src/llm/agent_config.rs"
     },
     {
-      "max_bytes": 355592,
+      "max_bytes": 355352,
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs"
     },
     {
@@ -455,7 +467,7 @@
       "path": "crates/harn-vm/src/stdlib/workflow/stage.rs"
     },
     {
-      "max_bytes": 138660,
+      "max_bytes": 138408,
       "path": "crates/harn-vm/src/stdlib/workflow/state.rs"
     },
     {
@@ -493,5 +505,7 @@
   ],
   "near_ceiling_fraction": 0.05,
   "threshold_bytes": 100000,
-  "version": 2
+  "tolerance_bytes": 256,
+  "tolerance_fraction": 0.005,
+  "version": 3
 }

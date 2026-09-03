@@ -205,6 +205,25 @@ pub fn is_generated_path(path: &Path) -> bool {
         .is_some_and(|name| name.ends_with(GENERATED_HARN_SUFFIX))
 }
 
+/// True when `path` is test source: anywhere under a directory named `tests`,
+/// or a file whose stem ends in `_test`.
+///
+/// Path-driven for the same reason [`is_generated_path`] is. A test root is a
+/// structural fact about where a file lives, visible in review and not
+/// forgeable by pasting a marker into a file that wants a rule turned off.
+pub fn is_test_source_path(path: &Path) -> bool {
+    use std::path::Component;
+    if path
+        .components()
+        .any(|component| matches!(component, Component::Normal(name) if name == "tests"))
+    {
+        return true;
+    }
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.ends_with("_test"))
+}
+
 /// True when `path` points at Harn's canonical embedded stdlib source tree.
 ///
 /// Stdlib contract lints are intentionally path-driven: files under

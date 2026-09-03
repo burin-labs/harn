@@ -67,6 +67,16 @@ pub(super) fn parse_tool_search_option(
         VmValue::Nil => Ok(None),
         VmValue::Bool(false) => Ok(None),
         VmValue::Bool(true) => Ok(Some(ToolSearchConfig::default_bm25_auto())),
+        // A bare string is either a MODE word or a strategy variant. Reading a
+        // mode word as a variant is not a silent mistake: `tool_search: "auto"`
+        // is the natural way to write "let Harn pick the path", and rejecting
+        // it here refuses the option outright rather than resolving it.
+        VmValue::String(s) if matches!(s.as_str(), "auto" | "native" | "client") => {
+            Ok(Some(ToolSearchConfig {
+                variant: ToolSearchVariant::Bm25,
+                mode: mode_from_short(s.as_str())?,
+            }))
+        }
         VmValue::String(s) => Ok(Some(ToolSearchConfig {
             variant: variant_from_short(s.as_str())?,
             mode: ToolSearchMode::Auto,

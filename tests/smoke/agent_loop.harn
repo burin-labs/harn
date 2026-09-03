@@ -15,6 +15,7 @@
  * platform.
  */
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn smoke_tools() {
@@ -41,18 +42,19 @@ pipeline default(harness: Harness) {
     harness.llm,
     [llm_tool_call("add", {lhs: 2, rhs: 3}), llm_text("The sum is 5.")],
     { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: smoke_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 4,
+        turn_end_condition: nil,
+      }
       const result = agent_loop(
         harness,
         "Add 2 and 3 using the tool, then report the sum.",
         nil,
-        {
-          provider: "mock",
-          tools: smoke_tools(),
-          tool_format: "native",
-          loop_until_done: true,
-          max_iterations: 4,
-          turn_end_condition: nil,
-        },
+        opts,
       )
       if result.status != "done" {
         throw "agent loop smoke failed: expected status=done, got ${result.status}"

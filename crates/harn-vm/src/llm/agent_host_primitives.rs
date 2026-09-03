@@ -25,10 +25,9 @@ use denial_results::{
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
-    emit_permission_event, emit_permission_event_with_policy, emit_runtime_auto_approved_activity,
-    emit_runtime_denied_activity, emit_runtime_resolved_activity,
-    emit_runtime_unavailable_activity, request_host_permission, HostPermissionOutcome,
-    HostPermissionRequest,
+    emit_permission_event, emit_permission_event_with_policy, emit_runtime_denied_activity,
+    emit_runtime_resolved_activity, emit_runtime_unavailable_activity, record_allowed_dispatch,
+    request_host_permission, HostPermissionOutcome, HostPermissionRequest,
 };
 use primitive_args::{
     option_int as agent_primitive_option_int, option_str as agent_primitive_option_str,
@@ -1121,17 +1120,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
 
     match approval {
         None => {}
-        Some(decision) if decision.is_allow() && decision.has_audit_signal() => {
-            emit_permission_event_with_policy(
-                &session_id,
-                "PermissionGrant",
-                &tool_name,
-                &tool_args,
-                &decision.reason,
-                false,
-                Some(decision.receipt.clone()),
-            );
-            emit_runtime_auto_approved_activity(&session_id, &tool_id, &tool_name, &decision);
+        // One arm for every allowed dispatch; the recorder names whoever
+        // decided it. The old audit-signal condition also dropped a reviewer
+        // grant on a rule carrying no id and no risk label.
+        Some(decision)
+            if decision.is_allow() && crate::orchestration::decision_records_a_grant(&decision) =>
+        {
+            record_allowed_dispatch(&session_id, &tool_id, &tool_name, &tool_args, &decision);
         }
         Some(decision) if decision.is_deny() => {
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
@@ -2842,6 +2837,9 @@ mod parse_tool_call_id_tests;
 
 #[cfg(test)]
 mod approval_unavailable_tests;
+
+#[cfg(test)]
+mod auto_review_decider_tests;
 #[cfg(test)]
 mod schema_argument_dispatch_tests;
 #[cfg(test)]

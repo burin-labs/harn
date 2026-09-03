@@ -20,10 +20,12 @@ fn budget(
   exceptions: list<StackFrameException> = [],
 ) -> StackFrameBudget {
   return {
-    version: 2,
+    version: 3,
     threshold_bytes: 100000,
     ceiling_bytes: 512000,
     near_ceiling_fraction: 0.05,
+    tolerance_bytes: 256,
+    tolerance_fraction: 0.005,
     comment: [],
     exceptions: exceptions,
     files: [{path: path, max_bytes: max_bytes}],
@@ -47,13 +49,40 @@ pipeline test_worst_frame_keeps_the_largest_per_file(harness: Harness, task: unk
   assert_eq(len(keys(worst)), 2, "non-JSON noise is ignored, not counted")
 }
 
+/**
+ * The band's whole purpose. One byte over used to fail the build, on files the
+ * author never touched, which is what made this gate unusable.
+ */
 @test
-pipeline test_growth_beyond_a_budget_is_refused(harness: Harness, task: unknown) {
+pipeline test_growth_inside_the_band_passes_and_is_reported(harness: Harness, task: unknown) {
   const worst = worst_frame_by_file(diagnostic("a.rs", 10, 300001))
   const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
-  assert_eq(report.violation_count, 1, "one byte over budget is a finding")
+  assert_eq(report.violation_count, 0, "one byte over budget is noise, not a refusal")
+  assert_eq(report.notes[0].kind, "growth_within_band", "the move is still reported")
+  assert(contains(render_drift(report), "+1"), "the drift record prints the delta")
+}
+
+/**
+ * The control that keeps the band from being an amnesty. 300000 takes a
+ * 1500-byte band by the fraction, so 302000 is real growth.
+ */
+@test
+pipeline test_growth_beyond_the_band_is_refused(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 302000))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  assert_eq(report.violation_count, 1, "growth past the band is a finding")
   assert_eq(report.findings[0].kind, "growth", "growth is named as growth")
-  assert_eq(report.findings[0].observed_bytes, 300001, "the report carries the measurement")
+  assert_eq(report.findings[0].observed_bytes, 302000, "the report carries the measurement")
+}
+
+/**
+ * The byte floor. A frame just over the collection threshold gets almost no
+ * band from the fraction alone, so the floor has to carry it.
+ */
+@test
+pipeline test_a_small_frame_gets_the_byte_floor_not_the_fraction(harness: Harness, task: unknown) {
+  assert_eq(tolerance_for(budget("a.rs", 100000), 20000), 256, "the floor wins on a small number")
+  assert_eq(tolerance_for(budget("a.rs", 100000), 300000), 1500, "the fraction wins on a large one")
 }
 
 @test
@@ -62,21 +91,34 @@ pipeline test_a_frame_at_its_budget_passes(harness: Harness, task: unknown) {
   const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
   assert_eq(report.violation_count, 0, "exactly at budget is not growth")
   assert_eq(report.budgeted_files, 1, "the pass line still reports what it judged")
-}
-
-@test
-pipeline test_a_shrunk_frame_demands_tightening(harness: Harness, task: unknown) {
-  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 200000))
-  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
-  assert_eq(report.violation_count, 1, "a shrink must not silently bank slack")
-  assert_eq(report.findings[0].kind, "tighten", "a shrink is named as a tighten")
+  assert_eq(len(report.notes), 0, "nothing moved, so there is nothing to report")
+  assert(
+    contains(render_drift(report), "none"),
+    "a tree that matches its baseline says so, which is what makes two runs comparable",
+  )
 }
 
 /**
- * The absence control. A budgeted file that disappears from the census has
- * fallen under the collection threshold, and that must read as a finding
- * rather than as a pass. Without this, deleting a budgeted file's diagnostics
- * would make the gate green while measuring nothing about it.
+ * A shrink is progress. Refusing it was the second half of what made this gate
+ * unusable: an author who made a frame smaller was told the build had failed.
+ */
+@test
+pipeline test_a_shrunk_frame_passes_and_names_the_ground_it_left(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 200000))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  assert_eq(report.violation_count, 0, "a shrink is never a refusal")
+  assert_eq(report.notes[0].kind, "banked_ground", "the unbanked ground is named")
+  assert(contains(render_drift(report), "-100000"), "the drift record prints how far it moved")
+}
+
+/**
+ * The absence control, and the one rule the band does not relax.
+ *
+ * A budgeted file missing from the census either shrank under the collection
+ * threshold or was never measured, and those are indistinguishable from here.
+ * The second is exactly how the first version of this gate shipped a baseline
+ * too low to hold: a warm build replayed cached diagnostics, so whole crates
+ * went unmeasured and their absence read as nothing to report.
  */
 @test
 pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(
@@ -86,10 +128,10 @@ pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(
   const worst = worst_frame_by_file(diagnostic("other.rs", 10, 200000))
   const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
   const kinds = report.findings.map({ f -> f.kind })
-  assert(contains(kinds, "shrunk_below_threshold"), "an absent budgeted file is a finding")
+  assert(contains(kinds, "absent_from_census"), "an absent budgeted file is a finding")
   assert_eq(
     report.findings[0].kind,
-    "shrunk_below_threshold",
+    "absent_from_census",
     "absence is named for what it is, not treated as satisfied",
   )
   assert_eq(report.findings[0].observed_bytes, nil, "no measurement is reported as none")
@@ -97,24 +139,48 @@ pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(
 
 @test
 pipeline test_report_text_names_the_file_and_both_numbers(harness: Harness, task: unknown) {
-  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 300001))
+  const worst = worst_frame_by_file(diagnostic("a.rs", 10, 302000))
   const rendered = render_report(judge_stack_frames(worst, budget("a.rs", 300000), TODAY))
   assert(contains(rendered, "a.rs"), "the failing file is named")
-  assert(contains(rendered, "300001"), "the observed size is printed")
+  assert(contains(rendered, "302000"), "the observed size is printed")
   assert(contains(rendered, "300000"), "the budget it broke is printed")
 }
 
 /**
- * A frame crossing the collection floor for the first time must be recorded,
- * not silently tolerated. An incomplete census is not a gate: a file nobody
- * listed is a file nobody is watching.
+ * A newcomer is judged against the collection threshold, because that is where
+ * it must have been before it appeared. A frame that crosses by a hair passes;
+ * one that arrives far above it is real growth.
+ *
+ * The old rule refused every newcomer and reported it against a budget of
+ * zero, which read as if the gate had lost the number rather than never having
+ * had one.
  */
 @test
-pipeline test_an_unlisted_frame_is_refused(harness: Harness, task: unknown) {
+pipeline test_a_newcomer_just_over_the_threshold_passes(harness: Harness, task: unknown) {
+  const worst = worst_frame_by_file(diagnostic("newcomer.rs", 10, 100026))
+  const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
+  const kinds = report.notes.map({ f -> f.kind })
+  assert(contains(kinds, "unlisted_within_band"), "a hair over the threshold is not a refusal")
+  assert_eq(report.violation_count, 1, "only the absent budgeted file refuses here")
+  assert_eq(
+    report.findings[0].kind,
+    "absent_from_census",
+    "and it is the absence, not the newcomer",
+  )
+}
+
+@test
+pipeline test_a_newcomer_far_above_the_threshold_is_refused(harness: Harness, task: unknown) {
   const worst = worst_frame_by_file(diagnostic("newcomer.rs", 10, 150000))
   const report = judge_stack_frames(worst, budget("a.rs", 300000), TODAY)
   const kinds = report.findings.map({ f -> f.kind })
-  assert(contains(kinds, "unlisted"), "a file absent from the budget is named")
+  assert(contains(kinds, "unlisted"), "a frame arriving far above the threshold is named")
+  const unlisted = report.findings.filter({ f -> f.kind == "unlisted" })
+  assert_eq(
+    unlisted[0].budget_bytes,
+    100000,
+    "it is judged against the threshold, not against zero",
+  )
 }
 
 /**

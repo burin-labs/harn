@@ -73,8 +73,8 @@ pipeline test_forced_stop_after_recovery_is_terminal(harness: Harness, task: unk
       llm_text("Rescued after a forced stop. ##DONE##"),
     ],
     { ->
-      let session = "forced-stop-terminal-" + harness.random.uuid()
-      let opts: AgentSpec = {
+      const session = "forced-stop-terminal-" + harness.random.uuid()
+      const opts: AgentSpec = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -94,15 +94,15 @@ pipeline test_forced_stop_after_recovery_is_terminal(harness: Harness, task: unk
         },
         terminal_callback: { _info -> return {message: "Try once more."} },
       }
-      let captured = agent_capture_events(
+      const captured = agent_capture_events(
         harness.agent,
         session,
         fn() { return agent_loop(harness, "Inspect the target model.", nil, opts) },
       )
-      let result = captured.result
+      const result = captured.result
       assert_eq(result.status, "stuck")
       assert_eq(result.stop_reason, "thrash_hard_stop")
-      let rescued = events_of(captured.events, "loop_control_decision").filter(
+      const rescued = events_of(captured.events, "loop_control_decision").filter(
         { event -> event.reason == "terminal_callback_continue" },
       )
       assert_eq(len(rescued), 0, "a forced stop must not be re-opened by the terminal callback")
@@ -119,8 +119,8 @@ pipeline test_repeated_unchanged_evidence_is_bounded(harness: Harness, task: unk
     harness.llm,
     [run_call("r1"), run_call("r2"), run_call("r3"), run_call("r4"), run_call("r5")],
     { ->
-      let session = "recovery-bound-" + harness.random.uuid()
-      let opts: AgentSpec = {
+      const session = "recovery-bound-" + harness.random.uuid()
+      const opts: AgentSpec = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -138,18 +138,18 @@ pipeline test_repeated_unchanged_evidence_is_bounded(harness: Harness, task: unk
           max_feedback: 4,
         },
       }
-      let captured = agent_capture_events(
+      const captured = agent_capture_events(
         harness.agent,
         session,
         fn() { return agent_loop(harness, "Inspect the target model.", nil, opts) },
       )
-      let receipts = recovery_receipts(captured.events)
+      const receipts = recovery_receipts(captured.events)
       assert(len(receipts) >= 2, "the bound must be recorded, not just the rescue")
-      let fired = receipts.filter({ event -> event.checkpoint.status == "fired" })
+      const fired = receipts.filter({ event -> event.checkpoint.status == "fired" })
       assert_eq(len(fired), 1, "unchanged evidence earns exactly one recovery")
       assert_eq(fired[0].checkpoint.consecutive_recoveries, 1)
       assert_eq(fired[0].checkpoint.bound, "")
-      let skipped = receipts.filter({ event -> event.checkpoint.status == "skipped" })
+      const skipped = receipts.filter({ event -> event.checkpoint.status == "skipped" })
       assert(len(skipped) >= 1, "the refused recovery must leave a receipt")
       assert_eq(skipped[0].checkpoint.bound, "unchanged_evidence")
       assert_eq(skipped[0].checkpoint.consecutive_recoveries, 1)

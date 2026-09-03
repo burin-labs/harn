@@ -1,0 +1,186 @@
+// MECHANISM CONTRACT (onramp tier): a judge resolves its model from its own
+// configuration or the catalog's judge role, and never from the run's own
+// model.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — a run with an actor model set configures a completion judge and
+//              gives it no model of its own;
+//   effect   — the judge grades on the catalog's judge row for that provider
+//              family, recorded on the admission receipt with the source named
+//              `catalog_role`; where the provider family has no judge row the
+//              judge refuses instead, with the source named `unconfigured`;
+//              in neither case is a judge call dispatched on the actor's
+//              model;
+//   negative — a judge that IS given a model runs, and the model recorded on
+//              its admission receipt is its own and not the actor's.
+//
+// Why this contract exists. The judge resolved its model as its own
+// configuration falling back to `opts.model`, and `opts` is the actor's turn
+// options (harn#7937). An unconfigured judge therefore asked the same model
+// the same question twice and reported the answer as a check, which is the
+// mechanical cause of the cheap-judge behaviour in harn#7910.
+//
+// The instrument is the model id on the receipt, deliberately, not the absence
+// of a verdict. A missing verdict is also what a skipped judge, a capped
+// judge, and a broken fixture look like; a recorded model id says which model
+// was actually asked.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+const ACTOR_MODEL = "actor-model-7937"
+
+const JUDGE_MODEL = "judge-model-7937"
+
+// The `mock` row of the catalog's `judge` ladder. Named, not derived, so that
+// deleting the row fails this contract rather than silently agreeing with
+// whatever the catalog happens to say.
+const CATALOG_MOCK_JUDGE_MODEL = "mock-judge-default"
+
+// A provider family the catalog's judge ladder has no row for. This is what
+// makes the refusal reachable at all now that a default exists.
+const PROVIDER_WITHOUT_A_JUDGE_ROLE = "no-judge-role-provider"
+
+fn admissions(events: any) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_judge_admission.v1"
+    },
+  )
+    .to_list()
+}
+
+fn judge_models(events: any) -> list {
+  return admissions(events).map({ event -> event.checkpoint?.judge_model }).to_list()
+}
+
+fn base_opts(session: any, judge_cfg: dict) {
+  return {
+    provider: "mock",
+    model: ACTOR_MODEL,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    turn_end_condition: nil,
+    max_iterations: 3,
+    final_wrapup: false,
+    session_id: session,
+    stall_diagnostics: {enabled: false},
+    verify_completion_judge: judge_cfg,
+  }
+}
+
+fn unconfigured_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("I finished the task. ##DONE##")],
+    { ->
+      const session = "contract-judge-unconfigured-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Do the task and stop.",
+          nil,
+          base_opts(session, {provider: PROVIDER_WITHOUT_A_JUDGE_ROLE, max_invocations: 1}),
+        ) },
+      )
+      const refusals = admissions(captured.events).filter(
+        { event -> event.checkpoint?.outcome == "model_unconfigured" },
+      )
+        .to_list()
+      contract_effect(
+        harness.stdio,
+        "effect_unconfigured_judge_refuses_and_records_it",
+        len(refusals) == 1
+          && refusals[0].checkpoint.judge_model_source == "unconfigured"
+          && refusals[0].checkpoint.admitted == false,
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_unconfigured_judge_never_uses_the_actors_model",
+        !contains(judge_models(captured.events), ACTOR_MODEL),
+      )
+    },
+  )
+}
+
+fn configured_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I finished the task. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+    ],
+    { ->
+      const session = "contract-judge-configured-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Do the task and stop.",
+          nil,
+          base_opts(session, {provider: "mock", model: JUDGE_MODEL, max_invocations: 1}),
+        ) },
+      )
+      // The clause that keeps the effect above non-vacuous: on a build where
+      // the judge never runs at all, "the actor's model was never used" is
+      // also true.
+      contract_negative(
+        harness.stdio,
+        "negative_a_configured_judge_still_grades_on_its_own_model",
+        !contains(judge_models(captured.events), JUDGE_MODEL)
+          || contains(judge_models(captured.events), ACTOR_MODEL),
+      )
+    },
+  )
+}
+
+fn catalog_role_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I finished the task. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+    ],
+    { ->
+      const session = "contract-judge-catalog-role-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Do the task and stop.",
+          nil,
+          base_opts(session, {provider: "mock", max_invocations: 1}),
+        ) },
+      )
+      const models = judge_models(captured.events)
+      const admitted = admissions(captured.events).filter(
+        { event -> event.checkpoint?.judge_model == CATALOG_MOCK_JUDGE_MODEL },
+      )
+        .to_list()
+      contract_effect(
+        harness.stdio,
+        "effect_a_judge_with_no_model_grades_on_the_catalog_role",
+        contains(models, CATALOG_MOCK_JUDGE_MODEL)
+          && len(admitted) > 0
+          && admitted[0].checkpoint.judge_model_source == "catalog_role",
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_the_catalog_role_is_not_the_actors_model",
+        !contains(models, ACTOR_MODEL),
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  catalog_role_case(harness)
+  unconfigured_case(harness)
+  configured_case(harness)
+}
