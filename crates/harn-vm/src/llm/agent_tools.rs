@@ -339,12 +339,13 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
 /// Coerce a Harn tool handler's return value into the tool-result payload.
 /// Preserve explicit text envelopes, computer screenshots, and typed domain
 /// outcomes. Boolean `ok` or `success` distinguishes return from operation
-/// success; other values retain historical display rendering.
+/// success, whether the handler returned a typed struct or a plain dict;
+/// other values retain historical display rendering.
 pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
     let json = crate::llm::vm_value_to_json(val);
     if agent_tool_handler_result_text(&json).is_some()
         || json_carries_screenshot(&json)
-        || handler_result::carries_typed_outcome(val, &json)
+        || handler_result::carries_typed_outcome(&json)
     {
         json
     } else {
@@ -1379,6 +1380,41 @@ mod tests {
             None
         );
         assert_eq!(ok_result_failure_category(&serde_json::Value::Null), None);
+    }
+
+    /// Reach test for harn#7884. The two functions above were each green in
+    /// isolation while the pair was broken: the classifier was only ever fed a
+    /// pre-quoted JSON string in tests, and production fed it the display
+    /// rendering of a plain dict, which does not parse. Compose them the way
+    /// the dispatch path does — handler return value first, classification
+    /// second — so a regression in either half fails here.
+    #[test]
+    fn a_plain_dict_handler_refusal_survives_coercion_and_is_classified_a_failure() {
+        let failure_shapes = [
+            serde_json::json!({"ok": false, "status": "blocked", "message": "apply blocked"}),
+            serde_json::json!({"ok": false, "error": "boom"}),
+            serde_json::json!({"success": false, "message": "rejected"}),
+        ];
+        for shape in failure_shapes {
+            // A plain dict, not a typed struct — what a `tool_define` handler
+            // returns unless it goes out of its way to build a struct.
+            let returned = crate::stdlib::json_to_vm_value(&shape);
+            let coerced = harn_handler_result_value(&returned);
+            assert!(
+                coerced.is_object(),
+                "a dict carrying a boolean outcome must stay structured, got {coerced:?}"
+            );
+            assert_eq!(
+                ok_result_failure_category(&coerced),
+                Some("tool_error"),
+                "refusal must classify as a failure after coercion: {shape:?}"
+            );
+        }
+
+        // Negative control: the same path must not manufacture a failure.
+        let ok_shape = serde_json::json!({"ok": true, "message": "fine"});
+        let coerced = harn_handler_result_value(&crate::stdlib::json_to_vm_value(&ok_shape));
+        assert_eq!(ok_result_failure_category(&coerced), None);
     }
 
     #[test]

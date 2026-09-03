@@ -1,0 +1,8 @@
+ok_false_blocked ok=false status=error structured=true
+ok_false_error ok=false status=error structured=true
+success_false ok=false status=error structured=true
+status_error ok=false status=error structured=true
+ok_false_categorized ok=false status=error structured=true
+is_error_true ok=false status=error structured=true
+ok_true ok=true status=ok structured=true
+raises ok=false status=error

@@ -1,0 +1,65 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+/**
+ * A tool handler that returns a plain dict declaring its own failure must be
+ * classified a failure at the dispatch boundary (harn#7884).
+ *
+ * The refusal shapes below are what a handler writes when it completed without
+ * raising but declined to perform the operation. They previously fell through
+ * to the display rendering, reaching the classifier as an unparseable string
+ * like `{ok: false, error: boom}`, and every one of them was reported `ok`.
+ *
+ * The raising handler is the control: it was already classified correctly, and
+ * it must stay that way. The `{ok: true}` handler is the negative control —
+ * this path must not manufacture failures.
+ */
+fn shapes() -> list {
+  return [
+    {name: "ok_false_blocked", value: {ok: false, status: "blocked", message: "apply blocked"}},
+    {name: "ok_false_error", value: {ok: false, error: "boom"}},
+    {name: "success_false", value: {success: false, message: "rejected"}},
+    {name: "status_error", value: {status: "error", message: "nope"}},
+    {name: "ok_false_categorized", value: {ok: false, error_category: "tool_error", error: "boom"}},
+    {name: "is_error_true", value: {isError: true, message: "mcp shape"}},
+    {name: "ok_true", value: {ok: true, message: "fine"}},
+  ]
+}
+
+pipeline default(harness: Harness) {
+  let tools = tool_registry()
+  for shape in shapes() {
+    const returned = shape.value
+    tools = tool_define(tools, shape.name, "returns a plain dict verbatim", {
+      handler: { _args -> returned },
+      parameters: {},
+      annotations: {kind: "edit"},
+    })
+  }
+  tools = tool_define(tools, "raises", "raises instead of returning", {
+    handler: { _args -> throw("boom") },
+    parameters: {},
+    annotations: {kind: "edit"},
+  })
+
+  for shape in shapes() {
+    const envelope = agent_dispatch_tool_call(
+      harness.tools,
+      {id: "call-" + shape.name, name: shape.name, arguments: {}},
+      tools,
+      {},
+    )
+    harness.stdio.println(
+      shape.name + " ok=" + to_string(envelope?.ok)
+        + " status=" + to_string(envelope?.status)
+        + " structured=" + to_string(type_of(envelope?.result) == "dict")
+    )
+  }
+
+  const raised = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "call-raises", name: "raises", arguments: {}},
+    tools,
+    {},
+  )
+  harness.stdio.println("raises ok=" + to_string(raised?.ok) + " status=" + to_string(raised?.status))
+}

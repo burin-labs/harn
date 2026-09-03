@@ -6,17 +6,23 @@ pub(super) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Optio
     object.get("text")?.as_str()
 }
 
-pub(super) fn carries_typed_outcome(
-    source: &crate::value::VmValue,
-    value: &serde_json::Value,
-) -> bool {
-    source.struct_data().is_some()
-        && value.as_object().is_some_and(|object| {
-            object.get("ok").is_some_and(serde_json::Value::is_boolean)
-                || object
-                    .get("success")
-                    .is_some_and(serde_json::Value::is_boolean)
-        })
+/// Whether a handler's return declares its own operation outcome.
+///
+/// A boolean `ok` or `success` is that declaration, and it is the whole
+/// signal: a handler writes it precisely to distinguish "the call returned"
+/// from "the operation succeeded". This deliberately does **not** require the
+/// source to be a typed struct. Requiring one meant a plain dict carrying
+/// `{ok: false}` fell through to the display rendering below, arriving at
+/// `ok_result_failure_category` as an unparseable string like
+/// `{ok: false, error: boom}` — so every dict-shaped refusal was classified a
+/// success and the loop could not see it (harn#7884).
+pub(super) fn carries_typed_outcome(value: &serde_json::Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.get("ok").is_some_and(serde_json::Value::is_boolean)
+            || object
+                .get("success")
+                .is_some_and(serde_json::Value::is_boolean)
+    })
 }
 
 #[cfg(test)]
