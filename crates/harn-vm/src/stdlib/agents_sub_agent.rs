@@ -295,7 +295,7 @@ fn prepare_sub_agent_options(
 }
 
 fn inject_sub_agent_skill_context(options: &mut crate::value::DictMap) {
-    let Some(context) = crate::orchestration::current_workflow_skill_context() else {
+    let Some(context) = crate::orchestration::current_workflow_stage_context() else {
         return;
     };
     if !options.contains_key("skills") {
