@@ -820,3 +820,100 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
          burin-mini playground test uses\n{dump}"
     );
 }
+
+/// Every `tool_call_update` transcript event for the `run` tool, across every
+/// stage, regardless of status: `raw_input` (the command asked for),
+/// `raw_output` (what the tool returned, e.g. its captured stdout/exit
+/// status), and `error` when the call failed outright. Unlike
+/// `summarize_stages` (which only looks at failed stages/calls), this reads
+/// a *successful* run tool call's own output too, since the diagnostic probe
+/// below deliberately runs a command (`cmd.exe /D /C where node & ... & set`)
+/// that is expected to exit 0 either way — the interesting content is in
+/// what it printed, not whether it "failed".
+#[cfg(windows)]
+fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let Some(stages) = report["stages"].as_array() else {
+        return "  (no execution.run.stages in this report)\n".to_string();
+    };
+    for stage in stages {
+        let Some(events) = stage["transcript"]["events"].as_array() else {
+            continue;
+        };
+        for event in events {
+            if event["kind"] != "tool_call_update" {
+                continue;
+            }
+            let metadata = &event["metadata"];
+            if metadata["tool_name"] != "run" {
+                continue;
+            }
+            out.push_str(&format!(
+                "  tool_call_update status={} raw_input={} raw_output={} error={}\n",
+                metadata["status"].as_str().unwrap_or("<none>"),
+                metadata["raw_input"],
+                metadata["raw_output"],
+                metadata["error"].as_str().unwrap_or("<none>"),
+            ));
+        }
+    }
+    if out.is_empty() {
+        out.push_str("  (no run tool_call_update events found in any stage's transcript)\n");
+    }
+    out
+}
+
+/// DIAGNOSTIC PROBE (harn#7993), round 2. `windows_only_diagnostic_probe_of_the_sandboxed_run_child_env`
+/// above measures `harness.process.exec` under `execute_run_with_sandbox_options`
+/// (burin_mini_playground.rs:181-207 at time of writing), which installs a
+/// `SessionEnvironment` and PASSED on CI (job 100828333196) with a full,
+/// correct 120-entry PATH including `C:\Program Files\nodejs\`. But that is
+/// not the seam the real fixture's `run` tool goes through:
+/// `burin_mini_comment_file_fixture_run_updates_workspace_copy` calls
+/// `execute_playground_inputs`, which installs no `SessionEnvironment` and no
+/// `CapabilityPolicy` at all (`configured_vm`/`execute_playground` never call
+/// `SessionEnvironment::launch_from_snapshot` or push an execution policy).
+/// The probe above therefore measures a healthy, unrelated seam and its
+/// 120-entry PATH says nothing about what the failing seam's child actually
+/// sees. This probe drives `execute_playground_inputs` itself — the exact
+/// same entry point, experiment, and mocked-LLM orchestration as the failing
+/// fixture, differing only in the `run` tool's command string — so the
+/// dumped `where node` result and full `set` output come from the process
+/// that is actually failing on Windows CI, not a stand-in for it.
+#[cfg(windows)]
+#[test]
+fn windows_run_tool_env_probe_through_execute_playground_inputs() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_run_tool_env_probe.jsonl",
+    );
+    let stdout = match &outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let transcript_dump = if report_path.exists() {
+        let report = read_json(&report_path);
+        dump_run_tool_transcript(&report)
+    } else {
+        format!(
+            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
+            report_path.display()
+        )
+    };
+    let full_dump = format!(
+        "=== windows_run_tool_env_probe_through_execute_playground_inputs ===\n\
+         playground stdout/error:\n{stdout}\n\
+         run tool transcript:\n{transcript_dump}\n\
+         === end probe ==="
+    );
+    eprintln!("{full_dump}");
+    assert!(
+        full_dump.contains("PROBE_WHERE_STATUS=0"),
+        "the run tool's child (through execute_playground_inputs, the SAME \
+         seam burin_mini_comment_file_fixture_run_updates_workspace_copy \
+         uses) could not resolve 'node' via `where node`\n{full_dump}"
+    );
+}
