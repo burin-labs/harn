@@ -22,7 +22,7 @@
 pub use harn_clock as clock;
 
 mod runtime_stack;
-pub use runtime_stack::RUNTIME_STACK_SIZE;
+pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
 
 pub mod a2a;
 pub mod actor_chain;
