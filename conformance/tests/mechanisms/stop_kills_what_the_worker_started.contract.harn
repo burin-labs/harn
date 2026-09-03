@@ -1,0 +1,188 @@
+// MECHANISM CONTRACT (onramp tier): what a stopped worker started dies with it.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — a background sub-agent starts a long-running background command
+//              through a handle the runtime owns, and the parent then stops
+//              that sub-agent;
+//   effect   — the command's process is gone after the stop;
+//   negative — a background command the PARENT owns is untouched by the child's
+//              stop, and the job is observed alive before the stop so a job
+//              that never started cannot pass.
+//
+// Why this contract exists. Stopping a worker aborted its task and wrote a
+// terminal that said `stopped`, and the processes that worker had started kept
+// running. The abort drops the loop's future mid-await, so the normal finalize
+// never runs, so the session-end hooks that reclaim a session's command handles
+// never fire. The run reported success at exactly the moment the guarantee
+// failed.
+//
+// The liveness clause is not ceremony. An earlier probe for this used a job
+// that never actually started, and its dead process looked exactly like a clean
+// kill: absence read as success. Nothing here may conclude anything about the
+// stop unless the job was observed running first.
+import { agent_lifecycle_tools, agent_stop, sub_agent_run, wait_agent } from "std/agent/workers"
+import { command_run } from "std/command"
+import { with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+/**
+ * Start a process that records its own pid and then does nothing but stay
+ * alive. `exec` replaces the shell, so the pid written is the pid that must
+ * die.
+ */
+fn spawn_recorded_job(harness: Harness, pid_file: string) {
+  return command_run(
+    harness.tools,
+    {mode: "shell", command: "echo $$ > " + pid_file + "; exec sleep 300"},
+    {background: true},
+  )
+}
+
+/** Ask the operating system, not a receipt, whether the pid is still there. */
+fn pid_is_alive(harness: Harness, pid: string) -> bool {
+  if pid == "" {
+    return false
+  }
+  const probe = command_run(
+    harness.tools,
+    {mode: "shell", command: "kill -0 " + pid + " 2>/dev/null && echo ALIVE || echo DEAD"},
+  )
+  return trim(probe.stdout) == "ALIVE"
+}
+
+/** Poll for the pid the job records, bounded so a job that never starts fails. */
+fn recorded_pid(harness: Harness, pid_file: string) -> string {
+  let waited = 0
+  while waited < 10000 {
+    if harness.fs.exists(pid_file) {
+      const raw = trim(harness.fs.read_text(pid_file))
+      if raw != "" {
+        return raw
+      }
+    }
+    harness.clock.sleep_ms(100)
+    waited = waited + 100
+  }
+  return ""
+}
+
+/** Poll for the pid to disappear, bounded, so a slow kill still passes. */
+fn pid_gone_within(harness: Harness, pid: string, budget_ms: int) -> bool {
+  let waited = 0
+  while waited < budget_ms {
+    if !pid_is_alive(harness, pid) {
+      return true
+    }
+    harness.clock.sleep_ms(200)
+    waited = waited + 200
+  }
+  return false
+}
+
+fn job_tools(harness: Harness, pid_file: string) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "start_long_job",
+    "Start the long background job.",
+    {
+      handler: { _args ->
+        spawn_recorded_job(harness, pid_file)
+        return "job started"
+      },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-stop-kills-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  const child_pid_file = path_join(root, "child.pid")
+  const bystander_pid_file = path_join(root, "bystander.pid")
+
+  // The bystander belongs to the parent session, not the worker being stopped.
+  // It is what separates "the stop reclaimed what the worker owned" from "the
+  // stop killed whatever it could reach".
+  spawn_recorded_job(harness, bystander_pid_file)
+  const bystander_pid = recorded_pid(harness, bystander_pid_file)
+
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [{id: "start_1", name: "start_long_job", arguments: {}}],
+        input_tokens: 5,
+        output_tokens: 6,
+      },
+      {
+        tool_calls: [
+          {
+            id: "park_1",
+            name: "agent_await_resumption",
+            arguments: {reason: "waiting for the parent to stop this worker"},
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 8,
+      },
+    ],
+    { ->
+      const worker = sub_agent_run(
+        harness,
+        "Start the long job, then park.",
+        {
+          provider: "mock",
+          background: true,
+          tool_format: "native",
+          max_iterations: 4,
+          token_budget: 50,
+          tools: agent_lifecycle_tools(harness.agent, job_tools(harness, child_pid_file)),
+          allowed_tools: ["start_long_job", "agent_await_resumption"],
+          session_id: "stop-kills-worker",
+        },
+      )
+      const parked = wait_agent(harness.agent, worker)
+      const child_pid = recorded_pid(harness, child_pid_file)
+
+      // Liveness first. Every clause below is meaningless without it.
+      contract_effect(
+        harness.stdio,
+        "effect_job_observed_alive_before_stop",
+        child_pid != "" && pid_is_alive(harness, child_pid),
+      )
+
+      agent_stop(harness.agent, worker, {graceful: true, reason: "operator pressed stop"})
+
+      contract_effect(
+        harness.stdio,
+        "effect_stopped_worker_job_is_gone",
+        pid_gone_within(harness, child_pid, 10000),
+      )
+
+      // The stop is still a stop: the worker reached a terminal state.
+      contract_effect(
+        harness.stdio,
+        "effect_worker_reached_a_terminal_state",
+        parked.status != "running",
+      )
+
+      contract_negative(
+        harness.stdio,
+        "negative_parent_owned_job_survives_the_childs_stop",
+        bystander_pid == "" || !pid_is_alive(harness, bystander_pid),
+      )
+
+      // Leave nothing running behind this test whatever the verdict above.
+      command_run(
+        harness.tools,
+        {mode: "shell", command: "kill -9 " + bystander_pid + " 2>/dev/null; exit 0"},
+      )
+    },
+  )
+}
