@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.128";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.128-dev";
 
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
