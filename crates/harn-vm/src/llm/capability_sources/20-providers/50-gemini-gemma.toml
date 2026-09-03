@@ -129,6 +129,15 @@ extends = true
 reasoning_disable_supported = true
 reasoning_none_supported = true
 
+# Gemini 3.8 Flash uses thinking_level with low/medium/high; medium is the
+# provider default and minimal/none is unsupported.
+[[provider.gemini]]
+model_match = ["gemini-3.8-flash*", "models/gemini-3.8-flash*"]
+extends = true
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+
 [[provider.gemini]]
 model_match = ["gemini-3.7*", "models/gemini-3.7*"]
 extends = true
@@ -137,7 +146,7 @@ reasoning_effort_levels = ["low", "medium", "high"]
 reasoning_none_supported = false
 
 [[provider.gemini]]
-model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*"]
+model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*", "gemini-3.8*", "models/gemini-3.8*"]
 advanced_generation_options = []
 native_tools = true
 preferred_tool_format = "native"

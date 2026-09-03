@@ -55,7 +55,12 @@ fn gemini_routes_default_to_generate_content() {
 #[test]
 fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
     clear_user_overrides();
-    for model in ["gemini-3.6-flash", "gemini-3.5-flash-lite"] {
+    for model in [
+        "gemini-3.8-flash",
+        "models/gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+    ] {
         let caps = lookup("gemini", model);
         assert_eq!(
             caps.live_endpoint_family,
@@ -65,6 +70,23 @@ fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
         assert!(!caps.temperature_supported, "{model} temperature");
         assert!(!caps.top_p_supported, "{model} top_p");
         assert!(!caps.top_k_supported, "{model} top_k");
+        if model.contains("3.8-flash") {
+            assert!(caps.native_tools, "{model} native tools");
+            assert_eq!(
+                caps.structured_output.as_deref(),
+                Some("native"),
+                "{model} structured output"
+            );
+            assert!(caps.vision_supported, "{model} vision");
+            assert!(caps.prompt_caching, "{model} prompt caching");
+            assert!(caps.reasoning_effort_supported, "{model} thinking level");
+            assert_eq!(
+                caps.reasoning_effort_levels,
+                vec!["low", "medium", "high"],
+                "{model} thinking levels"
+            );
+            assert!(!caps.reasoning_none_supported, "{model} minimal/none");
+        }
 
         let mut payload = gemini_payload(
             model,
