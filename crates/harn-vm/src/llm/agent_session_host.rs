@@ -131,7 +131,13 @@ struct AgentHostSession {
     /// Sum of calls whose price is known. This remains useful as a lower bound
     /// when another call in the same session is unpriced.
     cost_used: f64,
+    /// Sum of every call's worst case: its price when known, its price-table
+    /// bound when not. Read with `unprojectable_calls`, which says whether any
+    /// call had no bound at all.
+    projected_cost_used: f64,
+    priced_calls: i64,
     unpriced_calls: i64,
+    unprojectable_calls: i64,
     usage_unknown_calls: i64,
     input_tokens: i64,
     output_tokens: i64,
@@ -319,7 +325,10 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         task: String::new(),
         tokens_used: 0,
         cost_used: 0.0,
+        projected_cost_used: 0.0,
+        priced_calls: 0,
         unpriced_calls: 0,
+        unprojectable_calls: 0,
         usage_unknown_calls: 0,
         input_tokens: 0,
         output_tokens: 0,
@@ -960,8 +969,15 @@ fn host_agent_session_record_usage_builtin(
             .saturating_add(cache_write_tokens);
         if let Some(cost) = accounting.cost_usd {
             session.cost_used += cost;
+            session.priced_calls = session.priced_calls.saturating_add(1);
         } else {
             session.unpriced_calls = session.unpriced_calls.saturating_add(1);
+        }
+        match accounting.projected_cost_usd {
+            Some(projected) => session.projected_cost_used += projected,
+            None => {
+                session.unprojectable_calls = session.unprojectable_calls.saturating_add(1);
+            }
         }
         if accounting.usage_unknown {
             session.usage_unknown_calls = session.usage_unknown_calls.saturating_add(1);

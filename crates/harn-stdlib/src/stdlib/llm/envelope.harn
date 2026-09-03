@@ -71,8 +71,22 @@ pub type LlmUsage = {
   reported_total_tokens?: int,
   cost_usd?: float,
   known_cost_usd: float,
+  /*
+   * Worst case for the whole call. Everything priced, plus a price-table bound
+   * on every unpriced attempt's reported tokens. Absent or nil means at least
+   * one attempt has no bound at any token count, and a ceiling must fail
+   * closed on it rather than spend the measured floor.
+   */
+  projected_cost_usd?: float,
   provider_call_count: int,
   unpriced_calls: int,
+  /* Tokens the unpriced attempts did report, which is what bounds them. */
+  unpriced_tokens: int,
+  /*
+   * One of pricing_unknown, usage_unreported, no_response, or mixed. The
+   * same field name and vocabulary std/llm/economics uses.
+   */
+  unpriced_reason?: string,
   usage_unknown_calls: int,
   cache_read_tokens: int,
   cache_write_tokens: int,
@@ -87,8 +101,12 @@ pub type LlmUsage = {
    */
   provider_attempts?: LlmProviderAttempts,
   served_fast: bool,
-  /* Optional only for replay compatibility with recordings made before this field existed. */
-  accounting_status?: "reported" | "unknown",
+  /*
+   * Optional only for replay compatibility with recordings made before this
+   * field existed. "partial" means some attempt was priced and some was not;
+   * only a call that priced nothing at all reads "unknown".
+   */
+  accounting_status?: "reported" | "partial" | "unknown",
   provider_telemetry?: dict,
 }
 

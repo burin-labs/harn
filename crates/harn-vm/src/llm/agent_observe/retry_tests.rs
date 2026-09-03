@@ -1364,3 +1364,62 @@ fn retry_after_missing_returns_none() {
 fn retry_after_malformed_returns_none() {
     assert_eq!(parse_retry_after("retry-after: soon-ish"), None);
 }
+
+/// harn#7938 falsifier. A provider's own body text must not outrank the
+/// `Retry-After` header we actually read off the response.
+///
+/// Measured before the fix on this exact input: the typed read gave 2000 ms
+/// and the message scan gave 60000 ms, the body's 900 seconds clamped to the
+/// 60-second ceiling. Any path that reaches the message instead of the typed
+/// field therefore waited thirty times too long on a hint whose whole purpose
+/// is to make a retry prompt.
+#[test]
+fn a_retry_after_in_the_body_does_not_outrank_the_header() {
+    let assembled = "openai HTTP 429 [rate_limited]: {\"error\":{\"message\":\"upstream said \
+                     retry-after: 900 seconds\"}} (retry-after: 2)";
+
+    assert_eq!(
+        crate::llm::agent_observe::parse_retry_after(assembled),
+        Some(2000),
+        "the header we read is recorded last; it must win over provider body text"
+    );
+}
+
+/// The control that keeps the fix from simply ignoring provider text. A
+/// message that carries only the provider's own hint, with no suffix of ours,
+/// still yields that hint. Losing it would read as "no Retry-After was sent",
+/// which is the expensive direction: retry immediately.
+#[test]
+fn a_provider_only_retry_after_is_still_honoured() {
+    assert_eq!(
+        crate::llm::agent_observe::parse_retry_after("provider said retry-after: 3"),
+        Some(3000),
+        "with nothing of ours in the message the provider's hint is all there is"
+    );
+}
+
+/// The structured field is the authority, and this pins that the message is
+/// never consulted when it exists. `provider_http_error` throws a dictionary
+/// carrying `retry_after_ms`, and the body text here would give a different
+/// answer if the scan were reached.
+#[test]
+fn the_typed_retry_after_field_is_read_before_any_message() {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "retry-after",
+        reqwest::header::HeaderValue::from_static("2"),
+    );
+    let err = crate::llm::api::errors::provider_http_error(
+        None,
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        &headers,
+        r#"{"error":{"message":"upstream said retry-after: 900 seconds","code":"rate_limit_exceeded"}}"#,
+    );
+
+    assert!(
+        matches!(err, VmError::Thrown(VmValue::Dict(_))),
+        "the HTTP path must keep throwing a structured value, not prose"
+    );
+    assert_eq!(extract_retry_after_ms(&err), Some(2000));
+}

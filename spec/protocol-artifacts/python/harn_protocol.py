@@ -690,6 +690,7 @@ class LlmErrorReason(str, Enum):
     INVALID_RESPONSE = "invalid_response"
     MODEL_UNAVAILABLE = "model_unavailable"
     EMPTY_GENERATION = "empty_generation"
+    BILLING_LIMIT = "billing_limit"
     OUTPUT_BUDGET_EXHAUSTED = "output_budget_exhausted"
     UNKNOWN = "unknown"
 

@@ -307,21 +307,48 @@ pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
     parse_retry_after(msg)
 }
 
-/// Parse the value of a `retry-after:` header embedded anywhere in `msg`.
+/// The exact shape `classify_provider_http_error` appends when it has read a
+/// `Retry-After` header off the response. Matched before any other occurrence
+/// so our own record of the header beats text the provider wrote.
+const APPENDED_RETRY_AFTER_PREFIX: &str = " (retry-after: ";
+
+/// Parse a `retry-after` hint out of an error message.
+///
+/// This is the FALLBACK, not the contract. The authority is the typed
+/// `retry_after_ms` field that `provider_http_error` puts on the thrown
+/// dictionary, and `extract_retry_after_ms` reads that first and returns
+/// without ever reaching here. A message is only consulted for error shapes
+/// that carry no structured value at all.
+///
+/// It has to prefer our own appended suffix, because a provider body can
+/// contain the text `retry-after:` itself: an echoed request header, a nested
+/// upstream error, a proxy's own message. Taking the first occurrence in the
+/// assembled message read the provider's number instead of the header's. On a
+/// 429 whose header said 2 seconds and whose body text said 900, that returned
+/// 60000 ms (the clamp) rather than 2000 ms, a thirty-fold overshoot on a hint
+/// meant to make a retry prompt.
 ///
 /// Exposed for unit tests; the public entry point is
 /// `extract_retry_after_ms`.
 #[expect(
     clippy::string_slice,
-    reason = "pos comes from find() on the byte-length-preserving ASCII-lowercased copy of \
-              msg and end from find() on the sliced tail, so both are char boundaries"
+    reason = "every index comes from find()/rfind() on the byte-length-preserving \
+              ASCII-lowercased copy of msg, or from find() on a slice of it, so all \
+              of them are char boundaries"
 )]
 pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     let lower = msg.to_ascii_lowercase();
-    let pos = lower.find("retry-after:")?;
-    let after = &msg[pos + "retry-after:".len()..];
-    // End at CRLF so we don't grab a neighboring header.
-    let end = after.find(['\r', '\n']).unwrap_or(after.len());
+    let (pos, marker_len) = match lower.rfind(APPENDED_RETRY_AFTER_PREFIX) {
+        Some(pos) => (pos, APPENDED_RETRY_AFTER_PREFIX.len()),
+        // No suffix of ours, so the message is provider text or a flattened
+        // shape. Fall back to the last occurrence rather than the first: if
+        // anything in this message is ours it was appended at the end.
+        None => (lower.rfind("retry-after:")?, "retry-after:".len()),
+    };
+    let after = &msg[pos + marker_len..];
+    // End at our closing parenthesis or at a CRLF, so neither the rest of the
+    // sentence nor a neighbouring header is swallowed.
+    let end = after.find(['\r', '\n', ')']).unwrap_or(after.len());
     let value = after[..end].trim();
     if value.is_empty() {
         return None;
@@ -700,6 +727,12 @@ pub(crate) async fn observed_llm_call(
                     )
                 {
                     let retry_usage = result.usage();
+                    // The discarded attempt keeps its own measured ledger,
+                    // including its typed unpriced reason. Rewriting it to a
+                    // known zero would assert it cost nothing, which nobody
+                    // measured. The aggregate reports partial accounting
+                    // instead, so one discarded attempt no longer nulls the
+                    // priced siblings' cost.
                     completed_retry_usage.push(retry_usage.clone());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[

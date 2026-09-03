@@ -267,7 +267,7 @@ impl Formatter<'_> {
                     self.indent,
                     self.indent * 2 + 4 + text_width(&pat) + 4,
                 );
-                self.writeln(&format!("for {pat} in {iter_str} {{"));
+                self.writeln(&super::for_header(&pat, &iter_str));
                 self.indent();
                 self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();

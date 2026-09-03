@@ -168,11 +168,22 @@ fn retryable_denial_case(harness: Harness) {
           base_opts(session, {tool_caller: retryable_caller}),
         ) },
       )
+      // This clause owns one question: did the DENIAL CUTOFF fire? No receipt
+      // and a third model call are the answer, and they are unchanged.
+      //
+      // The status is a different mechanism's answer and it moved. Both edits
+      // were denied, nothing else was called, and the model then announced it
+      // had recovered, so the run reached its end having attempted tool calls
+      // without one succeeding — which harn#7915 convicts. It read `done`
+      // before, which is the record that issue exists to stop producing.
+      // Pinning it here keeps the two mechanisms distinguishable instead of
+      // letting a future change to either one pass silently.
       contract_negative(
         harness.stdio,
         "negative_retryable_denial_not_cut",
         cutoff_count(captured.events) > 0
-          || captured.result.status != "done"
+          || captured.result.status != "completion_unverified"
+          || captured.result.abandonment?.cause != "no_tool_call_succeeded"
           || len(harness.llm.mock_calls()) != 3,
       )
     },

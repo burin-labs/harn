@@ -806,7 +806,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + live_artifact_handoff_errors(workflow)
   errors = errors + walltime_report_errors(workflow)
   errors = errors + rust_cache_refresh_errors(workflow)
-  for {key: job_name, value: job} in workflow?.jobs ?? {} {
+  for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
       && to_string(job_name)
         != "rust-check-inputs" {
