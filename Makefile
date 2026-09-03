@@ -671,6 +671,7 @@ test-pr-gate-scripts:
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_gate_stale_out_dir_test.sh
 	./scripts/tests/prune_stale_targets_test.sh
+	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
