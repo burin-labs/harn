@@ -31,7 +31,12 @@ pub fn comment_profile() {
     target_paths: ["packages/server/src/middleware/auth-guard.ts"],
     success_criteria: ["Add a short, accurate module comment.", "Do not change runtime behavior."],
     write_paths: ["packages/server/src/middleware/auth-guard.ts"],
-    verify_command: "grep -n 'Auth guard middleware' packages/server/src/middleware/auth-guard.ts",
+    // Node, not a shell `grep`. The command runs under whatever shell the host
+    // picked, which on Windows is cmd.exe, and cmd neither ships grep nor
+    // strips single quotes -- so the old pattern arrived as three arguments and
+    // the only verification this task had never ran (harn#7968). A `node`
+    // invocation with no quoting in it is unaffected by either cause.
+    verify_command: "node scripts/verify-comment.js",
     verification_contract: {
       required_paths: ["packages/server/src/middleware/auth-guard.ts"],
       required_text: ["Auth guard middleware"],
