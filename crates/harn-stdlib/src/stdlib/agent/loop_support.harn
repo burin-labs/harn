@@ -423,11 +423,7 @@ pub fn __agent_loop_finalize_failed(
     agent_session_finalize(
       agent,
       session.session_id,
-      __agent_loop_boundary_terminal_record(
-        to_string(terminal?.category ?? ""),
-        iteration,
-        error,
-      ),
+      __agent_loop_boundary_terminal_record(to_string(terminal?.category ?? ""), iteration, error),
     )
   }
   if is_err(finalized) {
