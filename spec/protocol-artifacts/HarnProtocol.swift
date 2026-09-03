@@ -1586,19 +1586,40 @@ public enum HarnAgentLifecycleEvent: String, Codable, Sendable, CaseIterable {
     ].map { Self(rawValue: $0)! }
 }
 
-public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
-    case contextOverflow = "context_overflow"
-    case providerMisconfigured = "provider_misconfigured"
-    case providerUnavailable = "provider_unavailable"
-    case rateLimited = "rate_limited"
-    case timeout = "timeout"
-    case resourceBusy = "resource_busy"
-    case toolPolicyRejected = "tool_policy_rejected"
-    case hostBridgeUnimplemented = "host_bridge_unimplemented"
-    case agentLoopProtocolFailure = "agent_loop_protocol_failure"
-    case parseDropped = "parse_dropped"
-    case genericThrow = "generic_throw"
+/// Stable terminal classes carried by typed ACP prompt-error data.
+/// Open vocabulary: the static members are the values this binding was generated
+/// from, and any other wire string is preserved verbatim so a newer Harn never
+/// breaks an older consumer.
+public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let contextOverflow = Self(rawValue: "context_overflow")
+    public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
+    public static let providerUnavailable = Self(rawValue: "provider_unavailable")
+    public static let rateLimited = Self(rawValue: "rate_limited")
+    public static let timeout = Self(rawValue: "timeout")
+    public static let resourceBusy = Self(rawValue: "resource_busy")
+    public static let toolPolicyRejected = Self(rawValue: "tool_policy_rejected")
+    public static let hostBridgeUnimplemented = Self(rawValue: "host_bridge_unimplemented")
+    public static let agentLoopProtocolFailure = Self(rawValue: "agent_loop_protocol_failure")
+    public static let parseDropped = Self(rawValue: "parse_dropped")
+    public static let genericThrow = Self(rawValue: "generic_throw")
+
+    /// Every value this binding was generated from, in wire order. A value
+    /// outside it is valid and preserved; it is simply not listed here.
     public static let allCases: [Self] = [
         "context_overflow",
         "provider_misconfigured",
@@ -1611,23 +1632,49 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
         "agent_loop_protocol_failure",
         "parse_dropped",
         "generic_throw",
-    ].map { Self(rawValue: $0)! }
+    ].map { Self(rawValue: $0) }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    public var isKnown: Bool { Self.allCases.contains(self) }
+
+    public var description: String { rawValue }
 }
 
-public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
-    case natural = "natural"
-    case userCancelled = "user_cancelled"
-    case policyBudget = "policy_budget"
-    case completionUnverified = "completion_unverified"
-    case policyNoProgress = "policy_no_progress"
-    case policyThrash = "policy_thrash"
-    case policyGuardrail = "policy_guardrail"
-    case policyStop = "policy_stop"
-    case providerError = "provider_error"
-    case runtimeError = "runtime_error"
-    case suspended = "suspended"
-    case unknown = "unknown"
+/// Producer-owned agent terminal outcome kinds.
+/// Open vocabulary: the static members are the values this binding was generated
+/// from, and any other wire string is preserved verbatim so a newer Harn never
+/// breaks an older consumer.
+public struct HarnAgentTerminalKind: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let natural = Self(rawValue: "natural")
+    public static let userCancelled = Self(rawValue: "user_cancelled")
+    public static let policyBudget = Self(rawValue: "policy_budget")
+    public static let completionUnverified = Self(rawValue: "completion_unverified")
+    public static let policyNoProgress = Self(rawValue: "policy_no_progress")
+    public static let policyThrash = Self(rawValue: "policy_thrash")
+    public static let policyGuardrail = Self(rawValue: "policy_guardrail")
+    public static let policyStop = Self(rawValue: "policy_stop")
+    public static let providerError = Self(rawValue: "provider_error")
+    public static let runtimeError = Self(rawValue: "runtime_error")
+    public static let suspended = Self(rawValue: "suspended")
+    public static let unknown = Self(rawValue: "unknown")
+
+    /// Every value this binding was generated from, in wire order. A value
+    /// outside it is valid and preserved; it is simply not listed here.
     public static let allCases: [Self] = [
         "natural",
         "user_cancelled",
@@ -1641,17 +1688,43 @@ public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
         "runtime_error",
         "suspended",
         "unknown",
-    ].map { Self(rawValue: $0)! }
+    ].map { Self(rawValue: $0) }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    public var isKnown: Bool { Self.allCases.contains(self) }
+
+    public var description: String { rawValue }
 }
 
-public enum HarnAgentTerminalOwner: String, Codable, Sendable, CaseIterable {
-    case agent = "agent"
-    case user = "user"
-    case policy = "policy"
-    case provider = "provider"
-    case harness = "harness"
-    case unknown = "unknown"
+/// Owners attributed by producer-owned agent terminal outcomes.
+/// Open vocabulary: the static members are the values this binding was generated
+/// from, and any other wire string is preserved verbatim so a newer Harn never
+/// breaks an older consumer.
+public struct HarnAgentTerminalOwner: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let agent = Self(rawValue: "agent")
+    public static let user = Self(rawValue: "user")
+    public static let policy = Self(rawValue: "policy")
+    public static let provider = Self(rawValue: "provider")
+    public static let harness = Self(rawValue: "harness")
+    public static let unknown = Self(rawValue: "unknown")
+
+    /// Every value this binding was generated from, in wire order. A value
+    /// outside it is valid and preserved; it is simply not listed here.
     public static let allCases: [Self] = [
         "agent",
         "user",
@@ -1659,33 +1732,60 @@ public enum HarnAgentTerminalOwner: String, Codable, Sendable, CaseIterable {
         "provider",
         "harness",
         "unknown",
-    ].map { Self(rawValue: $0)! }
+    ].map { Self(rawValue: $0) }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    public var isKnown: Bool { Self.allCases.contains(self) }
+
+    public var description: String { rawValue }
 }
 
-public enum HarnLlmErrorCategory: String, Codable, Sendable, CaseIterable {
-    case timeout = "timeout"
-    case auth = "auth"
-    case invalidRequest = "invalid_request"
-    case rateLimit = "rate_limit"
-    case overloaded = "overloaded"
-    case serverError = "server_error"
-    case transientNetwork = "transient_network"
-    case resourceBusy = "resource_busy"
-    case schemaIncompatible = "schema_incompatible"
-    case schemaValidation = "schema_validation"
-    case schemaStreamAborted = "schema_stream_aborted"
-    case toolError = "tool_error"
-    case toolRejected = "tool_rejected"
-    case egressBlocked = "egress_blocked"
-    case cancelled = "cancelled"
-    case channelClosed = "channel_closed"
-    case notFound = "not_found"
-    case circuitOpen = "circuit_open"
-    case budgetExceeded = "budget_exceeded"
-    case `internal` = "internal"
-    case environment = "environment"
-    case generic = "generic"
+/// Thrown-error categories carried in `category` on the
+///          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `ErrorCategory`.
+/// Open vocabulary: the static members are the values this binding was generated
+/// from, and any other wire string is preserved verbatim so a newer Harn never
+/// breaks an older consumer.
+public struct HarnLlmErrorCategory: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let timeout = Self(rawValue: "timeout")
+    public static let auth = Self(rawValue: "auth")
+    public static let invalidRequest = Self(rawValue: "invalid_request")
+    public static let rateLimit = Self(rawValue: "rate_limit")
+    public static let overloaded = Self(rawValue: "overloaded")
+    public static let serverError = Self(rawValue: "server_error")
+    public static let transientNetwork = Self(rawValue: "transient_network")
+    public static let resourceBusy = Self(rawValue: "resource_busy")
+    public static let schemaIncompatible = Self(rawValue: "schema_incompatible")
+    public static let schemaValidation = Self(rawValue: "schema_validation")
+    public static let schemaStreamAborted = Self(rawValue: "schema_stream_aborted")
+    public static let toolError = Self(rawValue: "tool_error")
+    public static let toolRejected = Self(rawValue: "tool_rejected")
+    public static let egressBlocked = Self(rawValue: "egress_blocked")
+    public static let cancelled = Self(rawValue: "cancelled")
+    public static let channelClosed = Self(rawValue: "channel_closed")
+    public static let notFound = Self(rawValue: "not_found")
+    public static let circuitOpen = Self(rawValue: "circuit_open")
+    public static let budgetExceeded = Self(rawValue: "budget_exceeded")
+    public static let `internal` = Self(rawValue: "internal")
+    public static let environment = Self(rawValue: "environment")
+    public static let generic = Self(rawValue: "generic")
+
+    /// Every value this binding was generated from, in wire order. A value
+    /// outside it is valid and preserved; it is simply not listed here.
     public static let allCases: [Self] = [
         "timeout",
         "auth",
@@ -1709,34 +1809,91 @@ public enum HarnLlmErrorCategory: String, Codable, Sendable, CaseIterable {
         "internal",
         "environment",
         "generic",
-    ].map { Self(rawValue: $0)! }
+    ].map { Self(rawValue: $0) }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    public var isKnown: Bool { Self.allCases.contains(self) }
+
+    public var description: String { rawValue }
 }
 
-public enum HarnLlmErrorKind: String, Codable, Sendable, CaseIterable {
-    case transient = "transient"
-    case terminal = "terminal"
+/// Coarse retry semantics carried in `kind` on the
+///          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorKind`.
+///          `transient` means a byte-identical replay may succeed; `terminal` means it cannot.
+/// Open vocabulary: the static members are the values this binding was generated
+/// from, and any other wire string is preserved verbatim so a newer Harn never
+/// breaks an older consumer.
+public struct HarnLlmErrorKind: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let transient = Self(rawValue: "transient")
+    public static let terminal = Self(rawValue: "terminal")
+
+    /// Every value this binding was generated from, in wire order. A value
+    /// outside it is valid and preserved; it is simply not listed here.
     public static let allCases: [Self] = [
         "transient",
         "terminal",
-    ].map { Self(rawValue: $0)! }
+    ].map { Self(rawValue: $0) }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    public var isKnown: Bool { Self.allCases.contains(self) }
+
+    public var description: String { rawValue }
 }
 
-public enum HarnLlmErrorReason: String, Codable, Sendable, CaseIterable {
-    case rateLimit = "rate_limit"
-    case serverError = "server_error"
-    case networkError = "network_error"
-    case timeout = "timeout"
-    case authFailure = "auth_failure"
-    case contextOverflow = "context_overflow"
-    case contentPolicy = "content_policy"
-    case invalidRequest = "invalid_request"
-    case invalidResponse = "invalid_response"
-    case modelUnavailable = "model_unavailable"
-    case emptyGeneration = "empty_generation"
-    case outputBudgetExhausted = "output_budget_exhausted"
-    case unknown = "unknown"
+/// Canonical provider-failure reason carried in `reason` on the
+///          `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`.
+///          The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is
+///          opaque diagnostic text, and a host must never branch on it. Branch on `reason`.
+/// Open vocabulary: the static members are the values this binding was generated
+/// from, and any other wire string is preserved verbatim so a newer Harn never
+/// breaks an older consumer.
+public struct HarnLlmErrorReason: RawRepresentable, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let rateLimit = Self(rawValue: "rate_limit")
+    public static let serverError = Self(rawValue: "server_error")
+    public static let networkError = Self(rawValue: "network_error")
+    public static let timeout = Self(rawValue: "timeout")
+    public static let authFailure = Self(rawValue: "auth_failure")
+    public static let contextOverflow = Self(rawValue: "context_overflow")
+    public static let contentPolicy = Self(rawValue: "content_policy")
+    public static let invalidRequest = Self(rawValue: "invalid_request")
+    public static let invalidResponse = Self(rawValue: "invalid_response")
+    public static let modelUnavailable = Self(rawValue: "model_unavailable")
+    public static let emptyGeneration = Self(rawValue: "empty_generation")
+    public static let outputBudgetExhausted = Self(rawValue: "output_budget_exhausted")
+    public static let unknown = Self(rawValue: "unknown")
+
+    /// Every value this binding was generated from, in wire order. A value
+    /// outside it is valid and preserved; it is simply not listed here.
     public static let allCases: [Self] = [
         "rate_limit",
         "server_error",
@@ -1751,7 +1908,12 @@ public enum HarnLlmErrorReason: String, Codable, Sendable, CaseIterable {
         "empty_generation",
         "output_budget_exhausted",
         "unknown",
-    ].map { Self(rawValue: $0)! }
+    ].map { Self(rawValue: $0) }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    public var isKnown: Bool { Self.allCases.contains(self) }
+
+    public var description: String { rawValue }
 }
 
 public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
