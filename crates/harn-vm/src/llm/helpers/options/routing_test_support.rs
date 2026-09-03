@@ -75,6 +75,7 @@ pub(super) fn test_equivalent_model_with_context(
     context_window: u64,
 ) -> ModelDef {
     ModelDef {
+        data_controls: None,
         name: format!("{provider} equivalent model"),
         display_name: None,
         blurb: None,

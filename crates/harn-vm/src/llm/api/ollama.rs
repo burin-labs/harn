@@ -845,6 +845,7 @@ mod tests {
         overlay.models.insert(
             "qwen-test".to_string(),
             crate::llm_config::ModelDef {
+                data_controls: None,
                 name: "Qwen Test".to_string(),
                 display_name: None,
                 blurb: None,
@@ -967,6 +968,7 @@ mod tests {
         overlay.models.insert(
             "qwen-test".to_string(),
             crate::llm_config::ModelDef {
+                data_controls: None,
                 name: "Qwen Test".to_string(),
                 display_name: None,
                 blurb: None,
@@ -1238,6 +1240,7 @@ mod tests {
         overlay.models.insert(
             "devstral-small-2:24b".to_string(),
             crate::llm_config::ModelDef {
+                data_controls: None,
                 name: "Devstral Small 2 24B".to_string(),
                 display_name: None,
                 blurb: None,
