@@ -1060,17 +1060,7 @@ async fn workflow_stage_agent_loop_options(
             tools_value.clone().unwrap_or(VmValue::Nil)
         },
     );
-    if let Some(context) = crate::orchestration::current_workflow_stage_context() {
-        if let Some(registry) = context.registry {
-            config.insert(crate::value::intern_key("skills"), registry);
-        }
-        if let Some(match_config) = context.match_config {
-            config.insert(crate::value::intern_key("skill_match"), match_config);
-        }
-        if let Some(tool_search) = context.tool_search {
-            config.insert(crate::value::intern_key("tool_search"), tool_search);
-        }
-    }
+    crate::orchestration::WorkflowStageContext::apply_current_to_stage_config(&mut config);
     insert_json_vm_option(&mut config, "policy", &effective_policy)?;
     insert_json_vm_option(&mut config, "approval_policy", &node.approval_policy)?;
     config.put_str("session_id", stage_session_id);

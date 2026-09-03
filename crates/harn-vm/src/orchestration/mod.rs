@@ -196,6 +196,28 @@ pub struct WorkflowStageContext {
     pub tool_search: Option<VmValue>,
 }
 
+impl WorkflowStageContext {
+    /// Project the installed run-level defaults onto a stage's flatten config.
+    ///
+    /// The projection lives with the struct that owns the fields so a new
+    /// run-level default is added in one place rather than in the caller that
+    /// happens to build the config.
+    pub fn apply_current_to_stage_config(config: &mut crate::value::DictMap) {
+        let Some(context) = current_workflow_stage_context() else {
+            return;
+        };
+        for (key, value) in [
+            ("skills", context.registry),
+            ("skill_match", context.match_config),
+            ("tool_search", context.tool_search),
+        ] {
+            if let Some(value) = value {
+                config.insert(crate::value::intern_key(key), value);
+            }
+        }
+    }
+}
+
 pub fn install_workflow_stage_context(context: Option<WorkflowStageContext>) {
     CURRENT_WORKFLOW_STAGE_CONTEXT.with(|slot| {
         *slot.borrow_mut() = context;
