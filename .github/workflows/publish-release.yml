@@ -409,7 +409,11 @@ jobs:
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
 
+      # A skipped open is a correct no-op, not a failure: main already carries
+      # the target development version. There is no pull request to arm, and the
+      # validator refuses an empty one, so it must not run.
       - name: Validate grammar receipt and arm development bump
+        if: steps.development-bump.outputs.skipped != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
