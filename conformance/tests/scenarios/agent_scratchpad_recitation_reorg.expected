@@ -1,4 +1,7 @@
-status:completion_unverified
+status:done
+observe_succeeded:true
+tool_rejected_count:0
+abandoned:false
 calls:3
 first_has_scratchpad:true
 first_tail:true
