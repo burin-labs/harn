@@ -85,10 +85,7 @@ pipeline test_the_bare_shorthand_grades_on_the_catalog_judge_not_the_actor(
         "the bare shorthand must grade on the catalog's judge row for this provider",
       )
       // The defect, stated directly.
-      assert_false(
-        contains(models, ACTOR_MODEL),
-        "and never on the actor's own model",
-      )
+      assert_false(contains(models, ACTOR_MODEL), "and never on the actor's own model")
       const admitted = admissions(captured.events).filter(
         { event -> event.checkpoint?.judge_model == CATALOG_MOCK_JUDGE_MODEL },
       )
