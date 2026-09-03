@@ -37,7 +37,7 @@ pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tool_governance;
 mod agent_tools;
-pub use agent_tools::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
+pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;

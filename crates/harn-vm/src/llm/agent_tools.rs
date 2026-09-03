@@ -7,11 +7,10 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
 pub(super) mod approval_denials;
 pub(super) mod denials;
-mod handler_result;
+pub(super) mod handler_result;
 pub(super) mod hash;
 
 use handler_result::agent_tool_handler_result_text;
-pub use handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 
 pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> serde_json::Value {
     denials::denied_tool_result(tool_name, reason)
