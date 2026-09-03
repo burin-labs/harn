@@ -15,5 +15,11 @@ harn-parser = { path = "../harn-parser", version = "=0.10.129-dev" }
 # byte nor a `char` count once a literal holds CJK or emoji.
 unicode-width = "0.2"
 
+[dev-dependencies]
+# The corpus audit compares two parsed programs with their source coordinates
+# erased. Serializing the AST is how it does that without asking every node to
+# carry a second, span-insensitive equality.
+serde_json = "1"
+
 [lints]
 workspace = true
