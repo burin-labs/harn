@@ -467,6 +467,15 @@ fn interactions_content(content: &Value) -> Vec<Value> {
 
 fn content_from_gemini_part(part: &Value) -> Option<Value> {
     if let Some(text) = part.get("text").and_then(Value::as_str) {
+        // Interactions requires a text block to carry text. An empty one is
+        // refused with `invalid_request: Missing text in content of type
+        // text.`, which takes down the whole request rather than degrading.
+        // Google itself returns an empty text part beside a tool-calls-only
+        // model turn, so a replay that echoes the turn back verbatim would
+        // send exactly the block the endpoint refuses.
+        if text.is_empty() {
+            return None;
+        }
         return Some(json!({"type": "text", "text": text}));
     }
     if let Some(inline) = part.get("inline_data").or_else(|| part.get("inlineData")) {

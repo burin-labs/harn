@@ -26,6 +26,40 @@ pub type CompletionJudgeVerdict = {
 const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
 
 /**
+ * Gap classes that name a specific unmet obligation.
+ *
+ * `other` is deliberately absent. It is the value the schema documents for a
+ * `done` verdict, and the value an absent, blank, or unrecognized field decodes
+ * to, so a cached or older-pin reply carrying no gap class at all arrives here
+ * as `other`. Reading `other` as a named gap would refuse every one of those
+ * replies, which is the opposite of the safe direction.
+ */
+pub const COMPLETION_JUDGE_NAMED_GAP_CLASSES = [
+  "missing_artifact",
+  "unmet_manner_clause",
+  "failed_verification",
+  "unresolved_authorization",
+]
+
+/**
+ * __judge_completion_verdict_contradicts_itself.
+ *
+ * Whether a decoded verdict accepts and refuses in the same object: `done`
+ * beside a gap class that names an obligation the judge itself says is unmet.
+ * The pair is checkable without a model, and a judge that produces it has not
+ * decided the run is finished, it has decided the run is blocked.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_completion_verdict_contradicts_itself({verdict: "done", detail: "", gap_class: "failed_verification"})
+ */
+pub fn __judge_completion_verdict_contradicts_itself(decoded: CompletionJudgeVerdict) -> bool {
+  return decoded.verdict == "done"
+    && contains(COMPLETION_JUDGE_NAMED_GAP_CLASSES, decoded.gap_class)
+}
+
+/**
  * __judge_completion_verdict_schema.
  *
  * One discriminant and one dual-purpose detail keep completion decisions
