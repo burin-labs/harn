@@ -14,6 +14,24 @@ pub(super) fn lint_source(source: &str) -> Vec<LintDiagnostic> {
     lint_with_source(&program, source)
 }
 
+/// Lint a source fixture as if it lived at `path`.
+///
+/// Some rules are path-driven on purpose (generated files, the stdlib tree,
+/// test roots), and a helper that cannot supply a path can only ever exercise
+/// the pathless branch of those rules.
+pub(super) fn lint_source_at(source: &str, path: &str) -> Vec<LintDiagnostic> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let path = std::path::PathBuf::from(path);
+    let options = LintOptions {
+        file_path: Some(&path),
+        ..LintOptions::default()
+    };
+    lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
+}
+
 pub(super) fn has_rule(diagnostics: &[LintDiagnostic], rule: &str) -> bool {
     diagnostics.iter().any(|d| d.rule == rule)
 }

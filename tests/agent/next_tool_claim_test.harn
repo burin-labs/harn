@@ -17,7 +17,7 @@ import {
   __agent_loop_effective_llm_options,
   __agent_loop_provider_request_options,
 } from "std/agent/loop_support"
-import { AgentSpec } from "std/agent/options"
+import { AgentSpec, agent_options } from "std/agent/options"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { agent_apply_tool_surface_narrowing } from "std/agent/tool_surface"
 
@@ -542,23 +542,25 @@ pipeline test_guardrail_stop_emits_no_request_applied_receipt(harness: Harness, 
       harness,
       "The guardrail must stop this claimed turn before dispatch.",
       nil,
-      {
-        provider: "mock",
-        session_id: session,
-        tools: _tools(harness.runtime),
-        policy: {tools: ["verify"]},
-        tool_format: "json",
-        llm_caller: mock_llm,
-        _next_tool_claim: {tool_name: "verify", source: "post_turn_callback"},
-        input_guardrail: { _payload ->
-          return {
-            tripwire: true,
-            reason: "blocked before request",
-            label: "blocked",
-            confidence: 1.0,
-          }
+      agent_options(
+        {
+          provider: "mock",
+          session_id: session,
+          tools: _tools(harness.runtime),
+          policy: {tools: ["verify"]},
+          tool_format: "json",
+          llm_caller: mock_llm,
+          _next_tool_claim: {tool_name: "verify", source: "post_turn_callback"},
+          input_guardrail: { _payload ->
+            return {
+              tripwire: true,
+              reason: "blocked before request",
+              label: "blocked",
+              confidence: 1.0,
+            }
+          },
         },
-      },
+      ),
     ) },
   )
   assert_eq(harness.runtime.shared_snapshot(turns).value, 0)

@@ -4,6 +4,7 @@
 // proposals. A policy callback can explicitly bypass completion verification
 // when the host already owns the terminal decision.
 import { agent_loop } from "std/agent/loop"
+import { agent_options } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test_post_turn_policy_stop_can_explicitly_bypass_completion_verify(
@@ -24,31 +25,33 @@ pipeline test_post_turn_policy_stop_can_explicitly_bypass_completion_verify(
         harness,
         "Finish the task.",
         nil,
-        {
-          provider: "mock",
-          loop_until_done: true,
-          max_iterations: 4,
-          done_sentinel: "##DONE##",
-          verify_completion: { info ->
-            const count = harness.runtime.shared_snapshot(verify_calls)
-            harness.runtime.shared_set(verify_calls, count.value + 1)
-            if info.stop_reason == "pace_cutoff" {
-              return "policy stops must not be completion-verified"
-            }
-            return nil
-          },
-          post_turn_callback: { info ->
-            if info.iteration == 0 {
-              return {
-                stop: true,
-                stop_reason: "pace_cutoff",
-                needs_verify: false,
-                message: "Run stopped by host policy.",
+        agent_options(
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            done_sentinel: "##DONE##",
+            verify_completion: { info ->
+              const count = harness.runtime.shared_snapshot(verify_calls)
+              harness.runtime.shared_set(verify_calls, count.value + 1)
+              if info.stop_reason == "pace_cutoff" {
+                return "policy stops must not be completion-verified"
               }
-            }
-            return nil
+              return nil
+            },
+            post_turn_callback: { info ->
+              if info.iteration == 0 {
+                return {
+                  stop: true,
+                  stop_reason: "pace_cutoff",
+                  needs_verify: false,
+                  message: "Run stopped by host policy.",
+                }
+              }
+              return nil
+            },
           },
-        },
+        ),
       )
       assert_eq(result?.stop_reason, "pace_cutoff")
       assert_eq(result?.llm?.iterations, 1)
@@ -83,31 +86,33 @@ pipeline test_post_turn_policy_stop_can_request_completion_verify(harness: Harne
         harness,
         "Finish the task.",
         nil,
-        {
-          provider: "mock",
-          loop_until_done: true,
-          max_iterations: 4,
-          done_sentinel: "##DONE##",
-          verify_completion: { info ->
-            if info.stop_reason == "pace_cutoff" {
-              const count = harness.runtime.shared_snapshot(policy_verify_calls)
-              harness.runtime.shared_set(policy_verify_calls, count.value + 1)
-              return "policy requested one verification pass"
-            }
-            return nil
-          },
-          post_turn_callback: { info ->
-            if info.iteration == 0 {
-              return {
-                stop: true,
-                stop_reason: "pace_cutoff",
-                needs_verify: true,
-                message: "Policy stop requested verification.",
+        agent_options(
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            done_sentinel: "##DONE##",
+            verify_completion: { info ->
+              if info.stop_reason == "pace_cutoff" {
+                const count = harness.runtime.shared_snapshot(policy_verify_calls)
+                harness.runtime.shared_set(policy_verify_calls, count.value + 1)
+                return "policy requested one verification pass"
               }
-            }
-            return nil
+              return nil
+            },
+            post_turn_callback: { info ->
+              if info.iteration == 0 {
+                return {
+                  stop: true,
+                  stop_reason: "pace_cutoff",
+                  needs_verify: true,
+                  message: "Policy stop requested verification.",
+                }
+              }
+              return nil
+            },
           },
-        },
+        ),
       )
       assert_eq(result?.stop_reason, "sentinel")
       assert_eq(result?.llm?.iterations, 2)
@@ -140,18 +145,20 @@ pipeline test_a_host_verdict_can_waive_verification_on_a_sentinel_terminal(
         harness,
         "Finish the task.",
         nil,
-        {
-          provider: "mock",
-          loop_until_done: true,
-          max_iterations: 4,
-          done_sentinel: "##DONE##",
-          verify_completion: { info ->
-            const count = harness.runtime.shared_snapshot(verify_calls)
-            harness.runtime.shared_set(verify_calls, count.value + 1)
-            return nil
+        agent_options(
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            done_sentinel: "##DONE##",
+            verify_completion: { info ->
+              const count = harness.runtime.shared_snapshot(verify_calls)
+              harness.runtime.shared_set(verify_calls, count.value + 1)
+              return nil
+            },
+            post_turn_callback: { info -> return {stop: true, needs_verify: false} },
           },
-          post_turn_callback: { info -> return {stop: true, needs_verify: false} },
-        },
+        ),
       )
       assert_eq(result?.stop_reason, "sentinel")
       assert_eq(result?.llm?.iterations, 1)
@@ -180,18 +187,20 @@ pipeline test_a_sentinel_terminal_still_verifies_when_the_host_says_nothing(
         harness,
         "Finish the task.",
         nil,
-        {
-          provider: "mock",
-          loop_until_done: true,
-          max_iterations: 4,
-          done_sentinel: "##DONE##",
-          verify_completion: { info ->
-            const count = harness.runtime.shared_snapshot(verify_calls)
-            harness.runtime.shared_set(verify_calls, count.value + 1)
-            return nil
+        agent_options(
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            done_sentinel: "##DONE##",
+            verify_completion: { info ->
+              const count = harness.runtime.shared_snapshot(verify_calls)
+              harness.runtime.shared_set(verify_calls, count.value + 1)
+              return nil
+            },
+            post_turn_callback: { info -> return {stop: true} },
           },
-          post_turn_callback: { info -> return {stop: true} },
-        },
+        ),
       )
       assert_eq(result?.stop_reason, "sentinel")
       assert_eq(harness.runtime.shared_snapshot(verify_calls).value, 1)
