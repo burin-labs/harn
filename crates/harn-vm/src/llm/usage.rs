@@ -1330,7 +1330,7 @@ mod tests {
         assert!(usage
             .unpriced_attempts
             .iter()
-            .all(|attempt| attempt.reason == UnpricedReason::ProviderUnreported),);
+            .all(|attempt| attempt.reason == super::UnpricedReason::ProviderUnreported),);
         // No response arrived, so there is nothing to project from and the
         // projection stays a floor rather than pretending to be a ceiling.
         assert_eq!(usage.unprojectable_attempts, 2);
@@ -1430,7 +1430,7 @@ mod tests {
         let unreported = usage
             .unpriced_attempts
             .iter()
-            .filter(|attempt| attempt.reason == UnpricedReason::ProviderUnreported)
+            .filter(|attempt| attempt.reason == super::UnpricedReason::ProviderUnreported)
             .count();
         assert!(
             unreported >= 1,
