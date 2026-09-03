@@ -1,0 +1,62 @@
+name: Stack frame banking
+
+# Bank the stack-frame budget from a census of main.
+#
+# The gate in CI judges a pull request against numbers banked here. It never
+# writes them: a branch that rewrites its own baseline is judged against its
+# own measurement, and the gate refuses `--write` without `--bank-on main` for
+# that reason. This is the only job that passes it.
+#
+# Weekly rather than on every push to main. Shrinkage and in-band movement
+# already pass the gate, so a stale budget blocks nobody; it only means a real
+# regression is measured against older ground. Weekly keeps that ground fresh
+# without opening a pull request after every merge.
+
+on:
+  schedule:
+    # Mondays, early UTC, off the hour to stay out of the scheduled-job crowd.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: stack-frame-banking
+  cancel-in-progress: false
+
+jobs:
+  bank:
+    name: Bank the stack-frame budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      HARN_RUNNER_TIER: github-hosted
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: ./.github/actions/free-disk-space
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          components: clippy
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          # The same key the gate lane uses. Both build the workspace under the
+          # lowered clippy threshold, and giving them separate keys would have
+          # each evicting the other's artifacts every week.
+          shared-key: stack-frames
+          cache-on-failure: true
+          cache-bin: false
+          cache-workspace-crates: "true"
+      # This job runs on its own schedule, so there is no CI run publishing a
+      # shared Harn binary for it to download. It builds the one it needs.
+      - name: Build the Harn CLI
+        run: cargo build -p harn-cli --bin harn
+      - name: Bank the budget
+        run: ./scripts/ci/bank_stack_frames.sh target/debug/harn

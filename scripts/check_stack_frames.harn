@@ -11,6 +11,24 @@
  * clippy under a lowered `stack-size-threshold` so a frame is visible long
  * before it reaches the ceiling that aborts a worker.
  *
+ * What this gate refuses, and what it does not:
+ *
+ *   - Growth past a file's banked number by more than the tolerance band.
+ *   - Any frame inside the near-ceiling band, whatever its budget says,
+ *     unless a dated exception with an owner admits it.
+ *   - A budgeted file absent from the census, because a census that failed to
+ *     measure a crate is indistinguishable here from a frame that shrank, and
+ *     absence must never read as a pass.
+ *
+ * Shrinkage passes and is reported, not refused. In-band movement passes and
+ * is reported. Banking a new baseline happens on main, in the banking job, so
+ * a pull request is never asked to rewrite the measurement it is judged by.
+ *
+ * The first version of this gate refused all three of those, and that is why
+ * it had to be rewritten: it failed unrelated pull requests over deltas of a
+ * few dozen bytes on files they never touched, and it told their authors to
+ * fix it by rebaselining the gate from their own branch.
+ *
  * Observed failure this gate exists to refuse, reported on harn#7911 by a lane
  * that hit it while verifying an unrelated change. At base
  * `825c052af432930725c4487cd9560395a521cbd4`, with no local modifications, two
@@ -52,6 +70,8 @@ pub type StackFrameBudget = {
   threshold_bytes: int,
   ceiling_bytes: int,
   near_ceiling_fraction: float,
+  tolerance_bytes: int,
+  tolerance_fraction: float,
   comment: list<string>,
   exceptions: list<StackFrameException>,
   files: list<StackFrameBudgetFile>,
@@ -69,7 +89,31 @@ pub type FrameReport = {
   scanned_files: int,
   budgeted_files: int,
   findings: list<FrameFinding>,
+  notes: list<FrameFinding>,
   violation_count: int,
+}
+
+/**
+ * How far a frame may move before this gate calls it a change rather than
+ * noise.
+ *
+ * Derived from measurement, not taste. The same tree was measured four times
+ * on four machines, once on a build host and three times by this gate's own CI
+ * job, and all 112 files agreed to the byte. So the observed run-to-run
+ * variance is zero and any band at all is margin, held against a future
+ * toolchain that is less reproducible than this one. It is a fraction rather
+ * than a flat count because a 200-byte move means something different on a
+ * 100000-byte frame than on a 500000-byte one.
+ *
+ * The floor exists so a frame just over the collection threshold still gets a
+ * usable band; the fraction alone would give it almost none.
+ */
+pub fn tolerance_for(budget: StackFrameBudget, bytes: int) {
+  const scaled = to_int(to_float(bytes) * budget.tolerance_fraction)
+  if scaled > budget.tolerance_bytes {
+    return scaled
+  }
+  return budget.tolerance_bytes
 }
 
 /** Reduce raw clippy JSON lines to the worst frame per source file. */
@@ -125,11 +169,17 @@ pub fn frame_bytes(message: string) {
 /**
  * Judge one census against one budget.
  *
- * A budgeted file that is ABSENT from the census is a finding, never a pass.
- * Absence means its worst frame fell under the collection threshold, which is
- * a large shrink that must tighten the budget rather than quietly satisfy it.
- * That is the same reason the collector refuses an empty census: a run that
- * measured nothing must not read like a clean tree.
+ * Two kinds of outcome come back. `findings` are refusals. `notes` are things
+ * worth printing that pass: a frame that shrank, and a frame that moved less
+ * than the tolerance band. Both used to be refusals, and that is what made
+ * this gate unusable: it refused pull requests over deltas smaller than the
+ * ground the budget already held, on files they never touched.
+ *
+ * A budgeted file that is ABSENT from the census is still a refusal, and it is
+ * the one kind of absence that cannot be relaxed. Absence has two causes that
+ * look identical here: the frame fell under the collection threshold, or the
+ * census never measured that crate. The second is exactly how this gate shipped
+ * a baseline too low to hold, so absence must never read as a pass.
  */
 pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, today: string) {
   const near_floor = to_int(to_float(budget.ceiling_bytes) * (1.0 - budget.near_ceiling_fraction))
@@ -142,20 +192,23 @@ pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, to
     budgeted[entry.path] = entry.max_bytes
   }
   let findings = []
+  let notes = []
   for entry in budget.files {
     const observed = worst[entry.path]
     if observed == nil {
       findings = findings
         + [
           {
-            kind: "shrunk_below_threshold",
+            kind: "absent_from_census",
             path: entry.path,
             budget_bytes: entry.max_bytes,
-            detail: "budgeted file has no measured frame above the collection "
-              + "threshold; it shrank, so bank that with --write",
+            detail: "budgeted file has no measured frame in this census. That is "
+              + "either a shrink under the collection threshold or a crate the "
+              + "census failed to measure, and those are indistinguishable here, "
+              + "so it is refused rather than read as a pass",
           },
         ]
-    } else if observed > entry.max_bytes {
+    } else if observed > entry.max_bytes + tolerance_for(budget, entry.max_bytes) {
       findings = findings
         + [
           {
@@ -163,20 +216,32 @@ pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, to
             path: entry.path,
             budget_bytes: entry.max_bytes,
             observed_bytes: observed,
-            detail: "worst stack frame grew beyond its budget; this budget is "
-              + "shrink-only because a frame is paid once per nested descent level",
+            detail: "worst stack frame grew past its budget and the tolerance "
+              + "band; a frame is paid once per nested descent level, so growth "
+              + "this size is a product decision rather than build noise",
           },
         ]
-    } else if observed < entry.max_bytes {
-      findings = findings
+    } else if observed > entry.max_bytes {
+      notes = notes
         + [
           {
-            kind: "tighten",
+            kind: "growth_within_band",
             path: entry.path,
             budget_bytes: entry.max_bytes,
             observed_bytes: observed,
-            detail: "worst stack frame shrank; run with --write so the budget "
-              + "keeps the ground it gained",
+            detail: "grew by less than the tolerance band, which passes",
+          },
+        ]
+    } else if observed < entry.max_bytes {
+      notes = notes
+        + [
+          {
+            kind: "banked_ground",
+            path: entry.path,
+            budget_bytes: entry.max_bytes,
+            observed_bytes: observed,
+            detail: "shrank, and the budget still holds the older, larger number. "
+              + "The banking job on main tightens it",
           },
         ]
     }
@@ -184,18 +249,38 @@ pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, to
   for path in keys(worst) {
     const observed = worst[path] ?? 0
     if budgeted[path] == nil {
-      findings = findings
-        + [
-          {
-            kind: "unlisted",
-            path: path,
-            budget_bytes: 0,
-            observed_bytes: observed,
-            detail: "a frame crossed the collection threshold for the first time "
-              + "and is absent from the budget; an incomplete census is not a gate, "
-              + "so record it with --write",
-          },
-        ]
+      // A file absent from the budget was under the collection threshold when
+      // the budget was banked, so the threshold IS its prior measurement. That
+      // makes a newcomer ordinary growth judged by the ordinary band, rather
+      // than a special case reported against a budget of zero, which read like
+      // the gate had lost the number rather than never having had one.
+      const implied = budget.threshold_bytes
+      if observed > implied + tolerance_for(budget, implied) {
+        findings = findings
+          + [
+            {
+              kind: "unlisted",
+              path: path,
+              budget_bytes: implied,
+              observed_bytes: observed,
+              detail: "a frame crossed the collection threshold for the first "
+                + "time by more than the tolerance band, judged against the "
+                + "threshold because that is where it must have been before",
+            },
+          ]
+      } else {
+        notes = notes
+          + [
+            {
+              kind: "unlisted_within_band",
+              path: path,
+              budget_bytes: implied,
+              observed_bytes: observed,
+              detail: "crossed the collection threshold by less than the "
+                + "tolerance band, which passes",
+            },
+          ]
+      }
     }
     if observed < near_floor {
       continue
@@ -235,8 +320,42 @@ pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, to
     scanned_files: len(keys(worst)),
     budgeted_files: len(budget.files),
     findings: findings,
+    notes: notes,
     violation_count: len(findings),
   }
+}
+
+/**
+ * Every file whose measurement differs from its banked number, largest move
+ * first.
+ *
+ * This is the gate's own drift record. Two runs of this gate on one commit
+ * print the same list when the toolchain is reproducible, and the day they do
+ * not, the difference is the measured variance the tolerance band is supposed
+ * to cover. Without it a passing run says nothing about how far anything moved.
+ */
+pub fn render_drift(report: FrameReport) {
+  if len(report.notes) == 0 {
+    return "frame drift: none. Every measured frame equals its banked number."
+  }
+  let out = "frame drift: " + to_string(len(report.notes)) + " file(s) moved within band\n"
+  for note in report.notes {
+    const observed = note.observed_bytes ?? 0
+    const delta = observed - note.budget_bytes
+    const sign = if delta > 0 {
+      "+"
+    } else {
+      ""
+    }
+    out = out + "\n- " + note.path + ": " + to_string(observed)
+      + " ("
+      + sign
+      + to_string(delta)
+      + " against "
+      + to_string(note.budget_bytes)
+      + ")"
+  }
+  return out
 }
 
 pub fn render_report(report: FrameReport) {
@@ -263,8 +382,10 @@ pub fn render_report(report: FrameReport) {
       + "\n  "
       + finding.detail
   }
-  out = out + "\n\nRegenerate the census with scripts/ci/collect_stack_frames.sh, "
-    + "then re-run this gate with --write to accept a shrink."
+  out = out + "\n\nThese are moves larger than the tolerance band, so they are "
+    + "product decisions rather than build noise. Shrinkage and in-band movement "
+    + "pass here and are banked on main by the stack-frame banking job; a pull "
+    + "request never needs to run this gate with --write."
   return out
 }
 
@@ -277,6 +398,7 @@ fn arg_spec() {
         {kind: "flag", name: "budget", long: "--budget", parse: "string", default: BUDGET_PATH},
         {kind: "flag", name: "today", long: "--today", parse: "string", default: ""},
         {kind: "switch", name: "write", long: "--write", default: false},
+        {kind: "flag", name: "bank_on", long: "--bank-on", parse: "string", default: ""},
         {kind: "switch", name: "json", long: "--json", default: false},
       ],
     },
@@ -286,7 +408,8 @@ fn arg_spec() {
 fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/check_stack_frames.harn -- --census PATH [--budget PATH] [--write] [--json]",
+      "usage: harn run scripts/check_stack_frames.harn -- --census PATH "
+        + "[--budget PATH] [--today YYYY-MM-DD] [--write --bank-on main] [--json]",
     )
     return nil
   }
@@ -326,6 +449,19 @@ fn main(harness: Harness) {
   }
   const report = judge_stack_frames(worst, budget, today)
   if parsed?.write ?? false {
+    // Banking is a main-branch act. On a pull request it rewrites the baseline
+    // to whatever that branch happens to measure, which turns the gate into a
+    // record of the last person to run it. The banking job passes --bank-on
+    // with the branch it is running on, and this refuses anything else.
+    const banking_ref = to_string(parsed?.bank_on ?? "")
+    if banking_ref != "main" {
+      harness.stdio.eprintln(
+        "error: --write banks a new baseline and belongs to the banking job on "
+          + "main, which passes --bank-on main. A pull request never needs it: "
+          + "shrinkage and in-band movement already pass.",
+      )
+      harness.runtime.exit(2)
+    }
     // Rewrite from the CENSUS, not from the previous budget. Walking the old
     // entries could only ever adjust files that were already listed, so a
     // frame crossing the threshold for the first time stayed "unlisted"
@@ -342,6 +478,10 @@ fn main(harness: Harness) {
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
+    // The drift record prints on a pass as well as a failure. A gate that only
+    // speaks when it refuses cannot tell anyone how much room is left, and the
+    // run-to-run variance its band is sized against is invisible.
+    harness.stdio.println(render_drift(report))
     const out = render_report(report)
     if report.violation_count == 0 {
       harness.stdio.println(out)
