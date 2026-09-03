@@ -29,7 +29,6 @@ const SEALED_DISPATCH_ALLOWED_RISK_LABELS: [&str; 3] = [
 
 thread_local! {
     static COMMAND_POLICY_STACK: RefCell<Vec<CommandPolicy>> = const { RefCell::new(Vec::new()) };
-    static COMMAND_POLICY_HOOK_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
 #[derive(Clone, Debug, Default)]
@@ -118,29 +117,6 @@ pub(crate) enum CommandDispatchOrigin {
     ReviewedGitPushWithLease,
 }
 
-/// Enter one of the VM's own command-policy hooks (`pre`, `consent`).
-///
-/// The depth this raises is what distinguishes Harn's policy machinery running
-/// from ordinary tool work, so capability enforcement can let the consent gate
-/// ask its host without the calling tool having to declare a `permission`
-/// capability it has no other use for. `AmbientExecutionScope` swaps the depth
-/// per task, so it is correct across an `.await`.
-pub(crate) fn enter_command_policy_hook() -> HookDepthGuard {
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow_mut() += 1);
-    HookDepthGuard
-}
-
-pub(crate) struct HookDepthGuard;
-
-impl Drop for HookDepthGuard {
-    fn drop(&mut self) {
-        COMMAND_POLICY_HOOK_DEPTH.with(|depth| {
-            let mut depth = depth.borrow_mut();
-            *depth = depth.saturating_sub(1);
-        });
-    }
-}
-
 pub fn push_command_policy(policy: CommandPolicy) {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
 }
@@ -153,7 +129,7 @@ pub fn pop_command_policy() {
 
 pub fn clear_command_policies() {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+    hook_depth::reset_command_policy_hook_depth();
 }
 
 pub fn current_command_policy() -> Option<CommandPolicy> {
@@ -203,14 +179,6 @@ pub(crate) fn credential_read_path_candidates(args: &JsonValue) -> Vec<String> {
 /// cooperatively-scheduled siblings on the same thread.
 pub(crate) fn swap_command_policy_stack(next: Vec<CommandPolicy>) -> Vec<CommandPolicy> {
     COMMAND_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
-}
-
-pub(crate) fn swap_command_policy_hook_depth(next: usize) -> usize {
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| std::mem::replace(&mut *depth.borrow_mut(), next))
-}
-
-pub fn command_policy_hook_depth() -> usize {
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow())
 }
 
 pub fn parse_command_policy_value(
@@ -1486,6 +1454,11 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
 }
 
 mod catastrophic;
+mod hook_depth;
+// Re-exported so `command_policy::command_policy_hook_depth` keeps naming the
+// same thing it always did; only the file it lives in moved.
+pub use hook_depth::command_policy_hook_depth;
+pub(crate) use hook_depth::{enter_command_policy_hook, swap_command_policy_hook_depth};
 mod scan;
 mod workspace_effect;
 

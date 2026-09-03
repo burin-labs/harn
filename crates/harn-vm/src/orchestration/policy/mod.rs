@@ -5,6 +5,7 @@ mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
 mod capability_lattice;
+mod consent_capability;
 mod effect_call_cache;
 mod effects;
 mod nested_budget;
@@ -584,32 +585,12 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                     "host_call '{name}' must use capability.operation naming"
                 ));
             };
-            // The VM's own policy machinery is allowed to ask for consent.
-            //
-            // A `command_policy` consent gate runs inside the execution scope
-            // of whichever tool triggered it, so its
-            // `host_call("permission.request", ...)` was measured against that
-            // tool's ceiling. A tool that runs commands declares
-            // `process: ["exec"]` and has no reason to declare a `permission`
-            // capability, so the gate could not ask, the embedder caught the
-            // throw, and the command failed with a sentence that reads as
-            // "there is nobody to ask" while the host was reachable.
-            //
-            // Asking for consent is not work the model requested. It is the VM
-            // deciding whether to allow work the model requested, so it carries
-            // the policy machinery's own capability. `command_policy_hook_depth`
-            // is non-zero only while the VM is inside one of its own command
-            // hooks, and `AmbientExecutionScope` swaps it per task, so this
-            // stays correct across an `.await` and cannot leak to a sibling.
-            //
-            // Exactly one operation is granted, and only here. A tool that
-            // calls `host_call("permission.request", ...)` itself, outside the
-            // hook, is still refused by its own ceiling. The side-effect
-            // ceiling below, the deny patterns, and the never-approvable
-            // catastrophic floor are all unchanged.
-            let consent_gate_asking_for_itself = (capability, op) == ("permission", "request")
-                && super::command_policy::command_policy_hook_depth() > 0;
-            if !consent_gate_asking_for_itself && !policy_allows_capability(&policy, capability, op)
+            // The VM's own policy machinery may ask for consent regardless of
+            // the calling tool's ceiling; `consent_capability` owns that rule
+            // and explains why. Everything below is unchanged, including the
+            // side-effect ceiling and the never-approvable catastrophic floor.
+            if !consent_capability::is_policy_machinery_consent_call(capability, op)
+                && !policy_allows_capability(&policy, capability, op)
             {
                 return reject_policy(format!(
                     "host_call {capability}.{op} exceeds capability ceiling"
