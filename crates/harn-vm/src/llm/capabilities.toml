@@ -4940,7 +4940,7 @@ prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
-model_match = ["google/gemini-3.6*", "google/gemini-3.7*"]
+model_match = ["google/gemini-3.6*", "google/gemini-3.7*", "google/gemini-3.8*"]
 native_tools = true
 preferred_tool_format = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
@@ -5044,8 +5044,30 @@ reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
 reasoning_none_supported = false
 
+# Live probe of `gemini-3.8-flash` on 2026-09-03, every call against the real
+# endpoint with an unknown-id negative control returning 404 first:
+#   thinking_level low / medium / high  -> 200
+#   thinking_level minimal              -> 400 "Thinking level MINIMAL is not
+#                                          supported for this model"
+# so the effort ladder is the same three rungs 3.7 exposes and `none` is off.
+# Two further observations that are deliberately NOT read as support:
+#   * `thinkingConfig.thinkingBudget: 0` on the legacy generateContent dialect
+#     DID suppress thinking (5 total tokens, no thoughtsTokenCount). The 3.x
+#     rows drive the Interactions thinking_level ladder, which refuses the
+#     equivalent rung, so the two channels disagree and the ladder wins here.
+#   * temperature / top_p / top_k are ACCEPTED with HTTP 200 rather than
+#     refused, but Google's own model guidance says to strip them. A 200 proves
+#     the field was tolerated, never that it was honored, so these stay
+#     unsupported exactly as they are on the 3.6/3.7 rows.
 [[provider.gemini]]
-model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*"]
+model_match = ["gemini-3.8*", "models/gemini-3.8*"]
+extends = true
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+
+[[provider.gemini]]
+model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*", "gemini-3.8*", "models/gemini-3.8*"]
 advanced_generation_options = []
 native_tools = true
 preferred_tool_format = "native"
