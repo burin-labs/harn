@@ -1161,7 +1161,7 @@ mod tests {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
-            unpriced_attempts: Vec::new(),
+            unpriced_attempts: None,
             projected_cost_usd: 0.0123,
             unprojectable_attempts: 0,
         };
@@ -1199,13 +1199,13 @@ mod tests {
             provider_call_count: 1,
             unpriced_calls: 1,
             usage_unknown_calls: 0,
-            unpriced_attempts: vec![crate::llm::usage::UnpricedAttempt {
+            unpriced_attempts: Some(Box::new([crate::llm::usage::UnpricedAttempt {
                 reason: crate::llm::usage::UnpricedReason::NoPriceTable,
                 input_tokens: 5,
                 output_tokens: 1,
                 reported_total_tokens: None,
                 projected_cost_usd: None,
-            }],
+            }])),
             projected_cost_usd: 0.0,
             unprojectable_attempts: 1,
         };
