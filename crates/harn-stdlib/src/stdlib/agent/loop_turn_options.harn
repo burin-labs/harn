@@ -436,6 +436,7 @@ pub fn __agent_loop_budget_aggregates(
   return {
     cost_usd: __agent_loop_cost_usd(resolved_totals),
     known_cost_usd: to_float(resolved_totals?.known_cost_usd ?? 0.0) ?? 0.0,
+    projected_cost_usd: resolved_totals?.projected_cost_usd,
     unpriced_calls: to_int(resolved_totals?.unpriced_calls ?? 0) ?? 0,
     usage_unknown_calls: to_int(resolved_totals?.usage_unknown_calls ?? 0) ?? 0,
     wall_clock_ms: __agent_loop_elapsed_ms(clock, loop_start_ms),
@@ -475,10 +476,16 @@ pub fn __agent_loop_budget_exhaustion(
     return aggregates
       + {exhausted: true, kind: "wall_clock", iteration: iteration, max_iterations: max_iterations}
   }
+  // Exhaustion is judged on the worst case. An unpriced attempt whose worst
+  // case the runtime could not compute still exhausts, so the loop keeps
+  // failing closed on it.
+  const projected_spend = aggregates.projected_cost_usd
   if budget?.total_cost_usd != nil
-    && (aggregates.unpriced_calls > 0
-      || aggregates.cost_usd
-        >= budget.total_cost_usd) {
+    && (if projected_spend != nil {
+      projected_spend >= budget.total_cost_usd
+    } else {
+      aggregates.unpriced_calls > 0 || aggregates.cost_usd >= budget.total_cost_usd
+    }) {
     return aggregates
       + {exhausted: true, kind: "total_cost", iteration: iteration, max_iterations: max_iterations}
   }

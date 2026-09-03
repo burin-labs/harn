@@ -679,23 +679,13 @@ pub(crate) async fn observed_llm_call(
                     )
                 {
                     let retry_usage = result.usage();
-                    // A discarded attempt that reported no tokens on any axis
-                    // measured zero; it did not fail to measure. Folding its raw
-                    // `unknown` ledger instead let one empty retry mark the whole
-                    // call unpriced, which nulls `cost_usd` beside a populated
-                    // `known_cost_usd` and makes a cost governor consume its
-                    // entire ceiling on a call that recovered cleanly. A
-                    // rate-limited retry is already folded as a known zero for
-                    // exactly this reason.
-                    //
-                    // An actionless turn that DID report tokens keeps its
-                    // measured ledger: that spend was real, and the governor must
-                    // keep failing closed on it.
-                    completed_retry_usage.push(if retry_usage.reports_no_tokens() {
-                        crate::llm::usage::LlmUsage::known_zero_attempt()
-                    } else {
-                        retry_usage.clone()
-                    });
+                    // The discarded attempt keeps its own measured ledger,
+                    // including its typed unpriced reason. Rewriting it to a
+                    // known zero would assert it cost nothing, which nobody
+                    // measured. The aggregate reports partial accounting
+                    // instead, so one discarded attempt no longer nulls the
+                    // priced siblings' cost.
+                    completed_retry_usage.push(retry_usage.clone());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
                         ("status", serde_json::json!("retrying")),

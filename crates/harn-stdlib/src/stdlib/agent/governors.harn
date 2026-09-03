@@ -254,6 +254,24 @@ fn __convergence_guard_finalization(reason: string, evidence: dict) -> dict {
  * @errors: []
  * @api_stability: experimental
  */
+
+/**
+ * The worst-case cost a ceiling spends against, or nil when nothing bounds it.
+ *
+ * A totals dict recorded before `projected_cost_usd` existed carries no such
+ * field. Its own measured cost stands in when every call was priced, so the
+ * absent field reads as the old fail-closed answer rather than as a free zero.
+ */
+fn __governor_projected_cost(totals: any) -> float? {
+  if totals?.projected_cost_usd != nil {
+    return to_float(totals.projected_cost_usd)
+  }
+  if (totals?.unpriced_calls ?? 0) > 0 {
+    return nil
+  }
+  return to_float(totals?.cost_usd ?? 0.0)
+}
+
 pub fn convergence_guard_decision(
   policy: ConvergenceGuardPolicy,
   facts: ConvergenceFactVector,
@@ -398,13 +416,16 @@ fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict
     to_float(agent_session_totals(agent, session_id)?.tokens_used ?? 0)
   } else if signal == "cost" {
     const totals = agent_session_totals(agent, session_id)
-    // A cost governor is a ceiling, not a telemetry display. Unknown pricing
-    // therefore consumes the ceiling and stops fail-closed; known-cost floors
-    // remain available separately for evidence.
-    if (totals?.unpriced_calls ?? 0) > 0 {
+    // A cost governor is a ceiling, not a telemetry display, so it spends
+    // against the worst case rather than the measured floor. A call that
+    // recovered from a discarded attempt has a computable worst case and no
+    // longer consumes the whole ceiling; a call whose worst case cannot be
+    // computed at all still does, and still stops fail-closed.
+    const projected = __governor_projected_cost(totals)
+    if projected == nil {
       to_float(policy.budget ?? 0.0)
     } else {
-      to_float(totals?.cost_usd ?? 0.0)
+      to_float(projected)
     }
   } else {
     to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)

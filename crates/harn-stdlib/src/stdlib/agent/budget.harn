@@ -39,16 +39,22 @@ pub fn agent_budget_post_call_stop_reason(totals: dict, opts: dict) -> string {
       return "token_budget"
     }
   }
-  if envelope?.total_budget_usd != nil && totals?.cost_usd != nil {
-    if totals.cost_usd >= envelope.total_budget_usd {
+  // A configured USD ceiling spends against the worst case: everything priced
+  // plus a price-table bound on every unpriced attempt. A call that recovered
+  // from a discarded attempt therefore no longer stops the loop on its first
+  // retry. A call whose worst case cannot be computed at all still does, at
+  // the same post-call boundary, instead of treating unknown spend as zero.
+  if envelope?.total_budget_usd != nil {
+    const projected = totals?.projected_cost_usd
+    if projected != nil {
+      if projected >= envelope.total_budget_usd {
+        return "total_cost"
+      }
+    } else if (totals?.unpriced_calls ?? 0) > 0 {
+      return "unpriced_call"
+    } else if totals?.cost_usd != nil && totals.cost_usd >= envelope.total_budget_usd {
       return "total_cost"
     }
-  }
-  // A configured USD ceiling cannot be proven safe once any completed call is
-  // unpriced. Stop at the same post-call boundary instead of treating unknown
-  // spend as zero and allowing the loop to continue unbounded.
-  if envelope?.total_budget_usd != nil && (totals?.unpriced_calls ?? 0) > 0 {
-    return "unpriced_call"
   }
   return ""
 }

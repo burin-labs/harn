@@ -24,6 +24,11 @@ pub(crate) use receipt::ProviderUsageReceipt;
 #[serde(rename_all = "snake_case")]
 pub enum UsageAccountingStatus {
     Reported,
+    /// Some attempt in this ledger was priced and some was not. The priced
+    /// portion is a real measurement, so it is reported rather than blacked
+    /// out; the unpriced attempts stay visible in `unpriced_calls`,
+    /// `unpriced_tokens`, and `unpriced_reason`.
+    Partial,
     #[default]
     Unknown,
 }
@@ -32,7 +37,48 @@ impl UsageAccountingStatus {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Reported => "reported",
+            Self::Partial => "partial",
             Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Why an attempt in a ledger carries no price.
+///
+/// A ceiling consumer needs this to tell a bound it can compute from one it
+/// cannot: an attempt that reported tokens on a priced route has a worst case,
+/// while a route with no price table has none at any token count.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UnpricedReason {
+    /// The route has no entry in the price table, so no token count bounds it.
+    NoPriceTable,
+    /// The route is priced but the attempt reported no usable token counts.
+    UsageUnreported,
+    /// The attempt produced no response at all, so neither a token count nor
+    /// a price table bounds it.
+    NoResponse,
+    /// Unpriced attempts in this ledger disagree, or the ledger predates this
+    /// field. Either way the projection refuses.
+    Mixed,
+}
+
+impl UnpricedReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::NoPriceTable => "no_price_table",
+            Self::UsageUnreported => "usage_unreported",
+            Self::NoResponse => "no_response",
+            Self::Mixed => "mixed",
+        }
+    }
+
+    /// Fold two reasons from sibling attempts into the one this ledger carries.
+    fn merge(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            Self::Mixed
         }
     }
 }
@@ -75,6 +121,25 @@ pub struct LlmUsage {
     pub unpriced_calls: i64,
     #[serde(default)]
     pub usage_unknown_calls: i64,
+    /// Tokens the unpriced attempts in this ledger did report. This is what
+    /// the worst-case projection below is priced from, so a reader can see
+    /// how much of that bound rests on measured counts.
+    #[serde(default)]
+    pub unpriced_tokens: i64,
+    /// Why the unpriced attempts carry no price. `None` when nothing here is
+    /// unpriced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unpriced_reason: Option<UnpricedReason>,
+    /// Worst case USD for this ledger: the priced portion plus a price-table
+    /// bound on every unpriced attempt's reported tokens. `None` means at
+    /// least one unpriced attempt is unprojectable, and a ceiling consumer
+    /// must fail closed on it.
+    ///
+    /// A ledger deserialized from before this field existed reads `None`.
+    /// `summarize_usage_cost_certainty` reconstructs those from `cost_usd`
+    /// rather than letting the absent field read as a refusal.
+    #[serde(default)]
+    pub projected_cost_usd: Option<f64>,
 }
 
 /// Aggregate cost certainty for a collection of canonical call ledgers.
@@ -84,6 +149,28 @@ pub struct UsageCostCertainty {
     pub provider_call_count: i64,
     pub unpriced_calls: i64,
     pub usage_unknown_calls: i64,
+    pub unpriced_tokens: i64,
+    pub unpriced_reason: Option<UnpricedReason>,
+    /// Worst case USD attributable to the unpriced attempts alone.
+    pub unpriced_projection_usd: f64,
+    /// At least one unpriced attempt has no computable bound.
+    pub unprojectable: bool,
+}
+
+impl UsageCostCertainty {
+    /// The number a ceiling consumer spends against: everything measured plus
+    /// the worst case for everything that was not. `None` refuses, and a
+    /// governor or budget that gets `None` must fail closed.
+    #[must_use]
+    pub fn projected_cost_usd(&self) -> Option<f64> {
+        (!self.unprojectable).then(|| self.known_cost_usd + self.unpriced_projection_usd)
+    }
+
+    /// Whether any attempt folded here carried a price.
+    #[must_use]
+    pub const fn has_priced_attempt(&self) -> bool {
+        self.unpriced_calls < self.provider_call_count
+    }
 }
 
 /// Fold cost and accounting certainty once for every reporting projection.
@@ -113,8 +200,76 @@ pub fn summarize_usage_cost_certainty<'a>(
             } else {
                 usage.usage_unknown_calls
             };
+            summary.unpriced_tokens += if legacy {
+                if usage.cost_usd.is_none() {
+                    usage.input_tokens.saturating_add(usage.output_tokens)
+                } else {
+                    0
+                }
+            } else {
+                usage.unpriced_tokens
+            };
+            let reason = if legacy {
+                usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
+            } else {
+                usage.unpriced_reason
+            };
+            if let Some(reason) = reason {
+                summary.unpriced_reason = Some(
+                    summary
+                        .unpriced_reason
+                        .map_or(reason, |existing| existing.merge(reason)),
+                );
+            }
+            // A legacy ledger has no stored projection, so its own cost stands
+            // in: priced members project to exactly what they cost, unpriced
+            // ones refuse.
+            let member_projection = if legacy {
+                usage.cost_usd
+            } else {
+                usage.projected_cost_usd
+            };
+            let member_known = if legacy {
+                usage.cost_usd.unwrap_or(0.0)
+            } else {
+                usage.known_cost_usd
+            };
+            match member_projection {
+                Some(projected) => {
+                    summary.unpriced_projection_usd += (projected - member_known).max(0.0);
+                }
+                None => summary.unprojectable = true,
+            }
             summary
         })
+}
+
+/// Classify one attempt's missing price and bound what it may have cost.
+///
+/// `table_cost` is what the route's price table makes of the counts the
+/// attempt reported, independent of whether those counts were usable. A priced
+/// attempt projects to its own cost. An unpriced attempt on a priced route is
+/// bounded by that table figure, which is zero when it reported no tokens. An
+/// unpriced attempt on a route with no price table has no bound at any token
+/// count, so its projection refuses.
+fn unpriced_projection(
+    cost_usd: Option<f64>,
+    table_cost: Option<f64>,
+) -> (Option<UnpricedReason>, Option<f64>) {
+    match (cost_usd, table_cost) {
+        (Some(cost), _) => (None, Some(cost)),
+        (None, Some(bound)) => (Some(UnpricedReason::UsageUnreported), Some(bound)),
+        (None, None) => (Some(UnpricedReason::NoPriceTable), None),
+    }
+}
+
+/// Tokens attributable to an attempt only when that attempt went unpriced.
+const fn unpriced_token_count(cost_usd: Option<f64>, input: i64, output: i64) -> i64 {
+    if cost_usd.is_some() {
+        0
+    } else {
+        input.saturating_add(output)
+    }
 }
 
 impl LlmUsage {
@@ -150,7 +305,12 @@ impl LlmUsage {
             input_tokens,
             output_tokens,
             reported_total_tokens,
-            cost_usd: (certainty.unpriced_calls == 0).then_some(certainty.known_cost_usd),
+            // The priced attempts measured something real. Reporting their
+            // sum as null because a sibling was unpriced turns a measurement
+            // into no measurement; the unpriced siblings stay visible in
+            // `unpriced_calls`, `unpriced_tokens`, and `unpriced_reason`.
+            cost_usd: (certainty.unpriced_calls == 0 || certainty.has_priced_attempt())
+                .then_some(certainty.known_cost_usd),
             cache_read_tokens,
             cache_write_tokens,
             cache_supported,
@@ -167,8 +327,13 @@ impl LlmUsage {
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
             served_fast: usages.iter().any(|usage| usage.served_fast),
-            accounting_status: if certainty.usage_unknown_calls == 0 {
+            accounting_status: if certainty.usage_unknown_calls == 0
+                && certainty.unpriced_calls == 0
+            {
                 UsageAccountingStatus::Reported
+            } else if certainty.has_priced_attempt() {
+                // Only a call that priced nothing at all blacks out.
+                UsageAccountingStatus::Partial
             } else {
                 UsageAccountingStatus::Unknown
             },
@@ -176,6 +341,9 @@ impl LlmUsage {
             provider_call_count: certainty.provider_call_count,
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
+            unpriced_tokens: certainty.unpriced_tokens,
+            unpriced_reason: certainty.unpriced_reason,
+            projected_cost_usd: certainty.projected_cost_usd(),
         }
     }
 
@@ -203,22 +371,11 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
+            unpriced_tokens: 0,
+            unpriced_reason: None,
+            projected_cost_usd: Some(0.0),
             ..Self::unknown_attempt()
         }
-    }
-
-    /// Whether this ledger carries no token counts at all.
-    ///
-    /// Distinct from an attempt whose counts happen to be zero on one axis: a
-    /// provider that reported nothing on every axis measured nothing, and a
-    /// discarded attempt in that state can be folded as a known zero rather
-    /// than as an unpriced call that voids its siblings.
-    pub(crate) fn reports_no_tokens(&self) -> bool {
-        self.input_tokens == 0
-            && self.output_tokens == 0
-            && self.cache_read_tokens == 0
-            && self.cache_write_tokens == 0
-            && self.reported_total_tokens.is_none()
     }
 
     pub(crate) fn unknown_attempt() -> Self {
@@ -249,6 +406,12 @@ impl LlmUsage {
             provider_call_count: count,
             unpriced_calls: count,
             usage_unknown_calls: count,
+            unpriced_tokens: 0,
+            // No response arrived, so neither a token count nor a price table
+            // bounds what it may have cost. That refuses the projection, which
+            // is what keeps a ceiling consumer failing closed.
+            unpriced_reason: Some(UnpricedReason::NoResponse),
+            projected_cost_usd: None,
         }
     }
 
@@ -270,28 +433,28 @@ impl LlmUsage {
         // ceiling whole. `usage_unknown_calls` still records that the token
         // counts were missing: that stays unknown, only the cost does not.
         let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
+        // The price table is looked up whether or not the counts are usable,
+        // because it is what separates an unpriced attempt that still has a
+        // worst case from one that has none at any token count.
+        let table_cost = super::cost::pricing_detail_for_tier(
+            &result.provider,
+            &result.model,
+            result.served_fast,
+            result.input_tokens,
+        )
+        .map(|detail| {
+            super::cost::project_call_cost(
+                &detail,
+                result.input_tokens,
+                result.output_tokens,
+                result.cache_read_tokens,
+                result.cache_write_tokens,
+            )
+        });
         let cost_usd = authoritative_cost
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| {
-                if !component_usage_known {
-                    return None;
-                }
-                super::cost::pricing_detail_for_tier(
-                    &result.provider,
-                    &result.model,
-                    result.served_fast,
-                    result.input_tokens,
-                )
-                .map(|detail| {
-                    super::cost::project_call_cost(
-                        &detail,
-                        result.input_tokens,
-                        result.output_tokens,
-                        result.cache_read_tokens,
-                        result.cache_write_tokens,
-                    )
-                })
-            });
+            .or_else(|| component_usage_known.then_some(table_cost).flatten());
+        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
         let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
             .then(|| {
@@ -329,6 +492,13 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
+            unpriced_tokens: unpriced_token_count(
+                cost_usd,
+                result.input_tokens,
+                result.output_tokens,
+            ),
+            unpriced_reason,
+            projected_cost_usd,
         }
     }
 
@@ -358,6 +528,11 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: 0,
+            unpriced_tokens: unpriced_token_count(cost_usd, input_tokens, output_tokens),
+            // A probe reports its own counts, so an unpriced probe is unpriced
+            // because the route has no price table.
+            unpriced_reason: cost_usd.is_none().then_some(UnpricedReason::NoPriceTable),
+            projected_cost_usd: cost_usd,
         }
     }
 
@@ -374,30 +549,26 @@ impl LlmUsage {
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
         let free_route = crate::llm_config::provider_is_self_hosted(provider);
+        let table_cost = super::cost::pricing_detail_for_tier(
+            provider,
+            model,
+            receipt.served_fast,
+            input_tokens,
+        )
+        .map(|detail| {
+            super::cost::project_call_cost(
+                &detail,
+                input_tokens,
+                output_tokens,
+                receipt.cache_read_tokens,
+                receipt.cache_write_tokens,
+            )
+        });
         let cost_usd = receipt
             .provider_cost_usd
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| {
-                complete_counts
-                    .then(|| {
-                        super::cost::pricing_detail_for_tier(
-                            provider,
-                            model,
-                            receipt.served_fast,
-                            input_tokens,
-                        )
-                    })
-                    .flatten()
-                    .map(|detail| {
-                        super::cost::project_call_cost(
-                            &detail,
-                            input_tokens,
-                            output_tokens,
-                            receipt.cache_read_tokens,
-                            receipt.cache_write_tokens,
-                        )
-                    })
-            });
+            .or_else(|| complete_counts.then_some(table_cost).flatten());
+        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
         let usage_unknown = i64::from(!complete_counts);
         Self {
             input_tokens,
@@ -435,6 +606,9 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: usage_unknown,
+            unpriced_tokens: unpriced_token_count(cost_usd, input_tokens, output_tokens),
+            unpriced_reason,
+            projected_cost_usd,
         }
     }
 
@@ -490,6 +664,19 @@ impl LlmUsage {
         usage.insert(
             crate::value::intern_key("usage_unknown_calls"),
             VmValue::Int(self.usage_unknown_calls),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_tokens"),
+            VmValue::Int(self.unpriced_tokens),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_reason"),
+            self.unpriced_reason
+                .map_or(VmValue::Nil, |reason| VmValue::string(reason.as_str())),
+        );
+        usage.insert(
+            crate::value::intern_key("projected_cost_usd"),
+            self.projected_cost_usd.map_or(VmValue::Nil, VmValue::Float),
         );
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
@@ -576,6 +763,17 @@ impl LlmUsage {
         fields.insert(
             "usage_unknown_calls".to_string(),
             self.usage_unknown_calls.into(),
+        );
+        fields.insert("unpriced_tokens".to_string(), self.unpriced_tokens.into());
+        fields.insert(
+            "unpriced_reason".to_string(),
+            self.unpriced_reason
+                .map_or(Value::Null, |reason| reason.as_str().into()),
+        );
+        fields.insert(
+            "projected_cost_usd".to_string(),
+            self.projected_cost_usd
+                .map_or(Value::Null, serde_json::Value::from),
         );
         fields.insert(
             "cache_read_tokens".to_string(),
@@ -1025,6 +1223,124 @@ mod tests {
         assert_eq!(summary.usage_unknown_calls, 1);
     }
 
+    /// harn#7912 falsifier. A call that recovered from a discarded attempt
+    /// must report the cost it measured.
+    ///
+    /// Live shape: a zero-token empty completion was retried, the retry
+    /// answered and reported full usage, and the envelope still came back
+    /// `accounting_status: "unknown"` with a null `cost_usd` beside a
+    /// populated `known_cost_usd`. A real measurement was reported as no
+    /// measurement, and both cost consumers spend a whole ceiling on that.
+    #[test]
+    fn a_recovered_retry_reports_partial_accounting_instead_of_a_black_out() {
+        let priced = LlmUsage::from_result(&accounted_result());
+        let discarded = LlmUsage::from_result(&LlmResult {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            attempts: ProviderAttempts::default(),
+            ..accounted_result()
+        });
+        assert_eq!(
+            discarded.unpriced_calls, 1,
+            "the discarded attempt reported nothing usable, so it stays unpriced"
+        );
+
+        let call = LlmUsage::aggregate(&[priced.clone(), discarded]);
+
+        assert_eq!(
+            call.cost_usd,
+            Some(priced.known_cost_usd),
+            "the priced attempt measured this; a discarded sibling must not null it"
+        );
+        assert_eq!(call.accounting_status, UsageAccountingStatus::Partial);
+        assert_eq!(
+            call.unpriced_calls, 1,
+            "the discarded attempt stays visible"
+        );
+        assert_eq!(call.provider_call_count, 2);
+        assert_eq!(
+            call.unpriced_reason,
+            Some(super::UnpricedReason::UsageUnreported),
+            "the route is priced; what is missing is the attempt's token counts"
+        );
+    }
+
+    /// The falsifier control the ruling names: a recovered retry must not
+    /// consume the whole ceiling. The projection is what a governor spends
+    /// against, so it has to be a number near the measured cost rather than a
+    /// refusal.
+    #[test]
+    fn a_recovered_retry_projects_close_to_what_it_measured() {
+        let priced = LlmUsage::from_result(&accounted_result());
+        let discarded = LlmUsage::from_result(&LlmResult {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            attempts: ProviderAttempts::default(),
+            ..accounted_result()
+        });
+
+        let call = LlmUsage::aggregate(&[priced.clone(), discarded]);
+
+        let projected = call
+            .projected_cost_usd
+            .expect("a priced route bounds its own unreported attempt");
+        assert!(
+            projected >= priced.known_cost_usd,
+            "the projection is a worst case, so it never undercuts what was measured: \
+             projected {projected}, measured {}",
+            priced.known_cost_usd
+        );
+        assert!(
+            projected <= priced.known_cost_usd * 2.0,
+            "an attempt that reported no tokens adds no worst case at this price \
+             table, so the projection must not blow up: projected {projected}, \
+             measured {}",
+            priced.known_cost_usd
+        );
+    }
+
+    /// The control that keeps the fix from passing by pricing everything at
+    /// zero. An attempt that never answered has no token count and no price
+    /// table entry to bound it, so the projection refuses and every ceiling
+    /// consumer keeps failing closed.
+    #[test]
+    fn an_unprojectable_attempt_still_refuses_the_projection() {
+        let priced = LlmUsage::from_result(&accounted_result());
+
+        let call = LlmUsage::aggregate(&[priced.clone(), LlmUsage::unknown_attempt()]);
+
+        assert_eq!(
+            call.projected_cost_usd, None,
+            "nothing bounds an attempt that produced no response"
+        );
+        assert_eq!(
+            call.unpriced_reason,
+            Some(super::UnpricedReason::NoResponse)
+        );
+        assert_eq!(
+            call.cost_usd,
+            Some(priced.known_cost_usd),
+            "the priced sibling is still a measurement"
+        );
+        assert_eq!(call.accounting_status, UsageAccountingStatus::Partial);
+    }
+
+    /// The second control the ruling names: a call that priced nothing at all
+    /// still blacks out. Only a mixed ledger is partial.
+    #[test]
+    fn a_call_that_priced_nothing_still_blacks_out() {
+        let call = LlmUsage::aggregate(&[LlmUsage::unknown_attempt(), LlmUsage::unknown_attempt()]);
+
+        assert_eq!(call.cost_usd, None);
+        assert_eq!(call.projected_cost_usd, None);
+        assert_eq!(call.accounting_status, UsageAccountingStatus::Unknown);
+        assert_eq!(call.unpriced_calls, 2);
+    }
+
     #[test]
     fn terminal_unknown_ledger_counts_every_physical_attempt() {
         let usage = LlmUsage::unknown_attempts(3);
@@ -1045,11 +1361,15 @@ mod tests {
         let usage = LlmUsage::aggregate_with_unknown_attempts(&[completed], 2);
 
         assert_eq!(usage.known_cost_usd, 0.25);
-        assert_eq!(usage.cost_usd, None);
+        // harn#7912: the completed receipt measured 0.25, and two attempts
+        // that never answered do not unmeasure it. What they do is refuse the
+        // projection, which is what a ceiling consumer fails closed on.
+        assert_eq!(usage.cost_usd, Some(0.25));
+        assert_eq!(usage.projected_cost_usd, None);
         assert_eq!(usage.provider_call_count, 3);
         assert_eq!(usage.unpriced_calls, 2);
         assert_eq!(usage.usage_unknown_calls, 2);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
     }
 
     #[test]
@@ -1136,9 +1456,22 @@ mod tests {
         let vm_usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(usage.to_vm_dict(&result.attempts).into()));
 
-        assert_eq!(usage.cost_usd, None);
-        assert_eq!(vm_usage["accounting_status"], "unknown");
-        assert_eq!(vm_usage["cost_usd"], serde_json::Value::Null);
+        // The stream attempt reported no usage, so it stays unpriced and
+        // visible. It is not turned into a free zero, which is what this test
+        // has always guarded.
+        assert_eq!(usage.unpriced_calls, 1);
+        assert_eq!(usage.usage_unknown_calls, 1);
+
+        // harn#7912: `accounted_result` carries one completed retry receipt
+        // that WAS priced. Reporting the call as unmeasured because a sibling
+        // attempt was unpriced is the black-out this issue named, so the
+        // ledger is now partial and carries the priced portion.
+        assert_eq!(vm_usage["accounting_status"], "partial");
+        assert_eq!(usage.cost_usd, Some(usage.known_cost_usd));
+        assert!(
+            usage.known_cost_usd > 0.0,
+            "the priced retry receipt is a real measurement"
+        );
     }
 
     #[test]

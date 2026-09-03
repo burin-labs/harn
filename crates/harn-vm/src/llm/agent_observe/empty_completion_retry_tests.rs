@@ -954,21 +954,17 @@ fn billed_noncommittal_error() -> crate::value::VmError {
     )))
 }
 
-/// harn#7912 falsifier. A retried zero-token empty attempt must not make the
-/// whole call read as unpriced.
+/// harn#7912 reach test. The discarded attempt must actually arrive in the
+/// call's ledger through the real dispatch path, carrying its own typed
+/// unpriced reason rather than being rewritten to a known zero.
 ///
-/// The discarded attempt reported no tokens on any axis, so it measured zero
-/// rather than failing to measure. Folding its raw `unknown` ledger made one
-/// empty retry null `cost_usd` beside a populated `known_cost_usd`, and a cost
-/// governor treats an unpriced call by consuming its entire ceiling, so a call
-/// that recovered cleanly could stop the run.
-///
-/// The assertion is a delta against the single-call baseline rather than an
-/// absolute: the fake route carries no pricing, so every completed attempt is
-/// unpriced on its own. What must hold is that the DISCARDED attempt adds
-/// nothing.
+/// This route has no price table, so it is also the control the ruling names:
+/// a call that priced nothing at all still refuses its projection, and every
+/// USD ceiling consumer keeps failing closed on it. The partial-accounting
+/// falsifier needs a priced route and lives on `LlmUsage::aggregate` in
+/// `crates/harn-vm/src/llm/usage.rs`.
 #[test]
-fn a_retried_empty_attempt_does_not_add_an_unpriced_call() {
+fn a_discarded_empty_attempt_reaches_the_ledger_with_a_typed_reason() {
     current_thread_runtime().block_on(async {
         reset_agent_trace_state();
         let baseline = {
@@ -982,6 +978,10 @@ fn a_retried_empty_attempt_does_not_add_an_unpriced_call() {
                 .expect("clean call")
                 .usage()
         };
+        assert_eq!(
+            baseline.provider_call_count, 1,
+            "the baseline is one physical request"
+        );
 
         let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(
             FakeLlmTurn::stream(vec![
@@ -996,56 +996,26 @@ fn a_retried_empty_attempt_does_not_add_an_unpriced_call() {
 
         assert_eq!(
             retried.provider_call_count, 2,
-            "the physical attempt count still records both requests"
+            "the discarded attempt is in the ledger, not dropped from it"
         );
         assert_eq!(
-            retried.unpriced_calls, baseline.unpriced_calls,
-            "a discarded zero-token attempt must not add an unpriced call"
+            retried.unpriced_calls - baseline.unpriced_calls,
+            1,
+            "it keeps its own measured ledger; it is not rewritten to a known zero"
         );
         assert_eq!(
-            retried.usage_unknown_calls, baseline.usage_unknown_calls,
-            "a discarded zero-token attempt must not add an unknown-usage call"
+            retried.unpriced_reason,
+            Some(crate::llm::usage::UnpricedReason::NoPriceTable),
+            "this route has no price table, which is why nothing here is priced"
         );
-        reset_agent_trace_state();
-    });
-}
-
-/// The control that keeps the fix honest. An actionless turn that DID report
-/// tokens is real spend, so its ledger must survive being discarded. Without
-/// this, zeroing every retried attempt would pass the falsifier above while
-/// hiding measured spend from the governor.
-#[test]
-fn a_retried_attempt_that_reported_tokens_keeps_counting() {
-    current_thread_runtime().block_on(async {
-        reset_agent_trace_state();
-        let baseline = {
-            let _guard =
-                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
-                    FakeLlmEvent::Token("answered".into()),
-                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
-                ])));
-            observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
-                .await
-                .expect("clean call")
-                .usage()
-        };
-
-        let _guard =
-            install_fake_llm_script(FakeLlmScript::new().push(errored_actionless_turn()).push(
-                FakeLlmTurn::stream(vec![
-                    FakeLlmEvent::Token("answered".into()),
-                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
-                ]),
-            ));
-        let retried = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
-            .await
-            .expect("actionless completion retry should recover")
-            .usage();
-
-        let discarded = retried.usage_unknown_calls - baseline.usage_unknown_calls;
         assert_eq!(
-            discarded, 1,
-            "an actionless attempt that reported tokens still counts as its own call"
+            retried.projected_cost_usd, None,
+            "no price table means no bound at any token count, so a ceiling fails closed"
+        );
+        assert_eq!(
+            retried.accounting_status,
+            crate::llm::usage::UsageAccountingStatus::Unknown,
+            "nothing was priced, so this call still blacks out"
         );
         reset_agent_trace_state();
     });

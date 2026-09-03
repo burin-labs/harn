@@ -249,7 +249,12 @@ fn record_usage_preserves_unknown_cost_and_reports_the_known_floor() {
     )
     .expect("priced usage after unknown");
     let mixed_json = vm_to_json(&mixed_totals);
-    assert_eq!(mixed_json["cost_usd"], serde_json::Value::Null);
+    // harn#7912: the second call measured 0.0025 and the first call being
+    // unpriced does not unmeasure it. What the unpriced call does is refuse
+    // the projection, which is what a USD ceiling fails closed on.
+    assert_eq!(mixed_json["cost_usd"], 0.0025);
+    assert_eq!(mixed_json["projected_cost_usd"], serde_json::Value::Null);
+    assert_eq!(mixed_json["unprojectable_calls"], 1);
     assert_eq!(mixed_json["known_cost_usd"], 0.0025);
     assert_eq!(mixed_json["unpriced_calls"], 1);
     assert_eq!(mixed_json["usage_unknown_calls"], 1);
