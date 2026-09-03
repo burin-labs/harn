@@ -94,6 +94,97 @@ pub(super) fn emit_permission_activity(
     layer: ToolPermissionPolicyLayer,
     resolution: ToolPermissionResolution,
 ) {
+    emit_permission_activity_with_policy_outcome(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        layer,
+        resolution,
+        None,
+    );
+}
+
+/// Both records for an allowed dispatch: the operational transcript event and
+/// the portable permission activity.
+///
+/// One function because who decided the call and how it is recorded are the
+/// same question, and splitting them is how a reviewer grant ended up filed
+/// under the policy layer that could not decide it.
+///
+/// Out of line, and `inline(never)`, because the dispatch function that calls
+/// it sits inside the stack-frame gate's near-ceiling band. Growing that frame
+/// to emit an audit record would trade one instrument for another.
+#[inline(never)]
+pub(super) fn record_allowed_dispatch(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    evaluation: &PolicyEvaluation,
+) {
+    let by_reviewer = crate::orchestration::granted_by_auto_review(evaluation);
+    emit_permission_event_with_policy(
+        session_id,
+        "PermissionGrant",
+        tool_name,
+        tool_args,
+        &evaluation.reason,
+        by_reviewer,
+        Some(evaluation.receipt.clone()),
+    );
+    if by_reviewer {
+        emit_auto_review_granted_activity(session_id, tool_call_id, tool_name, evaluation);
+    } else {
+        emit_runtime_auto_approved_activity(session_id, tool_call_id, tool_name, evaluation);
+    }
+}
+
+/// Record a grant the automated reviewer made on an `ask` the policy layers
+/// left unresolved.
+///
+/// The policy evidence keeps saying `ApprovalRequired`. The layers really did
+/// require approval; the reviewer is what answered. Reading the rewritten allow
+/// back out of the evaluation would make the record agree with its own outcome
+/// by construction and lose the one fact worth recording, which is that a
+/// reviewer was load-bearing on this call.
+///
+/// Emitted unconditionally, unlike the ordinary auto-approval beside it: that
+/// one is gated on the evaluation carrying an audit signal, and a reviewer
+/// grant on a rule with neither an id nor a risk label would otherwise leave no
+/// record at all.
+fn emit_auto_review_granted_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_permission_activity_with_policy_outcome(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionPolicyLayer::RuntimePolicy,
+        ToolPermissionResolution::approved(
+            crate::orchestration::ToolPermissionDecider::AutoReviewer,
+            crate::orchestration::ToolPermissionGrantScope::Once,
+        ),
+        Some(ToolPermissionPolicyOutcome::ApprovalRequired),
+    );
+}
+
+/// `policy_outcome` overrides what the policy layer is recorded as having
+/// decided. `None` reads it off the evaluation, which is right everywhere the
+/// evaluation still holds the layer's own verdict.
+fn emit_permission_activity_with_policy_outcome(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+    layer: ToolPermissionPolicyLayer,
+    resolution: ToolPermissionResolution,
+    policy_outcome: Option<ToolPermissionPolicyOutcome>,
+) {
     if !crate::agent_sessions::exists(session_id) {
         return;
     }
@@ -116,13 +207,15 @@ pub(super) fn emit_permission_activity(
         occurred_at_ms: crate::clock_mock::now_ms().max(0) as u64,
     };
     let policy = ToolPermissionPolicyFacts {
-        outcome: if evaluation.is_allow() {
-            ToolPermissionPolicyOutcome::Allowed
-        } else if evaluation.is_deny() {
-            ToolPermissionPolicyOutcome::Denied
-        } else {
-            ToolPermissionPolicyOutcome::ApprovalRequired
-        },
+        outcome: policy_outcome.unwrap_or_else(|| {
+            if evaluation.is_allow() {
+                ToolPermissionPolicyOutcome::Allowed
+            } else if evaluation.is_deny() {
+                ToolPermissionPolicyOutcome::Denied
+            } else {
+                ToolPermissionPolicyOutcome::ApprovalRequired
+            }
+        }),
         rule_id: evaluation
             .matched_rule
             .as_ref()

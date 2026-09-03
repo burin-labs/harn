@@ -285,6 +285,28 @@ pub fn parse_approval_reviewer_value(
     }
 }
 
+/// Whether the automated reviewer is what turned this decision into an allow.
+///
+/// Reads the receipt `grant_by_auto_review` writes rather than a flag carried
+/// beside it, so what a caller branches on is what an auditor reads back. A
+/// separate flag could disagree with the receipt; this cannot.
+pub fn granted_by_auto_review(decision: &crate::orchestration::PolicyEvaluation) -> bool {
+    decision
+        .receipt
+        .get("auto_review")
+        .is_some_and(serde_json::Value::is_object)
+}
+
+/// Whether an allowed dispatch has a grant worth recording.
+///
+/// `has_audit_signal` alone was the old condition, and it misses a reviewer
+/// grant on an ask rule carrying neither a rule id nor a risk label. That
+/// combination left no record at all of a call a reviewer let through, which
+/// is the one case where the record matters most.
+pub fn decision_records_a_grant(decision: &crate::orchestration::PolicyEvaluation) -> bool {
+    decision.has_audit_signal() || granted_by_auto_review(decision)
+}
+
 /// Offer one refused decision to the reviewer, rewriting it in place on a grant.
 ///
 /// Returns whether the decision was granted, so the caller can record the

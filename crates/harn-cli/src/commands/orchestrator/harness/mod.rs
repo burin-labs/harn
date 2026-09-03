@@ -87,6 +87,7 @@ impl OrchestratorHarness {
                 // runtime would deadlock: block_on holds the only thread while
                 // the reactor needs that same thread to drive the TCP export.
                 let rt = tokio::runtime::Builder::new_multi_thread()
+                    .thread_stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                     .worker_threads(2)
                     .enable_all()
                     .build()
