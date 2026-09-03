@@ -244,7 +244,6 @@ pub fn check_test_target_coverage(fs: HarnessFs, root: string = "") -> dict {
   }
 }
 
-
 /** Split a recipe line into bare tokens, dropping shell punctuation. */
 fn recipe_tokens(line: string) -> list<string> {
   let cleaned = line
@@ -260,7 +259,6 @@ fn recipe_tokens(line: string) -> list<string> {
   }
   return out
 }
-
 
 /** True when a recipe line only prints a banner. */
 fn recipe_line_is_echo(line: string) -> bool {
@@ -382,7 +380,6 @@ fn attributed_root(path: string) -> string {
   }
   return parts[0] + "/" + parts[1]
 }
-
 
 /** Add one to the tally for `name`, starting it at one when it is new. */
 fn count_one_more(rows: list<dict>, name: string) -> list<dict> {
@@ -524,7 +521,6 @@ fn render_report(report: dict) -> string {
   return join(lines, "\n")
 }
 
-
 /** The lint-root census as text. */
 fn render_lint_root_report(report: dict) -> string {
   // Both counts on the pass line, for the reason the test census reports its
@@ -549,7 +545,9 @@ fn render_lint_root_report(report: dict) -> string {
     lines = lines
       + [
         "- " + to_string(violation.root) + " (" + to_string(violation.kind) + ", "
-          + to_string(violation.files) + " file(s)) " + to_string(violation.detail),
+          + to_string(violation.files)
+          + " file(s)) "
+          + to_string(violation.detail),
       ]
   }
   return join(lines, "\n")
