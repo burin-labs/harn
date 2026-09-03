@@ -239,7 +239,7 @@ pub type AgentResult = {
   acp_stop_reason: string,
   terminal_class: string?,
   terminal: AgentTerminalOutcome,
-  abandonment: AgentAbandonment?,
+  abandonment?: AgentAbandonment,
   error: any,
   text: string,
   visible_text: string,
