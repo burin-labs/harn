@@ -203,13 +203,11 @@ pipeline default(harness: Harness) {
   const immune_pid_file = path_join(root, "term-immune.pid")
   const polite_pid_file = path_join(root, "term-polite.pid")
   const term_marker_file = path_join(root, "term-received.marker")
-
   // The bystander belongs to the parent session, not the worker being stopped.
   // It is what separates "the stop reclaimed what the worker owned" from "the
   // stop killed whatever it could reach".
   spawn_recorded_job(harness.tools, bystander_pid_file)
   const bystander_pid = recorded_pid(harness, bystander_pid_file)
-
   with_llm_script(
     harness.llm,
     [
@@ -232,13 +230,7 @@ pipeline default(harness: Harness) {
           token_budget: 5000,
           tools: agent_lifecycle_tools(
             harness.agent,
-            job_tools(
-              harness,
-              child_pid_file,
-              immune_pid_file,
-              polite_pid_file,
-              term_marker_file,
-            ),
+            job_tools(harness, child_pid_file, immune_pid_file, polite_pid_file, term_marker_file),
           ),
           allowed_tools: ["start_long_job", "keep_working"],
           session_id: "stop-kills-worker",
@@ -249,14 +241,12 @@ pipeline default(harness: Harness) {
       const child_pid = recorded_pid(harness, child_pid_file)
       const immune_pid = recorded_pid(harness, immune_pid_file)
       const polite_pid = recorded_pid(harness, polite_pid_file)
-
       // Liveness first. Every clause below is meaningless without it.
       contract_effect(
         harness.stdio,
         "effect_job_observed_alive_before_stop",
         child_pid != "" && pid_is_alive(harness.tools, child_pid),
       )
-
       // The escalation clauses get their own liveness read, and the marker
       // must be ABSENT here. A marker written before the stop would prove
       // nothing about the stop, and a pre-dead job is the failure this whole
@@ -270,19 +260,16 @@ pipeline default(harness: Harness) {
           && pid_is_alive(harness.tools, polite_pid)
           && !harness.fs.exists(term_marker_file),
       )
-
       const stopped_summary = agent_stop(
         harness.agent,
         worker,
         {graceful: true, reason: "operator pressed stop"},
       )
-
       contract_effect(
         harness.stdio,
         "effect_stopped_worker_job_is_gone",
         pid_gone_within(harness, child_pid, 10000),
       )
-
       // Escalation, both halves. A stop that only sends SIGTERM leaves the
       // immune pid alive; a stop that jumps straight to SIGKILL never lets the
       // polite job write its marker. Only TERM -> grace -> KILL satisfies both.
@@ -291,37 +278,36 @@ pipeline default(harness: Harness) {
         "effect_term_ignoring_job_is_killed",
         pid_gone_within(harness, immune_pid, 15000),
       )
-
       contract_effect(
         harness.stdio,
         "effect_polite_job_was_asked_with_sigterm_first",
         harness.fs.exists(term_marker_file)
           && trim(harness.fs.read_text(term_marker_file)) == "TERM",
       )
-
       contract_effect(
         harness.stdio,
         "effect_polite_job_exited_on_its_own_terms",
         pid_gone_within(harness, polite_pid, 15000),
       )
-
       // The stop is still a stop: the worker left the running state.
       contract_effect(
         harness.stdio,
         "effect_worker_reached_a_terminal_state",
         stopped_summary?.worker?.status != "running",
       )
-
       contract_negative(
         harness.stdio,
         "negative_parent_owned_job_survives_the_childs_stop",
         bystander_pid == "" || !pid_is_alive(harness.tools, bystander_pid),
       )
-
       // Leave nothing running behind this test whatever the verdict above.
       command_run(
-        tools,
-        {mode: "shell", command: "kill -9 " + bystander_pid + " " + immune_pid + " " + polite_pid + " 2>/dev/null; exit 0"},
+        harness.tools,
+        {
+          mode: "shell",
+          command: "kill -9 " + bystander_pid + " " + immune_pid + " " + polite_pid
+            + " 2>/dev/null; exit 0",
+        },
       )
     },
   )
