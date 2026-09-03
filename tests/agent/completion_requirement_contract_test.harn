@@ -1035,3 +1035,43 @@ pipeline test_an_unreported_verification_row_stays_unassessed(harness: Harness, 
   )
   assert_eq(refused.rows[0].status, "unmet")
 }
+
+// harn#7865 residual. The `done` path stopped charging an omitted report to the
+// actor; the `continue` path still did. A judge that refuses AND itemizes
+// nothing has assessed nothing, so the run must carry the judge's own reason,
+// not a ledger complaint naming evidence kinds the actor cannot supply.
+pipeline test_declining_judge_that_itemizes_nothing_keeps_its_own_reason(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "continue", detail: "The greeting was never sent."})},
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "Now complete."})},
+    ],
+    { ->
+      const session = "requirement-declined-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 3)) },
+      )
+      const receipts = completion_receipts(captured.events).filter(
+        { receipt -> receipt?.action == "continue" },
+      )
+        .to_list()
+      assert(len(receipts) >= 1)
+      const first = receipts[0]
+      // The judge declined on its own terms, so the ledger adds nothing and the
+      // run carries the judge's words rather than a complaint about rows nobody
+      // assessed.
+      const reason = to_string(first?.reason ?? "")
+      assert(reason != "completion_requirements_pending")
+      assert(reason.contains("The greeting was never sent."))
+      assert(!reason.contains("Accepted evidence kinds"))
+    },
+  )
+}
