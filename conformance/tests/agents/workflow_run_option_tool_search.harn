@@ -1,5 +1,5 @@
-// The falsifier for burin-code#7890: a `tool_search` set once on
-// `workflow_execute` has to reach every stage's agent loop.
+// The falsifier for #7951: a `tool_search` set once on `workflow_execute`
+// has to reach every stage's agent loop.
 //
 // It did not. The stage config is built from the stage's own typed options, so
 // a run-level key was dropped at that seam with no error and no receipt. From
