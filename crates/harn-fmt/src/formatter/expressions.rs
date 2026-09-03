@@ -722,7 +722,7 @@ impl Formatter<'_> {
                 let iter_col = column + 4 + text_width(&pat) + 4;
                 let iter_str = self.format_expr(iterable, indent, iter_col);
                 self.format_block_expr(
-                    &format!("for {pat} in {iter_str} {{"),
+                    &super::for_header(&pat, &iter_str),
                     body,
                     indent,
                     node.span.line,

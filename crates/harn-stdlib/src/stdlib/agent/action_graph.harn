@@ -275,7 +275,7 @@ fn __action_graph_aliases_for(
 
 fn __action_graph_merge_aliases(base: dict?, extra: dict?) {
   let merged = base ?? {}
-  for entry in extra ?? {} {
+  for entry in (extra ?? {}) {
     merged[entry.key] = entry.value
   }
   return merged

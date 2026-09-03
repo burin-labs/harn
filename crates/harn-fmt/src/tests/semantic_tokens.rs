@@ -71,7 +71,9 @@ fn audit_current_harn_corpus() {
 
     assert!(
         failures.is_empty(),
-        "formatter changed semantic tokens:\n{}",
+        "the formatter changed these files into different programs. \
+         The defect is in the formatter, not in the listed files; do not \
+         rewrite the listed source to make this pass.\n{}",
         failures.join("\n")
     );
 }
@@ -129,10 +131,26 @@ fn merge_base_harn_rewrite_preserves_semantic_tokens() {
     eprintln!("audited {} comparable changed .harn files", pairs.len());
 }
 
-fn assert_same_semantic_tokens(before: &str, after: &str) -> Result<(), String> {
-    let before = semantic_tokens(before).map_err(|error| format!("before: {error}"))?;
-    let after = semantic_tokens(after).map_err(|error| format!("after: {error}"))?;
+fn assert_same_semantic_tokens(before_source: &str, after_source: &str) -> Result<(), String> {
+    let before = semantic_tokens(before_source).map_err(|error| format!("before: {error}"))?;
+    let after = semantic_tokens(after_source).map_err(|error| format!("after: {error}"))?;
     if before == after {
+        return Ok(());
+    }
+
+    // The formatter canonicalizes grouping parentheses: it drops a pair that
+    // adds nothing and keeps a pair that carries precedence, so `(1 + 2) * 3`
+    // survives and `for x in (xs ?? [])` loses its pair. That is a token
+    // change the audit must allow without becoming an audit of nothing, so the
+    // allowance is bounded on both sides. Every other token, in order, has to
+    // be identical, which keeps a dropped semicolon or a `?.` rewritten to `.`
+    // failing; and the two sources have to parse to the same program, which
+    // keeps a paren whose removal actually reassociates the expression
+    // failing. Only a pair that satisfies both is grouping the source wrote
+    // and the formatter is entitled to drop.
+    if strip_grouping_parens(&before) == strip_grouping_parens(&after)
+        && parsed_program(before_source)? == parsed_program(after_source)?
+    {
         return Ok(());
     }
 
@@ -145,7 +163,7 @@ fn assert_same_semantic_tokens(before: &str, after: &str) -> Result<(), String> 
     let before_end = (first + 3).min(before.len());
     let after_end = (first + 3).min(after.len());
     Err(format!(
-        "first difference at token {first}; before[{start}..{before_end}]={:?}, after[{start}..{after_end}]={:?} ({} vs {} tokens)",
+        "the formatter rewrote this file into a different program, not a different layout; first difference at token {first}; before[{start}..{before_end}]={:?}, after[{start}..{after_end}]={:?} ({} vs {} tokens)",
         &before[start..before_end],
         &after[start..after_end],
         before.len(),
@@ -172,6 +190,87 @@ fn semantic_token_allowances_are_narrow() {
     let block_crlf = "/* first\r\n * second\r\n */\r\nfn f() {\r\n}\r\n";
     let block_lf = "/* first\n * second\n */\nfn f() {\n}\n";
     assert_same_semantic_tokens(block_crlf, block_lf).unwrap();
+}
+
+/// The grouping-parenthesis allowance, pinned from both directions.
+///
+/// The reported symptom was a contributor writing `for span in (xs ?? [])`,
+/// the formatter dropping the pair, and the audit reporting the contributor's
+/// file. That pair carries no precedence, so dropping it is layout. The
+/// negative control is the pair that does carry precedence: removing it
+/// reassociates the expression, the two sources stop being the same program,
+/// and the audit still has to say so.
+#[test]
+fn redundant_grouping_is_layout_but_reassociating_is_not() {
+    let grouped = "fn f(xs: list?) {\n  for span in (xs ?? []) {\n    g(span)\n  }\n}\n";
+    let ungrouped = "fn f(xs: list?) {\n  for span in xs ?? [] {\n    g(span)\n  }\n}\n";
+    assert_same_semantic_tokens(grouped, ungrouped).unwrap();
+
+    let precedence = "fn f() {\n  g((1 + 2) * 3)\n}\n";
+    let reassociated = "fn f() {\n  g(1 + 2 * 3)\n}\n";
+    let error = assert_same_semantic_tokens(precedence, reassociated)
+        .expect_err("dropping a precedence-carrying pair must not read as layout");
+    assert!(
+        error.contains("different program"),
+        "refusal does not name the formatter as the changer: {error}"
+    );
+
+    // The allowance is bounded to parentheses. A file that differs by more
+    // than its parentheses is still a different program even when the two
+    // parse identically, which is what keeps the statement-separator case
+    // above failing.
+    let paren_and_more = "fn f() {\n  let a = (1)\n}\n";
+    let more_only = "fn f() {\n  let b = 1\n}\n";
+    assert!(assert_same_semantic_tokens(paren_and_more, more_only).is_err());
+}
+
+/// The token sequence with every parenthesis removed. Two sequences that agree
+/// here differ only in where parentheses sit, which is the one canonicalization
+/// the formatter is allowed to make.
+fn strip_grouping_parens(tokens: &[TokenKind]) -> Vec<&TokenKind> {
+    tokens
+        .iter()
+        .filter(|kind| !matches!(kind, TokenKind::LParen | TokenKind::RParen))
+        .collect()
+}
+
+/// The parsed program with source coordinates erased. Spans move whenever
+/// layout moves, so they are not part of the program; everything else the
+/// parser recorded is. Serializing is how this compares two syntax trees
+/// without asking every AST node to implement a span-insensitive equality.
+fn parsed_program(source: &str) -> Result<serde_json::Value, String> {
+    let tokens = Lexer::new(source)
+        .tokenize()
+        .map_err(|error| error.to_string())?;
+    let program = Parser::new(tokens)
+        .parse()
+        .map_err(|error| format!("source does not parse: {error}"))?;
+    let mut json =
+        serde_json::to_value(&program).map_err(|error| format!("cannot serialize AST: {error}"))?;
+    erase_spans(&mut json);
+    Ok(json)
+}
+
+fn erase_spans(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            // `Spanned` names its coordinate `span`, and several nodes record a
+            // keyword's own position beside it: `then_span`, `else_span`,
+            // `try_span`, `catch_span`, `finally_span`. Dropping only `span`
+            // leaves those behind, and they move whenever layout moves, so two
+            // identical programs laid out differently would compare unequal.
+            map.retain(|key, _| key != "span" && !key.ends_with("_span"));
+            for nested in map.values_mut() {
+                erase_spans(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                erase_spans(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn semantic_tokens(source: &str) -> Result<Vec<TokenKind>, String> {

@@ -213,7 +213,7 @@ fn ladder_agreement_errors(job_name: string, job: dict) -> list<string> {
 /** Return every runner-tier violation without stopping at the first. */
 pub fn runner_tier_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
-  for {key: job_name, value: job} in workflow?.jobs ?? {} {
+  for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     const name = to_string(job_name)
     errors = errors + runner_environment_errors(name, job)
     errors = errors + tier_declaration_errors(name, job)
