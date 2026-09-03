@@ -37,6 +37,8 @@ pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 #[cfg(test)]
 mod capability_admission_tests;
 #[cfg(test)]
+mod directive_speaker_tests;
+#[cfg(test)]
 mod logical_defaults_tests;
 #[cfg(test)]
 mod output_format_tests;
