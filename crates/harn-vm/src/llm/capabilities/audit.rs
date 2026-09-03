@@ -483,6 +483,7 @@ preferred_tool_format = "native"
                     blurb: None,
                     provider: "acme".to_string(),
                     context_window: 128_000,
+                    reasoning_modes: Vec::new(),
                     logical_model: None,
                     equivalence_group: None,
                     served_variant: None,

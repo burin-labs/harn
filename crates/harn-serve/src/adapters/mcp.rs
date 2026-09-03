@@ -702,11 +702,7 @@ impl McpServer {
         };
 
         let result = if let Some(task) = job.task.as_ref() {
-            tokio::select! {
-                biased;
-                result = self.executor.call(request) => Some(result),
-                () = task.cancelled() => None,
-            }
+            run_until_task_cancelled(task, self.executor.call(request)).await
         } else {
             Some(self.executor.call(request).await)
         };
@@ -932,6 +928,19 @@ impl McpServer {
                 &format!("Unsupported completion ref.type: {other}"),
             ),
         }
+    }
+}
+
+/// Await execution while giving an already-observed task cancellation the
+/// deterministic first claim when both futures become ready together.
+async fn run_until_task_cancelled<T>(
+    task: &harn_vm::mcp_tasks::McpTaskLease,
+    execution: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        () = task.cancelled() => None,
+        result = execution => Some(result),
     }
 }
 

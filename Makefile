@@ -604,6 +604,7 @@ test-pr-gate-scripts:
 	./scripts/tests/check_stdlib_host_neutral_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
+	./scripts/tests/check_issue_comment_privacy_test.sh
 	./scripts/tests/apt_install_action_test.sh
 	./scripts/tests/rust_toolchain_action_test.sh
 	./scripts/tests/npm_ci_with_retry_test.sh

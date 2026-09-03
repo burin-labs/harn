@@ -131,6 +131,7 @@ pub(crate) fn effort_probe_ungated() -> bool {
 pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
     !effort_probe_ungated()
 }
+pub(crate) mod reasoning_modes;
 pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;

@@ -9,6 +9,161 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.128
+
+### Breaking
+
+- **Tool registries now own one typed CLI command tree (#7779).**
+  `tool_registry_from` accepts registry metadata through an options record,
+  tools can define typed flag, positional, boolean-presence, help, and static
+  completion projections, leaf and parent commands can define aliases, parent
+  commands can define help metadata,
+  and `harn tool completions` generates Bash, Zsh, Fish, and PowerShell
+  completion from the same validated tree used by help and dispatch.
+- **The portable tool catalog now uses the `harn-tools/2.0` discriminator
+  (#7782).** This direct pre-launch cutover adds declared `errorSchema`
+  contracts and rejects version 1 catalogs. Regenerate the catalog, JSON
+  Schema, and strict TypeScript contract together; version 1 readers and writers
+  are intentionally incompatible with version 2.
+
+### Added
+
+- Publish the `harn-tools/2.0` JSON Schema and strict TypeScript contract, and let
+  `harn tool schema --surface exports` derive the same catalog from public Harn
+  functions without running `main`.
+- **Tool catalogs now carry typed declared failures (#7782).** Public Harn
+  `throws` types and handwritten `error_schema` definitions project to one
+  `errorSchema`; prepared adapters validate the data once, generated CLIs emit
+  a stable nonzero JSON failure envelope, and MCP, MCP tasks, HTTP, and A2A
+  preserve typed application errors without misclassifying runtime faults or
+  exposing free-form error data in human summaries. Portable tool results now
+  also preserve nominal enum and ordered-set structure while rejecting
+  host-owned handles, and every schema position accepts Draft 2020-12 boolean
+  or object schemas. MCP task identifiers are bound to the authenticated
+  principal that created them, cancellation stops the owned execution, and
+  clock-backed expiry plus a hard record cap bound retained task state.
+- **A session now records an accepted control word as a typed event
+  (#7851).** An accepted stop left no row in the session store at all, and a
+  steer, an interrupt and a queued note read back as the same message row, so
+  anything deciding whether a run may finish had to recover "the person
+  running this stopped it" by matching prose. Sessions now carry a `control`
+  event written at the moment a control is accepted, keeping the caller's own
+  mode word beside the canonical delivery mode along with the steer's message
+  id and text. Every acceptance path writes it, including the two paths that
+  answer a control while a turn is already in flight, and the recording
+  outcome rides on the control-outcome notification so a dropped record
+  cannot read as no control at all.
+- **Issue comments are scanned for public-metadata leaks (#7872).** The privacy
+  gate covered pull request titles, bodies and commits but nothing scanned issue
+  or pull request comments, so the same wording blocked in a body was
+  publishable in a comment. Comments and issue bodies now run through the same
+  vocabulary and hashed host denylist as the existing gate.
+- The model catalog can declare `reasoning_modes`: provider knobs that change
+  how much work a model does before answering, as opposed to `serving_tiers`,
+  which change how fast the same work is served. The two are independent and a
+  request may set both. Selected per call with `reasoning_mode`, validated
+  against the catalog, and injected by path so a nested knob merges beside the
+  caller's other settings instead of replacing them.
+- GPT-5.6 Sol, Terra, and Luna declare OpenAI's `pro` reasoning mode. Pro is
+  Responses-API only and is not a separate model id, so `reasoning_mode: "pro"`
+  on the existing row is the whole opt-in. OpenAI bills pro at each row's
+  standard token rates and charges for the extra work, so the row records a
+  measured `token_multiplier` rather than a price override.
+
+### Changed
+
+- The Linux Rust producer's CI budget is now owned by its workload. Each heavy
+  step carries its own ceiling and the hosted job ceiling is the sum of those
+  ceilings plus setup overhead plus a reserve for the main-branch cache save, so a
+  full-generation save can no longer cancel a job whose tests already passed.
+- **Two write-only receipt topics removed (#7615).** Lifecycle receipts no longer
+  append to the `agent.lifecycle.receipts` event-log topic and git receipts no
+  longer append to `stdlib.git.receipts`. Nothing read either topic: lifecycle
+  consumers read the in-process journal, and git receipt content is still
+  recorded in the trust graph.
+
+### Fixed
+
+- **Run JSON now reports typed import failures (#7609).** Launch errors identify
+  unresolved modules, missing imported symbols, and broken imported modules
+  through structured fields with portable source and Harn build identities.
+- Automatic compaction receipts now report the requested and applied engine
+  strategies, resolved threshold source and value, hard limit, and measured
+  summary size from the engine result. Nested `auto_compact` overrides no longer
+  run one strategy while recording another.
+- Fixed high-concurrency test runs silently omitting queued tests. Terminal receipts now name any selected test the
+  runner did not finish.
+- Tool execution now prepares one shared schema contract for CLI, MCP, tasks,
+  replay, and exported functions. Invalid arguments cannot reach handlers, and
+  invalid or non-JSON results cannot be reported or cached as successful calls.
+  Reusable component schemas stay attached to live registries, adapter audience
+  rules govern both discovery and invocation, and generated command paths reject
+  only conflicts visible on the CLI surface. Variadic exported functions retain
+  their rest-parameter marker and project that parameter as an array across
+  named and positional adapter calls.
+- **Prepared module initialization can call module functions (#7782).** Harn
+  now binds retained private and public callables before replaying module value
+  initializers. A failed initializer also restores the calling VM scope and
+  releases its import-cycle marker, so a caught import failure cannot poison
+  later work in the same VM.
+- **Merge-group cleanup now distinguishes a disabled queue from missing queue
+  evidence (#7791).** A verified disabled queue exits as a measured zero
+  without reading or cancelling Actions runs, while malformed, partial, and
+  paginated responses still fail closed.
+- **Full repository gates now preserve exact Harn binary freshness through
+  runtime state and recursive Cargo checks (#7800).** Runtime-only children of
+  internal `.harn` directories no longer invalidate an unchanged source tree,
+  while tracked files remain exact inputs and the final canonical binary
+  receipt is republished only after recursive checks succeed. Tree-sitter
+  libraries and Python bytecode created by the gate now live in gate-owned
+  temporary roots that are removed when the gate exits.
+- A supervised Cargo run that dies before acquiring its lease now records the
+  worker's exit code or terminating signal in its receipt, and reports elapsed
+  wait, configured limit, and queue position alongside the terminal reason. An
+  expired wait now says so on stderr instead of printing only a receipt path.
+- `make test-one` now returns when its Cargo runner completes even if a
+  runner-side supervisor keeps an inherited output descriptor open.
+- Supervised Cargo runs now report who holds a contended build lease, their queue
+  position, and elapsed wait time at a bounded cadence. Failures before Cargo
+  starts also use a distinct supervisor exit status instead of imitating a Cargo
+  failure.
+- An explicitly empty completion `requirements` list is now a satisfied
+  acceptance ledger rather than a hard error, so a task with nothing checkable
+  no longer aborts the run (#7847).
+- The release binary-size policy check owns one timestamp pattern, and its policy
+  test asserts the committed file's shape and contract band instead of the exact
+  values a release refresh replaces, so a baseline refresh no longer breaks a test
+  nothing updates.
+- A turn where the provider commits nothing — no visible text, no tool call, no
+  thinking — now ends the run with `provider_error` / `empty_generation` instead
+  of starting another turn. Every recovery for that condition has already fired
+  by then: the runtime's built-in empty-completion retries, and the caller's own
+  retry budget, which re-dispatches a billed-empty response and hands back the
+  last one when it is spent. Advancing spent the rest of the iteration budget one
+  empty turn at a time on a provider that had stopped producing value (#7858).
+- A completion judge whose reply cannot be read now ends the run on its own
+  reason instead of vetoing it forever. The unreadable reply was recorded and
+  then read as `continue`, which is a veto no turn can answer, so the run kept
+  going until an unrelated budget ran out and stopped with an unrelated reason.
+- The reply is retried to a fixed bound first, so one malformed answer followed
+  by a good one still completes normally. A judge that could not be started
+  inside its deadline is unchanged, and already terminated.
+- The stop rides `terminal_judge_reason`, the field the deadline path already
+  sets, so both exit authorities read it through the vocabulary they share and
+  no new terminal value is introduced.
+- Acknowledged MCP task cancellation now wins atomically over completion that
+  becomes ready in the same scheduling turn, while an already-recorded completion
+  remains completed.
+- **Automatic execution evidence persistence (#7615).** The canonical run path now
+  uses one Harn-owned VM interface for automatic run records, bounded retention,
+  and optional flight artifacts. Embedded hosts can reuse the same behavior, and
+  a durable flight-artifact receipt survives a later run-record write failure.
+- **Workflow trace-span evidence is scoped to its own execution (#7615).** A
+  workflow run record filled `evidence.trace_spans` from every completed span on
+  the thread, so a span belonging to a different execution could appear in this
+  execution's evidence. The workflow writers now select on the owning execution,
+  matching the canonical run-record path.
+
 ## v0.10.127
 
 ### Added

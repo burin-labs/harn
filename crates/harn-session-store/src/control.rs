@@ -21,9 +21,11 @@
 //!    obligations seam already derives from a delivered message.
 //!
 //! The record is written at **acceptance**, not at delivery. A steer
-//! that is later revoked is followed by its own revoke row rather than
-//! being erased, so the stream stays append-only and a reader can see
-//! that the control was taken and then withdrawn.
+//! that is later revoked therefore leaves its acceptance row standing;
+//! the stream is append-only and nothing erases it. Revocation has no
+//! row of its own yet, so a reader must not treat an accepted steer as
+//! proof that the model saw it — `ControlAction::is_delivered_to_model`
+//! answers whether it was ever eligible to be seen, not whether it was.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -52,8 +54,6 @@ pub enum ControlAction {
     /// A note that lands in the transcript after the last model call
     /// and is never rendered into a prompt.
     Queue,
-    /// A previously accepted control was withdrawn before delivery.
-    Revoke,
 }
 
 impl ControlAction {
@@ -63,7 +63,6 @@ impl ControlAction {
             Self::Steer => "steer",
             Self::Interrupt => "interrupt",
             Self::Queue => "queue",
-            Self::Revoke => "revoke",
         }
     }
 
