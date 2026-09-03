@@ -7,7 +7,7 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
 pub(super) mod approval_denials;
 pub(super) mod denials;
-mod handler_result;
+pub(super) mod handler_result;
 pub(super) mod hash;
 
 use handler_result::agent_tool_handler_result_text;

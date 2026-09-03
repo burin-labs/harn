@@ -25,6 +25,7 @@ pub const PROVIDER_NAMES: list<string> = [
   "inception",
   "llamacpp",
   "local",
+  "meta",
   "minimax",
   "mistral",
   "mlx",

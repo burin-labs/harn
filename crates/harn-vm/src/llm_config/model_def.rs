@@ -7,6 +7,8 @@ use chrono::{NaiveDate, TimeZone as _, Utc};
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+use super::ModelDataControlsDef;
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct HealthcheckDef {
     pub method: String,
@@ -992,6 +994,12 @@ pub struct ModelDef {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub pricing: Option<ModelPricing>,
+    /// Per-route override of the provider's training/retention posture, for
+    /// providers that sell the posture per model id rather than per account or
+    /// per request. Absent means "inherit the provider's declaration", which
+    /// is the answer for almost every row.
+    #[serde(default)]
+    pub data_controls: Option<ModelDataControlsDef>,
     // Serialized only when true. A field that always serializes cannot tell
     // "the author never mentioned it" from "the author wrote the default",
     // which is how a whole-row overlay copy silently un-deprecates a route it

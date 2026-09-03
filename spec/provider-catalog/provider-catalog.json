@@ -907,6 +907,46 @@
       "latency_p50_ms": 900
     },
     {
+      "id": "meta",
+      "display_name": "Meta",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.meta.ai/v1",
+        "base_url_env": "META_BASE_URL",
+        "chat_endpoint": "/chat/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "META_API_KEY"
+        ],
+        "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
+      "data_controls": {
+        "control_scope": "none",
+        "retention_default": "unspecified",
+        "training_default": "does_not_train",
+        "checked_on": "2026-09-02",
+        "sources": [
+          "https://developer.meta.com/ai/products/meta-model-api/",
+          "https://developer.meta.com/ai/models/muse-spark/"
+        ],
+        "note": "Standard routes are documented as not used to improve Meta's products. The separately priced -contributor routes ARE, and each declares that on its own model row."
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1900
+    },
+    {
       "id": "minimax",
       "display_name": "Minimax",
       "classification": "hosted",
@@ -11266,6 +11306,434 @@
       "tier": "small",
       "open_weight": true,
       "strengths": [
+        "cheap"
+      ]
+    },
+    {
+      "id": "muse-spark-1.1",
+      "name": "Muse Spark 1.1",
+      "data_controls": {
+        "training_default": "does_not_train",
+        "checked_on": "2026-09-02",
+        "sources": [
+          "https://developer.meta.com/ai/products/meta-model-api/"
+        ],
+        "note": "Meta documents the standard tier as not used to improve its products."
+      },
+      "display_name": "Muse Spark 1.1",
+      "provider": "meta",
+      "aliases": [],
+      "context_window": 1048576,
+      "rate_limits": {
+        "rpm": 3000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 4.25,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "meta",
+      "lineage": "meta",
+      "tier": "frontier",
+      "strengths": [
+        "reasoning",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "muse-spark-1.2",
+      "name": "Muse Spark 1.2",
+      "data_controls": {
+        "training_default": "does_not_train",
+        "checked_on": "2026-09-02",
+        "sources": [
+          "https://developer.meta.com/ai/products/meta-model-api/"
+        ],
+        "note": "Meta documents the standard tier as not used to improve its products."
+      },
+      "display_name": "Muse Spark 1.2",
+      "provider": "meta",
+      "aliases": [],
+      "context_window": 1048576,
+      "rate_limits": {
+        "rpm": 3000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 4.25,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "meta",
+      "lineage": "meta",
+      "tier": "reasoning",
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "muse-spark-1.2-contributor",
+      "name": "Muse Spark 1.2 (contributor tier)",
+      "data_controls": {
+        "training_default": "trains",
+        "checked_on": "2026-09-02",
+        "sources": [
+          "https://developer.meta.com/ai/products/meta-model-api/"
+        ],
+        "note": "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+      },
+      "display_name": "Muse Spark 1.2",
+      "provider": "meta",
+      "aliases": [],
+      "context_window": 1048576,
+      "wire_model": "muse-spark-1.2-contributor",
+      "rate_limits": {
+        "rpm": 100
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.2,
+        "cache_read_per_mtok": 0.002,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "meta",
+      "lineage": "meta",
+      "tier": "reasoning",
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
+      "id": "muse-spark-1.3",
+      "name": "Muse Spark 1.3",
+      "data_controls": {
+        "training_default": "does_not_train",
+        "checked_on": "2026-09-02",
+        "sources": [
+          "https://developer.meta.com/ai/products/meta-model-api/"
+        ],
+        "note": "Meta documents the standard tier as not used to improve its products."
+      },
+      "display_name": "Muse Spark 1.3",
+      "provider": "meta",
+      "aliases": [],
+      "context_window": 1048576,
+      "rate_limits": {
+        "rpm": 3000
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 4.25,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "meta",
+      "lineage": "meta",
+      "tier": "reasoning",
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "muse-spark-1.3-contributor",
+      "name": "Muse Spark 1.3 (contributor tier)",
+      "data_controls": {
+        "training_default": "trains",
+        "checked_on": "2026-09-02",
+        "sources": [
+          "https://developer.meta.com/ai/products/meta-model-api/"
+        ],
+        "note": "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+      },
+      "display_name": "Muse Spark 1.3",
+      "provider": "meta",
+      "aliases": [],
+      "context_window": 1048576,
+      "wire_model": "muse-spark-1.3-contributor",
+      "rate_limits": {
+        "rpm": 100
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.2,
+        "cache_read_per_mtok": 0.002,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "meta",
+      "lineage": "meta",
+      "tier": "reasoning",
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
         "cheap"
       ]
     },
@@ -28825,6 +29293,106 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "muse-spark-1.1",
+      "base_url": "https://api.meta.ai/v1",
+      "secret_env": "META_API_KEY",
+      "label": "Muse Spark 1.1",
+      "family": "meta",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "muse-spark-1.2",
+      "base_url": "https://api.meta.ai/v1",
+      "secret_env": "META_API_KEY",
+      "label": "Muse Spark 1.2",
+      "family": "meta",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "muse-spark-1.2-contributor",
+      "base_url": "https://api.meta.ai/v1",
+      "secret_env": "META_API_KEY",
+      "label": "Muse Spark 1.2 (contributor tier)",
+      "family": "meta",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "muse-spark-1.3",
+      "base_url": "https://api.meta.ai/v1",
+      "secret_env": "META_API_KEY",
+      "label": "Muse Spark 1.3",
+      "family": "meta",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "muse-spark-1.3-contributor",
+      "base_url": "https://api.meta.ai/v1",
+      "secret_env": "META_API_KEY",
+      "label": "Muse Spark 1.3 (contributor tier)",
+      "family": "meta",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools",

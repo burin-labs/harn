@@ -41,6 +41,32 @@ pub fn data_controls_default_posture() -> DataPosture {
     effective_config().data_controls_policy.default_posture
 }
 
+/// The training posture that actually applies to one route.
+///
+/// A model row's own declaration wins over its provider's, because a provider
+/// that sells the posture per model id has no single provider-wide answer to
+/// give. A row that declares nothing inherits, so the uniform case stays one
+/// declaration on the provider.
+///
+/// `None` means neither level is researched. That is deliberately distinct
+/// from `Some(TrainingDefault::Unspecified)`, which is the stronger claim that
+/// someone looked and the provider publishes no answer.
+pub fn effective_training_default(provider: &str, model_id: &str) -> Option<TrainingDefault> {
+    if let Some(model_controls) = model_catalog_entry(model_id).and_then(|row| row.data_controls) {
+        return Some(model_controls.training_default);
+    }
+    provider_config(provider)
+        .and_then(|definition| definition.data_controls)
+        .map(|controls| controls.training_default)
+}
+
+/// The route's own data-controls note and sources, when it overrides its
+/// provider. Hosts surface this verbatim rather than re-wording a privacy
+/// claim.
+pub fn model_data_controls(model_id: &str) -> Option<ModelDataControlsDef> {
+    model_catalog_entry(model_id).and_then(|row| row.data_controls)
+}
+
 pub fn provider_protocol(name: &str) -> Option<String> {
     provider_config(name).and_then(|def| def.protocol)
 }

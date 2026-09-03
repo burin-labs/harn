@@ -79,8 +79,11 @@ impl SandboxBackend for Backend {
         _policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
+        // Only `command_output()` owns the `STARTUPINFOEX` plumbing an
+        // AppContainer needs; `std_command_for()` cannot carry one.
         unavailable(
-            "Windows process sandboxing requires command_output(); std_command_for() cannot attach an AppContainer to std::process::Command",
+            super::SandboxMechanism::WindowsAppContainer,
+            super::SandboxMechanismAvailability::EntryPointCannotAttach,
             profile,
         )
     }
@@ -92,8 +95,10 @@ impl SandboxBackend for Backend {
         _policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
+        // As above: `tokio_command_for()` cannot carry an AppContainer either.
         unavailable(
-            "Windows process sandboxing requires command_output(); tokio_command_for() cannot attach an AppContainer to tokio::process::Command",
+            super::SandboxMechanism::WindowsAppContainer,
+            super::SandboxMechanismAvailability::EntryPointCannotAttach,
             profile,
         )
     }
