@@ -23,15 +23,22 @@ import { agent_required_tools_missing_from_session } from "std/agent/required_to
  *   Whether what it did was CORRECT is a different question, and the judge's or
  *   a declared-artifact contract's to answer.
  *
- * What does convict, both from tallies the loop already keeps:
+ * What does convict:
  *
  * - `required_tool_missing`: the caller declared required tools and one never
  *   succeeded. Already computed; previously it could only warn.
  * - `no_tool_call_succeeded`: the run attempted tool calls and not one of them
  *   succeeded. This is the issue's read-only workspace and its denied approval,
- *   in one rule, because `rejected_tools_seen` is fed by the structured
- *   classifier from harn#7893, which counts a handler throw and a
- *   `permission_denied` refusal alike and never substring-matches prose.
+ *   in one rule, because the per-call tally is decided by `__tool_result_ok`,
+ *   the same structured reader that feeds the session name lists, which counts
+ *   a handler throw and a `permission_denied` refusal alike and never
+ *   substring-matches prose.
+ *
+ * The call counts, not the session name lists, decide the second rule.
+ * `successful_tools_seen` and `rejected_tools_seen` deduplicate by tool NAME,
+ * so their lengths answer "which tools worked" and not "how many calls were
+ * made". Both readings agree on whether the count is zero, but only the tally
+ * can be reported as evidence without mislabeling it.
  *
  * @effects: []
  * @errors: []
@@ -39,12 +46,13 @@ import { agent_required_tools_missing_from_session } from "std/agent/required_to
 pub fn __agent_loop_abandonment_cause(
   opts: dict,
   successful_tools_seen: list,
-  rejected_tools_seen: list,
+  attempted_tool_calls: int,
+  succeeded_tool_calls: int,
 ) -> string? {
   if len(agent_required_tools_missing_from_session(opts, successful_tools_seen)) > 0 {
     return "required_tool_missing"
   }
-  if len(successful_tools_seen) == 0 && len(rejected_tools_seen) > 0 {
+  if attempted_tool_calls > 0 && succeeded_tool_calls == 0 {
     return "no_tool_call_succeeded"
   }
   return nil
@@ -325,20 +333,36 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
   // The run is about to seal its outcome. This is the last point at which the
   // loop still holds the evidence, and the only owner of the abandoned/finished
   // distinction on the ordinary path.
+  let abandonment = nil
   if __agent_loop_terminal_seals_natural(
     final_status,
     stop_reason,
     terminal_error,
     state.suspend_result,
   ) {
-    const abandonment = __agent_loop_abandonment_cause(
+    const attempted = state?.tool_calls_attempted ?? 0
+    const succeeded = state?.tool_calls_succeeded ?? 0
+    const cause = __agent_loop_abandonment_cause(
       opts,
       state?.successful_tools_seen ?? [],
-      state?.rejected_tools_seen ?? [],
+      attempted,
+      succeeded,
     )
-    if abandonment != nil {
+    if cause != nil {
+      // COMPOSE, never overwrite. The typed kind has to change or a host
+      // cannot tell the two runs apart, and `completion_unverified` is the
+      // status the classifier already maps to that kind. But the reason the
+      // run gave for stopping is the only record of what it thought it was
+      // doing, so it is kept verbatim and the abandonment evidence is carried
+      // beside it rather than written over it.
+      abandonment = {
+        cause: cause,
+        natural_stop_reason: to_string(stop_reason ?? ""),
+        attempted_tool_calls: attempted,
+        succeeded_tool_calls: succeeded,
+        last_rejection_category: state?.last_tool_rejection_category,
+      }
       final_status = "completion_unverified"
-      stop_reason = abandonment
       agent_emit_event(
         harness.agent,
         session.session_id,
@@ -346,10 +370,12 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
         {
           iteration: state.iteration,
           action: "abandon",
-          reason: abandonment,
+          reason: cause,
           status: final_status,
-          successfulToolCount: len(state?.successful_tools_seen ?? []),
-          rejectedToolCount: len(state?.rejected_tools_seen ?? []),
+          naturalStopReason: abandonment.natural_stop_reason,
+          attemptedToolCalls: attempted,
+          succeededToolCalls: succeeded,
+          lastRejectionCategory: state?.last_tool_rejection_category,
         },
       )
     }
@@ -360,6 +386,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
       opts: opts,
       final_status: final_status,
       stop_reason: stop_reason,
+      abandonment: abandonment,
       terminal_write_unverified: terminal_write_unverified,
       call_budget: call_budget,
       verify_attempts: verify_attempts,

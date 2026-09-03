@@ -11,7 +11,7 @@
 // tool worked, must both still finish naturally.
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
-import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+import { assert_nil, assert_not_nil, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn read_only_tools() {
   let tools = tool_registry()
@@ -88,8 +88,15 @@ pipeline test_a_run_whose_only_tool_always_fails_does_not_finish_naturally(
       )
       assert_eq(result.terminal.lifecycle_state, "failed")
       assert_eq(result.terminal.run_record_status, "failed")
-      // And the cause is named, not left for the reader to infer.
-      assert_eq(result.terminal.reason, "no_tool_call_succeeded")
+      // The cause is named, not left for the reader to infer.
+      assert_eq(result.abandonment.cause, "no_tool_call_succeeded")
+      // And the run's own reason for stopping is COMPOSED beside it, not
+      // written over. Overwriting it would destroy the only record of what the
+      // run thought it was doing, which is the fact a person debugging this
+      // needs most.
+      assert_eq(result.abandonment.natural_stop_reason, result.stop_reason)
+      assert_eq(result.abandonment.attempted_tool_calls, 1)
+      assert_eq(result.abandonment.succeeded_tool_calls, 0)
     },
   )
 }
@@ -118,6 +125,8 @@ pipeline test_a_run_whose_tool_succeeds_still_finishes_naturally(
       )
       assert_eq(result.terminal.kind, "natural")
       assert_eq(result.terminal.lifecycle_state, "completed")
+      // Absent, not merely falsy: a record is written only on a conviction.
+      assert_nil(result?.abandonment)
     },
   )
 }
@@ -144,6 +153,8 @@ pipeline test_a_run_that_used_no_tools_still_finishes_naturally(
       )
       assert_eq(result.terminal.kind, "natural")
       assert_eq(result.terminal.lifecycle_state, "completed")
+      // Absent, not merely falsy: a record is written only on a conviction.
+      assert_nil(result?.abandonment)
     },
   )
 }
@@ -193,6 +204,47 @@ pipeline test_a_failed_call_followed_by_a_successful_one_finishes_naturally(
       )
       assert_eq(result.terminal.kind, "natural")
       assert_eq(result.terminal.lifecycle_state, "completed")
+      // Absent, not merely falsy: a record is written only on a conviction.
+      assert_nil(result?.abandonment)
+    },
+  )
+}
+
+/**
+ * The fifth arm, and the one that pins the EVIDENCE rather than the verdict.
+ *
+ * The model tries the tool once, is refused, and then answers from its own
+ * knowledge and stops. That is the shape most likely to be mistaken for a
+ * finished run, because the final message reads like a completed answer. The
+ * counts asserted here are per-CALL counts from the loop's own tally, not the
+ * lengths of the deduplicated name lists, which is why one attempted call is
+ * reported as one and not as one distinct tool.
+ */
+pipeline test_a_refused_call_then_an_answer_reports_its_evidence(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: "/tmp/notes.txt"}, "write-1"),
+      llm_text("I could not write the file, but the capital of France is Paris. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write the capital of France to /tmp/notes.txt, and tell me what it is.",
+        nil,
+        spec("evidence-" + harness.random.uuid(), read_only_tools()),
+      )
+      assert_eq(result.terminal.kind, "completion_unverified")
+      assert_eq(result.abandonment.cause, "no_tool_call_succeeded")
+      assert_eq(result.abandonment.attempted_tool_calls, 1)
+      assert_eq(result.abandonment.succeeded_tool_calls, 0)
+      // A failing call with no typed category reads `unclassified`, never
+      // nothing, so "failed with no category" cannot be confused with "did not
+      // fail".
+      assert_not_nil(result.abandonment.last_rejection_category)
     },
   )
 }

@@ -79,6 +79,62 @@ pub fn __tool_result_ok(result: dict) -> bool {
   return status == "ok" || status == "success"
 }
 
+/**
+ * How many tool calls a dispatch made and how many of them worked.
+ *
+ * Deliberately NOT derivable from the session's `successful_tools_seen` and
+ * `rejected_tools_seen`. Those lists deduplicate by tool NAME, so their lengths
+ * answer "which tools worked", not "how many calls were made". A terminal that
+ * printed one while calling it the other would be a mislabeled instrument, and
+ * telling two abandoned runs apart is the whole point of this evidence.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __dispatch_call_tally(dispatch: AgentToolDispatch) -> dict {
+  let attempted = 0
+  let succeeded = 0
+  for result in __dispatch_results_list(dispatch) {
+    attempted = attempted + 1
+    if type_of(result) == "dict" && __tool_result_ok(result) {
+      succeeded = succeeded + 1
+    }
+  }
+  return {attempted: attempted, succeeded: succeeded}
+}
+
+/**
+ * The typed error category of the last failing result in a dispatch.
+ *
+ * Read from the same structured fields as `__tool_result_ok`, never from
+ * rendered prose. `unclassified` is returned when a result failed but carried
+ * no typed category, so a reader can tell "failed with no category" from "did
+ * not fail" instead of both arriving as nothing.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __dispatch_last_rejection_category(dispatch: AgentToolDispatch) -> string? {
+  let category = nil
+  for result in __dispatch_results_list(dispatch) {
+    if type_of(result) == "dict" && !__tool_result_ok(result) {
+      const nested = result?.result
+      const nested_cat = if type_of(nested) == "dict" {
+        agent_tool_lifecycle_error_category(nested?.error_category ?? nested?.error)
+      } else {
+        nil
+      }
+      const resolved = agent_tool_result_outcome(result).error_category ?? nested_cat
+      category = if resolved == nil {
+        "unclassified"
+      } else {
+        to_string(resolved)
+      }
+    }
+  }
+  return category
+}
+
 pub fn __tool_result_name(result: dict) {
   return result?.tool_name ?? result?.name ?? ""
 }

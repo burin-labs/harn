@@ -204,6 +204,15 @@ pub fn __agent_loop_project_final_result(
         },
       }
   }
+  // harn#7915: the abandonment evidence rides BESIDE the terminal, on the same
+  // result the host already reads, so the typed kind says the run failed and
+  // this says what the loop saw. Absent whenever the run was not convicted, so
+  // a present record always means the rule fired and never that a default was
+  // stamped.
+  const abandonment = state?.abandonment
+  if abandonment != nil {
+    final_result = final_result + {abandonment: abandonment}
+  }
   if suspend_result != nil {
     final_result = final_result + suspend_result
   }
