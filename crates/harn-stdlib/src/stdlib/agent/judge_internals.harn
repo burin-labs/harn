@@ -314,7 +314,8 @@ pub fn __judge_model_unconfigured_message(checkpoint_name: string, provider: str
   const family = if provider == nil || provider == "" {
     "this run's provider could not be determined"
   } else {
-    "provider `" + to_string(provider) + "` has no `" + __JUDGE_ROLE_LADDER + "` role in the model catalog"
+    "provider `" + to_string(provider) + "` has no `" + __JUDGE_ROLE_LADDER
+      + "` role in the model catalog"
   }
   return checkpoint_name
     + " did not run: no judge model is configured and "
