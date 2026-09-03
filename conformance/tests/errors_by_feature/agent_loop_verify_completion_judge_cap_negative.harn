@@ -12,7 +12,7 @@ pipeline test(harness: Harness, task: unknown) {
       provider: "mock",
       loop_until_done: true,
       max_iterations: 1,
-      verify_completion_judge: {max_invocations: -1},
+      verify_completion_judge: {model: "mock-judge", max_invocations: -1},
     },
   )
 }

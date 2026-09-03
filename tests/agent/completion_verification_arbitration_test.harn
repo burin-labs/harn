@@ -83,7 +83,7 @@ fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 2,
-        verify_completion_judge: {provider: "mock", max_invocations: 1},
+        verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
       }
         + opts_extra
       assert(
@@ -447,7 +447,7 @@ pipeline test_gate_that_could_not_read_facts_does_not_convert(harness: Harness, 
             loop_until_done: true,
             done_sentinel: "##DONE##",
             max_iterations: 2,
-            verify_completion_judge: {provider: "mock", max_invocations: 1},
+            verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
           }
             + agent_completion_gate(harness.runtime, {}),
         ) },

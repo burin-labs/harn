@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
           provider: "mock",
           loop_until_done: true,
           max_iterations: 3,
-          turn_end_condition: {max_invocations: 1},
+          turn_end_condition: {model: "mock-judge", max_invocations: 1},
         },
       )
       const result = agent_loop(

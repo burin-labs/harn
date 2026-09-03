@@ -59,7 +59,7 @@ pipeline default(harness: Harness) {
             max_iterations: 5,
             session_id: session,
             stall_diagnostics: {threshold: 3, inject_feedback: true, max_feedback: 1},
-            turn_end_condition: {cadence: {when: "stalled"}},
+            turn_end_condition: {model: "mock-judge", cadence: {when: "stalled"}},
           },
         ) },
       )

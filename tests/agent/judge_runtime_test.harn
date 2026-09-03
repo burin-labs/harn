@@ -402,7 +402,7 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 4,
-        verify_completion_judge: {provider: "mock", max_invocations: 1},
+        verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
       }
       const captured = agent_capture_events(
         harness.agent,
@@ -562,7 +562,7 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
             loop_until_done: true,
             done_sentinel: "##DONE##",
             max_iterations: 4,
-            verify_completion_judge: {provider: "mock", max_invocations: 1},
+            verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
           },
         ) },
       )
@@ -610,13 +610,13 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
             done_sentinel: "##DONE##",
             max_iterations: 2,
             deadline_ms: 1,
-            verify_completion_judge: {
+            verify_completion_judge: {model: "mock-judge", 
               provider: "mock",
               max_invocations: 1,
               operation_timeout_ms: 100,
               deadline_reserve_ms: 0,
             },
-            turn_end_condition: {provider: "mock", max_invocations: 1},
+            turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 1},
           },
         ) },
       )
@@ -677,7 +677,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
         done_sentinel: "##DONE##",
         loop_until_done: true,
         max_iterations: 3,
-        verify_completion_judge: {provider: "mock", max_invocations: 1},
+        verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
       }
       const captured = agent_capture_events(
         harness.agent,
@@ -714,7 +714,7 @@ pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
         done_sentinel: "##DONE##",
         loop_until_done: true,
         max_iterations: 1,
-        verify_completion_judge: {provider: "mock", max_invocations: 1},
+        verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
       }
       const captured = agent_capture_events(
         harness.agent,
@@ -792,8 +792,8 @@ pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, t
             done_sentinel: "##DONE##",
             max_iterations: 1,
             verify_completion: { _payload -> "deterministic repair" },
-            verify_completion_judge: {provider: "mock", max_invocations: 1},
-            turn_end_condition: {provider: "mock", max_invocations: 1},
+            verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
+            turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 1},
           },
         ) },
       )
@@ -1139,7 +1139,7 @@ pipeline test_a_polled_background_verifier_reaches_the_judge_as_verification(
             loop_until_done: true,
             done_sentinel: "##DONE##",
             max_iterations: 5,
-            verify_completion_judge: {provider: "mock", max_invocations: 1},
+            verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
           }
           const captured = agent_capture_events(
             harness.agent,
