@@ -446,6 +446,149 @@ fn stateless_tool_replay_emits_thought_then_call_then_result() {
     assert_eq!(input.as_array().expect("input is a list").len(), 4);
 }
 
+/// Regression for the defect that took down every direct-route tool loop.
+///
+/// Google returns an empty text part alongside a tool-calls-only model turn.
+/// Interactions then refuses a text content block that carries no text, with
+/// `invalid_request: Missing text in content of type text.`, and the refusal
+/// kills the whole request rather than degrading. Echoing the model turn back
+/// verbatim therefore sends exactly the block the endpoint will not accept.
+///
+/// Captured on the wire before the fix, as the second step of the second
+/// request: `{"type": "model_output", "content": [{"type": "text", "text": ""}]}`.
+#[test]
+fn an_empty_model_text_part_never_becomes_an_empty_text_block() {
+    let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
+    payload.messages = vec![
+        json!({"role": "user", "content": "read the spec"}),
+        json!({
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": ""},
+                {
+                    "type": "tool_call",
+                    "id": "call_abc",
+                    "name": "read_file",
+                    "arguments": {"path": "spec.md"},
+                    "thought_signature": "sig-xyz",
+                },
+            ],
+        }),
+        json!({
+            "role": "tool",
+            "name": "read_file",
+            "tool_call_id": "call_abc",
+            "content": "the greeting must say hello",
+        }),
+    ];
+    let input = GeminiInteractions::build_request_body(&payload)["input"].clone();
+    let steps = input.as_array().expect("input is a list").clone();
+
+    assert!(
+        !steps.iter().any(|step| step["type"] == "model_output"),
+        "an assistant turn whose only text is empty must not emit a model_output step: {input}"
+    );
+    assert!(
+        !steps.iter().any(empty_text_block_anywhere),
+        "no step may carry a text block with no text: {input}"
+    );
+    // The turn is still replayed: the signature and the call have to survive,
+    // or the provider refuses the request for a different reason.
+    assert_eq!(steps[1], json!({"type": "thought", "signature": "sig-xyz"}));
+    assert_eq!(steps[2]["type"], "function_call");
+    assert_eq!(steps[3]["type"], "function_result");
+
+    // Direction control. Real assistant text must still be sent, so the fix
+    // cannot pass by dropping model output in general.
+    payload.messages[1]["content"][0]["text"] = json!("reading it now");
+    let with_text = GeminiInteractions::build_request_body(&payload)["input"].clone();
+    let model_output = with_text
+        .as_array()
+        .expect("input is a list")
+        .iter()
+        .find(|step| step["type"] == "model_output")
+        .expect("a turn with real text still emits a model_output step")
+        .clone();
+    assert_eq!(model_output["content"][0]["text"], "reading it now");
+}
+
+/// The other side of the turn cannot violate the same rule, and this pins why.
+///
+/// A handler that returns nothing does not reach the wire as an empty text
+/// block, because the shared payload normalizer always hands back an object:
+/// an empty string becomes `{"result": ""}`, which serializes to text. There is
+/// no guard in the result path on purpose. This test is what makes that safe to
+/// rely on, so a later change to the normalizer that lets a bare empty string
+/// through fails here rather than in production against the provider.
+#[test]
+fn a_tool_result_with_no_text_still_carries_text() {
+    let mut payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
+    payload.messages = vec![
+        json!({"role": "user", "content": "dim the lights"}),
+        json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_abc",
+                "name": "set_light",
+                "arguments": {"brightness": 20},
+                "thought_signature": "sig-xyz",
+            }],
+        }),
+        json!({
+            "role": "tool",
+            "name": "set_light",
+            "tool_call_id": "call_abc",
+            "content": "",
+        }),
+    ];
+    let input = GeminiInteractions::build_request_body(&payload)["input"].clone();
+    let steps = input.as_array().expect("input is a list").clone();
+
+    assert!(
+        !steps.iter().any(empty_text_block_anywhere),
+        "a silent handler must not reach the wire as a text block with no text: {input}"
+    );
+    let result = steps
+        .iter()
+        .find(|step| step["type"] == "function_result")
+        .expect("the result step is still sent")
+        .clone();
+    assert_eq!(result["call_id"], "call_abc");
+    assert_eq!(result["result"][0]["type"], "text");
+    assert_eq!(
+        result["result"][0]["text"], "{\"result\":\"\"}",
+        "the normalizer, not a guard in this file, is what keeps this non-empty"
+    );
+
+    // Direction control: a handler that did return text still sends it.
+    payload.messages[2]["content"] = json!("brightness set to 20");
+    let with_text = GeminiInteractions::build_request_body(&payload)["input"].clone();
+    let answered = with_text
+        .as_array()
+        .expect("input is a list")
+        .iter()
+        .find(|step| step["type"] == "function_result")
+        .expect("the result step is still sent")
+        .clone();
+    assert_eq!(
+        answered["result"][0]["text"],
+        "{\"result\":\"brightness set to 20\"}"
+    );
+}
+
+/// True when any content or result list on this step holds a text block whose
+/// text is empty, which is the exact shape Interactions refuses.
+fn empty_text_block_anywhere(step: &Value) -> bool {
+    ["content", "result"].iter().any(|field| {
+        step[field].as_array().is_some_and(|blocks| {
+            blocks
+                .iter()
+                .any(|block| block["type"] == "text" && block["text"] == "")
+        })
+    })
+}
+
 /// The stateful variant: the provider already holds every step through the last
 /// assistant turn, so replaying them would double both the history and the bill.
 #[test]
