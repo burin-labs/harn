@@ -159,6 +159,39 @@ fn unpriced_attempt_for(
     }]
 }
 
+impl UnpricedAttempt {
+    const fn reason_str(&self) -> &'static str {
+        match self.reason {
+            UnpricedReason::NoPriceTable => "no_price_table",
+            UnpricedReason::ZeroUsageReported => "zero_usage_reported",
+            UnpricedReason::ProviderUnreported => "provider_unreported",
+        }
+    }
+
+    fn to_vm_value(&self) -> VmValue {
+        let mut attempt = crate::value::VmDict::default();
+        attempt.put_str("reason", self.reason_str());
+        attempt.insert(
+            crate::value::intern_key("input_tokens"),
+            VmValue::Int(self.input_tokens),
+        );
+        attempt.insert(
+            crate::value::intern_key("output_tokens"),
+            VmValue::Int(self.output_tokens),
+        );
+        attempt.insert(
+            crate::value::intern_key("reported_total_tokens"),
+            self.reported_total_tokens
+                .map_or(VmValue::Nil, VmValue::Int),
+        );
+        attempt.insert(
+            crate::value::intern_key("projected_cost_usd"),
+            self.projected_cost_usd.map_or(VmValue::Nil, VmValue::Float),
+        );
+        VmValue::dict(attempt)
+    }
+}
+
 /// Aggregate cost certainty for a collection of canonical call ledgers.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct UsageCostCertainty {
@@ -332,20 +365,6 @@ impl LlmUsage {
             unprojectable_attempts: 0,
             ..Self::unknown_attempt()
         }
-    }
-
-    /// Whether this ledger carries no token counts at all.
-    ///
-    /// Distinct from an attempt whose counts happen to be zero on one axis: a
-    /// provider that reported nothing on every axis measured nothing, and a
-    /// discarded attempt in that state can be folded as a known zero rather
-    /// than as an unpriced call that voids its siblings.
-    pub(crate) fn reports_no_tokens(&self) -> bool {
-        self.input_tokens == 0
-            && self.output_tokens == 0
-            && self.cache_read_tokens == 0
-            && self.cache_write_tokens == 0
-            && self.reported_total_tokens.is_none()
     }
 
     pub(crate) fn unknown_attempt() -> Self {
@@ -745,6 +764,25 @@ impl LlmUsage {
             VmValue::Bool(self.served_fast),
         );
         usage.put_str("accounting_status", self.accounting_status.as_str());
+        // The number a spend governor consumes, and the shape that tells a
+        // reader how much of it is projection rather than measurement.
+        usage.insert(
+            crate::value::intern_key("projected_cost_usd"),
+            VmValue::Float(self.projected_cost_usd),
+        );
+        usage.insert(
+            crate::value::intern_key("unprojectable_attempts"),
+            VmValue::Int(self.unprojectable_attempts),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_attempts"),
+            VmValue::list(
+                self.unpriced_attempts
+                    .iter()
+                    .map(UnpricedAttempt::to_vm_value)
+                    .collect::<Vec<_>>(),
+            ),
+        );
         usage
     }
 
@@ -795,6 +833,21 @@ impl LlmUsage {
         fields.insert(
             "usage_unknown_calls".to_string(),
             self.usage_unknown_calls.into(),
+        );
+        fields.insert(
+            "projected_cost_usd".to_string(),
+            self.projected_cost_usd.into(),
+        );
+        fields.insert(
+            "unprojectable_attempts".to_string(),
+            self.unprojectable_attempts.into(),
+        );
+        // Enumerated rather than counted: a receipt that says only "one
+        // attempt was unpriced" cannot tell a reader whether that attempt was
+        // measured at zero or never measured at all.
+        fields.insert(
+            "unpriced_attempts".to_string(),
+            serde_json::to_value(&self.unpriced_attempts).unwrap_or(Value::Null),
         );
         fields.insert(
             "cache_read_tokens".to_string(),
