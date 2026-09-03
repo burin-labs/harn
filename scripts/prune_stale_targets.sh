@@ -35,8 +35,9 @@
 # still be there.
 #
 # Cargo's default build scratch lives inside each per-worktree target directory,
-# so the same liveness decision reclaims both. An assertion below pins the rm
-# loop to a root whose basename is exactly "harn-target".
+# so the same liveness decision reclaims both. The removal loop re-validates
+# that its root is one of the two managed families by exact name, and removes
+# only a path it built from that root.
 #
 # Usage:
 #   scripts/prune_stale_targets.sh [--dry-run]
@@ -44,7 +45,7 @@
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
-#   HARN_TARGET_GC_MIN_AGE_SECS idle age fallback when no process probe (default 10800)
+#   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before removal (default 10800)
 #   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
 #                               both the legacy $TMPDIR and durable cache roots
 set -euo pipefail
