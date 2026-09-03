@@ -754,6 +754,53 @@ async fn host_agent_dispatch_tool_call_impl(
     host_agent_dispatch_tool_call(ctx, call, tools.as_ref(), &options).await
 }
 
+/// Build the session- and tool-call-scoped dispatch future on its own frame.
+///
+/// `Box::pin(expr)` materializes `expr` in the caller's frame before moving it
+/// to the heap, so constructing this future inline left its whole state machine
+/// resident in `host_agent_dispatch_tool_call` for the entire call: 65 KB of
+/// the 519 KB that function measured at, over clippy's 512 KB
+/// `large_stack_frames` threshold. The frame is re-entered once per nested tool
+/// call, which is what a deep sub-agent descent spends its tokio worker stack
+/// on. `#[inline(never)]` keeps the temporary on a frame that is popped as soon
+/// as the box exists, so neither the lint nor the descent pays for it.
+#[inline(never)]
+fn pin_scoped_tool_dispatch<'a>(
+    session_id: String,
+    tool_id: String,
+    request: ToolDispatchRequest<'a>,
+) -> std::pin::Pin<Box<impl std::future::Future<Output = agent_tools::ToolDispatchOutcome> + 'a>> {
+    Box::pin(crate::orchestration::scope_agent_session(
+        session_id,
+        crate::agent_sessions::scope_current_tool_call(tool_id, async move {
+            agent_tools::dispatch_tool_execution_with_mcp(
+                Some(request.ctx),
+                request.tool_name,
+                request.tool_args,
+                request.tools,
+                request.mcp_clients,
+                request.bridge,
+                request.tool_retries,
+                request.tool_backoff_ms,
+            )
+            .await
+        }),
+    ))
+}
+
+/// The borrowed inputs one tool dispatch reads, bundled so
+/// [`pin_scoped_tool_dispatch`] stays inside clippy's argument limit.
+struct ToolDispatchRequest<'a> {
+    ctx: &'a crate::vm::AsyncBuiltinCtx,
+    tool_name: &'a str,
+    tool_args: &'a serde_json::Value,
+    tools: Option<&'a VmValue>,
+    mcp_clients: Option<&'a std::collections::BTreeMap<String, crate::mcp::VmMcpClientHandle>>,
+    bridge: Option<&'a std::sync::Arc<crate::bridge::HostBridge>>,
+    tool_retries: usize,
+    tool_backoff_ms: u64,
+}
+
 pub(super) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
@@ -1442,27 +1489,25 @@ pub(super) async fn host_agent_dispatch_tool_call(
     )
     .map(|(handle, guard)| (Some(handle), Some(guard)))
     .unwrap_or((None, None));
-    // Heap-pin the dispatch future. The tool-execution path builds large
-    // per-call state (e.g. `LlmCallOptions`/`LlmRequestPayload`), so keeping
-    // this future inline in the parent frame pushes the enclosing async fn
-    // over clippy's `large_stack_frames` threshold. Boxing moves that state
-    // onto the heap; both await arms below consume the `Pin<Box<_>>` directly.
-    let mut dispatch_future = Box::pin(crate::orchestration::scope_agent_session(
+    // Heap-pin the dispatch future on a frame that dies immediately. The
+    // tool-execution path builds large per-call state (e.g.
+    // `LlmCallOptions`/`LlmRequestPayload`), and both await arms below consume
+    // the `Pin<Box<_>>` directly, but the box alone is not enough: see
+    // `pin_scoped_tool_dispatch`.
+    let mut dispatch_future = pin_scoped_tool_dispatch(
         session_id.clone(),
-        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-            agent_tools::dispatch_tool_execution_with_mcp(
-                Some(&ctx),
-                &tool_name,
-                &tool_args,
-                tools,
-                mcp_clients_ref,
-                bridge.as_ref(),
-                tool_retries,
-                tool_backoff_ms,
-            )
-            .await
-        }),
-    ));
+        tool_id.clone(),
+        ToolDispatchRequest {
+            ctx: &ctx,
+            tool_name: &tool_name,
+            tool_args: &tool_args,
+            tools,
+            mcp_clients: mcp_clients_ref,
+            bridge: bridge.as_ref(),
+            tool_retries,
+            tool_backoff_ms,
+        },
+    );
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
         Some(handle) => {
             // Race the dispatch against the cancellation signal. When the
