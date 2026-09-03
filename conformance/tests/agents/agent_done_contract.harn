@@ -40,7 +40,7 @@ pipeline default(harness: Harness) {
             max_nudges: 4,
             done_sentinel: "##DONE##",
           }
-            + agent_done_contract(),
+            + agent_done_contract({model: "mock-judge"}),
         ) },
       )
       const result = captured.result

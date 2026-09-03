@@ -325,7 +325,7 @@ pipeline default(harness: Harness) {
           max_iterations: 2,
           max_nudges: 4,
           tools: edit_tools(),
-          turn_end_condition: true,
+          turn_end_condition: {model: "mock-judge"},
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
@@ -491,7 +491,7 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
-          turn_end_condition: true,
+          turn_end_condition: {model: "mock-judge"},
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
           post_turn_callback: { _info -> {stop: true, stop_reason: "host_said_stop"} },
         },

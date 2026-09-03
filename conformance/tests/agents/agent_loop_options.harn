@@ -10,7 +10,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(no_tools.keys(), "verify_completion_judge"))
   const judged = agent_loop_options(
     harness,
-    {provider: "mock", tools: tool_registry(), turn_end_condition: true},
+    {provider: "mock", tools: tool_registry(), turn_end_condition: {model: "mock-judge"}},
   )
   harness.stdio.println(judged.done_sentinel)
   harness.stdio.println(type_of(judged.turn_end_condition))
@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
       tools: tool_registry(),
       tool_format: "native",
       loop_until_done: true,
-      turn_end_condition: true,
+      turn_end_condition: {model: "mock-judge"},
     },
   )
   harness.stdio.println(judged_native.done_sentinel == nil)

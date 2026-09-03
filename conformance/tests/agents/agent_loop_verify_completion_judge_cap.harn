@@ -92,7 +92,7 @@ fn run_approved(harness: Harness) {
           max_nudges: 10,
           session_id: session_id,
           done_sentinel: "##DONE##",
-          verify_completion_judge: true,
+          verify_completion_judge: {model: "mock-judge"},
         },
       )
       harness.stdio.println("approved.status=${result.status}")
@@ -174,7 +174,7 @@ fn run_diagnosis_recovery(harness: Harness) {
             max_iterations: 4,
             session_id: session_id,
             done_sentinel: "##DONE##",
-            verify_completion_judge: true,
+            verify_completion_judge: {model: "mock-judge"},
           },
         ) },
       )

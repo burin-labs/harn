@@ -35,7 +35,7 @@ pipeline main(harness: Harness) {
           tools: lookup_tools(),
           tool_format: "native",
           loop_until_done: true,
-          turn_end_condition: true,
+          turn_end_condition: {model: "mock-judge"},
           max_iterations: 4,
         },
       )
