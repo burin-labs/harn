@@ -429,6 +429,14 @@ pub fn agent_loop_post_turn_transition(
         context.raw_text,
       )
       verdict_record = verdict
+      next = next
+        + {
+          feedback_history: verdict.feedback_history ?? next.feedback_history,
+          turn_end_judge_invocations: next.turn_end_judge_invocations
+            + __turn_end_judge_hit(verdict),
+          verify_completion_judge_invocations: next.verify_completion_judge_invocations
+            + __completion_judge_hit(verdict),
+        }
       if verdict.action == "continue" {
         __agent_loop_pop_rejected_assistant_turn(
           harness.agent,
@@ -436,6 +444,11 @@ pub fn agent_loop_post_turn_transition(
           AGENT_LOOP_REJECTED_TURN_MARKER,
         )
       }
+      // Delivery, now that the transcript is in its final shape for this round.
+      // The composed history is the authority afterwards: the deferred
+      // directive carried the history as it was BEFORE this emit, so writing it
+      // after would restore the stale one and defeat the unchanged-next-step
+      // suppression.
       const judge_feedback = trim(to_string(verdict?.feedback ?? ""))
       if judge_feedback != "" {
         const composed = agent_feedback_emit(
@@ -458,14 +471,6 @@ pub fn agent_loop_post_turn_transition(
         )
         next = next + {feedback_history: composed.history}
       }
-      next = next
-        + {
-          feedback_history: verdict.feedback_history ?? next.feedback_history,
-          turn_end_judge_invocations: next.turn_end_judge_invocations
-            + __turn_end_judge_hit(verdict),
-          verify_completion_judge_invocations: next.verify_completion_judge_invocations
-            + __completion_judge_hit(verdict),
-        }
       if verdict.action == "stop_unverified" {
         return {
           action: "break",
