@@ -23,8 +23,22 @@ if [ -f clippy.toml ]; then
 fi
 printf 'stack-size-threshold = %s\n' "$threshold" >> "$conf_dir/clippy.toml"
 
-CLIPPY_CONF_DIR="$conf_dir" cargo clippy --workspace --all-targets \
+# The census is a measurement, not the lint gate. `-D warnings` is dropped and
+# clippy's exit status ignored on purpose: at a lowered threshold this lint
+# fires by design, and under the workspace RUSTFLAGS that would abort the run
+# before the diagnostics were written. The lint gate itself lives in the Rust
+# lint lane and keeps its own ceiling. The only pass condition here is the
+# non-null control below.
+set +e
+CLIPPY_CONF_DIR="$conf_dir" RUSTFLAGS="" cargo clippy --workspace --all-targets \
   --message-format=json > "$raw_out"
+cargo_status=$?
+set -e
+
+if [ ! -s "$raw_out" ]; then
+  echo "error: clippy wrote no output (exit ${cargo_status}); the census measured nothing." >&2
+  exit 1
+fi
 
 if ! grep -q 'clippy::large_stack_frames' "$raw_out"; then
   echo "error: clippy reported no large_stack_frames diagnostics at ${threshold} bytes." >&2

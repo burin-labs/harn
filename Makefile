@@ -1209,11 +1209,12 @@ check-source-file-lengths:
 # clippy run of its own at a lowered threshold, so it is not part of the fast
 # preflight and is not wired into the per-PR audit gates yet (see #7911).
 check-stack-frames:
-	@echo "=== Checking re-entrant stack frames against their budgets ==="
+	@echo "=== Checking stack frames against their budgets ==="
 	@mkdir -p .harn-tmp
 	@census=".harn-tmp/stack-frame-census.json"; \
 		./scripts/ci/collect_stack_frames.sh "$$census" && \
-		$(HARN_NO_BUILD_CMD) run scripts/check_stack_frames.harn -- --census "$$census"; \
+		$(HARN_NO_BUILD_CMD) run scripts/check_stack_frames.harn -- \
+			--census "$$census" --today "$$(date -u +%F)"; \
 		status=$$?; rm -f "$$census"; exit $$status
 
 check-python-boundary:
