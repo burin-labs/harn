@@ -72,7 +72,7 @@ pub type LlmUsage = {
   cost_usd?: float,
   known_cost_usd: float,
   /*
-   * Worst case for the whole call: everything priced, plus a price-table bound
+   * Worst case for the whole call. Everything priced, plus a price-table bound
    * on every unpriced attempt's reported tokens. Absent or nil means at least
    * one attempt has no bound at any token count, and a ceiling must fail
    * closed on it rather than spend the measured floor.
@@ -82,7 +82,7 @@ pub type LlmUsage = {
   unpriced_calls: int,
   /* Tokens the unpriced attempts did report, which is what bounds them. */
   unpriced_tokens: int,
-  /* Why they carry no price: no_price_table, usage_unreported, no_response, mixed. */
+  /* One of no_price_table, usage_unreported, no_response, or mixed. */
   unpriced_reason?: string,
   usage_unknown_calls: int,
   cache_read_tokens: int,
