@@ -83,32 +83,27 @@ pub fn worst_frame_by_file(census_text: string) {
     if !contains(trimmed, LARGE_FRAME_CODE) {
       continue
     }
-    const record = json_parse(trimmed)
-    if !schema_is(record, schema_of(ClippyRecord)) {
-      continue
-    }
-    if record.reason != "compiler-message" {
-      continue
-    }
-    const message = record.message
-    if message.code.code != LARGE_FRAME_CODE {
-      continue
-    }
-    const bytes = frame_bytes(message.message)
-    if bytes == nil {
-      continue
-    }
-    for span in message.spans {
-      if !span.is_primary {
-        continue
+    const parsed = json_parse(trimmed)
+    // The narrowing has to be a positive schema_is block. A negated guard with
+    // an early continue still reads as unvalidated to HARN-OWN-004, and a
+    // census line that does not match the shape is skipped rather than thrown
+    // on, so schema_expect is the wrong tool here.
+    if schema_is(parsed, schema_of(ClippyRecord)) {
+      const record: ClippyRecord = parsed
+      if record.reason == "compiler-message" {
+        const message = record.message
+        const bytes = frame_bytes(message.message)
+        if message.code.code == LARGE_FRAME_CODE && bytes != nil {
+          for span in message.spans {
+            if span.is_primary && span.file_name != "" {
+              if bytes > (worst[span.file_name] ?? 0) {
+                worst[span.file_name] = bytes
+              }
+              break
+            }
+          }
+        }
       }
-      if span.file_name == "" {
-        continue
-      }
-      if bytes > (worst[span.file_name] ?? 0) {
-        worst[span.file_name] = bytes
-      }
-      break
     }
   }
   return worst
