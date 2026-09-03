@@ -190,19 +190,19 @@ const __JUDGE_MODEL_SETTING = "model"
 /**
  * The model this judge will grade with, or `nil` when none is configured.
  *
- * Resolution order is judge configuration, then a catalog-level judge-role
- * default. There is NO third rung. It deliberately never falls back to
- * `opts.model`, which is the ACTOR's model for this run: a run graded by the
- * model that produced it is not a check, it is the same model asked the same
- * question twice, and it is the mechanical cause of a cheap judge accepting a
- * blocked run as done (harn#7937, harn#7910).
+ * The judge's own configuration is the ONLY source. It deliberately never
+ * falls back to `opts.model`, which is the ACTOR's model for this run: a run
+ * graded by the model that produced it is not a check, it is the same model
+ * asked the same question twice, and it is the mechanical cause of a cheap
+ * judge accepting a blocked run as done (harn#7937, harn#7910).
  *
- * The catalog rung is a lookup, not an invention: it returns the model the
- * catalog publishes for the judge role, and `nil` when the catalog publishes
- * none. Today no catalog row declares one, so this rung is always `nil` and
- * every unconfigured judge refuses. That is the intended behavior and not a
- * gap: a silent default chosen here would be exactly the guess this fix
- * exists to remove.
+ * A catalog-level judge-role default would be a legitimate second source and
+ * is deliberately NOT written here as an empty rung. No catalog row publishes
+ * a judge-role model today, so such a rung would read a field nothing sets and
+ * always return nothing, which is a lever-shaped non-lever: it would look like
+ * a resolution step a reader could configure and would never once decide
+ * anything. When the catalog grows that row, this is the function that gains
+ * the lookup.
  *
  * @effects: []
  * @errors: []
@@ -213,10 +213,6 @@ pub fn __judge_resolve_model(judge_cfg: dict) -> string? {
   const configured = trim(to_string(judge_cfg?.[__JUDGE_MODEL_SETTING] ?? ""))
   if configured != "" {
     return configured
-  }
-  const role_default = trim(to_string(judge_cfg?.role_default_model ?? ""))
-  if role_default != "" {
-    return role_default
   }
   return nil
 }
