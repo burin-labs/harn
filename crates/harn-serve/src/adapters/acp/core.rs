@@ -282,7 +282,7 @@ impl AcpServer {
                         "session_id": session_id,
                         "reason": reason,
                     }),
-                )
+                );
             }
         }
     }
