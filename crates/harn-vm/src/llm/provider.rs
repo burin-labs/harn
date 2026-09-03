@@ -296,6 +296,27 @@ pub(crate) fn openai_tool_search_wire_extensions_enabled(
             .any(|tool| tool.get("type").and_then(serde_json::Value::as_str) == Some("tool_search"))
 }
 
+/// True when an Anthropic request may carry the tool-search wire extensions
+/// (`defer_loading`) on its tool definitions.
+///
+/// Mirrors [`openai_tool_search_wire_extensions_enabled`], including the
+/// requirement that the search meta-tool is actually in the tools array. A
+/// `defer_loading` flag without a meta-tool is worse than no flag: the schema
+/// is held back and nothing can surface it again.
+pub(crate) fn anthropic_tool_search_wire_extensions_enabled(
+    provider: &str,
+    model: &str,
+    tools: &[serde_json::Value],
+) -> bool {
+    let caps = super::capabilities::lookup(provider, model);
+    caps.defer_loading
+        && tools.iter().any(|tool| {
+            tool.get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind.starts_with("tool_search_tool_"))
+        })
+}
+
 /// Apply caller-supplied provider body fields without serializing Harn controls.
 pub(crate) fn apply_provider_wire_overrides(
     body: &mut serde_json::Value,
