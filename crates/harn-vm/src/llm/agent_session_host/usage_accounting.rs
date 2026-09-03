@@ -5,6 +5,10 @@ use super::AgentHostSession;
 pub(super) struct CallAccounting {
     pub(super) cost_usd: Option<f64>,
     pub(super) usage_unknown: bool,
+    /// Worst case USD for this call, priced portion included. `None` means the
+    /// call has no computable bound, which is what a ceiling must fail closed
+    /// on.
+    pub(super) projected_cost_usd: Option<f64>,
 }
 
 pub(super) fn resolve_call_accounting(
@@ -38,9 +42,19 @@ pub(super) fn resolve_call_accounting(
         accounting_status,
         Some(VmValue::String(status)) if status.as_str() == "unknown"
     );
+    // A ledger written before the projection existed carries no field. Its own
+    // cost stands in: a priced call projects to what it cost, and an unpriced
+    // one still refuses. Absence must not read as a free zero here.
+    let projected_cost_usd = match super::dict_get(usage, "projected_cost_usd") {
+        Some(VmValue::Float(value)) => Some(*value),
+        Some(VmValue::Int(value)) => Some(*value as f64),
+        Some(VmValue::Nil) => None,
+        _ => cost_usd,
+    };
     CallAccounting {
         cost_usd,
         usage_unknown,
+        projected_cost_usd,
     }
 }
 
@@ -55,6 +69,9 @@ pub(super) struct SessionUsageTotals {
     pub(super) provider_call_count: i64,
     pub(super) unpriced_calls: i64,
     pub(super) usage_unknown_calls: i64,
+    pub(super) priced_calls: i64,
+    pub(super) projected_cost_used: f64,
+    pub(super) unprojectable_calls: i64,
 }
 
 impl From<&AgentHostSession> for SessionUsageTotals {
@@ -69,24 +86,46 @@ impl From<&AgentHostSession> for SessionUsageTotals {
             provider_call_count: session.provider_call_count,
             unpriced_calls: session.unpriced_calls,
             usage_unknown_calls: session.usage_unknown_calls,
+            priced_calls: session.priced_calls,
+            projected_cost_used: session.projected_cost_used,
+            unprojectable_calls: session.unprojectable_calls,
         }
     }
 }
 
 impl SessionUsageTotals {
+    /// What a USD ceiling spends against: everything priced plus the worst
+    /// case for everything that was not. `None` when any call in the session
+    /// has no bound at all, and a governor or budget must then fail closed.
+    pub(super) fn projected_cost_usd(self) -> Option<f64> {
+        (self.unprojectable_calls == 0).then_some(self.projected_cost_used)
+    }
+
     pub(super) fn to_vm(self, include_token_split: bool) -> VmValue {
         let mut out = crate::value::DictMap::new();
         out.insert(
             crate::value::intern_key("tokens_used"),
             VmValue::Int(self.tokens_used),
         );
+        // The priced calls measured something real. Nulling their sum because
+        // a sibling was unpriced turns a measurement into no measurement; only
+        // a session that priced nothing at all blacks out.
         out.insert(
             crate::value::intern_key("cost_usd"),
-            if self.unpriced_calls == 0 {
+            if self.priced_calls > 0 || self.unpriced_calls == 0 {
                 VmValue::Float(self.known_cost_usd)
             } else {
                 VmValue::Nil
             },
+        );
+        out.insert(
+            crate::value::intern_key("projected_cost_usd"),
+            self.projected_cost_usd()
+                .map_or(VmValue::Nil, VmValue::Float),
+        );
+        out.insert(
+            crate::value::intern_key("unprojectable_calls"),
+            VmValue::Int(self.unprojectable_calls),
         );
         out.insert(
             crate::value::intern_key("known_cost_usd"),

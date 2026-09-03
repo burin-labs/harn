@@ -665,6 +665,7 @@ mod trace_summary_pricing_tests {
                 provider_call_count: 1,
                 unpriced_calls: i64::from(cost_usd.is_none()),
                 usage_unknown_calls: 0,
+                unpriced: None,
             },
             duration_ms: 5,
         }
@@ -763,6 +764,7 @@ mod trace_summary_pricing_tests {
                 provider_call_count: 2,
                 unpriced_calls: 1,
                 usage_unknown_calls: 1,
+                ..UsageCostCertainty::default()
             },
         );
         assert_eq!(summary.call_count, 1);
@@ -785,6 +787,7 @@ mod trace_summary_pricing_tests {
                 provider_call_count: 2,
                 unpriced_calls: 0,
                 usage_unknown_calls: 0,
+                ..UsageCostCertainty::default()
             },
         });
         assert_eq!(summary.call_count, 1);

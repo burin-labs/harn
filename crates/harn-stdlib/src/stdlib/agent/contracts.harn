@@ -38,11 +38,13 @@ pub type AgentLlmSummary = {
   cache_write_tokens: int,
   accounting_status: "reported" | "partial" | "unknown",
   known_cost_usd: float,
+  projected_cost_usd?: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
   ...rest,
 }
 
+/* Worst case for the run; nil when some call has no bound at all. */
 pub type AgentToolSummary = {
   calls: list,
   successful: list<string>,

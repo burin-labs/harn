@@ -727,6 +727,12 @@ pub(crate) async fn observed_llm_call(
                     )
                 {
                     let retry_usage = result.usage();
+                    // The discarded attempt keeps its own measured ledger,
+                    // including its typed unpriced reason. Rewriting it to a
+                    // known zero would assert it cost nothing, which nobody
+                    // measured. The aggregate reports partial accounting
+                    // instead, so one discarded attempt no longer nulls the
+                    // priced siblings' cost.
                     completed_retry_usage.push(retry_usage.clone());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
