@@ -69,10 +69,70 @@ fn generated_report_path(experiment_root: &Path, stdout: &str, fallback_name: &s
         .unwrap_or_else(|| experiment_root.join("evals/generated").join(fallback_name))
 }
 
+/// Summarize each `execution.run.stages[]` entry (a batch, a verify stage,
+/// or the final verifier) as one line, and for a failed stage pull the tail
+/// of its `tool_call_update` errors out of the buried transcript so the
+/// actual verifier/tool failure — a Node "not recognized" error, a wrong
+/// cwd, an unresolved PATH entry — reads directly in the panic message
+/// instead of requiring a human to grep the full nested report by hand.
+/// `report` still prints in full below this summary, so nothing is lost;
+/// this only puts the part someone needs first, first.
+fn summarize_stages(report: &serde_json::Value) -> String {
+    let Some(stages) = report["stages"].as_array() else {
+        return "  (no execution.run.stages in this report)\n".to_string();
+    };
+    let mut out = String::new();
+    for stage in stages {
+        let node_id = stage["node_id"]
+            .as_str()
+            .or_else(|| stage["kind"].as_str())
+            .unwrap_or("<unnamed-stage>");
+        let status = stage["status"].as_str().unwrap_or("<unknown-status>");
+        let outcome = stage["outcome"].as_str().unwrap_or("<unknown-outcome>");
+        out.push_str(&format!(
+            "  stage {node_id}: status={status} outcome={outcome}\n"
+        ));
+        if status != "failed" {
+            continue;
+        }
+        let Some(events) = stage["transcript"]["events"].as_array() else {
+            continue;
+        };
+        for event in events {
+            if event["kind"] != "tool_call_update" || event["metadata"]["status"] != "failed" {
+                continue;
+            }
+            let tool_name = event["metadata"]["tool_name"].as_str().unwrap_or("?");
+            let command = event["metadata"]["raw_input"]["command"]
+                .as_str()
+                .unwrap_or("");
+            let error = event["metadata"]["error"].as_str().unwrap_or("");
+            // The tool's own error text is a single long line; a tail is
+            // plenty to see "not recognized" / "cannot find" / a wrong path
+            // without dumping the whole (often multi-KB) tool payload.
+            let tail: String = error
+                .chars()
+                .rev()
+                .take(600)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            out.push_str(&format!(
+                "    failed tool_call_update: tool={tool_name} command={command:?}\n    error tail: {tail}\n"
+            ));
+        }
+    }
+    out
+}
+
 fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
-    assert_eq!(
-        report["verdict"], "pass",
-        "playground report did not pass\nstdout:\n{stdout}\nreport:\n{report}"
+    if report["verdict"] == "pass" {
+        return;
+    }
+    let stage_summary = summarize_stages(report);
+    panic!(
+        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}\nfull report:\n{report}"
     );
 }
 
@@ -523,4 +583,93 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let semantic_json = read_json(&semantic);
     assert_eq!(semantic_json["overall_verdict"], "pass");
     assert!(semantic_json["overall_score"].as_i64().unwrap_or_default() >= 9);
+}
+
+#[cfg(test)]
+mod stage_summary_tests {
+    use super::summarize_stages;
+    use serde_json::json;
+
+    /// Trimmed to the fields `summarize_stages` reads, from the actual
+    /// `Workspace nextest (windows-latest)` CI failure this instrumentation
+    /// was written for (job 100729489477, harn#7993): the "run" tool's
+    /// `node scripts/verify-comment.js` call failed on Windows with
+    /// `'node' is not recognized as an internal or external command`. Before
+    /// this change, the panic message only printed the top-level report,
+    /// which requires paging through several KB of nested transcript JSON
+    /// to find that one line. This is a real report shape, not an invented
+    /// one, so the falsifier below is testing recall on production data.
+    fn windows_node_not_recognized_report() -> serde_json::Value {
+        json!({
+            "verdict": "fail",
+            "stages": [
+                {
+                    "node_id": "batch_1",
+                    "status": "completed",
+                    "outcome": "completed",
+                    "transcript": {"events": []},
+                },
+                {
+                    "node_id": "batch_2",
+                    "status": "failed",
+                    "outcome": "completion_unverified",
+                    "transcript": {
+                        "events": [
+                            {
+                                "kind": "tool_call",
+                                "metadata": {"status": "pending", "tool_name": "run"},
+                            },
+                            {
+                                "kind": "tool_call_update",
+                                "metadata": {
+                                    "status": "failed",
+                                    "tool_name": "run",
+                                    "raw_input": {"command": "node scripts/verify-comment.js"},
+                                    "error": "{combined: 'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n, exit_code: 1, pid: nil, status: completed, stderr: 'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n, success: false}",
+                                },
+                            },
+                        ]
+                    },
+                },
+                {
+                    "node_id": "final_verify",
+                    "status": "completed",
+                    "outcome": "completed",
+                    "transcript": {"events": []},
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn a_failed_tool_call_names_the_command_and_the_real_error_text() {
+        let summary = summarize_stages(&windows_node_not_recognized_report());
+        assert!(
+            summary.contains("stage batch_2: status=failed"),
+            "summary={summary}"
+        );
+        assert!(
+            summary.contains("command=\"node scripts/verify-comment.js\""),
+            "the failing stage's actual command must be named, not just its id\nsummary={summary}"
+        );
+        assert!(
+            summary.contains("not recognized as an internal or external command"),
+            "the tool's own error text must surface, not just status=failed\nsummary={summary}"
+        );
+        // The two completed stages get a one-line status each and nothing
+        // more: a passing stage's transcript is not worth paging through.
+        assert!(summary.contains("stage batch_1: status=completed"));
+        assert!(summary.contains("stage final_verify: status=completed"));
+        assert_eq!(
+            summary.matches("failed tool_call_update:").count(),
+            1,
+            "only the failed stage's failed tool call should be pulled out\nsummary={summary}"
+        );
+    }
+
+    #[test]
+    fn a_report_with_no_stages_array_says_so_instead_of_panicking() {
+        let summary = summarize_stages(&json!({"verdict": "fail"}));
+        assert!(summary.contains("no execution.run.stages"), "{summary}");
+    }
 }
