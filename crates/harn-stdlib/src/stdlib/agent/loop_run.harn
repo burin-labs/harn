@@ -18,6 +18,7 @@ import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
 import "std/agent/loop_purpose_labels"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
+import { __agent_loop_structural_veto_turn } from "std/agent/loop_structural_veto"
 import "std/agent/loop_support"
 import "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
@@ -491,79 +492,29 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           structural_validator_attempts,
         )
         if structural_verdict.vetoed {
-          const on_failure = structural_verdict?.on_failure ?? "regenerate_with_feedback"
-          if on_failure == "raise" {
-            throw structural_verdict?.diagnostic
-              ?? "structural validator rejected assistant turn"
-          }
-          structural_validator_attempts = structural_validator_attempts + 1
-          __agent_loop_pop_rejected_assistant_turn(harness.agent, session.session_id)
-          const feedback = to_string(structural_verdict?.feedback ?? "")
-          if feedback != "" {
-            agent_session_inject_feedback(
-              harness.agent,
-              session.session_id,
-              "structural_validator",
-              feedback,
-              1,
-            )
-          }
-          const structural_totals = agent_session_record_usage(
-            harness.agent,
-            session.session_id,
-            llm_result,
-            turn_llm_opts,
-            iteration_index + 1,
-          )
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "iteration_end",
+          const veto_outcome = __agent_loop_structural_veto_turn(
+            harness,
+            session,
             {
-              iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
-                harness.agent,
-                harness.clock,
-                session.session_id,
-                llm_result,
-                0,
-                visible_text,
-                structural_totals,
-                loop_start_ms,
-              )
-                + {
-                  dispatch_skipped: true,
-                  skip_reason: "structural_validator_revise",
-                  structural_validator_attempts: structural_validator_attempts,
-                  structural_validator_rule: structural_verdict?.rule ?? "",
-                },
+              budget: budget,
+              budget_decisions: budget_decisions,
+              current_max: current_max,
+              iteration: iteration,
+              iteration_index: iteration_index,
+              llm_result: llm_result,
+              loop_start_ms: loop_start_ms,
+              structural_validator_attempts: structural_validator_attempts,
+              structural_verdict: structural_verdict,
+              turn_llm_opts: turn_llm_opts,
+              visible_text: visible_text,
             },
           )
-          const structural_exhaustion = __agent_loop_budget_exhaustion(
-            harness.agent,
-            harness.clock,
-            session.session_id,
-            budget,
-            iteration,
-            structural_totals,
-            loop_start_ms,
-            current_max,
-          )
-          if structural_exhaustion.exhausted {
-            __agent_loop_emit_budget_exhausted(
-              harness.agent,
-              session.session_id,
-              structural_exhaustion,
-            )
-            budget_exhausted_emitted = true
-            budget_decisions = __agent_loop_record_budget_stop(
-              budget_decisions,
-              iteration,
-              current_max,
-              structural_exhaustion.kind,
-            )
-            final_status = "budget_exhausted"
-            stop_reason = structural_exhaustion.kind
+          budget_decisions = veto_outcome.budget_decisions
+          structural_validator_attempts = veto_outcome.structural_validator_attempts
+          if veto_outcome.action == "break" {
+            budget_exhausted_emitted = veto_outcome.budget_exhausted_emitted
+            final_status = veto_outcome.final_status
+            stop_reason = veto_outcome.stop_reason
             break
           }
           continue
