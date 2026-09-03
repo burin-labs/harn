@@ -6754,3 +6754,30 @@ steps = [
   { provider = "local", model = "gemma-4-e4b-it" },
   { provider = "mock", model = "mock" },
 ]
+
+# The default judge role. `std/agent/judge` resolves a judge's model here when
+# the judge's own configuration does not name one, so that the simplest
+# harness -- `turn_end_condition: true` and nothing else -- still grades with a
+# model, and never with the actor's own (harn#7937, harn#7910).
+#
+# This ladder is NOT a fallback chain. Each step is the judge model for ONE
+# provider family, and resolution picks the step matching the judge's (or the
+# run's) provider. There is deliberately no cross-provider fallthrough: a run
+# on a provider with no judge row gets a typed refusal naming the missing
+# setting, not a judge dispatched against a provider the caller never chose.
+#
+# Rows are cheap, capable, instruction-following models -- a judge reads a
+# short transcript and returns one small JSON verdict.
+[model_ladders.judge]
+label = "default judge model per provider family"
+steps = [
+  { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
+  { provider = "openai", model = "gpt-4o-mini", label = "openai" },
+  { provider = "gemini", model = "gemini-2.5-flash", label = "gemini" },
+  { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
+  { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
+  { provider = "groq", model = "qwen/qwen3.6-27b", label = "groq" },
+  { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
+  { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
+  { provider = "mock", model = "mock-judge-default", label = "mock" },
+]
