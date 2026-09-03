@@ -1,12 +1,16 @@
-// MECHANISM CONTRACT (onramp tier): a judge with no model configured refuses
-// instead of grading the run on the run's own model.
+// MECHANISM CONTRACT (onramp tier): a judge resolves its model from its own
+// configuration or the catalog's judge role, and never from the run's own
+// model.
 //
 // Contract = {trigger, effect, negative}:
 //   trigger  — a run with an actor model set configures a completion judge and
 //              gives it no model of its own;
-//   effect   — no judge call is dispatched on the actor's model, and the
-//              refusal is recorded on the admission receipt with the source
-//              named `unconfigured`;
+//   effect   — the judge grades on the catalog's judge row for that provider
+//              family, recorded on the admission receipt with the source named
+//              `catalog_role`; where the provider family has no judge row the
+//              judge refuses instead, with the source named `unconfigured`;
+//              in neither case is a judge call dispatched on the actor's
+//              model;
 //   negative — a judge that IS given a model runs, and the model recorded on
 //              its admission receipt is its own and not the actor's.
 //
@@ -28,6 +32,15 @@ import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 const ACTOR_MODEL = "actor-model-7937"
 
 const JUDGE_MODEL = "judge-model-7937"
+
+// The `mock` row of the catalog's `judge` ladder. Named, not derived, so that
+// deleting the row fails this contract rather than silently agreeing with
+// whatever the catalog happens to say.
+const CATALOG_MOCK_JUDGE_MODEL = "mock-judge-default"
+
+// A provider family the catalog's judge ladder has no row for. This is what
+// makes the refusal reachable at all now that a default exists.
+const PROVIDER_WITHOUT_A_JUDGE_ROLE = "no-judge-role-provider"
 
 fn admissions(events: any) -> list {
   return events.filter(
@@ -71,7 +84,7 @@ fn unconfigured_case(harness: Harness) {
           harness,
           "Do the task and stop.",
           nil,
-          base_opts(session, {provider: "mock", max_invocations: 1}),
+          base_opts(session, {provider: PROVIDER_WITHOUT_A_JUDGE_ROLE, max_invocations: 1}),
         ) },
       )
       const refusals = admissions(captured.events).filter(
@@ -126,7 +139,48 @@ fn configured_case(harness: Harness) {
   )
 }
 
+fn catalog_role_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I finished the task. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+    ],
+    { ->
+      const session = "contract-judge-catalog-role-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Do the task and stop.",
+          nil,
+          base_opts(session, {provider: "mock", max_invocations: 1}),
+        ) },
+      )
+      const models = judge_models(captured.events)
+      const admitted = admissions(captured.events).filter(
+        { event -> event.checkpoint?.judge_model == CATALOG_MOCK_JUDGE_MODEL },
+      )
+        .to_list()
+      contract_effect(
+        harness.stdio,
+        "effect_a_judge_with_no_model_grades_on_the_catalog_role",
+        contains(models, CATALOG_MOCK_JUDGE_MODEL)
+          && len(admitted) > 0
+          && admitted[0].checkpoint.judge_model_source == "catalog_role",
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_the_catalog_role_is_not_the_actors_model",
+        !contains(models, ACTOR_MODEL),
+      )
+    },
+  )
+}
+
 pipeline default(harness: Harness) {
+  catalog_role_case(harness)
   unconfigured_case(harness)
   configured_case(harness)
 }
