@@ -413,6 +413,8 @@ pub type AgentLifecycleSpec = {
 
 /** Transcript, prompt, skill, and task-context extensions. */
 pub type AgentContextSpec = {
+  /** Root for the canonical durable session store used by this run. */
+  root?: string,
   transcript_projection?: string | dict,
   scratchpad?: bool | dict,
   timestamp_messages?: bool,

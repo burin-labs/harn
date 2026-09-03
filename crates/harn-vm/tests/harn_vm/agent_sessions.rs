@@ -310,12 +310,12 @@ harness.agent.fork_at(s, -1)
 fn lru_eviction_kicks_in_at_cap() {
     harn_vm::reset_thread_local_state();
     harn_vm::agent_sessions::set_session_cap(3);
-    let a = harn_vm::agent_sessions::open_or_create(Some("a".to_string()));
-    let _b = harn_vm::agent_sessions::open_or_create(Some("b".to_string()));
-    let _c = harn_vm::agent_sessions::open_or_create(Some("c".to_string()));
+    let a = harn_vm::agent_sessions::open_or_create(Some("a".to_string())).unwrap();
+    let _b = harn_vm::agent_sessions::open_or_create(Some("b".to_string())).unwrap();
+    let _c = harn_vm::agent_sessions::open_or_create(Some("c".to_string())).unwrap();
     // touch a so b becomes the least-recent
-    harn_vm::agent_sessions::open_or_create(Some(a));
-    let _d = harn_vm::agent_sessions::open_or_create(Some("d".to_string()));
+    harn_vm::agent_sessions::open_or_create(Some(a)).unwrap();
+    let _d = harn_vm::agent_sessions::open_or_create(Some("d".to_string())).unwrap();
     assert!(harn_vm::agent_sessions::exists("a"));
     assert!(!harn_vm::agent_sessions::exists("b"), "b should be evicted");
     assert!(harn_vm::agent_sessions::exists("c"));

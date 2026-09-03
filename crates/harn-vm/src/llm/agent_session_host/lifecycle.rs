@@ -26,224 +26,264 @@ async fn host_agent_session_init(
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
 
-    let initialized =
-        live_transcript_journal::initialize(&session_id, &opts_map, system.clone()).await?;
+    let initialized = live_transcript_journal::initialize(
+        &session_id,
+        &opts_map,
+        system.clone(),
+        ctx.execution_id(),
+        ctx.task_id(),
+    )
+    .await?;
     let has_canonical_history = initialized.has_canonical_history;
     let run_id = initialized.run_id;
     let prompt_session_id = initialized.session_id;
+    let owns_session = initialized.owns_session;
+    // The prepared journal/session is live before any hook runs. One guard
+    // owns rollback from here through host registration so `?`, unwind, and
+    // future cancellation cannot strand a partial session.
+    let mut init_rollback =
+        cancellation::AgentSessionInitRollback::new(prompt_session_id.clone(), owns_session);
 
-    let prompt_payload = serde_json::json!({
-        "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
-        "session": {"id": &prompt_session_id},
-        "prompt": &message,
-        "system": system.clone().unwrap_or_default(),
-    });
-    if let crate::orchestration::HookControl::Block { reason } =
-        crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
-            Some(&ctx),
-            crate::orchestration::HookEvent::UserPromptSubmit,
-            &prompt_payload,
-        )
-        .await?
-    {
-        live_transcript_journal::flush_init_terminal(
-            &prompt_session_id,
-            "blocked",
-            "user_prompt_submit_blocked",
-        )
-        .await?;
-        let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
-        return Ok(agent_init_control_done(
-            &prompt_session_id,
-            &run_id,
-            &message,
-            system.as_deref(),
-            blocked,
-        ));
-    }
-
-    let autonomy_budget = match check_autonomy_budget(&opts_map, &session_id).await? {
-        AutonomyCheck::NoBudget => None,
-        AutonomyCheck::Approved(config) => Some(config),
-        AutonomyCheck::Denied(result) => {
+    // One result owner covers every ordinary setup failure after the durable
+    // run-start stamp. This keeps the synchronous Drop path cancellation-only;
+    // normal errors always get a named durable terminal receipt first.
+    let initialized_result = async {
+        let prompt_payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
+            "session": {"id": &prompt_session_id},
+            "prompt": &message,
+            "system": system.clone().unwrap_or_default(),
+        });
+        if let crate::orchestration::HookControl::Block { reason } =
+            crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+                Some(&ctx),
+                crate::orchestration::HookEvent::UserPromptSubmit,
+                &prompt_payload,
+            )
+            .await?
+        {
             live_transcript_journal::flush_init_terminal(
                 &prompt_session_id,
                 "blocked",
-                "autonomy_budget_denied",
+                "user_prompt_submit_blocked",
             )
             .await?;
-            return Ok(agent_init_control_done(
-                &session_id,
+            let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
+            return Ok(SessionInitOutcome::Admission(agent_init_control_done(
+                &prompt_session_id,
                 &run_id,
                 &message,
                 system.as_deref(),
-                result,
-            ));
+                blocked,
+            )));
         }
-    };
 
-    let session_system_prompt =
-        crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
-    let resolved = crate::agent_sessions::open_or_create(Some(session_id));
-    if let Some(system_prompt) = session_system_prompt.as_deref() {
-        crate::agent_sessions::record_system_prompt(&resolved, system_prompt)
-            .map_err(VmError::Runtime)?;
-    }
+        let autonomy_budget = match check_autonomy_budget(&opts_map, &prompt_session_id).await? {
+            AutonomyCheck::NoBudget => None,
+            AutonomyCheck::Approved(config) => Some(config),
+            AutonomyCheck::Denied(result) => {
+                live_transcript_journal::flush_init_terminal(
+                    &prompt_session_id,
+                    "blocked",
+                    "autonomy_budget_denied",
+                )
+                .await?;
+                return Ok(SessionInitOutcome::Admission(agent_init_control_done(
+                    &prompt_session_id,
+                    &run_id,
+                    &message,
+                    system.as_deref(),
+                    result,
+                )));
+            }
+        };
 
-    let nested_policy_guard = match install_session_nested_budget(&opts_map, &resolved) {
-        Ok(guard) => Some(CancelSafeNestedExecutionGuard::new(guard)),
-        Err(error) => {
-            let denial = build_nested_budget_denial(&resolved, &message, &error);
-            live_transcript_journal::flush_init_terminal(
-                &resolved,
-                "blocked",
-                "nested_policy_denied",
-            )
-            .await?;
-            return Ok(agent_init_control_done(
-                &resolved,
-                &run_id,
-                &message,
-                system.as_deref(),
-                denial,
-            ));
+        let resolved = prompt_session_id.clone();
+        let session_system_prompt =
+            crate::llm::helpers::compose_system_prompt(system.clone(), Some(&opts_map))?;
+        if let Some(system_prompt) = session_system_prompt.as_deref() {
+            crate::agent_sessions::record_system_prompt(&resolved, system_prompt)
+                .map_err(VmError::Runtime)?;
         }
-    };
 
-    let max_iterations = opt_int(&opts_map, "max_iterations").unwrap_or(50).max(1);
-    let max_verify_attempts = opt_int(&opts_map, "max_verify_attempts")
-        .unwrap_or(20)
-        .max(0);
-    let daemon_config = crate::llm::daemon::parse_daemon_loop_config(Some(&opts_map));
-    let resumed_iterations = match daemon_config.resume_path.as_deref() {
-        Some(path) => crate::llm::daemon::load_snapshot(path)?.total_iterations,
-        None => 0,
-    };
+        let max_iterations = opt_int(&opts_map, "max_iterations").unwrap_or(50).max(1);
+        let max_verify_attempts = opt_int(&opts_map, "max_verify_attempts")
+            .unwrap_or(20)
+            .max(0);
+        let daemon_config = crate::llm::daemon::parse_daemon_loop_config(Some(&opts_map));
+        let resumed_iterations = match daemon_config.resume_path.as_deref() {
+            Some(path) => crate::llm::daemon::load_snapshot(path)?.total_iterations,
+            None => 0,
+        };
 
-    if let Some(config) = autonomy_budget.as_ref() {
-        crate::llm::autonomy_budget::note_decision(config);
-    }
+        if let Some(config) = autonomy_budget.as_ref() {
+            crate::llm::autonomy_budget::note_decision(config);
+        }
 
-    let persisted_active_skills = crate::agent_sessions::active_skills(&resolved);
+        let persisted_active_skills = crate::agent_sessions::active_skills(&resolved);
+        let tool_format = opt_str(&opts_map, "tool_format").unwrap_or_default();
+        if !tool_format.is_empty() {
+            crate::agent_sessions::claim_tool_format(&resolved, &tool_format)
+                .map_err(VmError::Runtime)?;
+        }
 
-    let tool_format = opt_str(&opts_map, "tool_format").unwrap_or_default();
-    if !tool_format.is_empty() {
-        crate::agent_sessions::claim_tool_format(&resolved, &tool_format)
-            .map_err(VmError::Runtime)?;
-    }
+        let llm_transcript_dir = opt_str(&opts_map, "llm_transcript_dir").unwrap_or_default();
+        let transcript_dir = (!llm_transcript_dir.is_empty()).then_some(llm_transcript_dir);
+        let seeded_history = if has_canonical_history {
+            Vec::new()
+        } else {
+            seed_history_messages(&opts_map)?
+        };
+        let has_history = has_canonical_history || !seeded_history.is_empty();
+        for history_msg in seeded_history {
+            crate::agent_sessions::inject_message(&resolved, history_msg)
+                .map_err(VmError::Runtime)?;
+        }
+        if !(has_history && message.trim().is_empty()) {
+            let user_msg = serde_json::json!({
+                "role": "user",
+                "content": initial_user_content(&opts_map, &message),
+            });
+            crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
+                .map_err(VmError::Runtime)?;
+        }
 
-    let llm_transcript_dir = opt_str(&opts_map, "llm_transcript_dir").unwrap_or_default();
-    let pushed_transcript_dir = !llm_transcript_dir.is_empty();
-    if pushed_transcript_dir {
-        crate::llm::agent_observe::push_llm_transcript_dir(&llm_transcript_dir);
-    }
-    // Seed any caller-managed conversation history BEFORE the fresh user turn,
-    // so the first (and every) provider request presents the prior turns
-    // exactly as `llm_call`'s `messages` array would. The caller owns this
-    // history — it is transient seeding, not session persistence. See
-    // `seed_history_messages`.
-    let seeded_history = if has_canonical_history {
-        Vec::new()
-    } else {
-        seed_history_messages(&opts_map)?
-    };
-    let has_history = has_canonical_history || !seeded_history.is_empty();
-    for history_msg in seeded_history {
-        crate::agent_sessions::inject_message(&resolved, history_msg).map_err(VmError::Runtime)?;
-    }
+        // Install the policy only after every fallible synchronous setup step.
+        // From here through host registration there is no await and no `?`, so
+        // the cancel-safe guard can transfer directly into the host owner.
+        let nested_policy_guard = match install_session_nested_budget(&opts_map, &resolved) {
+            Ok(guard) => Some(CancelSafeNestedExecutionGuard::new(guard)),
+            Err(error) => {
+                let denial = build_nested_budget_denial(&resolved, &message, &error);
+                live_transcript_journal::flush_init_terminal(
+                    &resolved,
+                    "blocked",
+                    "nested_policy_denied",
+                )
+                .await?;
+                return Ok(SessionInitOutcome::Admission(agent_init_control_done(
+                    &resolved,
+                    &run_id,
+                    &message,
+                    system.as_deref(),
+                    denial,
+                )));
+            }
+        };
 
-    // Inject the fresh user turn. When history is present and the task message
-    // is blank, the caller's history already carries the latest user turn, so
-    // skip appending an empty user turn (providers reject empty content).
-    if !(has_history && message.trim().is_empty()) {
-        let user_msg = serde_json::json!({
-            "role": "user",
-            "content": initial_user_content(&opts_map, &message),
+        let current_session_frame = crate::agent_sessions::push_current_session(resolved.clone())
+            .expect("initialized agent session id is non-empty");
+        let transcript_dir_frame = transcript_dir
+            .as_deref()
+            .and_then(crate::llm::agent_observe::push_llm_transcript_dir);
+        let session = AgentHostSession {
+            session_id: resolved.clone(),
+            run_id: run_id.clone(),
+            execution_id: ctx.execution_id(),
+            task_id: ctx.task_id(),
+            owns_session,
+            task: message.clone(),
+            tokens_used: 0,
+            cost_used: 0.0,
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            provider_call_count: 0,
+            active_skills: persisted_active_skills,
+            tool_calls: Vec::new(),
+            successful_tools: Vec::new(),
+            rejected_tools: Vec::new(),
+            tool_mode: tool_format,
+            last_provider: None,
+            last_model: None,
+            last_tool_format: None,
+            transcript_dir: transcript_dir.clone(),
+            transcript_dir_frame,
+            current_session_frame: Some(current_session_frame),
+            started_at: now_id(),
+            max_iterations,
+            daemon_state: None,
+            daemon_snapshot_path: None,
+            resumed_iterations,
+            daemon_watch_state: std::collections::BTreeMap::new(),
+            daemon_idle_backoff_ms: 100,
+            host_bridge,
+            last_llm_stop_reason: None,
+            pending_finalization: None,
+            file_provenance: crate::security::FileProvenanceLedger::default(),
+            nested_policy_guard,
+        };
+
+        AGENT_HOST_SESSIONS.with(|sessions| {
+            sessions.borrow_mut().insert(resolved.clone(), session);
         });
-        crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
-            .map_err(VmError::Runtime)?;
-    }
 
-    let session = AgentHostSession {
-        session_id: resolved.clone(),
-        run_id: run_id.clone(),
-        task: message.clone(),
-        tokens_used: 0,
-        cost_used: 0.0,
-        unpriced_calls: 0,
-        usage_unknown_calls: 0,
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        active_skills: persisted_active_skills,
-        tool_calls: Vec::new(),
-        successful_tools: Vec::new(),
-        rejected_tools: Vec::new(),
-        tool_mode: tool_format,
-        last_provider: None,
-        last_model: None,
-        last_tool_format: None,
-        pushed_transcript_dir,
-        started_at: now_id(),
-        max_iterations,
-        daemon_state: None,
-        daemon_snapshot_path: None,
-        resumed_iterations,
-        daemon_watch_state: std::collections::BTreeMap::new(),
-        daemon_idle_backoff_ms: 100,
-        host_bridge,
-        last_llm_stop_reason: None,
-        file_provenance: crate::security::FileProvenanceLedger::default(),
-        nested_policy_guard,
-    };
-
-    AGENT_HOST_SESSIONS.with(|sessions| {
-        sessions.borrow_mut().insert(resolved.clone(), session);
-    });
-    // Push the session id onto the thread-local current-session stack so
-    // tool handlers + nested calls inside the loop see it via
-    // `agent_session_current_id()`. Paired with the pop in finalize.
-    crate::agent_sessions::push_current_session(resolved.clone());
-
-    let start_payload = serde_json::json!({
+        let start_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::SessionStart.as_str(),
         "session": {"id": &resolved},
         "task": &message,
         "system": system.clone().unwrap_or_default(),
         "max_iterations": max_iterations,
-    });
-    crate::orchestration::run_lifecycle_hooks_with_ctx(
-        Some(&ctx),
-        crate::orchestration::HookEvent::SessionStart,
-        &start_payload,
-    )
-    .await?;
-    // SessionStart is a paired event: hooks above run any user-registered
-    // `session_start` closures, and this call lets canonical reminder
-    // providers (currently `project_facts`) inject pre-turn context.
-    // Mirrors the pattern used at the `PostToolUse` and `PostCompact` call
-    // sites so adding new providers does not require new wiring.
-    let _ = crate::llm::reminder_providers::evaluate_and_inject(
-        Some(&ctx),
-        crate::orchestration::HookEvent::SessionStart,
-        &resolved,
-        start_payload,
-        crate::llm::reminder_providers::options_map_to_json(&opts_map),
-    )
-    .await?;
-    crate::agent_session_journal::flush(&resolved).await?;
+        });
+        crate::orchestration::run_lifecycle_hooks_with_ctx(
+            Some(&ctx),
+            crate::orchestration::HookEvent::SessionStart,
+            &start_payload,
+        )
+        .await?;
+        // SessionStart is a paired event: hooks above run any user-registered
+        // `session_start` closures, and this call lets canonical reminder
+        // providers (currently `project_facts`) inject pre-turn context.
+        // Mirrors the pattern used at the `PostToolUse` and `PostCompact` call
+        // sites so adding new providers does not require new wiring.
+        let _ = crate::llm::reminder_providers::evaluate_and_inject(
+            Some(&ctx),
+            crate::orchestration::HookEvent::SessionStart,
+            &resolved,
+            start_payload,
+            crate::llm::reminder_providers::options_map_to_json(&opts_map),
+        )
+        .await?;
+        crate::agent_session_journal::flush(&resolved).await?;
 
-    Ok(agent_init_control(
-        &resolved,
-        &run_id,
-        &message,
-        system.as_deref(),
-        max_iterations,
-        max_verify_attempts,
-        false,
-        None,
-    ))
+        Ok(SessionInitOutcome::Ready(agent_init_control(
+            &resolved,
+            &run_id,
+            &message,
+            system.as_deref(),
+            max_iterations,
+            max_verify_attempts,
+            false,
+            None,
+        )))
+    }
+    .await;
+
+    match initialized_result {
+        Ok(SessionInitOutcome::Ready(result)) => {
+            init_rollback.disarm();
+            Ok(result)
+        }
+        Ok(SessionInitOutcome::Admission(result)) => {
+            init_rollback.disarm();
+            if owns_session {
+                crate::agent_sessions::close(&prompt_session_id);
+            }
+            Ok(result)
+        }
+        Err(error) => {
+            init_rollback.fail().await;
+            Err(error)
+        }
+    }
+}
+
+enum SessionInitOutcome {
+    Ready(VmValue),
+    Admission(VmValue),
 }
 
 enum AutonomyCheck {
@@ -318,7 +358,7 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
     category = "agent.host",
     runtime_only = true
 )]
-async fn host_agent_session_finalize(
+pub(super) async fn host_agent_session_finalize(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -327,21 +367,21 @@ async fn host_agent_session_finalize(
         .map(|v| v.display())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| VmError::Runtime(format!("{HOST_SESSION_FINALIZE}: missing session_id")))?;
-    let status_dict = opts_dict(args.get(1));
+    let supplied_status = opts_dict(args.get(1));
+    let retry_run_id = opt_str(&supplied_status, "retry_run_id");
+    let mut finalization = match retry_run_id.as_deref() {
+        Some(run_id) => cancellation::AgentSessionFinalization::take_retry(&session_id, run_id)?,
+        None => cancellation::AgentSessionFinalization::take(&session_id)?,
+    };
+    let (status_dict, mut finalization_stage) = finalization
+        .session_mut()
+        .begin_finalization(supplied_status);
     let mut final_status = opt_str(&status_dict, "final_status").unwrap_or_default();
     let mut stop_reason = opt_str(&status_dict, "stop_reason").unwrap_or_default();
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
 
-    let mut session = AGENT_HOST_SESSIONS
-        .with(|sessions| sessions.borrow_mut().remove(&session_id))
-        .ok_or_else(|| {
-            VmError::Runtime(format!(
-                "{HOST_SESSION_FINALIZE}: unknown session `{session_id}`"
-            ))
-        })?;
-    permissions::clear_session_grants(&session_id);
-    crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
+    let session = finalization.session_mut();
 
     // Promote model-less success before the terminal marker so the durable
     // descriptor matches the returned terminal result.
@@ -370,61 +410,70 @@ async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
-    if session.pushed_transcript_dir {
-        crate::llm::agent_session_transcript::append_finalized_marker(
-            &session_id,
-            &canonical_status,
-            &stop_reason,
-            iterations,
-        );
-        crate::llm::agent_observe::pop_llm_transcript_dir();
+    if finalization_stage < super::AgentFinalizationStage::TranscriptMarkerWritten {
+        if let Some(dir) = session.transcript_dir.as_deref() {
+            crate::llm::agent_session_transcript::append_finalized_marker(
+                &session_id,
+                dir,
+                &canonical_status,
+                &stop_reason,
+                iterations,
+            );
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::TranscriptMarkerWritten);
+        finalization_stage = super::AgentFinalizationStage::TranscriptMarkerWritten;
     }
-    if terminal_error.is_some() || session_status_indicates_error(&final_status) {
-        let error_payload = serde_json::json!({
-            "event": crate::orchestration::HookEvent::SessionError.as_str(),
+    if finalization_stage < super::AgentFinalizationStage::ErrorHookCompleted {
+        if terminal_error.is_some() || session_status_indicates_error(&final_status) {
+            let error_payload = serde_json::json!({
+                "event": crate::orchestration::HookEvent::SessionError.as_str(),
+                "session": {"id": &session_id},
+                "final_status": &canonical_status,
+                "stop_reason": stop_reason,
+                "error": terminal_error.clone(),
+            });
+            // SessionError hooks are advisory — log but do not propagate so
+            // session cleanup always runs.
+            if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
+                Some(&ctx),
+                crate::orchestration::HookEvent::SessionError,
+                &error_payload,
+            )
+            .await
+            {
+                crate::events::log_warn(
+                    "agent.session_error_hook",
+                    &format!("session={session_id} hook error: {err}"),
+                );
+            }
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::ErrorHookCompleted);
+        finalization_stage = super::AgentFinalizationStage::ErrorHookCompleted;
+    }
+    if finalization_stage < super::AgentFinalizationStage::EndHookCompleted {
+        let end_payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::SessionEnd.as_str(),
             "session": {"id": &session_id},
             "final_status": &canonical_status,
             "stop_reason": stop_reason,
-            "error": terminal_error.clone(),
+            "iterations": opt_int(&status_dict, "iterations").unwrap_or(0),
         });
-        // SessionError hooks are advisory — log but do not propagate so
-        // session cleanup always runs.
         if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
             Some(&ctx),
-            crate::orchestration::HookEvent::SessionError,
-            &error_payload,
+            crate::orchestration::HookEvent::SessionEnd,
+            &end_payload,
         )
         .await
         {
             crate::events::log_warn(
-                "agent.session_error_hook",
+                "agent.session_end_hook",
                 &format!("session={session_id} hook error: {err}"),
             );
         }
+        session.advance_finalization_to(super::AgentFinalizationStage::EndHookCompleted);
+        finalization_stage = super::AgentFinalizationStage::EndHookCompleted;
     }
 
-    let end_payload = serde_json::json!({
-        "event": crate::orchestration::HookEvent::SessionEnd.as_str(),
-        "session": {"id": &session_id},
-        "final_status": &canonical_status,
-        "stop_reason": stop_reason,
-        "iterations": opt_int(&status_dict, "iterations").unwrap_or(0),
-    });
-    if let Err(err) = crate::orchestration::run_lifecycle_hooks_with_ctx(
-        Some(&ctx),
-        crate::orchestration::HookEvent::SessionEnd,
-        &end_payload,
-    )
-    .await
-    {
-        crate::events::log_warn(
-            "agent.session_end_hook",
-            &format!("session={session_id} hook error: {err}"),
-        );
-    }
-
-    // Pair with the push in init so subsequent loops see the right stack.
-    crate::agent_sessions::pop_current_session();
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or_else(|| session.tool_mode.clone());
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,
@@ -449,25 +498,32 @@ async fn host_agent_session_finalize(
     )
     .with_error(terminal_error.as_ref())
     .with_suspension(suspension.as_ref());
-    if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
-        bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+    if finalization_stage < super::AgentFinalizationStage::TerminalErrorAppended {
+        if let Some(error) = terminal_error.as_ref() {
+            let transcript_event = crate::llm::helpers::transcript_event(
+                "agent_loop_terminal_error",
+                "assistant",
+                "internal",
+                "Agent loop ended with a provider/tool-protocol failure",
+                Some(serde_json::json!({
+                    "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
+                    "final_status": final_status,
+                    "stop_reason": stop_reason,
+                    "terminal_class": terminal_class,
+                    "error": error,
+                })),
+            );
+            crate::agent_sessions::append_event(&session_id, transcript_event)
+                .map_err(VmError::Runtime)?;
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::TerminalErrorAppended);
+        finalization_stage = super::AgentFinalizationStage::TerminalErrorAppended;
     }
-    if let Some(error) = terminal_error.as_ref() {
-        let transcript_event = crate::llm::helpers::transcript_event(
-            "agent_loop_terminal_error",
-            "assistant",
-            "internal",
-            "Agent loop ended with a provider/tool-protocol failure",
-            Some(serde_json::json!({
-                "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
-                "final_status": final_status,
-                "stop_reason": stop_reason,
-                "terminal_class": terminal_class,
-                "error": error,
-            })),
-        );
-        crate::agent_sessions::append_event(&session_id, transcript_event)
-            .map_err(VmError::Runtime)?;
+    if finalization_stage < super::AgentFinalizationStage::PromptOutcomeProjected {
+        if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
+            bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+        }
+        session.advance_finalization_to(super::AgentFinalizationStage::PromptOutcomeProjected);
     }
     let recap_store = crate::agent_sessions::journal_store(&session_id);
     let recap_from_event_id = crate::agent_sessions::journal_first_event_id(&session_id);
@@ -478,6 +534,7 @@ async fn host_agent_session_finalize(
         terminal_class.map(crate::llm::agent_terminal_class::AgentTerminalClass::as_str),
         terminal_error.as_ref(),
         &terminal_outcome,
+        session.provider_call_count,
     )
     .await?;
     let recap = if let Some(store) = recap_store {
@@ -512,7 +569,21 @@ async fn host_agent_session_finalize(
             crate::session_recap::SessionRecapUnavailableReason::JournalUnavailable,
         )
     };
+    let mut session = finalization.commit();
+    permissions::clear_session_grants(&session_id);
+    crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
+    if let Some(frame) = session.transcript_dir_frame.take() {
+        crate::llm::agent_observe::remove_llm_transcript_dir(frame);
+    }
+    // Pair with the push in init only after every fallible terminal write.
+    if let Some(frame) = session.current_session_frame.take() {
+        crate::agent_sessions::remove_current_session(frame);
+    }
     cancellation::finish_agent_session(&mut session, &session_id, canonical_status != "suspended");
+    // Release same-session admission only after every session-id cleanup has
+    // completed. In particular, the awaited recap above must not overlap a
+    // successor run that old cleanup could otherwise erase.
+    crate::agent_sessions::clear_journal(&session_id);
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
         .as_ref()
@@ -591,6 +662,7 @@ async fn host_agent_session_finalize(
         "known_cost_usd": session.cost_used,
         "unpriced_calls": session.unpriced_calls,
         "usage_unknown_calls": session.usage_unknown_calls,
+        "provider_call_count": session.provider_call_count,
         "session_id": session.session_id,
         "run_id": session.run_id,
         "started_at": session.started_at,

@@ -97,7 +97,7 @@ mod tests {
         let owner_a_ready = Arc::clone(&owners_ready);
         let owner_a_reset = Arc::clone(&owner_b_reset);
         let owner_a = std::thread::spawn(move || {
-            super::super::open_or_create(Some(owner_a_session.clone()));
+            super::super::open_or_create_for_test(Some(owner_a_session.clone()));
             record_session_changed_path(&owner_a_session, "src/owner-a.rs");
             owner_a_ready.wait();
             owner_a_reset.wait();
@@ -113,7 +113,7 @@ mod tests {
         let owner_b_ready = Arc::clone(&owners_ready);
         let owner_b_reset = Arc::clone(&owner_b_reset);
         let owner_b = std::thread::spawn(move || {
-            super::super::open_or_create(Some(owner_b_session));
+            super::super::open_or_create_for_test(Some(owner_b_session));
             owner_b_ready.wait();
             super::super::reset_session_store();
             owner_b_reset.wait();
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn resetting_or_closing_an_owner_removes_its_abandoned_changed_paths() {
         let reset_session = format!("changed-path-reset-{}", uuid::Uuid::now_v7());
-        super::super::open_or_create(Some(reset_session.clone()));
+        super::super::open_or_create_for_test(Some(reset_session.clone()));
         record_session_changed_path(&reset_session, "src/reset.rs");
         super::super::reset_session_store();
         assert!(
@@ -135,7 +135,7 @@ mod tests {
         );
 
         let closed_session = format!("changed-path-close-{}", uuid::Uuid::now_v7());
-        super::super::open_or_create(Some(closed_session.clone()));
+        super::super::open_or_create_for_test(Some(closed_session.clone()));
         record_session_changed_path(&closed_session, "src/close.rs");
         super::super::close(&closed_session);
         assert!(
@@ -149,7 +149,7 @@ mod tests {
         let session = format!("changed-path-reuse-{}", uuid::Uuid::now_v7());
         record_session_changed_path(&session, "src/stale.rs");
 
-        super::super::open_or_create(Some(session.clone()));
+        super::super::open_or_create_for_test(Some(session.clone()));
 
         assert!(
             session_changed_paths(&session).is_empty(),
@@ -162,10 +162,10 @@ mod tests {
     fn evicting_an_owner_removes_its_abandoned_changed_paths() {
         let evicted_session = format!("changed-path-evicted-{}", uuid::Uuid::now_v7());
         super::super::set_session_cap(1);
-        super::super::open_or_create(Some(evicted_session.clone()));
+        super::super::open_or_create_for_test(Some(evicted_session.clone()));
         record_session_changed_path(&evicted_session, "src/evicted.rs");
 
-        super::super::open_or_create(Some(format!(
+        super::super::open_or_create_for_test(Some(format!(
             "changed-path-replacement-{}",
             uuid::Uuid::now_v7()
         )));
