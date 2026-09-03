@@ -210,6 +210,11 @@ pub type AgentRecapAvailability = {state: "available", snapshot: AgentRecapSnaps
  * `attempted_tool_calls` and `succeeded_tool_calls` are CALL counts. They are
  * deliberately not the lengths of `tools.successful` / `tools.rejected`, which
  * deduplicate by tool name and answer a different question.
+ *
+ * The decision belongs to the agent loop's terminal region, which is the only
+ * place that holds the evidence. A result obtained from
+ * `HarnessAgent.session_finalize` directly therefore never carries this field,
+ * because no loop ran to decide it — not because the run was judged complete.
  */
 pub type AgentAbandonment = {
   cause: "no_tool_call_succeeded" | "required_tool_missing",
