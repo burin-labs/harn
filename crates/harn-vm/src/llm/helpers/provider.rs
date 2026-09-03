@@ -614,42 +614,11 @@ mod platform_managed_credential_resolution_tests {
 
 #[cfg(test)]
 mod secret_reference_auth_tests {
-    use std::sync::Mutex;
+    use crate::llm::test_env::ScopedEnvVar;
 
     use crate::value::{VmError, VmValue};
 
     use crate::llm::{provider_auth_status, resolve_api_key};
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    struct ScopedEnvVar {
-        key: &'static str,
-        previous: Option<String>,
-    }
-
-    impl ScopedEnvVar {
-        fn set(key: &'static str, value: &str) -> Self {
-            let previous = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self { key, previous }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var(key).ok();
-            std::env::remove_var(key);
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for ScopedEnvVar {
-        fn drop(&mut self) {
-            if let Some(value) = &self.previous {
-                std::env::set_var(self.key, value);
-            } else {
-                std::env::remove_var(self.key);
-            }
-        }
-    }
 
     fn error_message(error: VmError) -> String {
         match error {
@@ -660,7 +629,7 @@ mod secret_reference_auth_tests {
 
     #[test]
     fn resolve_api_key_accepts_harn_secret_refs() {
-        let _lock = ENV_LOCK.lock().expect("env lock poisoned");
+        let _lock = crate::llm::env_guard();
         let _provider_chain = ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
         let _provider_key = ScopedEnvVar::set(
             "ANTHROPIC_API_KEY",
@@ -674,7 +643,7 @@ mod secret_reference_auth_tests {
 
     #[test]
     fn missing_harn_secret_ref_fails_without_leaking_values() {
-        let _lock = ENV_LOCK.lock().expect("env lock poisoned");
+        let _lock = crate::llm::env_guard();
         let _provider_chain = ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
         let _provider_key = ScopedEnvVar::set(
             "ANTHROPIC_API_KEY",
