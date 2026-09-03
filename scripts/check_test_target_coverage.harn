@@ -420,6 +420,23 @@ fn root_is_declared(name: string) -> bool {
 }
 
 /**
+ * True when any segment of `path` starts with a dot.
+ *
+ * A conformance scenario and a bump-driver run leave `.harn` state directories
+ * full of generated Harn behind, and a run that swept those would report a root
+ * whose contents depend on what somebody ran locally. This gate is about
+ * committed source, so a generated tree must not be able to change its verdict.
+ */
+fn path_has_dot_segment(path: string) -> bool {
+  for segment in path.split("/") {
+    if segment.starts_with(".") {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * Which roots holding committed Harn source no lint walk reaches.
  *
  * Reports the walked-path count and the scanned-file count on the pass line for
@@ -439,7 +456,7 @@ pub fn check_lint_root_coverage(fs: HarnessFs, root: string = "") -> dict {
   let unwalked: list<dict> = []
   for absolute in fs.glob("**/*.harn", {base: repo}).sorted() {
     const path = relative_path(repo, absolute)
-    if path == "" || path.starts_with("target/") {
+    if path == "" || path.starts_with("target/") || path_has_dot_segment(path) {
       continue
     }
     scanned = scanned + 1
