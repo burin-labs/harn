@@ -441,6 +441,9 @@ pub const LLM_UNPRICED_ATTEMPT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("projected_cost_usd", TY_FLOAT_OR_NIL),
 ]);
 
+const LLM_UNPRICED_ATTEMPT_ARGS: &[Ty] = &[LLM_UNPRICED_ATTEMPT];
+const LLM_UNPRICED_ATTEMPT_LIST: Ty = Ty::Apply("list", LLM_UNPRICED_ATTEMPT_ARGS);
+
 const LLM_UNPRICED_REASON: Ty = Ty::Union(&[
     Ty::LitString("no_price_table"),
     Ty::LitString("zero_usage_reported"),
@@ -481,7 +484,7 @@ pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("accounting_status", LLM_ACCOUNTING_STATUS),
     ShapeFieldDescriptor::new("projected_cost_usd", TY_FLOAT),
     ShapeFieldDescriptor::new("unprojectable_attempts", TY_INT),
-    ShapeFieldDescriptor::new("unpriced_attempts", Ty::List(&LLM_UNPRICED_ATTEMPT)),
+    ShapeFieldDescriptor::new("unpriced_attempts", LLM_UNPRICED_ATTEMPT_LIST),
     ShapeFieldDescriptor::optional("provider_telemetry", TY_DICT),
 ]);
 
