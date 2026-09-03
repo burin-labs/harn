@@ -105,6 +105,41 @@ pub(super) fn emit_permission_activity(
     );
 }
 
+/// Both records for an allowed dispatch: the operational transcript event and
+/// the portable permission activity.
+///
+/// One function because who decided the call and how it is recorded are the
+/// same question, and splitting them is how a reviewer grant ended up filed
+/// under the policy layer that could not decide it.
+///
+/// Out of line, and `inline(never)`, because the dispatch function that calls
+/// it sits inside the stack-frame gate's near-ceiling band. Growing that frame
+/// to emit an audit record would trade one instrument for another.
+#[inline(never)]
+pub(super) fn record_allowed_dispatch(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    evaluation: &PolicyEvaluation,
+) {
+    let by_reviewer = crate::orchestration::granted_by_auto_review(evaluation);
+    emit_permission_event_with_policy(
+        session_id,
+        "PermissionGrant",
+        tool_name,
+        tool_args,
+        &evaluation.reason,
+        by_reviewer,
+        Some(evaluation.receipt.clone()),
+    );
+    if by_reviewer {
+        emit_auto_review_granted_activity(session_id, tool_call_id, tool_name, evaluation);
+    } else {
+        emit_runtime_auto_approved_activity(session_id, tool_call_id, tool_name, evaluation);
+    }
+}
+
 /// Record a grant the automated reviewer made on an `ask` the policy layers
 /// left unresolved.
 ///
@@ -118,7 +153,7 @@ pub(super) fn emit_permission_activity(
 /// one is gated on the evaluation carrying an audit signal, and a reviewer
 /// grant on a rule with neither an id nor a risk label would otherwise leave no
 /// record at all.
-pub(super) fn emit_auto_review_granted_activity(
+fn emit_auto_review_granted_activity(
     session_id: &str,
     tool_call_id: &str,
     tool_name: &str,
