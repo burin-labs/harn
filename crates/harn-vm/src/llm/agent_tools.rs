@@ -336,52 +336,6 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
     }
 }
 
-/// Coerce a Harn tool handler's return value into the tool-result payload.
-/// Preserve explicit text envelopes, computer screenshots, and typed domain
-/// outcomes. Boolean `ok` or `success` distinguishes return from operation
-/// success; other values retain historical display rendering.
-///
-pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
-    let json = crate::llm::vm_value_to_json(val);
-    if agent_tool_handler_result_text(&json).is_some()
-        || json_carries_screenshot(&json)
-        || handler_result::carries_typed_outcome(val, &json)
-    {
-        json
-    } else {
-        serde_json::Value::String(val.display())
-    }
-}
-
-/// Coerce a handler's return value and classify it in one step, while the
-/// structured form is still in hand.
-///
-/// The coercion above renders most dicts to a display string, and that string
-/// is deliberate (#6508): it is what the model reads. But it is not JSON, so
-/// classifying it afterwards is impossible — `ok_result_failure_category`
-/// received text like `{error: boom, ok: false}`, failed to parse it, and
-/// reported every dict-shaped refusal as a success (harn#7884). Read the
-/// declaration off the structured value here, before it is rendered away, and
-/// hand it to the caller alongside the unchanged payload.
-fn coerce_and_classify_handler_result(val: &VmValue) -> (serde_json::Value, Option<&'static str>) {
-    let declared = ok_result_failure_category(&crate::llm::vm_value_to_json(val));
-    (harn_handler_result_value(val), declared)
-}
-
-/// Whether a JSON value contains a screenshot dict (`{base64, scale_factor}`
-/// with a non-empty base64) anywhere in its tree — the distinctive `ScreenImage`
-/// signature the computer tool returns.
-fn json_carries_screenshot(value: &serde_json::Value) -> bool {
-    if crate::llm::content::is_screenshot_dict(value) {
-        return true;
-    }
-    match value {
-        serde_json::Value::Object(map) => map.values().any(json_carries_screenshot),
-        serde_json::Value::Array(items) => items.iter().any(json_carries_screenshot),
-        _ => false,
-    }
-}
-
 pub(super) fn is_denied_tool_result(value: &serde_json::Value) -> bool {
     if is_denied_tool_result_object(value) {
         return true;
@@ -477,9 +431,7 @@ pub(super) struct ToolDispatchOutcome {
     pub result: Result<serde_json::Value, VmError>,
     pub executor: Option<ToolExecutor>,
     /// A failure the handler declared in its return value, read while that
-    /// value was still structured. `None` means it declared none, or the
-    /// payload survives coercion intact and the caller can classify it
-    /// directly. See `coerce_and_classify_handler_result` (harn#7884).
+    /// value was still structured (harn#7884).
     pub declared_failure: Option<&'static str>,
 }
 
@@ -630,7 +582,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 }
                 match outcome {
                     Ok(val) => {
-                        let (payload, failure) = coerce_and_classify_handler_result(&val);
+                        let (payload, failure) =
+                            handler_result::coerce_and_classify_handler_result(&val);
                         declared_failure = failure;
                         Ok(payload)
                     }
@@ -705,7 +658,8 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             }
             match outcome {
                 Ok(val) => {
-                    let (payload, failure) = coerce_and_classify_handler_result(&val);
+                    let (payload, failure) =
+                        handler_result::coerce_and_classify_handler_result(&val);
                     declared_failure = failure;
                     Ok(payload)
                 }
@@ -759,48 +713,29 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 category: ErrorCategory::ToolRejected,
             })
         };
-        match &result {
-            Ok(_) => {
-                break ToolDispatchOutcome {
-                    result,
-                    executor,
-                    declared_failure,
+        // Retry only a transient dispatch error with budget left. An internal
+        // engine/wiring bug (undefined builtin, corrupt bytecode) will never
+        // resolve on retry, so it breaks immediately and propagates to the
+        // agent loop rather than burning the budget as a tool observation.
+        let retryable = matches!(&result, Err(error)
+            if !matches!(
+                error,
+                VmError::CategorizedError {
+                    category: ErrorCategory::ToolRejected,
+                    ..
                 }
-            }
-            Err(VmError::CategorizedError {
-                category: ErrorCategory::ToolRejected,
-                ..
-            }) => {
-                break ToolDispatchOutcome {
-                    result,
-                    executor,
-                    declared_failure,
-                }
-            }
-            // An internal engine/wiring bug (undefined builtin, corrupt
-            // bytecode) will never resolve on retry. Break immediately so the
-            // error propagates to the agent loop, which re-raises it instead of
-            // burning the retry budget and folding it into a tool observation.
-            Err(e) if crate::value::error_to_category(e).is_internal() => {
-                break ToolDispatchOutcome {
-                    result,
-                    executor,
-                    declared_failure,
-                }
-            }
-            Err(_) if attempt < tool_retries => {
-                attempt += 1;
-                let delay = tool_backoff_ms * (1u64 << attempt.min(5));
-                crate::clock_mock::sleep(tokio::time::Duration::from_millis(delay)).await;
-            }
-            Err(_) => {
-                break ToolDispatchOutcome {
-                    result,
-                    executor,
-                    declared_failure,
-                }
-            }
+            ) && !crate::value::error_to_category(error).is_internal()
+            && attempt < tool_retries);
+        if !retryable {
+            break ToolDispatchOutcome {
+                result,
+                executor,
+                declared_failure,
+            };
         }
+        attempt += 1;
+        let delay = tool_backoff_ms * (1u64 << attempt.min(5));
+        crate::clock_mock::sleep(tokio::time::Duration::from_millis(delay)).await;
     }
 }
 
@@ -1437,76 +1372,6 @@ mod tests {
             None
         );
         assert_eq!(ok_result_failure_category(&serde_json::Value::Null), None);
-    }
-
-    /// Reach test for harn#7884. Both halves were green in isolation while the
-    /// pair was broken: the classifier was only ever fed a pre-quoted JSON
-    /// string in tests, and production fed it the display rendering of a plain
-    /// dict, which does not parse. Compose them the way the dispatch path
-    /// does, so a regression in either half fails here.
-    #[test]
-    fn a_plain_dict_handler_refusal_is_classified_before_it_is_rendered_away() {
-        let failure_shapes = [
-            serde_json::json!({"ok": false, "status": "blocked", "message": "apply blocked"}),
-            serde_json::json!({"ok": false, "error": "boom"}),
-            serde_json::json!({"success": false, "message": "rejected"}),
-            serde_json::json!({"isError": true, "message": "mcp shape"}),
-            // Classifying the structured value covers the failure `status`
-            // string too, which no rule about what to keep structured could
-            // have reached without holding open every dict that reports
-            // progress.
-            serde_json::json!({"status": "error", "message": "nope"}),
-        ];
-        for shape in failure_shapes {
-            // A plain dict, not a typed struct — what a `tool_define` handler
-            // returns unless it goes out of its way to build a struct.
-            let returned = crate::stdlib::json_to_vm_value(&shape);
-            let (payload, declared) = coerce_and_classify_handler_result(&returned);
-            assert_eq!(
-                declared,
-                Some("tool_error"),
-                "refusal must be classified before coercion: {shape:?}"
-            );
-            // The reason this had to be read early: the payload the caller is
-            // left holding cannot be classified.
-            assert_eq!(
-                ok_result_failure_category(&payload),
-                None,
-                "the rendered payload is unparseable — that is the defect"
-            );
-        }
-
-        // Negative control: the same path must not manufacture a failure.
-        let ok_shape = serde_json::json!({"ok": true, "message": "fine"});
-        let (_, declared) =
-            coerce_and_classify_handler_result(&crate::stdlib::json_to_vm_value(&ok_shape));
-        assert_eq!(declared, None);
-    }
-
-    /// #6508's rendering is the constraint this fix honors, so it is pinned
-    /// directly: the coerced payload for a plain dict is still the bare display
-    /// string, unchanged in type and in bytes. Classification now travels
-    /// beside it rather than being read out of it.
-    #[test]
-    fn carrying_the_outcome_does_not_change_the_rendered_payload() {
-        let shapes = [
-            serde_json::json!({"ok": false, "status": "blocked", "message": "apply blocked"}),
-            serde_json::json!({"ok": true, "message": "fine"}),
-            serde_json::json!({"success": false, "message": "rejected"}),
-            serde_json::json!({"isError": true, "message": "mcp shape"}),
-            serde_json::json!({"stdout": "done", "exit_code": 0}),
-        ];
-        for shape in shapes {
-            let returned = crate::stdlib::json_to_vm_value(&shape);
-            let (payload, _) = coerce_and_classify_handler_result(&returned);
-            // Taken from the same source value rather than restated, so the
-            // two cannot drift apart.
-            assert_eq!(
-                payload,
-                serde_json::Value::String(returned.display()),
-                "coerced payload must be the unchanged display string for {shape:?}"
-            );
-        }
     }
 
     #[test]

@@ -1504,7 +1504,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
     let executor = outcome
         .executor
         .as_ref()
-        .and_then(|executor| serde_json::to_value(executor).ok());
+        .and_then(|e| serde_json::to_value(e).ok());
 
     // If the dispatch was actually preempted by `cancel_in_flight_tool_call`,
     // surface a `status: "cancelled"` tool_result rather than tearing down
@@ -1594,22 +1594,15 @@ pub(super) async fn host_agent_dispatch_tool_call(
             ))
             .await?;
             let denied = agent_tools::is_denied_tool_result(&raw_result);
-            // A dispatch that returned `Ok(..)` can still carry a failure in the
-            // result body (host-bridge `{ok:false}` / `{status:"error"}` /
-            // `{error:".."}` envelopes, or an MCP-shaped `{isError:true}` that
-            // wasn't already thrown). Surface those as a failure instead of
-            // laundering them into `ok:true` — the agent loop reads `ok`/`status`
-            // to decide whether the tool succeeded.
-            // `declared_failure` was read off the handler's structured return
-            // before the display coercion rendered it to text. Prefer it: for a
-            // dict-returning handler the coerced payload is a display string
-            // that no longer parses, so classifying `raw_result` alone silently
-            // reported every such refusal as a success (harn#7884).
-            let body_failure = if denied {
-                None
-            } else {
+            // A dispatch that returned `Ok(..)` can still carry a failure in its
+            // body (`{ok:false}` / `{status:"error"}` / `{error:".."}`, or an
+            // MCP-shaped `{isError:true}`). Surface those instead of laundering
+            // them into `ok:true`: the agent loop reads `ok`/`status`.
+            // Prefer the pre-coercion declaration: a dict-returning handler's
+            // coerced payload no longer parses (harn#7884).
+            let body_failure = denied.then_some(None).unwrap_or_else(|| {
                 declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
-            };
+            });
             let is_failure = denied || body_failure.is_some();
             let error_category = if denied {
                 Some("tool_rejected")

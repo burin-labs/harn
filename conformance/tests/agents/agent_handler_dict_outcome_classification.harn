@@ -33,18 +33,25 @@ pipeline default(harness: Harness) {
   let tools = tool_registry()
   for shape in shapes() {
     const returned = shape.value
-    tools = tool_define(tools, shape.name, "returns a plain dict verbatim", {
-      handler: { _args -> returned },
+    tools = tool_define(
+      tools,
+      shape.name,
+      "returns a plain dict verbatim",
+      {handler: { _args -> returned }, parameters: {}, annotations: {kind: "edit"}},
+    )
+  }
+  tools = tool_define(
+    tools,
+    "raises",
+    "raises instead of returning",
+    {
+      handler: { _args ->
+        throw "boom"
+      },
       parameters: {},
       annotations: {kind: "edit"},
-    })
-  }
-  tools = tool_define(tools, "raises", "raises instead of returning", {
-    handler: { _args -> throw("boom") },
-    parameters: {},
-    annotations: {kind: "edit"},
-  })
-
+    },
+  )
   for shape in shapes() {
     const envelope = agent_dispatch_tool_call(
       harness.tools,
@@ -54,16 +61,19 @@ pipeline default(harness: Harness) {
     )
     harness.stdio.println(
       shape.name + " ok=" + to_string(envelope?.ok)
-        + " status=" + to_string(envelope?.status)
-        + " rendered=" + to_string(envelope?.rendered_result)
+        + " status="
+        + to_string(envelope?.status)
+        + " rendered="
+        + to_string(envelope?.rendered_result),
     )
   }
-
   const raised = agent_dispatch_tool_call(
     harness.tools,
     {id: "call-raises", name: "raises", arguments: {}},
     tools,
     {},
   )
-  harness.stdio.println("raises ok=" + to_string(raised?.ok) + " status=" + to_string(raised?.status))
+  harness.stdio.println(
+    "raises ok=" + to_string(raised?.ok) + " status=" + to_string(raised?.status),
+  )
 }
