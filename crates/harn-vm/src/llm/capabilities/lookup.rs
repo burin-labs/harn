@@ -334,6 +334,57 @@ mod tests {
         assert!(!legacy.thinking_modes.iter().any(|m| m == "effort"));
     }
 
+    /// Every claim here was measured against Google's live endpoint on
+    /// 2026-09-03, with an unknown-model negative control returning 404 first
+    /// so a 200 means the route actually ran.
+    #[test]
+    fn gemini_3_8_flash_declares_its_probed_thinking_ladder() {
+        reset();
+        let flash_38 = lookup("gemini", "gemini-3.8-flash");
+
+        // Probed: native function call returned a real functionCall part, and
+        // a responseSchema request returned parseable JSON.
+        assert!(flash_38.native_tools);
+        assert_eq!(flash_38.preferred_tool_format, "native");
+        assert_eq!(flash_38.structured_output_mode, "native_json");
+
+        // Probed: low / medium / high all returned 200, MINIMAL returned 400
+        // "Thinking level MINIMAL is not supported for this model".
+        assert!(flash_38.reasoning_effort_supported);
+        assert_eq!(flash_38.reasoning_effort_levels, ["low", "medium", "high"]);
+        assert!(
+            !flash_38.reasoning_none_supported,
+            "the thinking_level ladder refuses the lowest rung on 3.8"
+        );
+
+        // Google documents stripping these. The endpoint ACCEPTS them with a
+        // 200 rather than refusing, which proves tolerance and not that the
+        // value is honored, so the row must not read acceptance as support.
+        assert!(!flash_38.temperature_supported);
+        assert!(!flash_38.top_p_supported);
+        assert!(!flash_38.top_k_supported);
+
+        // The `models/` REST resource name is the same route.
+        let resource = lookup("gemini", "models/gemini-3.8-flash");
+        assert_eq!(
+            resource.reasoning_effort_levels,
+            flash_38.reasoning_effort_levels
+        );
+        assert!(!resource.reasoning_none_supported);
+
+        // Direction control. 3.6 Flash was measured honoring a disable and
+        // carries reasoning_none_supported = true. If 3.8 were silently
+        // inheriting the 3.6 row instead of matching its own, the assertion
+        // above would be testing the wrong rule, and this pins that apart.
+        assert!(lookup("gemini", "gemini-3.6-flash").reasoning_none_supported);
+
+        // OpenRouter serves the same model and must not fall through to a
+        // text-tool default.
+        let via_openrouter = lookup("openrouter", "google/gemini-3.8-flash");
+        assert!(via_openrouter.native_tools);
+        assert_eq!(via_openrouter.preferred_tool_format, "native");
+    }
+
     #[test]
     fn groq_qwen_36_declares_thinking_toggle() {
         reset();

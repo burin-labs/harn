@@ -148,6 +148,64 @@ fn glm_5_3_flash_routes_and_launch_pricing_are_live() {
 }
 
 #[test]
+fn gemini_3_8_flash_routes_and_introductory_pricing_are_live() {
+    let config = default_config();
+    let direct = config
+        .models
+        .get("gemini-3.8-flash")
+        .expect("direct Google Gemini 3.8 Flash route is catalogued");
+    let openrouter = config
+        .models
+        .get("google/gemini-3.8-flash")
+        .expect("OpenRouter Gemini 3.8 Flash route is catalogued");
+    assert_eq!(direct.provider, "gemini");
+    assert_eq!(openrouter.provider, "openrouter");
+
+    // Limits read off Google's live models endpoint on 2026-09-03.
+    assert_eq!(direct.context_window, Some(1_048_576));
+    for capability in ["tools", "vision", "streaming", "prompt_caching", "thinking"] {
+        assert!(
+            direct.capabilities.iter().any(|value| value == capability),
+            "3.8 Flash must declare {capability}"
+        );
+    }
+
+    // The introductory period runs 2026-09-02 through 2026-12-31; the regular
+    // rate applies on either side of it. Pinning both sides keeps a promotion
+    // that silently never expires from reading as correct pricing.
+    let pricing = direct.pricing.as_ref().expect("direct route is priced");
+    let at = |value| OffsetDateTime::parse(value, &Rfc3339).unwrap();
+    let promotional = pricing.effective_at(at("2026-09-15T12:00:00Z"));
+    assert_eq!(promotional.input_per_mtok, 0.75);
+    assert_eq!(promotional.output_per_mtok, 3.75);
+    assert_eq!(promotional.cache_read_per_mtok, Some(0.075));
+    let restored = pricing.effective_at(at("2027-01-02T12:00:00Z"));
+    assert_eq!(restored.input_per_mtok, 1.50);
+    assert_eq!(restored.output_per_mtok, 7.50);
+    assert_eq!(restored.cache_read_per_mtok, Some(0.15));
+    let before = pricing.effective_at(at("2026-08-01T12:00:00Z"));
+    assert_eq!(
+        before.input_per_mtok, 1.50,
+        "the promotion must not apply before it starts"
+    );
+
+    // Negative control. The `gemini-*` inference rule routes ANY gemini-shaped
+    // string to the Gemini provider, so "it routes" alone is satisfied by an id
+    // that does not exist. What separates a supported model from an invented
+    // one is the catalog row, so assert the neighbouring ids have none.
+    for unknown in [
+        "gemini-3.9-flash",
+        "gemini-3.8-flash-cyber",
+        "gemini-3.8-pro",
+    ] {
+        assert!(
+            config.models.get(unknown).is_none(),
+            "{unknown} is not a model Google serves us; it must not gain a row"
+        );
+    }
+}
+
+#[test]
 fn model_availability_parses_known_strings() {
     assert_eq!(
         ModelAvailability::parse("serverless"),
