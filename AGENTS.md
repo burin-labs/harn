@@ -146,6 +146,34 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Public stdlib functions need explicit return types: named closed records,
   `Result<T, E>`, or typed maps rather than `any` or open `dict`.
 
+## Adding a model or provider to the catalog
+
+- Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
+  `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
+  `crates/harn-vm/src/llm/providers.toml` and
+  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  everything under `spec/provider-catalog/` and the provider docs. Edit the
+  source fragments only.
+- Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
+  `make gen-provider-support`, then verify with the matching `check-` targets.
+  Regenerate using a binary built from the tree you are changing. A binary that
+  predates a new capability rule writes the same bytes back, so the local check
+  reads green and CI fails on a rebuild.
+- **Ship every route the model is served on.** A model reachable both directly
+  and through an aggregator needs a catalog row and a capability rule on each
+  route. Adding only the direct route leaves the aggregated route falling
+  through to a default rule, which usually downgrades it to text tools. Read how
+  the neighbouring generation is carried before concluding one route is enough,
+  and record the reason in a comment when it genuinely is.
+- **Give every catalog test a negative control.** Provider inference routes any
+  plausibly shaped model string, so "the id resolves" is also true of a model
+  that does not exist. Assert that a neighbouring unserved id has no row, and
+  pin an adjacent generation's contrasting capability value so a new rule that
+  silently inherits the old one fails instead of passing.
+- Back a capability claim with a live probe rather than a model card, and record
+  what the probe returned beside the row. An endpoint that tolerates a field its
+  own guidance says to strip has not honored it, so tolerance is not support.
+
 ## Verification
 
 - Start with the narrowest check through the owning interface.

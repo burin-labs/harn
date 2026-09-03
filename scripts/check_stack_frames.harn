@@ -326,17 +326,14 @@ fn main(harness: Harness) {
   }
   const report = judge_stack_frames(worst, budget, today)
   if parsed?.write ?? false {
+    // Rewrite from the CENSUS, not from the previous budget. Walking the old
+    // entries could only ever adjust files that were already listed, so a
+    // frame crossing the threshold for the first time stayed "unlisted"
+    // forever and the remediation this gate prints was a dead end. Building
+    // from the measurement also drops a file that fell back under it.
     let files = []
-    for entry in budget.files {
-      const observed = worst[entry.path]
-      files = files
-        + [
-          if observed == nil {
-            entry
-          } else {
-            {...entry, max_bytes: observed}
-          },
-        ]
+    for path in keys(worst).sorted() {
+      files = files + [{path: path, max_bytes: worst[path] ?? 0}]
     }
     harness.fs.write_text(budget_path, json_stringify_pretty({...budget, files: files}) + "\n")
     harness.stdio.println("stack-frame budget rewritten to the observed frame sizes.")

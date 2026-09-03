@@ -9,7 +9,7 @@
 # agent/codex worktrees). This script deletes any harn-target/* dir that no
 # live git worktree still maps to.
 #
-# Two rules decide, in order:
+# Three rules decide, in order:
 #
 #   1. Keep an entry a live worktree still maps to. "Live" means the worktree
 #      directory exists on disk. A worktree deleted with `rm -rf` leaves its
@@ -25,8 +25,17 @@
 #      the entry on its command line. The probe excludes its own process
 #      ancestry, because a GC whose own command line names the entry it is
 #      scanning would otherwise manufacture a live owner for it.
+#   3. Bound what rule 1 keeps. Dropping orphans bounds nothing on a machine
+#      whose worktrees are all alive, because every one of them keeps its tree
+#      forever, and the cache grows with the number of worktrees the machine
+#      has ever had at once. Warm entries are ranked by recency within their
+#      root; the newest HARN_TARGET_GC_KEEP_RECENT are the working set and are
+#      kept whatever their age, and the rest are retired once nothing has
+#      built them for HARN_TARGET_GC_MAX_IDLE_SECS. Rule 2 outranks this: an
+#      entry a live process owns never reaches the ranking, and neither does
+#      one whose mtime this run could not read.
 #
-# The idle-age bound survives both rules, as a staleness rule rather than a
+# The idle-age bound survives all three, as a staleness rule rather than a
 # liveness one: it is the last line of defence for a worktree that discovery
 # never reached, so a warm target outside HARN_TARGET_GC_ROOTS is still kept.
 # When the process probe is unavailable (no usable `ps` or `lsof`), the GC says
@@ -46,6 +55,10 @@
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
 #   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before removal (default 10800)
+#   HARN_TARGET_GC_KEEP_RECENT  warm trees per root kept whatever their age
+#                               (default 10; a negative value disables the cap)
+#   HARN_TARGET_GC_MAX_IDLE_SECS idle age past which a warm tree outside the
+#                               most-recent set is retired (default 259200)
 #   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
 #                               both the legacy $TMPDIR and durable cache roots
 set -euo pipefail
@@ -131,6 +144,15 @@ fi
 find_depth="${HARN_TARGET_GC_FIND_DEPTH:-3}"
 min_age="${HARN_TARGET_GC_MIN_AGE_SECS:-10800}"
 cutoff=$(( $(date +%s) - min_age ))
+# The retention cap. Dropping orphans bounds nothing on a machine whose
+# worktrees are all alive: every live worktree keeps its tree forever, so the
+# cache still grows with the number of worktrees the machine has ever had at
+# once. The newest few are the working set and are never touched. Past that,
+# a tree nobody has built in days is cache, and the cost of dropping it is a
+# rebuild.
+keep_recent="${HARN_TARGET_GC_KEEP_RECENT:-10}"
+max_idle="${HARN_TARGET_GC_MAX_IDLE_SECS:-259200}"
+idle_cutoff=$(( $(date +%s) - max_idle ))
 
 # The pids this GC must never mistake for a build: its own process and every
 # ancestor. An agent session or wrapper that names a cache entry on its command
@@ -221,9 +243,12 @@ entry_live_pids() {
 # worktree's .cargo/config.toml; fall back to the derived <parent>-<leaf> name.
 keep_file="$(mktemp)"
 release_keep_file="$(mktemp)"
+# Warm entries a live worktree still points at, one `<mtime> <path>` line per
+# root, so the retention cap below can rank them by recency.
+warm_file="$(mktemp)"
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
-trap 'rm -f "$keep_file" "$release_keep_file"; print_summary' EXIT
+trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file"; print_summary' EXIT
 
 live_worktrees() {
   discover_repo_roots | while read -r repo; do
@@ -275,7 +300,7 @@ done | sort -u > "$keep_file" || true
 prune_root() {
   local target_root="$1"
   local keep="$2"
-  local d name m sz pids
+  local d name m pids
   # Removal is destructive, so the root is re-validated here rather than only
   # where it was discovered. Both managed families are named exactly.
   case "$(basename "$target_root")" in
@@ -286,13 +311,19 @@ prune_root() {
       ;;
   esac
   walked_roots+=("$target_root")
+  # Warm entries are ranked across this root, so the list starts empty for it.
+  : > "$warm_file"
+  local warm_entry=0
   for d in "$target_root"/*; do
     [ -d "$d" ] || continue
     scanned=$((scanned + 1))
     name="$(basename "$d")"
+    warm_entry=0
     if grep -qxF "$name" "$keep"; then
-      echo "keep (live worktree): $name"
-      kept=$((kept + 1)); kept_paths+=("$d"); continue
+      # A live worktree points at this tree, so it is warm rather than an
+      # orphan. It is not decided here: the retention cap below ranks every
+      # warm entry in this root against the others.
+      warm_entry=1
     fi
 
     # Liveness is decided by process. An age bound alone cannot answer it: a
@@ -304,6 +335,18 @@ prune_root() {
         echo "keep (live process: $pids): $name"
         kept=$((kept + 1)); kept_paths+=("$d"); continue
       fi
+    fi
+
+    if [ "$warm_entry" -eq 1 ]; then
+      # An mtime this run could not read is not a rank. Keep it outright
+      # rather than letting an unreadable tree sort to the bottom and be
+      # retired for a measurement that never happened.
+      if ! m="$(file_mtime_epoch "$d")"; then
+        echo "keep (live worktree, mtime unavailable): $name"
+        kept=$((kept + 1)); kept_paths+=("$d"); continue
+      fi
+      printf '%s %s\n' "$m" "$d" >> "$warm_file"
+      continue
     fi
 
     # The age bound stays, as a staleness rule rather than a liveness one. It
@@ -318,30 +361,64 @@ prune_root() {
       kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
 
-    sz=$(du -sh "$d" 2>/dev/null | cut -f1 || true)
-    if [ "$dry_run" -eq 1 ]; then
-      echo "would remove orphan: $name (${sz:-?})"
-      removed=$((removed + 1))
-      continue
-    fi
-
-    # Remove one exact path this loop built from the validated root. Nothing
-    # here expands a pattern, and nothing outside the root is reachable.
-    if [ "$(dirname "$d")" != "$target_root" ] || [ "$name" = "." ] || [ "$name" = ".." ]; then
-      echo "refusing to remove a path outside the managed root: $d" >&2
-      kept=$((kept + 1)); kept_paths+=("$d"); continue
-    fi
-    echo "removing orphan: $name (${sz:-?})"
-    rm -rf "$d" || true
-    # Removal is destructive, so read the decision back instead of trusting
-    # the exit status of an `rm` that is deliberately failure-tolerant.
-    if [ -e "$d" ]; then
-      echo "warning: orphan survived removal, still present: $d" >&2
-      kept=$((kept + 1))
-      continue
-    fi
-    removed=$((removed + 1))
+    remove_entry "$target_root" "$d" "orphan"
   done
+
+  # Second pass: the retention cap, over the entries the first pass kept only
+  # because a live worktree still points at them. Rank by recency, keep the
+  # newest few whatever their age, and retire the rest once they pass the idle
+  # bound. A live process already won in the first pass and never reaches
+  # here, and an entry whose mtime could not be read was never recorded, so
+  # the cap can only choose among trees this run has measured.
+  if [ "$keep_recent" -ge 0 ] && [ -s "$warm_file" ]; then
+    local rank=0 mtime path base
+    while IFS=' ' read -r mtime path; do
+      [ -n "$path" ] || continue
+      rank=$((rank + 1))
+      base="$(basename "$path")"
+      if [ "$rank" -le "$keep_recent" ]; then
+        echo "keep (within the $keep_recent most recent): $base"
+        kept=$((kept + 1)); kept_paths+=("$path"); continue
+      fi
+      if [ "$mtime" -ge "$idle_cutoff" ]; then
+        echo "keep (past the $keep_recent most recent but built within ${max_idle}s): $base"
+        kept=$((kept + 1)); kept_paths+=("$path"); continue
+      fi
+      remove_entry "$target_root" "$path" "cold cache"
+    done < <(sort -rn "$warm_file")
+  fi
+}
+
+# Remove one entry, or report what would happen under --dry-run. Both passes
+# route through here so the path validation and the read-back are written once
+# and cannot drift apart.
+remove_entry() {
+  local target_root="$1" d="$2" reason="$3"
+  local name sz
+  name="$(basename "$d")"
+  sz=$(du -sh "$d" 2>/dev/null | cut -f1 || true)
+  if [ "$dry_run" -eq 1 ]; then
+    echo "would remove $reason: $name (${sz:-?})"
+    removed=$((removed + 1))
+    return 0
+  fi
+
+  # Remove one exact path built from the validated root. Nothing here expands
+  # a pattern, and nothing outside the root is reachable.
+  if [ "$(dirname "$d")" != "$target_root" ] || [ "$name" = "." ] || [ "$name" = ".." ]; then
+    echo "refusing to remove a path outside the managed root: $d" >&2
+    kept=$((kept + 1)); kept_paths+=("$d"); return 0
+  fi
+  echo "removing $reason: $name (${sz:-?})"
+  rm -rf "$d" || true
+  # Removal is destructive, so read the decision back instead of trusting the
+  # exit status of an `rm` that is deliberately failure-tolerant.
+  if [ -e "$d" ]; then
+    echo "warning: $reason survived removal, still present: $d" >&2
+    kept=$((kept + 1))
+    return 0
+  fi
+  removed=$((removed + 1))
 }
 
 # Bash 3.2 treats an empty `"${array[@]}"` expansion as unbound under

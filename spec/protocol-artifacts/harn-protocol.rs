@@ -3051,6 +3051,7 @@ pub enum HarnLlmErrorReason {
     InvalidResponse,
     ModelUnavailable,
     EmptyGeneration,
+    BillingLimit,
     OutputBudgetExhausted,
     Unknown,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
@@ -3072,6 +3073,7 @@ impl HarnLlmErrorReason {
         Self::InvalidResponse,
         Self::ModelUnavailable,
         Self::EmptyGeneration,
+        Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
     ];
@@ -3090,6 +3092,7 @@ impl HarnLlmErrorReason {
             Self::InvalidResponse => "invalid_response",
             Self::ModelUnavailable => "model_unavailable",
             Self::EmptyGeneration => "empty_generation",
+            Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
             Self::Unrecognized(value) => value.as_str(),
@@ -3110,6 +3113,7 @@ impl HarnLlmErrorReason {
             "invalid_response" => Self::InvalidResponse,
             "model_unavailable" => Self::ModelUnavailable,
             "empty_generation" => Self::EmptyGeneration,
+            "billing_limit" => Self::BillingLimit,
             "output_budget_exhausted" => Self::OutputBudgetExhausted,
             "unknown" => Self::Unknown,
             other => Self::Unrecognized(other.to_string()),
