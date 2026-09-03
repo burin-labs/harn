@@ -355,3 +355,31 @@ fn child_cwd_leaves_every_path_that_is_not_a_verbatim_disk_path_alone() {
         );
     }
 }
+
+#[test]
+fn child_cwd_drops_the_forward_slash_spelling_a_harn_script_hands_back() {
+    // Every `std/path` helper normalizes its output to forward slashes
+    // (`stdlib/path.rs::to_posix`), so a canonicalized Windows path that
+    // passes through a Harn script — as `workspace_root(fs)` does in
+    // `experiments/burin-mini` — comes back `//?/C:/...`, not `\\?\C:\...`.
+    // Windows treats `/` and `\` as interchangeable path separators, so this
+    // is the same prefix and must be stripped the same way. This is the
+    // shape that reproduced the "UNC paths are not supported" / "'node' is
+    // not recognized" failure on a real Windows job even after the
+    // backslash form above was fixed (harn#7974 fixed the backslash
+    // spelling only).
+    assert_eq!(
+        super::child_process_cwd(std::path::PathBuf::from("//?/C:/work/repo")),
+        std::path::PathBuf::from("C:/work/repo"),
+    );
+    // Controls: a forward-slash UNC verbatim path still has no drive-letter
+    // form to fall back to, and an ordinary POSIX-looking path with no `?`
+    // marker must not be mistaken for the prefix.
+    for path in ["//?/UNC/server/share", "/work/repo", "relative/path"] {
+        assert_eq!(
+            super::child_process_cwd(std::path::PathBuf::from(path)),
+            std::path::PathBuf::from(path),
+            "{path} must be handed to the child unchanged",
+        );
+    }
+}

@@ -182,14 +182,41 @@ pub(crate) fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf 
     }
 }
 
-/// Strip a `\\?\` prefix from a verbatim **disk** path, or return `None` when
-/// `path` is not one. Split out from [`child_process_cwd`] so the rule is
-/// testable as a pure string transformation on any platform.
+/// Strip a `\\?\` verbatim-disk-path prefix from `path`, or return `None`
+/// when `path` is not one. Split out from [`child_process_cwd`] so the rule
+/// is testable as a pure string transformation on any platform.
+///
+/// Every `std/path` helper normalizes its output to forward slashes
+/// (`stdlib/path.rs`'s `to_posix`, documented there as deliberate: Harn
+/// scripts see one separator regardless of host OS). A `cwd` that reaches
+/// here after passing through a Harn script — as `workspace_root(fs)` does
+/// in `experiments/burin-mini` — therefore carries this same prefix spelled
+/// `//?/C:/...`, not `\\?\C:\...`. Windows itself treats `/` and `\` as
+/// interchangeable path separators, so both spellings name the same prefix
+/// and both must be recognized here, or exactly the script-originated `cwd`
+/// this function exists to fix keeps its un-stripped prefix and reproduces
+/// the "UNC paths are not supported" failure one level removed.
+#[expect(
+    clippy::string_slice,
+    reason = "the 4-byte prefix just matched is pure ASCII, so byte offset 4 is a guaranteed char boundary"
+)]
 fn strip_windows_verbatim_prefix(path: &str) -> Option<&str> {
-    let rest = path.strip_prefix(r"\\?\")?;
+    let bytes = path.as_bytes();
+    let is_slash = |byte: u8| byte == b'\\' || byte == b'/';
+    if bytes.len() < 4
+        || !is_slash(bytes[0])
+        || !is_slash(bytes[1])
+        || bytes[2] != b'?'
+        || !is_slash(bytes[3])
+    {
+        return None;
+    }
+    // The first four bytes matched are single-byte ASCII, so byte offset 4
+    // is a valid char boundary to slice at.
+    let rest = &path[4..];
     let mut chars = rest.chars();
-    // A drive-letter path, and nothing else. `\\?\UNC\...` fails this and is
-    // deliberately left as it is.
+    // A drive-letter path, and nothing else. `\\?\UNC\...` (and its
+    // `//?/UNC/...` spelling) fails this and is deliberately left as it is.
     if !chars.next()?.is_ascii_alphabetic() {
         return None;
     }
