@@ -255,6 +255,35 @@ fn __agent_tool_result_edit_status(result: dict) -> AgentEditOutcomeStatus? {
   return nil
 }
 
+/**
+ * The typed denial a tool handler reported about its own execution, or nil.
+ *
+ * A handler that runs and then refuses reports through
+ * `agent_tool_handler_result`, so its denial rides one level deeper than a
+ * denial the VM wrote before dispatch: under `data`, not on the result. This
+ * is the single owner of that descent. Both authorities that decide whether a
+ * call was refused read it here, because a refusal recognized by one reader
+ * and not the other is how a refused call reads as a successful one.
+ *
+ * The shape is required, not assumed. A `denial` key without a gate has not
+ * named the authority that refused, and neither a terminal cutoff nor a
+ * failure verdict may fire on a shape it cannot attribute.
+ */
+pub fn agent_tool_handler_result_denial(result: dict) -> dict? {
+  const payload = result?.result
+  if payload?.schema != "harn.agent_tool_handler_result.v1" {
+    return nil
+  }
+  const denial = payload?.data?.denial
+  if type_of(denial) != "dict" {
+    return nil
+  }
+  if to_string(denial?.gate ?? "") == "" {
+    return nil
+  }
+  return denial
+}
+
 fn __agent_tool_result_product_error(result: dict) -> bool? {
   const raw = result?.product_error
   if raw != nil {
@@ -269,6 +298,15 @@ fn __agent_tool_result_product_error(result: dict) -> bool? {
   }
   if payload?.success != nil {
     return payload.success ? false : true
+  }
+  // A handler that reported a permanent denial about itself did not succeed,
+  // whatever its transport said. Reading this only from a separate `ok` flag
+  // would make one fact depend on two switches a producer must remember to
+  // set together, and a producer that set the denial and forgot the flag
+  // would read back as "not denied" — the case this reader exists to close.
+  const denial = agent_tool_handler_result_denial(result)
+  if denial != nil && denial?.retryable == false {
+    return true
   }
   return nil
 }
