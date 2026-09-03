@@ -4,12 +4,14 @@
 // owns extraction and schema validation; the judge consumes its typed data
 // without reparsing provider text.
 import { agent_capture_events } from "std/agent/events"
+import { agent_command_tools } from "std/agent/host_tools"
 import { __judge_evidence_projection } from "std/agent/judge"
 import { __judge_completion_admission } from "std/agent/judge_internals"
 import { agent_loop } from "std/agent/loop"
 import { __agent_loop_deadline_contract } from "std/agent/loop_foundation"
 import { AgentSpec } from "std/agent/options"
-import { llm_done, llm_text, with_llm_script } from "std/testing"
+import { command_result_ok } from "std/command"
+import { llm_done, llm_text, with_capability_fixtures, with_llm_script } from "std/testing"
 
 fn __feedback_contents(captured: dict, kind: string) -> list<string> {
   let contents: list<string> = []
@@ -924,4 +926,249 @@ pipeline test_completion_evidence_mutation_only_turn_has_empty_research(
   assert_eq(projected.stats.omitted_read_only_call_count, 0)
   assert_eq(len(projected.packet.actions), 1)
   assert_eq(projected.packet.actions[0].name, "delete")
+}
+
+/**
+ * A BACKGROUND VERIFIER'S POLL IS VERIFICATION EVIDENCE, AND MUST BE DECLARED SO.
+ *
+ * From the 2026-09-02 py-test trial 1 kill
+ * (`eval-py-test-20260902-204700-4d07ec7f-ab3-t1`). The agent dispatched its
+ * verifier to a background handle and polled it five times. Every poll returned
+ * ok with `dispatch_status: completed` and "Command succeeded (exit 0) ...
+ * 5 passed in 2.24s". The deterministic gate returned done with confirm at
+ * iterations 12, 14, 16, 18 and 20; the completion judge overrode every one,
+ * each time saying the verifier was still running and naming handle
+ * `hto-2f4b-3`; the judge cap then ended a verified run as
+ * `completion_unverified`.
+ *
+ * WHY THE JUDGE NEVER SAW A POLL, precisely. `poll_command` and `wait_command`
+ * are annotated `kind: "execute"`, `side_effect_level: "read_only"`. That does
+ * NOT make them read-only to the classifier -- `__AGENT_READ_ONLY_TOOL_KINDS` is
+ * `["read", "search", "think", "fetch"]` and excludes `execute`, so
+ * `agent_tool_is_read_only` returns false and the read-only research path never
+ * touches them. Instead `__judge_evidence_role` fell through every branch: not
+ * an edit, not a workspace write, not read-only. It returned "other". An
+ * "other" action is counted in `relevant_action_count` and then fills no slot,
+ * because selection only keeps the latest mutation, verification and problem.
+ * So the poll was silently dropped as an older action while the judge was told
+ * a verifier existed and never shown its result.
+ *
+ * The fix is a declaration at the annotation seam, not a rule in the judge: the
+ * two handle-reading tools now carry `completion_evidence_role: "verification"`,
+ * because what they return IS the command's outcome -- the same proof a
+ * synchronous verifier produces.
+ *
+ * The discriminator is not how many calls were dropped. The passing sibling in
+ * the same cell, one iteration apart, dropped six read-only calls and finished
+ * cleanly, because it verified synchronously through `verify` and none of its
+ * verification evidence arrived through a handle. What matters is whether the
+ * ONLY proof that verification succeeded arrives through a call that fills no
+ * evidence slot.
+ */
+pipeline test_command_handle_polls_are_declared_verification_evidence(
+  harness: Harness,
+  _task: any,
+) {
+  // The handle tools are opt-in; a run that never dispatches to the background
+  // never registers them. Enable them explicitly so this census measures the
+  // annotation rather than the default tool set.
+  const tools = agent_command_tools(harness, nil, {background_commands: true})
+  let seen: list<string> = []
+  for entry in tools.tools {
+    const name = to_string(entry?.name ?? "")
+    if name != "poll_command" && name != "wait_command" {
+      continue
+    }
+    seen = seen + [name]
+    assert_eq(
+      "verification",
+      to_string(entry?.annotations?.completion_evidence_role ?? ""),
+      "${name} returns the background command's own outcome, so it must be declared verification evidence or the completion judge can never be shown a passing async verifier",
+    )
+  }
+  // A census that found neither tool would pass the loop above vacuously.
+  assert_eq(2, len(seen), "expected both handle-reading tools, saw ${json_stringify(seen)}")
+}
+
+/**
+ * The projection consequence of that declaration, in both directions.
+ *
+ * Without the declared role the poll classifies "other" and fills no slot, so
+ * the judge is never shown the passing command. With it, the poll takes the
+ * verification slot and the output reaches the packet. The second half is the
+ * control that keeps this honest: a plain read must STAY out of `actions`, or
+ * the fix has widened from "verification-bearing" to "every call" and the
+ * projection has stopped projecting.
+ */
+pipeline test_declared_role_decides_whether_a_poll_reaches_the_judge(_task: any) {
+  const poll_text = "Command succeeded (exit 0)\n5 passed in 2.24s"
+  const messages = [
+    __assistant_facts(
+      "Read the module.",
+      [{id: "look-1", function: {name: "look", arguments: {file: "src/calc.py"}}}],
+    ),
+    __result_facts("look", "look-1", "def add(a, b):\n    return a + b", "ok"),
+    __assistant_facts(
+      "Apply the fix.",
+      [{id: "edit-1", function: {name: "edit", arguments: {content: "return a + b"}}}],
+    ),
+    __result_facts("edit", "edit-1", "write applied", "ok", {mutation_status: "applied"}),
+    __assistant_facts(
+      "Poll the focused verifier.",
+      [{id: "poll-1", function: {name: "poll_command", arguments: {handle_id: "hto-2f4b-3"}}}],
+    ),
+    __result_facts("poll_command", "poll-1", poll_text, "ok", {dispatch_status: "completed"}),
+  ]
+  const look_tool = {name: "look", annotations: {kind: "read", side_effect_level: "read_only"}}
+  const edit_tool = {
+    name: "edit",
+    annotations: {kind: "edit", side_effect_level: "workspace_write"},
+  }
+  // Exactly the annotation `host_tools.harn` shipped BEFORE the fix.
+  const undeclared = {
+    tools: [
+      look_tool,
+      edit_tool,
+      {name: "poll_command", annotations: {kind: "execute", side_effect_level: "read_only"}},
+    ],
+  }
+  const before = __judge_evidence_projection(messages, undeclared)
+  const before_names = before.packet.actions.map({ action -> action.name }).to_list()
+  assert(
+    !contains(before_names, "poll_command"),
+    "without a declared role the poll classifies \"other\" and fills no slot; if it now appears, this control has stopped measuring the defect: ${json_stringify(before_names)}",
+  )
+  // Exactly the annotation `host_tools.harn` ships now.
+  const declared = {
+    tools: [
+      look_tool,
+      edit_tool,
+      {
+        name: "poll_command",
+        annotations: {
+          kind: "execute",
+          side_effect_level: "read_only",
+          completion_evidence_role: "verification",
+        },
+      },
+    ],
+  }
+  const after = __judge_evidence_projection(messages, declared)
+  const after_names = after.packet.actions.map({ action -> action.name }).to_list()
+  const after_roles = after.packet.actions.map({ action -> action.semantics.evidence_role })
+    .to_list()
+  assert(
+    contains(after_names, "poll_command"),
+    "the declared poll must reach the judge as selected evidence, got ${json_stringify(after_names)}",
+  )
+  assert(
+    contains(after_roles, "verification"),
+    "the poll must occupy the verification slot, got ${json_stringify(after_roles)}",
+  )
+  assert(
+    contains(after.serialized, "5 passed in 2.24s"),
+    "the judge must be shown the command's outcome, not merely told a poll happened",
+  )
+  // CONTROL: a plain read is still research, never selected evidence.
+  assert(
+    !contains(after_names, "look"),
+    "a plain read must not be promoted to selected evidence: ${json_stringify(after_names)}",
+  )
+}
+
+/*
+ * THE END-TO-END ARM for #7895.
+ *
+ * The census proves the annotation is declared. This proves the production
+ * loop carries it all the way to the judge: a real `agent_command_tools`
+ * registry, a real `agent_loop`, a real judge call, and the projection
+ * checkpoint the judge actually consumed. Only the OS process is fixtured,
+ * so the handle id is deterministic.
+ *
+ * Two claims, both from the receipt rather than from prose:
+ *   1. `poll_command` occupies the verification slot.
+ *   2. The deterministic done gate is not overridden; the run ends `done`.
+ */
+pipeline test_a_polled_background_verifier_reaches_the_judge_as_verification(
+  harness: Harness,
+  task: unknown,
+) {
+  const tools = agent_command_tools(harness, nil, {background_commands: true})
+  with_capability_fixtures(
+    harness.testing,
+    [
+      {
+        capability: "tools",
+        method: "run_command",
+        result: command_result_ok("", {handle_id: "bg-1", status: "running"}),
+      },
+      {
+        capability: "tools",
+        method: "wait_command",
+        result: command_result_ok("2 passed, 0 failed", {handle_id: "bg-1"}),
+      },
+    ],
+    { ->
+      with_llm_script(
+        harness.llm,
+        [
+          {
+            text: "",
+            tool_calls: [
+              {
+                id: "run-1",
+                name: "run_command",
+                arguments: {command: "pytest -q", background: true},
+              },
+            ],
+          },
+          {
+            text: "",
+            tool_calls: [{id: "poll-1", name: "poll_command", arguments: {handle_id: "bg-1"}}],
+          },
+          llm_done(),
+          {text: json_stringify({verdict: "done", detail: "The suite passed under the handle."})},
+        ],
+        { ->
+          const session = "judge-async-verify-" + harness.random.uuid()
+          const opts: AgentSpec = {
+            provider: "mock",
+            session_id: session,
+            tools: tools,
+            tool_format: "native",
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 5,
+            verify_completion_judge: {provider: "mock", max_invocations: 1},
+          }
+          const captured = agent_capture_events(
+            harness.agent,
+            session,
+            fn() { return agent_loop(harness, "Run the tests in the background.", nil, opts) },
+          )
+          assert_eq(captured.result.status, "done")
+          const projection = captured.events.filter(
+            { event ->
+              event.type == "typed_checkpoint"
+                && event?.checkpoint?.schema
+                  == "harn.completion_judge_evidence_projection.v1"
+            },
+          )
+            .to_list()
+          assert_eq(len(projection), 1)
+          let verification_names: list<string> = []
+          for selected in projection[0].checkpoint.selected_actions {
+            if selected.evidence_role == "verification" {
+              verification_names = verification_names.appending(to_string(selected.name))
+            }
+          }
+          assert_eq(
+            verification_names,
+            ["poll_command"],
+            "the judge must be shown the polled background verifier as verification evidence",
+          )
+        },
+      )
+    },
+  )
 }
