@@ -2,14 +2,16 @@ import "../check_stack_frames.harn"
 
 /** One clippy JSON diagnostic line, as `--message-format=json` emits it. */
 fn diagnostic(path: string, line: int, bytes: int) -> string {
-  return json_stringify({
-    reason: "compiler-message",
-    message: {
-      code: {code: "clippy::large_stack_frames"},
-      message: "this function may allocate " + to_string(bytes) + " bytes on the stack",
-      spans: [{file_name: path, line_start: line, is_primary: true}],
+  return json_stringify(
+    {
+      reason: "compiler-message",
+      message: {
+        code: {code: "clippy::large_stack_frames"},
+        message: "this function may allocate " + to_string(bytes) + " bytes on the stack",
+        spans: [{file_name: path, line_start: line, is_primary: true}],
+      },
     },
-  },)
+  )
 }
 
 fn budget(path: string, max_bytes: int) -> StackFrameBudget {
@@ -29,7 +31,8 @@ pipeline test_worst_frame_keeps_the_largest_per_file(harness: Harness, task: unk
     diagnostic("a.rs", 90, 300000),
     diagnostic("b.rs", 4, 110000),
     "  not json at all",
-  ].join("\n")
+  ]
+    .join("\n")
   const worst = worst_frame_by_file(census)
   assert_eq(worst["a.rs"], 300000, "the larger frame in a file wins")
   assert_eq(worst["b.rs"], 110000, "each file keeps its own worst")
@@ -68,7 +71,10 @@ pipeline test_a_shrunk_frame_demands_tightening(harness: Harness, task: unknown)
  * would make the gate green while measuring nothing about it.
  */
 @test
-pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(harness: Harness, task: unknown) {
+pipeline test_a_budgeted_file_missing_from_the_census_is_not_a_pass(
+  harness: Harness,
+  task: unknown,
+) {
   const worst = worst_frame_by_file(diagnostic("other.rs", 10, 200000))
   const report = judge_stack_frames(worst, budget("a.rs", 300000))
   assert_eq(report.violation_count, 1, "an absent budgeted file is a finding")
