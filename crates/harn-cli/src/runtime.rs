@@ -43,6 +43,13 @@ pub(crate) fn cli_runtime_mode(raw_args: &[String]) -> CliRuntimeMode {
 pub(crate) fn build_cli_runtime(mode: CliRuntimeMode) -> tokio::runtime::Runtime {
     let build = panic::catch_unwind(|| {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
+        // Tokio's worker threads run the VM too: a background sub-agent's loop
+        // and the stop that ends it are polled here, not on the thread that
+        // built the runtime. Tokio's 2 MiB default is not enough for those
+        // frames, and a stack overflow aborts the process rather than failing
+        // one request, so the runtime states the size the same way a spawned
+        // VM thread does.
+        builder.thread_stack_size(crate::CLI_RUNTIME_STACK_SIZE);
         if mode.enables_tokio_io() {
             builder.enable_all();
         } else {

@@ -154,4 +154,98 @@ mod tests {
             offenders.join("\n  ")
         );
     }
+
+    /// A multi-thread Tokio runtime spawns its own worker threads, and those
+    /// workers run the VM.
+    ///
+    /// [`vm_driving_threads_ask_for_the_runtime_stack`] cannot see this: it
+    /// judges *spawn sites*, and a multi-thread runtime built on the process's
+    /// main thread has none. Tokio creates the workers internally, at its own
+    /// 2 MiB default, and the CLI's runtime went that way for five releases
+    /// (harn#7961) — stopping a background sub-agent is polled on a worker, and
+    /// at the default size that overflowed and aborted the process. The
+    /// dedicated VM thread's `RUNTIME_STACK_SIZE` says nothing about a thread
+    /// Tokio made.
+    ///
+    /// So every shipped multi-thread runtime must state
+    /// [`super::RUNTIME_STACK_SIZE`] for its workers. Unlike a behavioral test,
+    /// this fires under any ambient stack, which matters because the Rust test
+    /// lanes export `RUST_MIN_STACK=16777216` and would otherwise hide the
+    /// whole class.
+    ///
+    /// Test code is out of scope: a path component named `tests` or ending in
+    /// `_tests`, and anything after a file's first `#[cfg(test)]`, is skipped.
+    /// Those runtimes never ship, and they run under the lanes' large stack.
+    #[test]
+    fn multi_thread_runtimes_size_their_worker_threads() {
+        /// Tokio builds these workers itself; nothing at the call site spawns.
+        const MULTI_THREAD: &str = "Builder::new_multi_thread()";
+        /// The builder method that states a worker stack size.
+        const SIZES_WORKERS: &str = "thread_stack_size(";
+
+        let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("harn-vm lives below crates");
+
+        let mut offenders = Vec::new();
+        let mut scanned = 0usize;
+        for entry in walkdir::WalkDir::new(crates_dir)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && entry.path().extension().and_then(std::ffi::OsStr::to_str) == Some("rs")
+                    && entry
+                        .path()
+                        .components()
+                        .any(|component| component.as_os_str() == "src")
+                    && !entry.path().components().any(|component| {
+                        let part = component.as_os_str().to_string_lossy();
+                        let stem = part.strip_suffix(".rs").unwrap_or(&part);
+                        stem == "tests" || stem.ends_with("_tests")
+                    })
+            })
+        {
+            scanned += 1;
+            let source = std::fs::read_to_string(entry.path()).expect("read Rust source");
+            let test_mod = source.find("\n#[cfg(test)]").unwrap_or(source.len());
+            for (offset, _) in source.match_indices(MULTI_THREAD) {
+                if offset > test_mod {
+                    continue;
+                }
+                let end = (offset + WINDOW).min(source.len());
+                let Some(window) = source.get(offset..end) else {
+                    continue;
+                };
+                // The builder expression ends at its `build()`; past that is
+                // unrelated code that could carry the marker by accident.
+                #[expect(
+                    clippy::string_slice,
+                    reason = "find returns a char boundary in window"
+                )]
+                let window = match window.find(".build()") {
+                    Some(cut) => &window[..cut],
+                    None => window,
+                };
+                if !window.contains(SIZES_WORKERS) {
+                    #[expect(
+                        clippy::string_slice,
+                        reason = "offset is a match_indices offset on source"
+                    )]
+                    let line = 1 + source[..offset].matches('\n').count();
+                    offenders.push(format!("{}:{line}", entry.path().display()));
+                }
+            }
+        }
+
+        assert!(scanned > 100, "scan found only {scanned} sources to check");
+        assert!(
+            offenders.is_empty(),
+            "these multi-thread Tokio runtimes ship, so their worker threads run \
+             the VM, but they leave Tokio's 2 MiB default in place and a deep \
+             enough frame aborts the process. Add \
+             `.thread_stack_size(harn_vm::RUNTIME_STACK_SIZE)`:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
 }

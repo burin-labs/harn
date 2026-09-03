@@ -232,6 +232,12 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // tempfile project.
   "crates/harn-cli/tests/harn_cli_e2e/path_metadata_persistence_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/replay_session_cli.rs",
+  // A shipped multi-thread Tokio runtime sizes its workers internally, so
+  // only a real child process running without the test lane's
+  // RUST_MIN_STACK proves those workers carry RUNTIME_STACK_SIZE. It stays
+  // in the fast binary because the e2e profile does not run on pull
+  // requests, and this class must be gated on every change.
+  "crates/harn-cli/tests/harn_cli_fast/stop_default_stack.rs",
   "crates/harn-cli/tests/harn_cli_fast/persona_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/test_worker_cli_e2e.rs",
   // Prefix stability is a command and exit-status contract over captured
