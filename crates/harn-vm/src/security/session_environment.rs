@@ -394,7 +394,7 @@ impl SessionEnvironment {
         let mut launcher_snapshot = capture_process_environment();
         for name in super::environment_policy::ENV_ALLOWLIST {
             if let Some(value) = env_lookup(name) {
-                launcher_snapshot.insert((*name).to_string(), value);
+                insert_env_value(&mut launcher_snapshot, name, value);
             }
         }
         Self::launch_from_snapshot(kind, specs, launcher_snapshot, env_lookup)
@@ -654,6 +654,53 @@ fn capture_process_environment() -> BTreeMap<String, String> {
     std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect()
+}
+
+/// Insert `name=value` into a launcher-environment snapshot the way Windows
+/// itself would: a name that already exists under different casing gets
+/// updated in place, under its EXISTING casing, rather than gaining a second
+/// entry.
+///
+/// [`capture_process_environment`] seeds a snapshot with names in whatever
+/// casing `std::env::vars_os` reports — on Windows that is the OS's native
+/// casing (`Path`, `SystemRoot`, ...), never the POSIX-uppercase spelling
+/// [`super::environment_policy::ENV_ALLOWLIST`] uses. [`SessionEnvironment::launch`]
+/// re-asserts every allowlisted name right after that capture, so a variable
+/// `vars_os` happened to miss is still present — but on Windows, a name like
+/// `"PATH"` and the snapshot's own `"Path"` name the same variable to the OS
+/// while looking like two different map keys to a plain `BTreeMap::insert`.
+/// [`EnvironmentPolicyKind::Inherited`] hands this map to a child verbatim —
+/// nothing rebuilds it from the allowlist's own casing the way Isolated/
+/// Granted do — so an inherited-policy child would receive an environment
+/// block carrying the same variable twice under different names. Which of
+/// the two entries a consumer honors is not specified by anything this crate
+/// controls, so this is a latent defect regardless of whether it explains
+/// any one observed symptom.
+fn insert_env_value_case_insensitive(
+    map: &mut BTreeMap<String, String>,
+    name: &str,
+    value: String,
+) {
+    if let Some(existing_key) = map
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(name))
+        .cloned()
+    {
+        map.insert(existing_key, value);
+        return;
+    }
+    map.insert(name.to_string(), value);
+}
+
+/// [`insert_env_value_case_insensitive`] on Windows, a plain insert
+/// elsewhere: POSIX treats `PATH` and `Path` as two unrelated variables, so
+/// folding them there would be the bug, not the fix.
+fn insert_env_value(map: &mut BTreeMap<String, String>, name: &str, value: String) {
+    if cfg!(windows) {
+        insert_env_value_case_insensitive(map, name, value);
+    } else {
+        map.insert(name.to_string(), value);
+    }
 }
 
 fn validate_unique_specs(specs: &[GrantSpec]) -> Result<(), EnvironmentPolicyError> {
@@ -1378,5 +1425,108 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code(), "environment_policy.invalid_for_command");
+    }
+
+    /// The case-insensitive merge rule that keeps a Windows-cased snapshot
+    /// name (`"Path"`) and the allowlist's POSIX-cased name (`"PATH"`) from
+    /// coexisting as two separate keys. Exercised directly (not through
+    /// `launch`, which reads the real `std::env::vars_os` of whatever
+    /// process runs the test) so this holds on every host, not only Windows
+    /// CI, and holds regardless of the live environment the test runs in.
+    #[test]
+    fn a_case_insensitive_insert_updates_the_existing_key_not_a_second_one() {
+        let mut map = BTreeMap::new();
+        map.insert(
+            "Path".to_string(),
+            "C:\\nodejs;C:\\Windows\\System32".to_string(),
+        );
+        insert_env_value_case_insensitive(
+            &mut map,
+            "PATH",
+            "C:\\nodejs;C:\\Windows\\System32;C:\\extra".to_string(),
+        );
+        assert_eq!(
+            map.len(),
+            1,
+            "must update the existing 'Path' key, not add a second 'PATH' key: {map:?}"
+        );
+        assert_eq!(
+            map.get("Path").map(String::as_str),
+            Some("C:\\nodejs;C:\\Windows\\System32;C:\\extra"),
+            "the original casing is preserved, only the value is refreshed: {map:?}"
+        );
+        assert!(
+            !map.contains_key("PATH"),
+            "no second key should exist under the allowlist's own casing: {map:?}"
+        );
+    }
+
+    #[test]
+    fn a_case_insensitive_insert_adds_a_new_key_when_none_matches() {
+        let mut map = BTreeMap::new();
+        insert_env_value_case_insensitive(&mut map, "HOME", "/root".to_string());
+        assert_eq!(map.get("HOME").map(String::as_str), Some("/root"));
+    }
+
+    /// The end-to-end proof that `SessionEnvironment::launch` under
+    /// [`EnvironmentPolicyKind::Inherited`] hands a spawned child a `PATH`
+    /// that actually resolves a program the parent's `PATH` resolves —
+    /// specifically `node`, the program a `harn playground`/`harn run`
+    /// verify step failed to find on Windows CI (harn#7993). This differs
+    /// from the two tests above: those prove the merge rule in isolation;
+    /// this proves the whole `launch` -> `resolve_env` -> spawn path used in
+    /// production produces a working child environment on the one platform
+    /// where `capture_process_environment`'s real casing and the
+    /// allowlist's POSIX casing can actually diverge. `#[cfg(windows)]`
+    /// because there is nothing to prove on a platform where they cannot.
+    #[cfg(windows)]
+    #[test]
+    fn an_inherited_child_resolves_node_whenever_the_parent_does() {
+        let parent_has_node = std::process::Command::new("cmd")
+            .args(["/D", "/C", "where node"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if !parent_has_node {
+            // Nothing to prove on a machine without node on PATH; this test
+            // exists for CI runners that do have it.
+            return;
+        }
+        let environment =
+            SessionEnvironment::launch(EnvironmentPolicyKind::Inherited, vec![], &no_env)
+                .expect("inherited launch never fails");
+        let resolve_secret = |_: &str, _: &str| -> Option<String> { None };
+        let env = crate::security::resolve_env(&environment, &no_env, &resolve_secret)
+            .expect("inherited resolve_env never fails");
+        let path_entries: Vec<(&String, &String)> = env
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            .collect();
+        assert_eq!(
+            path_entries.len(),
+            1,
+            "exactly one PATH-shaped key must reach the child: {:?}",
+            env.keys().collect::<Vec<_>>()
+        );
+        // Not just present and singular: Inherited means the child's PATH is
+        // the parent's PATH, byte-for-byte, not a rebuilt or filtered one.
+        let parent_path = std::env::var("PATH").expect("this process has a PATH to compare");
+        assert_eq!(
+            path_entries[0].1, &parent_path,
+            "an Inherited child's PATH must equal the parent's PATH exactly"
+        );
+        let output = std::process::Command::new("cmd")
+            .args(["/D", "/C", "where node"])
+            .env_clear()
+            .envs(&env)
+            .output()
+            .expect("spawn cmd for the child-side probe");
+        assert!(
+            output.status.success(),
+            "parent resolved node on PATH but an Inherited-policy child did not: \
+             stdout={:?} stderr={:?}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

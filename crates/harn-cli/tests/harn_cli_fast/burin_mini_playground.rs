@@ -98,14 +98,31 @@ fn summarize_stages(report: &serde_json::Value) -> String {
         let Some(events) = stage["transcript"]["events"].as_array() else {
             continue;
         };
+        // `raw_input` (the tool's own arguments, e.g. its shell command) is
+        // carried by the initiating `tool_call` event and by an
+        // `in_progress` `tool_call_update`, but NOT by the terminal
+        // `"status":"failed"` update — that update only carries the
+        // outcome. Reading `raw_input` off the failed event itself (as an
+        // earlier version of this function did) silently prints an empty
+        // command on every real failure; a lookup by `tool_call_id` across
+        // the whole stage finds it on the event that actually carries it.
+        let mut commands_by_call_id: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for event in events {
+            let Some(call_id) = event["metadata"]["tool_call_id"].as_str() else {
+                continue;
+            };
+            if let Some(command) = event["metadata"]["raw_input"]["command"].as_str() {
+                commands_by_call_id.insert(call_id, command);
+            }
+        }
         for event in events {
             if event["kind"] != "tool_call_update" || event["metadata"]["status"] != "failed" {
                 continue;
             }
             let tool_name = event["metadata"]["tool_name"].as_str().unwrap_or("?");
-            let command = event["metadata"]["raw_input"]["command"]
-                .as_str()
-                .unwrap_or("");
+            let call_id = event["metadata"]["tool_call_id"].as_str().unwrap_or("");
+            let command = commands_by_call_id.get(call_id).copied().unwrap_or("");
             let error = event["metadata"]["error"].as_str().unwrap_or("");
             // The tool's own error text is a single long line; a tail is
             // plenty to see "not recognized" / "cannot find" / a wrong path
@@ -592,13 +609,22 @@ mod stage_summary_tests {
 
     /// Trimmed to the fields `summarize_stages` reads, from the actual
     /// `Workspace nextest (windows-latest)` CI failure this instrumentation
-    /// was written for (job 100729489477, harn#7993): the "run" tool's
+    /// was written for (job 100748266102, harn#7993): the "run" tool's
     /// `node scripts/verify-comment.js` call failed on Windows with
     /// `'node' is not recognized as an internal or external command`. Before
     /// this change, the panic message only printed the top-level report,
     /// which requires paging through several KB of nested transcript JSON
     /// to find that one line. This is a real report shape, not an invented
-    /// one, so the falsifier below is testing recall on production data.
+    /// one — the three-event `tool_call` / `tool_call_update` (in_progress)
+    /// / `tool_call_update` (failed) sequence, and specifically that only
+    /// the first two carry `raw_input` while the terminal failure does not,
+    /// is copied from the actual job log, not guessed. An earlier version
+    /// of this fixture put `raw_input` directly on the failed event, which
+    /// is not the real shape: it made the matching version of
+    /// `summarize_stages` (reading `raw_input` off the failed event) pass
+    /// this test while still printing `command=""` in production, exactly
+    /// the false-positive this file's [[a-probe-that-cannot-return-a-non-null-answer-is-not-a-probe]]
+    /// discipline warns about.
     fn windows_node_not_recognized_report() -> serde_json::Value {
         json!({
             "verdict": "fail",
@@ -617,14 +643,28 @@ mod stage_summary_tests {
                         "events": [
                             {
                                 "kind": "tool_call",
-                                "metadata": {"status": "pending", "tool_name": "run"},
+                                "metadata": {
+                                    "status": "pending",
+                                    "tool_name": "run",
+                                    "tool_call_id": "mock_call_5",
+                                    "raw_input": {"command": "node scripts/verify-comment.js"},
+                                },
+                            },
+                            {
+                                "kind": "tool_call_update",
+                                "metadata": {
+                                    "status": "in_progress",
+                                    "tool_name": "run",
+                                    "tool_call_id": "mock_call_5",
+                                    "raw_input": {"command": "node scripts/verify-comment.js"},
+                                },
                             },
                             {
                                 "kind": "tool_call_update",
                                 "metadata": {
                                     "status": "failed",
                                     "tool_name": "run",
-                                    "raw_input": {"command": "node scripts/verify-comment.js"},
+                                    "tool_call_id": "mock_call_5",
                                     "error": "{combined: 'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n, exit_code: 1, pid: nil, status: completed, stderr: 'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n, success: false}",
                                 },
                             },
@@ -672,4 +712,70 @@ mod stage_summary_tests {
         let summary = summarize_stages(&json!({"verdict": "fail"}));
         assert!(summary.contains("no execution.run.stages"), "{summary}");
     }
+}
+
+/// DIAGNOSTIC ONLY (harn#7993). Prints, never asserts on, what an
+/// `Inherited`-policy sandboxed `run`-tool child actually sees on this
+/// Windows runner: whether `where node` resolves, what `PATH` it received,
+/// and what directory it started in. Drives the exact seam
+/// `burin_mini_comment_file_fixture_run_updates_workspace_copy`'s failing
+/// `node scripts/verify-comment.js` call goes through —
+/// `harness.process.exec` -> `process_command_config` ->
+/// `session_closed_env` -> `crate::security::resolve_env` — under
+/// `RunSandboxOptions::default()`, the same default `Inherited` policy that
+/// test runs under. Delete this once the Windows red above is understood
+/// and fixed; it exists to put the child's own view of its environment
+/// directly in the CI log instead of requiring another round trip through
+/// full playground fixture replay.
+#[cfg(windows)]
+#[test]
+fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
+    let temp = TempDir::new().unwrap();
+    let sandbox_root = temp.path().to_path_buf();
+    let script = sandbox_root.join("probe.harn");
+    fs::write(
+        &script,
+        r#"
+fn main(harness: Harness) {
+  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & echo PROBE_PATH=%PATH% & echo PROBE_CD=%CD%")
+  harness.stdio.println("PROBE_STATUS=${result.status}")
+  harness.stdio.println("PROBE_SUCCESS=${result.success}")
+  harness.stdio.println("PROBE_STDOUT_START")
+  harness.stdio.println(result.stdout)
+  harness.stdio.println("PROBE_STDOUT_END")
+  harness.stdio.println("PROBE_STDERR_START")
+  harness.stdio.println(result.stderr)
+  harness.stdio.println("PROBE_STDERR_END")
+}
+"#,
+    )
+    .unwrap();
+
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        execute_run_with_sandbox_options(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(sandbox_root),
+        )
+        .await
+    });
+
+    // No assertions: the point is what prints below, in CI's own log, not a
+    // pass/fail signal. `eprintln!` (not `harness.stdio`) so it survives
+    // even if the script itself never got far enough to print anything.
+    eprintln!(
+        "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n\
+         exit_code={}\nscript stdout:\n{}\nscript stderr:\n{}\n\
+         === end probe ===",
+        outcome.exit_code, outcome.stdout, outcome.stderr
+    );
 }
