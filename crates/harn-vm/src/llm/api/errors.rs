@@ -687,11 +687,9 @@ fn provider_error_code_and_type(body: &str) -> (Option<String>, Option<String>) 
 pub(crate) fn is_billing_stop(body: &str, body_lower: &str) -> bool {
     let (code, kind) = provider_error_code_and_type(body);
     let names_a_billing_code = |value: &Option<String>| {
-        value.as_deref().is_some_and(|value| {
-            BILLING_STOP_CODES
-                .iter()
-                .any(|candidate| value == *candidate)
-        })
+        value
+            .as_deref()
+            .is_some_and(|value| BILLING_STOP_CODES.contains(&value))
     };
     if names_a_billing_code(&code) || names_a_billing_code(&kind) {
         return true;
