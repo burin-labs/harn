@@ -10,6 +10,20 @@
  * The census comes from `scripts/ci/collect_stack_frames.sh`, which runs
  * clippy under a lowered `stack-size-threshold` so a frame is visible long
  * before it reaches the ceiling that aborts a worker.
+ *
+ * Observed failure this gate exists to refuse, reported on harn#7911 by a lane
+ * that hit it while verifying an unrelated change. At base
+ * `825c052af432930725c4487cd9560395a521cbd4`, with no local modifications, two
+ * cases abort under the debug test runner:
+ *
+ *   agent_loop_final_wrapup::final_wrapup_records_and_surfaces_a_parsed_unconsumed_tool_call
+ *   agent_loop_final_wrapup::final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic
+ *
+ * Both die as SIGABRT with has overflowed its stack, in about 1.5s and 2.6s.
+ * The other seven cases in that module pass, and both reproduce on two
+ * unrelated branches off the same base, so the cause is the shared dispatch
+ * descent rather than wrap-up. Reproduce with the workspace test runner scoped
+ * to `-p harn-vm` and the filter `test(agent_loop_final_wrapup)`.
  */
 import { help_requested, parse, parser } from "std/cli/argparse"
 
