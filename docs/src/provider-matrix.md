@@ -391,6 +391,11 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `local` | `gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-e2b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-e4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.1` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.2` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.2-contributor` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.3` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `meta` | `muse-spark-1.3-contributor` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5-highspeed` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
