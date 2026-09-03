@@ -133,6 +133,32 @@ pub struct LlmUsage {
     pub unprojectable_attempts: i64,
 }
 
+/// Record one provider request that produced no price.
+///
+/// Returns an empty list when the request priced, so a caller cannot enumerate
+/// an attempt that does not exist. `projected` is the route's price table
+/// applied to the tokens the request reported, or `None` when the route has no
+/// table and therefore no projection.
+fn unpriced_attempt_for(
+    cost_usd: Option<f64>,
+    reason: UnpricedReason,
+    input_tokens: i64,
+    output_tokens: i64,
+    reported_total_tokens: Option<i64>,
+    projected: Option<f64>,
+) -> Vec<UnpricedAttempt> {
+    if cost_usd.is_some() {
+        return Vec::new();
+    }
+    vec![UnpricedAttempt {
+        reason,
+        input_tokens,
+        output_tokens,
+        reported_total_tokens,
+        projected_cost_usd: projected,
+    }]
+}
+
 /// Aggregate cost certainty for a collection of canonical call ledgers.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct UsageCostCertainty {
@@ -425,23 +451,20 @@ impl LlmUsage {
             && result.cache_read_tokens == 0
             && result.cache_write_tokens == 0
             && result.telemetry.server_total_tokens.unwrap_or(0) == 0;
-        let unpriced_attempts = if cost_usd.is_some() {
-            Vec::new()
-        } else {
-            vec![UnpricedAttempt {
-                reason: if !usage_known {
-                    UnpricedReason::ProviderUnreported
-                } else if reported_every_count_zero {
-                    UnpricedReason::ZeroUsageReported
-                } else {
-                    UnpricedReason::NoPriceTable
-                },
-                input_tokens: result.input_tokens,
-                output_tokens: result.output_tokens,
-                reported_total_tokens: result.telemetry.server_total_tokens,
-                projected_cost_usd: projected_if_unpriced,
-            }]
-        };
+        let unpriced_attempts = unpriced_attempt_for(
+            cost_usd,
+            if !usage_known {
+                UnpricedReason::ProviderUnreported
+            } else if reported_every_count_zero {
+                UnpricedReason::ZeroUsageReported
+            } else {
+                UnpricedReason::NoPriceTable
+            },
+            result.input_tokens,
+            result.output_tokens,
+            result.telemetry.server_total_tokens,
+            projected_if_unpriced,
+        );
         let unprojectable_attempts = i64::from(
             unpriced_attempts
                 .first()
@@ -481,7 +504,10 @@ impl LlmUsage {
             ),
             cache_hit: result.cache_read_tokens > 0,
             served_fast: result.served_fast,
-            accounting_status: if usage_known || authoritative_cost.is_some() {
+            // One physical request cannot be partly accounted: it either
+            // priced or it did not. `usage_unknown_calls` below still records
+            // the separate question of whether the provider reported counts.
+            accounting_status: if cost_usd.is_some() {
                 UsageAccountingStatus::Reported
             } else {
                 UsageAccountingStatus::Unknown
@@ -522,6 +548,19 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: 0,
+            // A probe's counts are known, so an absent price means the route
+            // has no table. Nothing can be projected from tokens nobody
+            // priced.
+            unpriced_attempts: unpriced_attempt_for(
+                cost_usd,
+                UnpricedReason::NoPriceTable,
+                input_tokens,
+                output_tokens,
+                None,
+                None,
+            ),
+            projected_cost_usd: cost_usd.unwrap_or(0.0),
+            unprojectable_attempts: i64::from(cost_usd.is_none()),
         }
     }
 
@@ -599,6 +638,22 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: usage_unknown,
+            // A partial receipt did not report what pricing needs. Recording
+            // the reason keeps that distinct from a route with no price table.
+            unpriced_attempts: unpriced_attempt_for(
+                cost_usd,
+                if usage_unknown == 0 {
+                    UnpricedReason::NoPriceTable
+                } else {
+                    UnpricedReason::ProviderUnreported
+                },
+                input_tokens,
+                output_tokens,
+                receipt.reported_total_tokens,
+                None,
+            ),
+            projected_cost_usd: cost_usd.unwrap_or(0.0),
+            unprojectable_attempts: i64::from(cost_usd.is_none()),
         }
     }
 

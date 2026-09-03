@@ -686,7 +686,8 @@ pub(crate) async fn observed_llm_call(
                     // siblings readable on its own, and carries this attempt as
                     // an enumerated unpriced attempt with a worst-case
                     // projection for the governor to consume.
-                    completed_retry_usage.push(result.usage());
+                    let retry_usage = result.usage();
+                    completed_retry_usage.push(retry_usage.clone());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
                         ("status", serde_json::json!("retrying")),
