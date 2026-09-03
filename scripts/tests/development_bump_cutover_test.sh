@@ -34,6 +34,10 @@ origin="$tmp_root/origin.git"
 git init --quiet --bare "$origin"
 git -C "$fixture" remote add origin "$origin"
 git -C "$fixture" push --quiet origin HEAD:refs/heads/main
+# The bare repository's HEAD follows whatever init.defaultBranch the host is
+# configured with, so name the branch this fixture actually pushed. Without it a
+# host defaulting to master clones an empty working tree.
+git -C "$origin" symbolic-ref HEAD refs/heads/main
 git -C "$fixture" fetch --quiet origin main
 
 cat > "$bin_dir/harn" <<'EOF'
