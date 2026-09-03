@@ -14,7 +14,7 @@
 //! on the child's exit status and on the absence of the abort message, not on
 //! any output the run would have produced.
 
-use std::process::Command;
+use crate::test_util::process::harn_e2e_command;
 
 /// A background sub-agent that does real tool work, stopped mid-flight.
 ///
@@ -91,7 +91,7 @@ fn stopping_a_background_sub_agent_survives_the_default_worker_stack() {
     // the same directory resumes worker state and takes a shallower path, so
     // it completes on the default stack even when the defect is present. The
     // fresh HOME is what keeps a pass meaningful.
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = harn_e2e_command()
         .arg("run")
         .arg(&script)
         .current_dir(dir.path())
