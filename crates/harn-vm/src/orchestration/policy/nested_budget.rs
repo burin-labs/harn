@@ -137,20 +137,26 @@ pub fn enter_nested_execution_policy(
 ) -> Result<NestedExecutionGuard, VmError> {
     let parent = current_execution_policy();
     let top_level_agent_loop = parent.is_none() && matches!(kind, NestedExecutionKind::AgentLoop);
-    // A top-level `agent_loop` is where the runtime's own default budget has to
-    // enter, because it is the outermost descent and there is nobody above it
-    // to have supplied one. Without this the limit is `None` at every level:
-    // nothing decrements, nothing ever reaches zero, and an agent that keeps
-    // delegating descends until the native stack is exhausted and the process
-    // aborts. The default was declared and carried by the workflow ceiling, and
-    // simply never reached the agent path.
+    // An `agent_loop` that finds no descent budget in force installs the
+    // runtime's default, so a descent nobody bounded is still bounded.
     //
-    // It belongs here rather than on the carrier built below, where an earlier
-    // attempt put it: that carrier's `recursion_limit` is overwritten with the
-    // computed child limit a few lines down, so a default set there is erased
-    // before it is ever read.
+    // Without this the limit is `None` at every level: nothing decrements,
+    // nothing reaches zero, and an agent whose tool delegates to another agent
+    // descends until the native stack is exhausted and the process aborts. The
+    // default was declared in `RuntimeLimits` and carried only by the workflow
+    // ceiling, so the agent path never saw one.
+    //
+    // The condition is the absent budget, not the absent parent. Two earlier
+    // attempts keyed on "nothing on the policy stack" and were both inert: a
+    // host has already pushed an ambient policy by the time the outermost
+    // `agent_loop` runs, and that policy is present while carrying no recursion
+    // limit, so a top-level test never fires in a real process.
+    //
+    // `or_else` supplies only a budget that is missing. Once one is in force
+    // every descent below decrements it as before, so a nested `agent_loop`
+    // inherits rather than re-seeding.
     let parent_limit = parent.as_ref().and_then(|p| p.recursion_limit).or_else(|| {
-        top_level_agent_loop
+        matches!(kind, NestedExecutionKind::AgentLoop)
             .then_some(crate::runtime_limits::RuntimeLimits::DEFAULT.max_nested_execution_depth)
     });
 
