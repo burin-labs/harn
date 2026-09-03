@@ -55,7 +55,7 @@ fn returned_dict_literals(body: &[SNode]) -> Vec<Span> {
     let mut spans = Vec::new();
     for statement in body {
         visit::walk_node(statement, &mut |node| {
-            if let Node::Return(Some(value)) = &node.node {
+            if let Node::ReturnStmt { value: Some(value) } = &node.node {
                 if let Node::DictLiteral(_) = &value.node {
                     spans.push(value.span);
                 }
@@ -73,7 +73,18 @@ fn returned_dict_literals(body: &[SNode]) -> Vec<Span> {
 }
 
 fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries.iter().find(|entry| entry.key == key)
+    entries
+        .iter()
+        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
+}
+
+fn key_name(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
+            Some(value.clone())
+        }
+        _ => None,
+    }
 }
 
 fn make_diagnostic(span: Span) -> LintDiagnostic {
