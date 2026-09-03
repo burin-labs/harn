@@ -24,7 +24,7 @@ pipeline default(harness: Harness) {
           provider: "mock",
           loop_until_done: true,
           max_iterations: 4,
-          step_judge: {model: "mock-judge", provider: "mock", on_veto: "replace"},
+          step_judge: {provider: "mock", on_veto: "replace"},
         },
       )
       harness.stdio.println(result.status)

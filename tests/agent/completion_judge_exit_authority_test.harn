@@ -16,7 +16,7 @@ fn judge_opts(session: string) -> AgentSpec {
     loop_until_done: true,
     done_sentinel: "##DONE##",
     max_iterations: 6,
-    verify_completion_judge: {model: "mock-judge", provider: "mock"},
+    verify_completion_judge: {provider: "mock"},
   }
 }
 

@@ -30,7 +30,7 @@ pipeline default(harness: Harness) {
             loop_until_done: true,
             max_iterations: 2,
             session_id: session,
-            turn_end_condition: {model: "mock-judge"},
+            turn_end_condition: true,
           },
         ) },
       )

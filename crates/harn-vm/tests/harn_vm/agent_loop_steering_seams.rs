@@ -769,7 +769,7 @@ pipeline main(harness: Harness, task: unknown) {{
           loop_until_done: true,
           done_sentinel: "##DONE##",
           max_iterations: 4,
-          verify_completion_judge: {{model: "mock-judge", provider: "mock", max_invocations: 2}},
+          verify_completion_judge: {{provider: "mock", max_invocations: 2}},
           verify_completion: {{ info ->
             const steers = info?.obligations?.steers ?? []
             harness.runtime.shared_set(seen, len(steers))

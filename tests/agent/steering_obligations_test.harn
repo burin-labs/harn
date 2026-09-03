@@ -159,7 +159,7 @@ pipeline test_unsteered_run_prompt_is_unchanged_and_still_vetoed(harness: Harnes
         loop_until_done: true,
         done_sentinel: "##DONE##",
         max_iterations: 4,
-        verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 3},
+        verify_completion_judge: {provider: "mock", max_invocations: 3},
       }
       const captured = agent_capture_events(
         harness.agent,

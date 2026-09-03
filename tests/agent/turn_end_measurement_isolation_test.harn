@@ -53,7 +53,7 @@ pipeline test_grading_done_cannot_override_turn_end_continue(harness: Harness, _
         loop_until_done: true,
         max_iterations: 4,
         done_sentinel: "##DONE##",
-        turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 2},
+        turn_end_condition: {provider: "mock", max_invocations: 2},
       }
       const captured = agent_capture_events(
         harness.agent,
@@ -90,7 +90,7 @@ pipeline test_grading_continue_cannot_override_turn_end_done(harness: Harness, _
         loop_until_done: true,
         max_iterations: 2,
         done_sentinel: "##DONE##",
-        turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 1},
+        turn_end_condition: {provider: "mock", max_invocations: 1},
       }
       const captured = agent_capture_events(
         harness.agent,

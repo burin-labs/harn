@@ -10,7 +10,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(no_tools.keys(), "verify_completion_judge"))
   const judged = agent_loop_options(
     harness,
-    {provider: "mock", tools: tool_registry(), turn_end_condition: {model: "mock-judge"}},
+    {provider: "mock", tools: tool_registry(), turn_end_condition: true},
   )
   harness.stdio.println(judged.done_sentinel)
   harness.stdio.println(type_of(judged.turn_end_condition))
@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
       tools: tool_registry(),
       tool_format: "native",
       loop_until_done: true,
-      turn_end_condition: {model: "mock-judge"},
+      turn_end_condition: true,
     },
   )
   harness.stdio.println(judged_native.done_sentinel == nil)
@@ -101,48 +101,42 @@ pipeline default(harness: Harness) {
   )
   for case in [
     {
-      options: {provider: "mock", turn_end_condition: {model: "mock-judge", fail_open: true}},
+      options: {provider: "mock", turn_end_condition: {fail_open: true}},
       removed: "turn_end_condition.fail_open",
       replacement: "completion judges always fail closed",
     },
     {
-      options: {
-        provider: "mock",
-        turn_end_condition: {model: "mock-judge", fail_open_on_error: true},
-      },
+      options: {provider: "mock", turn_end_condition: {fail_open_on_error: true}},
       removed: "turn_end_condition.fail_open_on_error",
       replacement: "completion judges always fail closed",
     },
     {
-      options: {provider: "mock", turn_end_condition: {model: "mock-judge", max_feedback: 2}},
+      options: {provider: "mock", turn_end_condition: {max_feedback: 2}},
       removed: "turn_end_condition.max_feedback",
       replacement: "max_invocations",
     },
     {
-      options: {provider: "mock", verify_completion_judge: {model: "mock-judge", fail_open: true}},
+      options: {provider: "mock", verify_completion_judge: {fail_open: true}},
       removed: "verify_completion_judge.fail_open",
       replacement: "completion judges always fail closed",
     },
     {
-      options: {
-        provider: "mock",
-        verify_completion_judge: {model: "mock-judge", fail_open_on_error: true},
-      },
+      options: {provider: "mock", verify_completion_judge: {fail_open_on_error: true}},
       removed: "verify_completion_judge.fail_open_on_error",
       replacement: "completion judges always fail closed",
     },
     {
-      options: {provider: "mock", verify_completion_judge: {model: "mock-judge", max_feedback: 2}},
+      options: {provider: "mock", verify_completion_judge: {max_feedback: 2}},
       removed: "verify_completion_judge.max_feedback",
       replacement: "max_invocations",
     },
     {
-      options: {provider: "mock", turn_end_condition: {model: "mock-judge", enabled: false}},
+      options: {provider: "mock", turn_end_condition: {enabled: false}},
       removed: "turn_end_condition.enabled",
       replacement: "turn_end_condition` to false",
     },
     {
-      options: {provider: "mock", verify_completion_judge: {model: "mock-judge", enabled: false}},
+      options: {provider: "mock", verify_completion_judge: {enabled: false}},
       removed: "verify_completion_judge.enabled",
       replacement: "verify_completion_judge` to false",
     },

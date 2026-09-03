@@ -137,7 +137,7 @@ fn base_opts(session: string) {
     done_sentinel: "##DONE##",
     max_iterations: 3,
     final_wrapup: false,
-    verify_completion_judge: {model: "mock-judge", provider: "mock", max_invocations: 1},
+    verify_completion_judge: {provider: "mock", max_invocations: 1},
   }
 }
 

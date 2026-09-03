@@ -51,7 +51,7 @@ pipeline test_loop_finishes_without_the_model_parroting_the_marker(
       const opts: AgentSpec = {
         provider: "mock",
         loop_until_done: true,
-        turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 4},
+        turn_end_condition: {provider: "mock", max_invocations: 4},
         max_iterations: 4,
       }
       const result = agent_loop(harness, "Add the eviction path and verify it.", nil, opts)
@@ -78,7 +78,7 @@ pipeline test_unrelenting_formatting_veto_stops_and_names_the_judge(
       const opts: AgentSpec = {
         provider: "mock",
         loop_until_done: true,
-        turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 2},
+        turn_end_condition: {provider: "mock", max_invocations: 2},
         max_iterations: 5,
       }
       const result = agent_loop(harness, "Add the eviction path and verify it.", nil, opts)
@@ -102,7 +102,7 @@ pipeline test_judge_veto_injects_one_typed_feedback(harness: Harness, task: unkn
         provider: "mock",
         session_id: session,
         loop_until_done: true,
-        turn_end_condition: {model: "mock-judge", provider: "mock", max_invocations: 4},
+        turn_end_condition: {provider: "mock", max_invocations: 4},
         max_iterations: 4,
       }
       const captured = agent_capture_events(

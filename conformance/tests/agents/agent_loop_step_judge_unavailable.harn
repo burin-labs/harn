@@ -49,7 +49,7 @@ pipeline default(harness: Harness) {
             loop_until_done: true,
             max_iterations: 2,
             session_id: session,
-            step_judge: {model: "mock-judge", provider: "mock", on_veto: "replace"},
+            step_judge: {provider: "mock", on_veto: "replace"},
           },
         ) },
       )
@@ -84,7 +84,7 @@ pipeline default(harness: Harness) {
             loop_until_done: true,
             max_iterations: 2,
             session_id: session,
-            step_judge: {model: "mock-judge", provider: "mock", on_veto: "replace"},
+            step_judge: {provider: "mock", on_veto: "replace"},
           },
         ) },
       )

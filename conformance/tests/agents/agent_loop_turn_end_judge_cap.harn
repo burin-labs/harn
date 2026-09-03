@@ -40,7 +40,7 @@ fn run_capped(harness: Harness) {
             max_nudges: 10,
             session_id: session_id,
             done_sentinel: "##DONE##",
-            turn_end_condition: {model: "mock-judge", max_invocations: 2},
+            turn_end_condition: {max_invocations: 2},
           },
         ) },
       )
@@ -79,7 +79,7 @@ fn run_approved(harness: Harness) {
           max_nudges: 10,
           session_id: session_id,
           done_sentinel: "##DONE##",
-          turn_end_condition: {model: "mock-judge", max_invocations: 2},
+          turn_end_condition: {max_invocations: 2},
         },
       )
       harness.stdio.println("approved.status=${result.status}")
@@ -119,7 +119,7 @@ fn run_cap_disabled(harness: Harness) {
             session_id: session_id,
             done_sentinel: "##DONE##",
             max_verify_attempts: 2,
-            turn_end_condition: {model: "mock-judge", max_invocations: 0},
+            turn_end_condition: {max_invocations: 0},
           },
         ) },
       )
