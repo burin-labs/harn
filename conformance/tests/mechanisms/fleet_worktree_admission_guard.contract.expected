@@ -1,0 +1,3 @@
+trigger_raw_worktree_add=true
+effect_denial_names_admission_owner=true
+negative_admission_and_inventory_not_denied=true

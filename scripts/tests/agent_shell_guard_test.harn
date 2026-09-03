@@ -65,6 +65,47 @@ pipeline test_cargo_is_caught_anywhere_in_a_pipeline(harness: Harness, task: unk
 }
 
 @test
+pipeline test_raw_git_worktree_add_is_denied_across_parser_shapes(harness: Harness, task: unknown) {
+  for command in [
+    "git worktree add ../lane origin/main",
+    "/usr/bin/git worktree add -b lane ../lane origin/main",
+    "env -u GIT_DIR git worktree add ../lane",
+    "git -C /workspace worktree add ../lane origin/main",
+    "git --no-pager -c advice.detachedHead=false worktree add --detach ../lane HEAD",
+    "echo preparing && git worktree add ../lane && make setup",
+    "bash -lc 'git worktree add ../lane origin/main'",
+    "bash --norc -c 'git worktree add ../lane origin/main'",
+    "sh -c \"git -C /workspace worktree add ../lane\"",
+    "HARN_ALLOW_RAW_CARGO=1 git worktree add ../lane",
+  ] {
+    const violation = raw_worktree_add_violation(command)
+    assert(violation != "", command + " should require Fleet admission")
+    assert(violation.contains("fleet-worktree-admit"))
+    assert(!decision(codex_payload(command)).allow)
+    assert(!decision(claude_payload(command)).allow)
+  }
+}
+
+@test
+pipeline test_worktree_guard_does_not_match_text_or_non_creation_operations(
+  harness: Harness,
+  task: unknown,
+) {
+  for command in [
+    "git worktree list --porcelain",
+    "git worktree remove ../retired-lane",
+    "git worktree prune",
+    "rg 'git worktree add' docs",
+    "echo 'git worktree add ../example'",
+    "./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1",
+  ] {
+    assert_eq(raw_worktree_add_violation(command), "", command + " is not raw creation")
+    assert(decision(codex_payload(command)).allow)
+    assert(decision(claude_payload(command)).allow)
+  }
+}
+
+@test
 pipeline test_quoted_shell_separators_stay_inside_arguments(harness: Harness, task: unknown) {
   const diagnostic = "ps -axo command | rg 'rustc .*harn_vm|cargo build --locked' | head -n 20"
   assert_eq(cargo_violation(diagnostic), "")
@@ -192,6 +233,7 @@ pipeline test_codex_and_claude_share_one_decision(harness: Harness, task: unknow
     assert(decision(encode("make test")).allow)
     assert(decision(encode("cargo tree -p harn-vm")).allow)
     assert(!decision(encode("trash /tmp/generated.log")).allow)
+    assert(!decision(encode("git worktree add ../unowned origin/main")).allow)
     assert(!decision(encode("/usr/bin/trash .build/debug/ModuleCache")).allow)
     assert(decision(encode("trash /Users/alice/Documents/report.txt")).allow)
     // The Cargo-only escape must not bypass unrelated command policy.

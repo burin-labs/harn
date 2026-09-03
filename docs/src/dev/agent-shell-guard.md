@@ -2,8 +2,9 @@
 
 Harn gives Codex and Claude the same repository command rules. The guard keeps
 Rust builds and tests on the Make targets that configure a private build
-directory for each worktree. It also stops long commands from losing most of
-their output in a filter.
+directory for each worktree. It also keeps Fleet worktree creation behind its
+durable admission command and stops long commands from losing most of their
+output in a filter.
 
 The guard applies only to agent shell calls. It does not change commands run by
 people, continuous integration, Make recipes, or repository scripts.
@@ -26,6 +27,16 @@ Inspection and package-management commands such as `cargo tree` and
 
 For a real one-off, add `HARN_ALLOW_RAW_CARGO=1` to that command. The escape is
 visible in the shell call and does not weaken later calls.
+
+## Admit Fleet worktrees before creating them
+
+Agent shell calls cannot run raw `git worktree add`. Use the owning
+`fleet-worktree-admit` command, which acquires the remote lease and records the
+joined ledger and recovery receipts before it creates the worktree. The guard
+does not expose an environment-variable bypass for this rule.
+
+This restriction does not affect people, continuous integration, repository
+scripts, `git worktree list`, or retirement through `git worktree remove`.
 
 ## Keep complete command output
 

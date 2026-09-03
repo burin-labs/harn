@@ -1,0 +1,35 @@
+// MECHANISM CONTRACT: Fleet worktree admission shell guard.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — an agent shell payload contains parser-recognized raw
+//              `git worktree add`, including behind a nested shell;
+//   effect   — the guard denies the call and directs it to the owning command;
+//   negative — the owning admission command and read-only worktree inventory
+//              remain available.
+import { decision } from "../../../scripts/agent_shell_guard"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn payload(command: string) -> string {
+  return json_stringify({tool_name: "Bash", tool_input: {command: command}})
+}
+
+pipeline default(harness: Harness) {
+  const direct = decision(payload("git -C /workspace worktree add ../lane origin/main"))
+  const nested = decision(payload("bash -lc 'git worktree add ../lane origin/main'"))
+  contract_effect(harness.stdio, "trigger_raw_worktree_add", !direct.allow && !nested.allow)
+  contract_effect(
+    harness.stdio,
+    "effect_denial_names_admission_owner",
+    direct.reason.contains("fleet-worktree-admit")
+      && nested.reason.contains("fleet-worktree-admit"),
+  )
+  const wrapper = decision(
+    payload("./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"),
+  )
+  const inventory = decision(payload("git worktree list --porcelain"))
+  contract_negative(
+    harness.stdio,
+    "negative_admission_and_inventory_not_denied",
+    !wrapper.allow || !inventory.allow,
+  )
+}

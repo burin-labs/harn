@@ -75,6 +75,41 @@ if [[ -n "$allowed" ]]; then
   exit 1
 fi
 
+discarded_blocked="$(
+  printf '%s' \
+    '{"tool_name":"Bash","tool_input":{"command":"make test | tail -20"}}' \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$discarded_blocked" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$discarded_blocked" != *'output is piped into a filter'* ]]; then
+  echo "adapter did not preserve the piped-build output denial" >&2
+  printf '%s\n' "$discarded_blocked" >&2
+  exit 1
+fi
+
+worktree_blocked="$(
+  printf '%s' \
+    '{"tool_name":"Bash","tool_input":{"command":"bash -lc '\''git -C /workspace worktree add ../unowned origin/main'\''"}}' \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$worktree_blocked" != *'fleet-worktree-admit'* ]]; then
+  echo "adapter did not route nested raw worktree creation to Fleet admission" >&2
+  printf '%s\n' "$worktree_blocked" >&2
+  exit 1
+fi
+
+admission_allowed="$(
+  printf '%s' \
+    '{"tool_name":"Bash","tool_input":{"command":"./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"}}' \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ -n "$admission_allowed" ]]; then
+  echo "adapter denied the owning Fleet admission command" >&2
+  printf '%s\n' "$admission_allowed" >&2
+  exit 1
+fi
+
 quoted_pipeline="$({
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"ps -axo command | rg '\''rustc .*harn_vm|cargo build --locked'\'' | head -n 20"}}'

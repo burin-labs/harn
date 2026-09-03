@@ -12,6 +12,10 @@
 //      Commands over the slow-command threshold must land their full output in
 //      a file first, then be grepped from there.
 //
+//   3. Raw agent-created Git worktrees. Fleet worktrees must go through the
+//      owning admission command so the remote lease, private ledger, recovery
+//      journal, and filesystem projection cannot diverge.
+//
 // Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
 // permission decision on stdout. Exit status is always 0 — a crashed guard
 // must not look like a denial.
@@ -101,6 +105,89 @@ pub fn cargo_violation(command: string) -> string {
     }
   }
   return ""
+}
+
+fn is_git_worktree_add(argv: list<string>) -> bool {
+  let consumes_next = false
+  let subcommand = ""
+  for token in argv.slice(1, len(argv)) {
+    if consumes_next {
+      consumes_next = false
+      continue
+    }
+    if [
+      "-C",
+      "-c",
+      "--git-dir",
+      "--work-tree",
+      "--namespace",
+      "--super-prefix",
+      "--config-env",
+      "--exec-path",
+    ]
+      .contains(token) {
+      consumes_next = true
+      continue
+    }
+    if token.starts_with("-") {
+      continue
+    }
+    if subcommand == "" {
+      subcommand = token
+      continue
+    }
+    return subcommand == "worktree" && token == "add"
+  }
+  return false
+}
+
+fn nested_shell_payload(stage: ShellCommandStage) -> string {
+  if !["bash", "dash", "sh", "zsh"].contains(stage_program(stage)) {
+    return ""
+  }
+  let takes_payload = false
+  for token in stage.argv.slice(1, len(stage.argv)) {
+    if takes_payload {
+      return token
+    }
+    const option = token
+    const short_command_flag = option.starts_with("-")
+      && !option.starts_with("--")
+      && option.contains("c")
+    if option == "--command" || short_command_flag {
+      takes_payload = true
+    }
+  }
+  return ""
+}
+
+fn raw_worktree_add_violation_at(command: string, depth: int) -> string {
+  for group in command_groups(command) {
+    for stage in group {
+      if stage_program(stage) == "git" {
+        if is_git_worktree_add(stage.argv) {
+          return "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
+            + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
+            + "and records the joined ledger and recovery receipts before returning success."
+        }
+      }
+      if depth < 4 {
+        const nested = nested_shell_payload(stage)
+        if nested != "" {
+          const violation = raw_worktree_add_violation_at(nested, depth + 1)
+          if violation != "" {
+            return violation
+          }
+        }
+      }
+    }
+  }
+  return ""
+}
+
+/** Reject only Git's worktree-creation subcommand, including shell wrappers. */
+pub fn raw_worktree_add_violation(command: string) -> string {
+  return raw_worktree_add_violation_at(command, 0)
 }
 
 /** True only for a path rooted in an OS-temp or known generated-output tree. */
@@ -211,16 +298,21 @@ pub fn discarded_output_violation(command: string) -> string {
     }
     // Capture must happen before the first filter. Redirecting the filter's
     // output preserves only the filtered lines, not the expensive command.
-    for index in range(0, len(group) - 1) {
-      const stage = group[index] ?? EMPTY_SHELL_STAGE
-      const next = group[index + 1] ?? EMPTY_SHELL_STAGE
-      if is_slow(stage) && !writes_to_file(stage) && !tee_writes_to_file(next) {
-        return "`" + stage_program(stage) + "` output is piped into a filter "
+    let has_previous = false
+    let previous = EMPTY_SHELL_STAGE
+    for stage in group {
+      if has_previous
+        && is_slow(previous)
+        && !writes_to_file(previous)
+        && !tee_writes_to_file(stage) {
+        return "`" + stage_program(previous) + "` output is piped into a filter "
           + "and then discarded, so recovering any other line costs a full rerun. "
           + "Redirect first, then read the file:\n"
           + "  <command> > .harn-runs/cmd.log 2>&1; echo \"exit=$?\"; grep ... .harn-runs/cmd.log\n"
           + "Any stable path works; .harn-runs/ is already ignored."
       }
+      previous = stage
+      has_previous = true
     }
   }
   return ""
@@ -239,6 +331,10 @@ pub fn decision(payload: string) -> ShellGuardDecision {
   const command = to_string(parsed?.tool_input?.command ?? "")
   if command == "" {
     return {allow: true, reason: ""}
+  }
+  const worktree = raw_worktree_add_violation(command)
+  if worktree != "" {
+    return {allow: false, reason: worktree}
   }
   if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
     const cargo = cargo_violation(command)
