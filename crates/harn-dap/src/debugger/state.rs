@@ -316,6 +316,7 @@ impl Debugger {
         if self.runtime.is_none() {
             self.runtime = Some(
                 tokio::runtime::Builder::new_multi_thread()
+                    .thread_stack_size(harn_vm::RUNTIME_STACK_SIZE)
                     .enable_all()
                     .build()
                     .unwrap(),

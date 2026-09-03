@@ -275,6 +275,7 @@ where
         std::sync::OnceLock::new();
     let runtime = CLEANUP_RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(crate::RUNTIME_STACK_SIZE)
             .worker_threads(1)
             .thread_name("harn-lifecycle-cleanup")
             .enable_all()
