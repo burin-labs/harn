@@ -17,3 +17,8 @@
   traffic with nothing stopping a strict run from reaching them. The shipped
   `default` posture is unchanged and refuses nothing, and an unresearched
   provider still reports through the receipt rather than failing the call.
+- **The per-request data-controls receipt now names the route it describes and
+  carries that route's own training posture and note.** A receipt that named
+  only the provider reported Meta's standard-tier wording, "not used to improve
+  our products", on traffic that is trained on, because the posture varies
+  between two model ids under one provider.
