@@ -712,12 +712,35 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     }
 
-    let parameters = config.get("parameters");
-    let input_schema = config.get("input_schema");
-    if parameters.is_some() && input_schema.is_some() {
-        return Err(VmError::Runtime(
-            "tool_define: use either 'parameters' or 'input_schema', not both".to_string(),
-        ));
+    // One owner for "how did this config spell the tool's input schema".
+    // `parameters` carries the legacy per-parameter map; `input_schema` and
+    // MCP-style `inputSchema` carry a complete object-root JSON Schema. At most
+    // one may be present, and the entry built below carries exactly one
+    // canonical key, so every downstream consumer reads a single spelling
+    // instead of guessing among three.
+    const SCHEMA_CONFIG_KEYS: [&str; 3] = ["parameters", "input_schema", "inputSchema"];
+    let declared_schema: Vec<(&str, &VmValue)> = SCHEMA_CONFIG_KEYS
+        .iter()
+        .filter_map(|key| {
+            config
+                .get(*key)
+                .filter(|value| !matches!(value, VmValue::Nil))
+                .map(|value| (*key, value))
+        })
+        .collect();
+    if declared_schema.len() > 1 {
+        let keys = declared_schema
+            .iter()
+            .map(|(key, _)| format!("{key:?}"))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!(
+                "tool_define: tool {name:?} declares its input schema twice ({keys}); \
+                 use `inputSchema` for a complete JSON Schema or legacy `parameters` \
+                 for a per-parameter map, not both"
+            ),
+        ))));
     }
     let output_schema = config
         .get("returns")
@@ -730,18 +753,23 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert(crate::value::intern_key("handler"), handler);
-    if let Some(input_schema) = input_schema {
-        tool_entry.insert(
-            crate::value::intern_key("inputSchema"),
-            input_schema.clone(),
-        );
-    } else {
-        tool_entry.insert(
-            crate::value::intern_key("parameters"),
-            parameters
-                .cloned()
-                .unwrap_or_else(|| VmValue::dict(crate::value::DictMap::new())),
-        );
+    // Normalize the declared spelling onto the entry contract's own two keys.
+    // A schema declared under any complete-schema spelling lands on
+    // `inputSchema`; nothing else inserts a competing default `parameters`,
+    // which is what used to make an entry look like it declared both.
+    match declared_schema.first() {
+        Some(("parameters", value)) => {
+            tool_entry.insert(crate::value::intern_key("parameters"), (*value).clone());
+        }
+        Some((_, value)) => {
+            tool_entry.insert(crate::value::intern_key("inputSchema"), (*value).clone());
+        }
+        None => {
+            tool_entry.insert(
+                crate::value::intern_key("parameters"),
+                VmValue::dict(crate::value::DictMap::new()),
+            );
+        }
     }
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
@@ -777,6 +805,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "handler"
                 | "parameters"
                 | "input_schema"
+                | "inputSchema"
                 | "returns"
                 | "output_schema"
                 | "error_schema"

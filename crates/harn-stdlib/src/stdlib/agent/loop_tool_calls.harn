@@ -207,7 +207,7 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   const schema = if entry == nil {
     nil
   } else {
-    entry?.parameters ?? entry?.input_schema ?? entry?.inputSchema
+    entry?.parameters ?? entry?.inputSchema
   }
   const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   const description = if entry == nil {
