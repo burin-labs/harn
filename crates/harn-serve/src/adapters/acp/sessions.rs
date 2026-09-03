@@ -194,17 +194,35 @@ impl ConcurrentSessionControls {
                     return true;
                 }
             };
+        // The caller's own word, before `bridge_mode_for_session_inject`
+        // normalized it onto a delivery checkpoint.
+        let requested_mode = params
+            .get("mode")
+            .and_then(|value| value.as_str())
+            .unwrap_or(mode)
+            .to_string();
+        let recorded_text = content.clone();
         let message_id = control
             .inject_state
             .push_pending_user_message(content, transcript_content, mode)
             .await;
         self.record_inject_owner(&session_id, message_id.clone(), actor.clone());
-        emit_routed_control_outcome(
+        // This is the mid-turn steer: the prompt is in flight, so the
+        // frame never reaches the dispatch handler. Recording only there
+        // would have left the store blind to exactly the case the typed
+        // control event exists for.
+        super::core::record_and_emit_control(
             &session_id,
-            "accepted",
-            actor.clone(),
-            serde_json::json!({"sessionId": session_id, "messageId": message_id}),
-            None,
+            harn_session_store::ControlEvent::injection(
+                "session/inject",
+                control_id(),
+                "accepted",
+                requested_mode,
+                mode,
+                message_id.clone(),
+                recorded_text,
+            )
+            .with_actor(actor.clone()),
         );
         let response = harn_vm::jsonrpc::response(
             id.clone(),
@@ -592,24 +610,27 @@ pub fn acp_persisted_session_item(session: harn_session_store::SessionMeta) -> s
     item
 }
 
+/// Land a stop on a registered session.
+///
+/// `None` means the cancel named no session this server has registered,
+/// so nothing was cancelled. `Some(true)` means this call is what
+/// stopped the run; `Some(false)` means it was already stopped. The
+/// caller needs the distinction to record an accurate control status,
+/// and a bare `false` used to conflate "already stopped" with "missed".
 pub(super) fn mark_cancelled_session(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     params: &serde_json::Value,
-) -> bool {
-    let Some(session_id) = params
+) -> Option<bool> {
+    let session_id = params
         .get("sessionId")
         .or_else(|| params.get("session_id"))
-        .and_then(|value| value.as_str())
-    else {
-        return false;
-    };
-    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
-        return false;
-    };
-    if cancellation.cancel() {
+        .and_then(|value| value.as_str())?;
+    let cancellation = lookup_session_cancellation(cancellations, session_id)?;
+    let newly_cancelled = cancellation.cancel();
+    if newly_cancelled {
         cancel_session_command_handles(session_id);
     }
-    true
+    Some(newly_cancelled)
 }
 
 /// Terminate the long-running command handles this session owns, after a cancel
@@ -681,7 +702,32 @@ pub(super) fn preempt_session_interruption(
                 // answered. Falling through on a miss hands the frame to the
                 // normal dispatch, which records the miss as a rejected
                 // control outcome instead of dropping it.
-                mark_cancelled_session(cancellations, params)
+                let Some(newly_cancelled) = mark_cancelled_session(cancellations, params) else {
+                    return false;
+                };
+                // A stop accepted here never reaches the dispatch
+                // handler, so this is the only place the mid-turn stop
+                // can become a typed control event.
+                if let Some(session_id) = params
+                    .get("sessionId")
+                    .or_else(|| params.get("session_id"))
+                    .and_then(|value| value.as_str())
+                {
+                    super::core::record_and_emit_control(
+                        session_id,
+                        harn_session_store::ControlEvent::stop(
+                            "session/cancel",
+                            control_id(),
+                            if newly_cancelled {
+                                "cancelled"
+                            } else {
+                                "already_cancelled"
+                            },
+                        )
+                        .with_actor(control_actor_from_params(params)),
+                    );
+                }
+                true
             }
         }
         Some("session/truncate" | "session/close" | "session/stop") => {

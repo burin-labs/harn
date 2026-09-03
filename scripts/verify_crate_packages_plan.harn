@@ -2,6 +2,15 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 
 type PublishablePackage = {dir: string, manifest_path: string, name: string, version: string}
 
+type PackageDependencyContract = {
+  dependency: string,
+  minimum: string,
+  package: string,
+  package_version: string,
+  requirement: string,
+  resolution_name: string,
+}
+
 fn rel_path(path: string, root: string) -> string {
   const normalized = replace(path_normalize(path), "\\", "/")
   const normalized_root = replace(path_normalize(root), "\\", "/")
@@ -66,6 +75,62 @@ pub fn publishable_workspace_packages_from_metadata(
   return packages.sorted_by({ package -> package.name })
 }
 
+/**
+ * Return the API-sensitive dependencies that packaged-crate verification must
+ * exercise at both their declared minimum and Cargo's resolver-latest choice.
+ * Cargo.toml remains the requirement owner; package metadata only opts a
+ * dependency into the stronger compatibility proof and names the minimum to
+ * force through Cargo's resolver.
+ */
+pub fn package_dependency_contracts_from_metadata(meta: dict) -> list<PackageDependencyContract> {
+  const members = workspace_member_ids(meta)
+  let contracts: list<PackageDependencyContract> = []
+  for package in meta?.packages ?? [] {
+    const id = to_string(package?.id ?? "")
+    if !members.contains(id) || package?.publish == [] {
+      continue
+    }
+    const package_name = require_string(package?.name, "packages[].name")
+    const package_version = require_string(package?.version, "packages[].version")
+    let seen: list<string> = []
+    for declared in package?.metadata?.harn?.package_verify?.dependency_contracts ?? [] {
+      const dependency = require_string(declared?.name, package_name + " dependency contract name")
+      const minimum = require_string(
+        declared?.minimum,
+        package_name + " dependency contract " + dependency + " minimum",
+      )
+      if seen.contains(dependency) {
+        throw package_name + " contains duplicate dependency contract: " + dependency
+      }
+      seen = seen + [dependency]
+      const normal_dependencies = (package?.dependencies ?? []).filter(
+        { candidate -> to_string(candidate?.name ?? "") == dependency && candidate?.kind == nil },
+      )
+      if len(normal_dependencies) != 1 {
+        throw package_name + " dependency contract " + dependency
+          + " must name exactly one normal dependency"
+      }
+      const requirement = require_string(
+        normal_dependencies[0]?.req,
+        package_name + " normal dependency " + dependency + " requirement",
+      )
+      const resolution_name = to_string(normal_dependencies[0]?.rename ?? dependency)
+      contracts = contracts
+        + [
+          {
+            dependency: dependency,
+            minimum: minimum,
+            package: package_name,
+            package_version: package_version,
+            requirement: requirement,
+            resolution_name: resolution_name,
+          },
+        ]
+    }
+  }
+  return contracts.sorted_by({ contract -> contract.package + "\t" + contract.dependency })
+}
+
 fn ensure_no_tabs(value: string, field: string) -> nil {
   if value.contains("\t") || value.contains("\n") {
     throw field + " contains a tab or newline, cannot render shell row safely"
@@ -86,6 +151,25 @@ pub fn verify_crate_packages_plan_rows(meta: dict, root: string) -> list<string>
       + [
         "package\t" + package.name + "\t" + package.version + "\t" + package.manifest_path + "\t"
           + package.dir,
+      ]
+  }
+  for contract in package_dependency_contracts_from_metadata(meta) {
+    ensure_no_tabs(contract.package, "dependency contract package")
+    ensure_no_tabs(contract.package_version, "dependency contract package version")
+    ensure_no_tabs(contract.dependency, "dependency contract name")
+    ensure_no_tabs(contract.requirement, "dependency contract requirement")
+    ensure_no_tabs(contract.minimum, "dependency contract minimum")
+    ensure_no_tabs(contract.resolution_name, "dependency contract resolution name")
+    rows = rows
+      + [
+        "dependency_contract\t" + contract.package + "\t" + contract.package_version + "\t"
+          + contract.dependency
+          + "\t"
+          + contract.requirement
+          + "\t"
+          + contract.minimum
+          + "\t"
+          + contract.resolution_name,
       ]
   }
   return rows

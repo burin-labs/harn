@@ -72,6 +72,13 @@ pub fn greet(name: string) -> string {
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let tools = server.tools_list_result(&json!({}));
+    assert_eq!(
+        tools["tools"][0],
+        server
+            .tool_catalog
+            .mcp_tool(&server.tool_catalog.tools[0])
+            .expect("MCP projection")
+    );
     assert_eq!(tools["tools"][0]["name"], "greet");
     assert_eq!(tools["tools"][0]["title"], "greet");
     assert_eq!(
@@ -110,6 +117,55 @@ pub fn greet(name: string) -> string {
     assert_eq!(response["result"]["structuredContent"]["result"], "Ada");
     let validator = jsonschema::validator_for(&output_schema).expect("valid output schema");
     assert!(validator.is_valid(&response["result"]["structuredContent"]));
+}
+
+#[tokio::test]
+async fn declared_throw_is_typed_call_result_and_not_a_jsonrpc_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+pub type LookupError = {variant: "NotFound", message: string, secret: string}
+
+pub fn lookup() -> string throws LookupError {
+  throw {variant: "NotFound", message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456", secret: "typed-detail"}
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let listed = server.tools_list_result(&json!({}));
+    assert_eq!(
+        listed["tools"][0]["_meta"][harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
+            ["errorSchema"]["properties"]["variant"]["const"],
+        "NotFound"
+    );
+
+    let response = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(1, "tools/call", json!({"name": "lookup", "arguments": {}})),
+        SharedSession::new(),
+    )
+    .await;
+    assert!(response.get("error").is_none(), "{response}");
+    assert_eq!(response["result"]["isError"], true);
+    assert!(response["result"].get("structuredContent").is_none());
+    assert_eq!(
+        response["result"]["_meta"][harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
+            ["applicationError"]["data"]["variant"],
+        "NotFound"
+    );
+    let content = response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("safe text content");
+    assert!(content.contains("declared application error"), "{content}");
+    assert!(!content.contains("typed-detail"), "{content}");
+    assert!(
+        !content.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"),
+        "{content}"
+    );
 }
 
 #[tokio::test]
@@ -1027,6 +1083,13 @@ fn streamable_http_accept_negotiation_uses_sse_only_when_json_is_absent() {
 
 /// A script with one `@job` export and one ordinary export.
 fn job_export_server(dir: &tempfile::TempDir) -> McpServer {
+    job_export_server_with_auth(dir, crate::AuthPolicy::default())
+}
+
+fn job_export_server_with_auth(
+    dir: &tempfile::TempDir,
+    auth_policy: crate::AuthPolicy,
+) -> McpServer {
     let script = dir.path().join("server.harn");
     std::fs::write(
         &script,
@@ -1036,14 +1099,30 @@ pub fn rollup(day: string) -> string {
   return day
 }
 
+pub type RollupError = {variant: "Unavailable", secret: string}
+
+@job("failing_rollup")
+pub fn fail_rollup() -> string throws RollupError {
+  throw {variant: "Unavailable", secret: "typed-detail"}
+}
+
 pub fn greet(name: string) -> string {
   return name
 }
 "#,
     )
     .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.auth_policy = auth_policy;
+    let core = DispatchCore::new(config).expect("core");
     McpServer::new(McpServerConfig::new(core))
+}
+
+fn bearer_auth(key: &str) -> AuthRequest {
+    AuthRequest {
+        headers: BTreeMap::from([("authorization".to_string(), format!("Bearer {key}"))]),
+        ..AuthRequest::default()
+    }
 }
 
 /// A `_meta` block for a client that carries the tasks extension.
@@ -1055,11 +1134,10 @@ fn task_client_request(request: JsonValue) -> JsonValue {
     request
 }
 
-/// `@job` already means "long-running" everywhere else in Harn. A client asking
-/// the same question over MCP gets the answer from that one declaration rather
-/// than from a second attribute that could disagree with it.
+/// `@job` remains Harn's server-side scheduling decision. The stable MCP tasks
+/// extension deliberately removed tool-level taskSupport discovery.
 #[tokio::test]
-async fn tools_list_marks_job_exports_as_task_capable() {
+async fn tools_list_omits_retired_tool_level_task_support() {
     let dir = tempfile::tempdir().expect("tempdir");
     let tools = job_export_server(&dir).tools_list_result(&json!({}));
     let by_name: std::collections::BTreeMap<&str, &JsonValue> = tools["tools"]
@@ -1068,14 +1146,8 @@ async fn tools_list_marks_job_exports_as_task_capable() {
         .iter()
         .map(|tool| (tool["name"].as_str().expect("tool name"), tool))
         .collect();
-    assert_eq!(
-        by_name["rollup"]["execution"],
-        json!({"taskSupport": "optional"})
-    );
-    assert!(
-        by_name["greet"].get("execution").is_none(),
-        "an ordinary export must not claim task support",
-    );
+    assert!(by_name["rollup"].get("execution").is_none());
+    assert!(by_name["greet"].get("execution").is_none());
 }
 
 /// The capability is advertised only when something can actually be served that
@@ -1145,7 +1217,11 @@ async fn a_job_export_runs_as_a_task_the_client_can_collect() {
 
     let read = mcp_response(
         &server,
-        harn_vm::jsonrpc::request(2, "tasks/get", json!({"taskId": task_id})),
+        task_client_request(harn_vm::jsonrpc::request(
+            2,
+            "tasks/get",
+            json!({"taskId": task_id}),
+        )),
         session,
     )
     .await;
@@ -1155,6 +1231,230 @@ async fn a_job_export_runs_as_a_task_the_client_can_collect() {
         read["result"]["result"]["content"][0]["text"],
         json!("2026-08-23"),
     );
+}
+
+#[tokio::test]
+async fn task_reads_are_bound_to_the_authenticated_principal() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let auth_policy = crate::AuthPolicy {
+        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+            keys: vec![
+                crate::ApiKeyEntry::new("key-a", []).with_tenant("tenant-a"),
+                crate::ApiKeyEntry::new("key-b", []).with_tenant("tenant-b"),
+            ],
+        })],
+        mcp_allowlist: None,
+    };
+    let server = Arc::new(job_export_server_with_auth(&dir, auth_policy));
+    let session = SharedSession::new();
+    let (immediate, job) = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                1,
+                "tools/call",
+                json!({"name": "rollup", "arguments": {"day": "2026-09-02"}}),
+            )),
+            session.clone(),
+            bearer_auth("key-a"),
+        )
+        .await
+    {
+        ImmediateResult::TaskStream { immediate, job } => (immediate, job),
+        _ => panic!("authenticated job must create a task"),
+    };
+    let task_id = immediate["result"]["taskId"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    server
+        .execute_streaming_job(*job, notify_channel(|_| {}))
+        .await;
+
+    let read_as_other_tenant = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                2,
+                "tasks/get",
+                json!({"taskId": task_id}),
+            )),
+            session.clone(),
+            bearer_auth("key-b"),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        _ => panic!("task read must answer immediately"),
+    };
+    assert_eq!(
+        read_as_other_tenant["error"]["message"],
+        "Failed to retrieve task: task not found"
+    );
+
+    let read_as_owner = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                3,
+                "tasks/get",
+                json!({"taskId": task_id}),
+            )),
+            session,
+            bearer_auth("key-a"),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        _ => panic!("task read must answer immediately"),
+    };
+    assert_eq!(read_as_owner["result"]["status"], "completed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_cancel_signals_the_token_installed_in_execution() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+@job("cancellable")
+pub fn cancellable(value: string) -> string {
+  test_rendezvous(value)
+  return value
+}
+"#,
+    )
+    .expect("write script");
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.vm_configurator = Arc::new(McpRendezvousConfigurator {
+        entered: entered_tx,
+        releases: Arc::new(std::sync::Mutex::new(HashMap::from([(
+            "work".to_string(),
+            release.clone(),
+        )]))),
+    });
+    let core = DispatchCore::new(config).expect("core");
+    let server = Arc::new(McpServer::new(McpServerConfig::new(core)));
+    let session = SharedSession::new();
+    let (immediate, job) = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                1,
+                "tools/call",
+                json!({"name": "cancellable", "arguments": {"value": "work"}}),
+            )),
+            session.clone(),
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::TaskStream { immediate, job } => (immediate, job),
+        _ => panic!("cancellable job must create a task"),
+    };
+    let task_id = immediate["result"]["taskId"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    let executor = {
+        let server = server.clone();
+        tokio::spawn(async move {
+            server
+                .execute_streaming_job(*job, notify_channel(|_| {}))
+                .await;
+        })
+    };
+    assert_eq!(entered_rx.recv().await.as_deref(), Some("work"));
+
+    let cancel = mcp_response(
+        &server,
+        task_client_request(harn_vm::jsonrpc::request(
+            2,
+            "tasks/cancel",
+            json!({"taskId": task_id}),
+        )),
+        session.clone(),
+    )
+    .await;
+    assert_eq!(cancel["result"]["resultType"], "complete");
+    release.add_permits(1);
+    executor.await.expect("execution task joins");
+
+    let read = mcp_response(
+        &server,
+        task_client_request(harn_vm::jsonrpc::request(
+            3,
+            "tasks/get",
+            json!({"taskId": task_id}),
+        )),
+        session,
+    )
+    .await;
+    assert_eq!(read["result"]["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn acknowledged_cancel_wins_when_cancel_and_completion_are_both_ready() {
+    let tasks = harn_vm::mcp_tasks::McpTaskStore::new();
+    let access = harn_vm::mcp_tasks::McpTaskAccess::unscoped();
+    let lease = tasks.begin(access.clone(), None).expect("task admitted");
+    let task_id = lease.task().task_id.clone();
+
+    let cancel = tasks.handle_cancel(&access, json!(1), &json!({"taskId": task_id}));
+    assert_eq!(cancel["result"], json!({}));
+
+    // Cancellation is ready before this helper is first polled, and the
+    // completion future is ready by construction. This is the exact
+    // simultaneous-readiness shape that failed Windows certification.
+    let selected = run_until_task_cancelled(&lease, std::future::ready("completed")).await;
+    assert_eq!(selected, None);
+}
+
+#[tokio::test]
+async fn declared_application_error_completes_task_with_typed_error_result() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = Arc::new(job_export_server(&dir));
+    let session = SharedSession::new();
+    let (immediate, job) = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                1,
+                "tools/call",
+                json!({"name": "fail_rollup", "arguments": {}}),
+            )),
+            session.clone(),
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::TaskStream { immediate, job } => (immediate, job),
+        _ => panic!("task-capable declared error must create a task"),
+    };
+    let task_id = immediate["result"]["taskId"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    server
+        .execute_streaming_job(*job, notify_channel(|_| {}))
+        .await;
+
+    let read = mcp_response(
+        &server,
+        task_client_request(harn_vm::jsonrpc::request(
+            2,
+            "tasks/get",
+            json!({"taskId": task_id}),
+        )),
+        session,
+    )
+    .await;
+    assert_eq!(read["result"]["status"], "completed");
+    assert_eq!(read["result"]["result"]["isError"], true);
+    assert_eq!(
+        read["result"]["result"]["_meta"][harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
+            ["applicationError"]["data"]["variant"],
+        "Unavailable"
+    );
+    assert!(read["result"]["result"].get("structuredContent").is_none());
 }
 
 /// Opting in is per client as well as per export: a client that never declared

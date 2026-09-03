@@ -57,6 +57,12 @@ async fn compact_transcript_impl(
     let parsed_options = parse_options(options)?;
 
     let mut config = AutoCompactConfig {
+        request_provenance: crate::orchestration::CompactionRequestProvenance {
+            requested_strategy: Some(compact_strategy_name(&parsed_options.strategy).to_string()),
+            threshold_source: parsed_options
+                .target_tokens
+                .map(|_| crate::orchestration::CompactionThresholdSource::TargetTokens),
+        },
         keep_last: parsed_options.keep_last,
         compact_strategy: parsed_options.strategy.clone(),
         hard_limit_strategy: parsed_options.strategy.clone(),

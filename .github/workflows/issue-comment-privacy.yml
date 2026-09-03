@@ -1,0 +1,62 @@
+name: Issue comment privacy
+
+# This repository is public, and issue comments are where cross-repository work
+# names other repositories: a consumer census, a reader list, a "who depends on
+# this" note. The pull-request metadata gate scans titles, bodies and commits,
+# so the same sentence that is blocked in a PR body was publishable in a
+# comment. That asymmetry is what this workflow closes (#7872).
+#
+# The vocabulary has ONE owner. This wrapper reads the event shape; the words
+# and the hashed host denylist stay in `check_public_product_names.sh`, reached
+# through `check_issue_comment_privacy.sh`. A second list would drift, and drift
+# here fails toward silent publication.
+#
+# Nothing here echoes a match. The scanner reports by digest so this log does
+# not become a second copy of the leak.
+
+on:
+  issue_comment:
+    types: [created, edited]
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comment-privacy-${{ github.event.comment.id || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Comment privacy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan comment metadata
+        id: scan
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: ./scripts/check_issue_comment_privacy.sh
+
+      # A failed run is the alert. It is deliberately not a required check,
+      # because an issue comment gates nothing: the point is that a human is
+      # told promptly, while the text is still young. Minimizing the comment
+      # needs `issues: write`, which this workflow does not take; see #7872 for
+      # that follow-up and the reasons to decide it separately.
+      - name: Explain a violation
+        if: failure() && steps.scan.outcome == 'failure'
+        run: |
+          {
+            echo "### Public metadata privacy"
+            echo
+            echo "A comment or body on this issue names a downstream host product"
+            echo "or private infrastructure. This repository is public."
+            echo
+            echo "Edit the comment to host-neutral wording (downstream host, host"
+            echo "repo, packager) and keep consumer names on the private side."
+            echo
+            echo "Locations are reported by digest in the step log; inspect the"
+            echo "source locally rather than pasting it back into a public field."
+          } >>"$GITHUB_STEP_SUMMARY"

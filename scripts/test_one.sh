@@ -201,18 +201,31 @@ fi
 
 echo "test_one: running $test_name in the $requested_target of package $package" >&2
 
+if ! exec 3> "$receipt"; then
+  echo "error: failed to initialize the exact-test receipt" >&2
+  exit 1
+fi
+
+# Capture through a regular file rather than a live `runner | tee` pipe. A
+# runner-side supervisor can outlive Cargo while retaining stdout; on a pipe,
+# that unrelated descendant owns EOF and can hold this command open after the
+# selected test has completed. A regular file makes the runner process the sole
+# lifetime boundary while preserving its status independently from output
+# replay.
 set +e
 "$cargo_runner" test --package "$package" "${selector[@]}" "$test_name" -- \
-  --exact --format terse 2>&1 | tee "$receipt"
-pipeline_status=("${PIPESTATUS[@]}")
+  --exact --format terse >&3 2>&1
+runner_status=$?
 set -e
+exec 3>&-
 
-if [[ ${pipeline_status[1]} -ne 0 ]]; then
-  echo "error: failed to record the exact-test receipt" >&2
-  exit "${pipeline_status[1]}"
+if ! cat "$receipt"; then
+  echo "error: failed to replay the exact-test receipt" >&2
+  exit 1
 fi
-if [[ ${pipeline_status[0]} -ne 0 ]]; then
-  exit "${pipeline_status[0]}"
+if ((runner_status != 0)); then
+  echo "error: exact-test runner failed with status $runner_status" >&2
+  exit "$runner_status"
 fi
 if ! grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;' "$receipt"; then
   echo "error: exact test did not produce a one-test success receipt: $test_name" >&2

@@ -130,10 +130,29 @@ pub(crate) async fn load_file_tool_registry_local(
     vm.execute(&chunk)
         .await
         .map_err(|error| ToolRegistryLoadError {
+            // A top-level `throw` is still caller-authored data. Until the
+            // registry exists there is no error schema that could authorize
+            // exposing its value, so startup follows the same value-free
+            // runtime summary as invocation adapters.
             message: format!(
                 "{diagnostics}{}{}",
                 vm.output(),
-                vm.format_runtime_error(&error)
+                if matches!(&error, harn_vm::VmError::Thrown(_))
+                    || matches!(
+                        harn_vm::error_to_category(&error),
+                        harn_vm::ErrorCategory::Auth
+                            | harn_vm::ErrorCategory::BudgetExceeded
+                            | harn_vm::ErrorCategory::Cancelled
+                            | harn_vm::ErrorCategory::RateLimit
+                    )
+                {
+                    format!(
+                        "Runtime error: {}\n",
+                        harn_vm::tool_registry::tool_runtime_error_summary(&error)
+                    )
+                } else {
+                    vm.format_runtime_error(&error)
+                }
             ),
             exit_code: error.process_exit_code().unwrap_or(1),
         })?;

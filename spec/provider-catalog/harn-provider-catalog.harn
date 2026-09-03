@@ -212,6 +212,7 @@ pub type HarnProviderCatalogModel = {
   quality_tags: list<string>,
   rate_limits?: HarnProviderCatalogRateLimits,
   reasoning: HarnProviderCatalogReasoning,
+  reasoning_modes?: list<HarnProviderCatalogReasoningMode>,
   released?: string,
   row_kind?: "snapshot" | "selector",
   runtime_context_window?: int,
@@ -366,6 +367,25 @@ pub type HarnProviderCatalogReasoning = {
   modes: list<string>,
   none_supported: bool,
   preserve_thinking: bool,
+}
+
+pub type HarnProviderCatalogReasoningMode = {
+  economics: "discounted" | "standard" | "premium",
+  id: string,
+  label?: string,
+  latency?: string,
+  note?: string,
+  request?: HarnProviderCatalogReasoningModeRequest,
+  status?: string,
+  suitable_workloads?: list<string>,
+  token_multiplier?: float,
+  unsuitable_workloads?: list<string>,
+}
+
+pub type HarnProviderCatalogReasoningModeRequest = {
+  param_path: list<string>,
+  response_values?: list<string>,
+  value: string,
 }
 
 pub type HarnProviderCatalogRoutingRoute = {

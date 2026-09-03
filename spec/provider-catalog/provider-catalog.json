@@ -2220,7 +2220,7 @@
       "display_name": "Claude Fable 5",
       "provider": "anthropic",
       "aliases": [
-        "fable"
+        "fable5"
       ],
       "context_window": 1000000,
       "modalities": {
@@ -2342,6 +2342,133 @@
       "benchmarks": {
         "swe_bench_pro": 80.3
       }
+    },
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "display_name": "Claude Fable 5.1",
+      "provider": "anthropic",
+      "aliases": [
+        "fable",
+        "fable51"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "anthropic_messages",
+        "input_mode": "inline_requests",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 100000,
+        "max_input_bytes": 268435456,
+        "result_retention_days": 29,
+        "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
+          "Batch data is scoped to the workspace that owns the API key.",
+          "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": 12.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ]
     },
     {
       "id": "claude-haiku-4-5-20251001",
@@ -15406,6 +15533,38 @@
             "interactive_chat"
           ]
         }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top."
+        }
       ]
     },
     {
@@ -15594,6 +15753,38 @@
             "interactive_chat"
           ]
         }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top."
+        }
       ]
     },
     {
@@ -15779,6 +15970,38 @@
           "unsuitable_workloads": [
             "interactive_chat"
           ]
+        }
+      ],
+      "reasoning_modes": [
+        {
+          "id": "pro",
+          "label": "Pro mode",
+          "economics": "premium",
+          "request": {
+            "param_path": [
+              "reasoning",
+              "mode"
+            ],
+            "value": "pro",
+            "response_values": [
+              "pro"
+            ]
+          },
+          "token_multiplier": 6.0,
+          "status": "ga",
+          "latency": "multi-minute for hard prompts; far slower than standard mode at the same effort",
+          "suitable_workloads": [
+            "hard_planning",
+            "architecture_review",
+            "oracle_consult"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat",
+            "agent_inner_loop",
+            "bulk_judge",
+            "corpus"
+          ],
+          "note": "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top."
         }
       ]
     },
@@ -25711,7 +25934,17 @@
     },
     {
       "name": "fable",
+      "model_id": "claude-fable-5-1",
+      "provider": "anthropic"
+    },
+    {
+      "name": "fable5",
       "model_id": "claude-fable-5",
+      "provider": "anthropic"
+    },
+    {
+      "name": "fable51",
+      "model_id": "claude-fable-5-1",
       "provider": "anthropic"
     },
     {
@@ -26629,6 +26862,34 @@
       "base_url": "https://api.anthropic.com/v1",
       "secret_env": "ANTHROPIC_API_KEY",
       "label": "Claude Fable 5",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "interleaved_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5-1",
+      "base_url": "https://api.anthropic.com/v1",
+      "secret_env": "ANTHROPIC_API_KEY",
+      "label": "Claude Fable 5.1",
       "family": "anthropic-claude",
       "capabilities": [
         "audio",

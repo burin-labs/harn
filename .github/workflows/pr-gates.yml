@@ -37,19 +37,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 jobs:
+  # The area list mirrors the table in CONTRIBUTING.md, "Title format". The
+  # action matches each tag literally, so the two must be edited together.
+  # `Release vX.Y.Z` and Dependabot titles are exempt inside the action;
+  # publish-release.yml matches that release subject verbatim before it tags.
+  pr-title-check:
+    name: PR title and description
+    # merge_group and push carry no pull request number. The action skips
+    # loudly in that case; gating here keeps the job off those events
+    # entirely so it can never hold up the merge queue.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: burin-labs/.github/.github/actions/pr-title-check@3f0f1f36795f7cd0705564f0697152b3d0f59043
+        with:
+          areas: "Parser|VM|LLM|Models|Stdlib|Agent|CLI|Modules|Orchestrator|ACP|Evals|Docs|CI|Release"
+
   public-metadata-privacy:
     name: Public metadata privacy
     runs-on: ubuntu-latest
     steps:
-      - name: Skip merge-group replay
-        if: github.event_name == 'merge_group'
-        run: echo "::notice title=Public metadata privacy::merge_group event is a no-op pass."
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
+        with:
+          # Commit messages are public PR metadata. The scanner fails closed if
+          # either range endpoint is absent; keep the exact range available for
+          # pull-request and merge-group events.
+          fetch-depth: 0
 
-      - name: Scan pull-request title and body
-        if: github.event_name == 'pull_request'
+      - name: Scan public metadata
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: ./scripts/check_pr_metadata_privacy.sh

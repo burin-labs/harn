@@ -1578,6 +1578,15 @@ provider = "anthropic"
 # Fable is the Mythos-class tier above Opus, not an Opus successor — the
 # `opus` alias tracks the current Opus generation (claude-opus-5), not Fable.
 [aliases.fable]
+id = "claude-fable-5-1"
+provider = "anthropic"
+
+[aliases.fable51]
+id = "claude-fable-5-1"
+provider = "anthropic"
+
+# Previous Fable generation, kept addressable for pinned workflows.
+[aliases.fable5]
 id = "claude-fable-5"
 provider = "anthropic"
 
@@ -2973,6 +2982,41 @@ strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_pro = 80.3 }
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 
+# Claude Fable 5.1 (released 2026-09-01) — successor to Claude Fable 5 in the
+# same Mythos-class tier above Opus, at the same $10 / $50 per MTok. It does
+# NOT supersede Opus 5; the `opus` alias keeps tracking the Opus generation.
+# Claude Mythos 5.1 is the same underlying model behind a restricted access
+# program (Project Glasswing) and is deliberately absent from this catalog —
+# a row nobody on a normal API key can call is a route that only fails.
+#
+# Same request surface as Fable 5 — thinking always on (an explicit
+# `disabled` is a 400, so the request builder omits the field), effort
+# low..max, no assistant prefill, sampling params rejected — with three
+# changes that matter to the wire:
+#   1. Forced tool choice is gone. `tool_choice` `any` / `tool` return a 400
+#      on this model (also on count_tokens and Batches), so the capability
+#      row narrows `allowed_tool_choice_modes` to auto/none. Use `auto` plus
+#      an instruction naming the tool, `strict: true`, or structured output.
+#   2. Thinking blocks are bound to the producing model, and editing earlier
+#      turns invalidates them ("preserved thinking"). Append-only history is
+#      the safe harness shape.
+#   3. Cache reads drop to $0.25 per MTok (0.025x input, not the uniform 0.1x
+#      ladder every other Anthropic row uses). 5-min cache write stays 1.25x.
+# No fast mode tier and no Priority Tier. Covered Model: zero-data-retention
+# orgs get a 400 unless expressly authorized by Anthropic. 1M context, 128K
+# max output. SWE-bench Verified is not published at launch, so it is omitted
+# rather than carried over from Fable 5.
+[models."claude-fable-5-1"]
+name = "Claude Fable 5.1"
+provider = "anthropic"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
 # --- source: 60-models/10-openai-gemini-mistral.toml ---
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
@@ -3007,6 +3051,15 @@ serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "ga", latency = "up to 2.5x faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
+# `reasoning.mode = "pro"` is a per-request execution mode, NOT a serving tier
+# and NOT a separate model. It is listed here rather than under
+# `serving_tiers` because the two knobs differ in kind: a serving tier changes
+# how fast the same work is served and is priced by a different per-token
+# rate, while a reasoning mode changes how much work happens at unchanged
+# rates. They are independent and a request may set both.
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
+]
 
 [models."gpt-5.6-terra"]
 name = "GPT-5.6 Terra"
@@ -3025,6 +3078,9 @@ serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 4.00, output_per_mtok = 24.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 1.00, output_per_mtok = 6.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
+]
 
 [models."gpt-5.6-luna"]
 name = "GPT-5.6 Luna"
@@ -3042,6 +3098,9 @@ complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "
 serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 0.40, output_per_mtok = 2.40, cache_read_per_mtok = 0.04, cache_write_per_mtok = 0.50 }, latency = "faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
   { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 0.10, output_per_mtok = 0.60, cache_read_per_mtok = 0.01, cache_write_per_mtok = 0.125 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
+reasoning_modes = [
+  { id = "pro", label = "Pro mode", economics = "premium", request = { param_path = ["reasoning", "mode"], value = "pro", response_values = ["pro"] }, token_multiplier = 6.0, status = "ga", latency = "multi-minute for hard prompts; far slower than standard mode at the same effort", suitable_workloads = ["hard_planning", "architecture_review", "oracle_consult"], unsuitable_workloads = ["interactive_chat", "agent_inner_loop", "bulk_judge", "corpus"], note = "Pro mode is Responses-API only and is independent of `reasoning.effort`: mode picks the execution path, effort controls how hard the model works within it. OpenAI bills pro mode at this row's standard token rates and charges for the extra work it does, so the cost increase shows up as token volume rather than a higher rate. There is no separate `gpt-5.6-*-pro` model id on OpenAI; aggregators that publish one are selling this knob. `token_multiplier` is measured, not published: two Burin planning prompts on gpt-5.6-sol at effort=high billed 5.8x and 7.6x a standard call at the same effort (2026-09-02, N=1 per cell). Most of that inflation lands on INPUT tokens (390 -> 5790 and 430 -> 10496 on those prompts) because pro aggregates its internal attempts back through the input side, so prompt caching does not absorb it and the 272k input band multiplier can stack on top." },
 ]
 
 # GPT-5.5 — current OpenAI frontier (Responses + Chat Completions).

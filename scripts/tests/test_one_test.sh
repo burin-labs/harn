@@ -3,7 +3,15 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 tmp_root=$(mktemp -d)
-trap 'rm -rf "$tmp_root"' EXIT
+holder_pid=""
+cleanup() {
+  if [[ -n "$holder_pid" ]]; then
+    kill "$holder_pid" 2>/dev/null || true
+    wait "$holder_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp_root"
+}
+trap cleanup EXIT
 
 fake_cargo="$tmp_root/fake cargo"
 args_log="$tmp_root/args.log"
@@ -60,6 +68,19 @@ case "${TEST_ONE_FAKE_MODE:-success}" in
   failure)
     echo 'cargo failed' >&2
     exit 17
+    ;;
+  held-fd)
+    # Model a runner-side supervisor that survives the Cargo command while
+    # retaining its stdout descriptor. The wrapper must return with this child
+    # still alive instead of waiting for pipe EOF.
+    sleep 30 &
+    holder_pid=$!
+    disown "$holder_pid"
+    printf '%s\n' "$holder_pid" > "${TEST_ONE_FAKE_HOLDER_PID:?}"
+    printf '%s\n' \
+      'running 1 test' \
+      'test package::module::case ... ok' \
+      'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out'
     ;;
   *)
     echo "unexpected fake mode: $TEST_ONE_FAKE_MODE" >&2
@@ -182,6 +203,63 @@ failure_status=$?
 set -e
 if [[ $failure_status -ne 17 ]]; then
   echo "Cargo failure status was not preserved: $failure_status" >&2
+  exit 1
+fi
+if ! grep -Fq 'cargo failed' "$tmp_root/failure.out"; then
+  echo "Cargo failure output was not replayed" >&2
+  cat "$tmp_root/failure.out" >&2
+  exit 1
+fi
+if ! grep -Fq 'exact-test runner failed with status 17' "$tmp_root/failure.err"; then
+  echo "Cargo failure was not named separately from receipt failures" >&2
+  cat "$tmp_root/failure.err" >&2
+  exit 1
+fi
+
+# A descendant holding the runner's stdout open must not own the exact-test
+# command's lifetime. Start the wrapper asynchronously so the control can fail
+# in bounded time without relying on a platform-specific timeout utility.
+holder_pid_file="$tmp_root/holder.pid"
+held_fd_output="$tmp_root/held-fd.out"
+TEST_ONE_FAKE_LISTING='package::module::case: test' \
+  TEST_ONE_FAKE_MODE=held-fd \
+  TEST_ONE_FAKE_HOLDER_PID="$holder_pid_file" \
+  "$repo_root/scripts/test_one.sh" --package harn-cli --lib package::module::case \
+  > "$held_fd_output" 2> "$tmp_root/held-fd.err" &
+held_fd_wrapper_pid=$!
+held_fd_finished=false
+for _ in {1..100}; do
+  if ! kill -0 "$held_fd_wrapper_pid" 2>/dev/null; then
+    held_fd_finished=true
+    break
+  fi
+  sleep 0.05
+done
+if [[ "$held_fd_finished" != true ]]; then
+  kill "$held_fd_wrapper_pid" 2>/dev/null || true
+  wait "$held_fd_wrapper_pid" 2>/dev/null || true
+  if [[ -s "$holder_pid_file" ]]; then
+    kill "$(< "$holder_pid_file")" 2>/dev/null || true
+  fi
+  echo "exact-test wrapper waited for a descendant holding stdout" >&2
+  exit 1
+fi
+wait "$held_fd_wrapper_pid"
+if [[ ! -s "$holder_pid_file" ]]; then
+  echo "inherited-stdout control did not start its background holder" >&2
+  exit 1
+fi
+holder_pid=$(< "$holder_pid_file")
+if ! kill -0 "$holder_pid" 2>/dev/null; then
+  echo "inherited-stdout holder was not alive when the wrapper returned" >&2
+  exit 1
+fi
+kill "$holder_pid" 2>/dev/null || true
+wait "$holder_pid" 2>/dev/null || true
+holder_pid=""
+if ! grep -Fq 'test result: ok. 1 passed;' "$held_fd_output"; then
+  echo "inherited-stdout control lost the success receipt" >&2
+  cat "$held_fd_output" >&2
   exit 1
 fi
 

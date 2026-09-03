@@ -98,16 +98,19 @@ fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize
 /// recoverable overflow as terminal). `archived == 0` means no compaction
 /// happened (already under threshold, a PreCompact hook blocked, or the engine
 /// found nothing to do); in that case `messages` is the input list unchanged,
-/// `archived` is 0, and `summary` is "".
+/// `archived` is 0, `summary` is "", and `receipt` is nil.
 ///
 /// `summary` is the exact summary text the engine inserted, so callers do not
 /// have to reverse-engineer it from a fixed index in `messages` — the summary's
 /// insertion index depends on `keep_first`, so reading `messages[0]` is wrong
-/// whenever the first turns are preserved.
+/// whenever the first turns are preserved. `receipt` is the engine-owned
+/// lifecycle result, including the applied strategy, request provenance, and
+/// source measurement; wrappers must project it instead of reconstructing
+/// those facts from their input options.
 #[harn_builtin(
     exposure = "harness.agent.transcript_auto_compact",
     effects = ["llm.write@dynamic"],
-    sig = "transcript_auto_compact(messages: list, options?: dict|nil) -> dict",
+    sig = "transcript_auto_compact(messages: list, options?: dict|nil) -> {messages: list, archived: int, summary: string, receipt: dict|nil}",
     kind = "async",
     category = "workflow.host"
 )]
@@ -147,6 +150,16 @@ pub(super) async fn transcript_auto_compact_builtin(
             .map(|v| ("token_threshold", v))
             .or_else(|| o.get("compact_threshold").map(|v| ("compact_threshold", v)))
     });
+    let threshold_source = threshold
+        .as_ref()
+        .map(|(key, _)| match *key {
+            "token_threshold" => crate::orchestration::CompactionThresholdSource::TokenThreshold,
+            "compact_threshold" => {
+                crate::orchestration::CompactionThresholdSource::CompactThreshold
+            }
+            _ => unreachable!("threshold keys are selected above"),
+        })
+        .unwrap_or(crate::orchestration::CompactionThresholdSource::Default);
     if let Some((key, v)) = threshold {
         config.token_threshold = non_negative_usize(v, "transcript_auto_compact", key)?;
     }
@@ -188,6 +201,8 @@ pub(super) async fn transcript_auto_compact_builtin(
         .map(|v| v.display())
     {
         config.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+        config.policy_strategy =
+            crate::orchestration::compact_strategy_name(&config.compact_strategy).to_string();
     }
     if let Some(strategy) = options
         .as_ref()
@@ -212,6 +227,7 @@ pub(super) async fn transcript_auto_compact_builtin(
             .is_some_and(|o| o.contains_key("compact_strategy"))
         {
             config.compact_strategy = crate::orchestration::CompactStrategy::Custom;
+            config.policy_strategy = "custom".to_string();
         }
     }
     let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
@@ -228,6 +244,12 @@ pub(super) async fn transcript_auto_compact_builtin(
     } else {
         None
     };
+    config.request_provenance = crate::orchestration::CompactionRequestProvenance {
+        requested_strategy: Some(
+            crate::orchestration::compact_strategy_name(&config.compact_strategy).to_string(),
+        ),
+        threshold_source: Some(threshold_source),
+    };
     let lifecycle =
         crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Workflow);
     // `Ok(None)` means no compaction happened (under threshold / hook blocked /
@@ -241,9 +263,14 @@ pub(super) async fn transcript_auto_compact_builtin(
         lifecycle,
     )
     .await?;
-    let (archived, summary) = outcome
-        .map(|o| (o.archived_messages, o.summary))
-        .unwrap_or((0, String::new()));
+    let (archived, summary, receipt) = match outcome {
+        Some(outcome) => (
+            outcome.archived_messages,
+            outcome.summary,
+            crate::stdlib::json_to_vm_value(&outcome.receipt.to_json()),
+        ),
+        None => (0, String::new(), VmValue::Nil),
+    };
     let compacted_messages = VmValue::List(std::sync::Arc::new(
         messages
             .iter()
@@ -260,6 +287,7 @@ pub(super) async fn transcript_auto_compact_builtin(
         crate::value::intern_key("summary"),
         VmValue::String(arcstr::ArcStr::from(summary)),
     );
+    result.insert(crate::value::intern_key("receipt"), receipt);
     Ok(VmValue::dict(result))
 }
 

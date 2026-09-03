@@ -34,26 +34,19 @@
 //!   precisely because the recorded hash no longer matches.
 //!
 //! The module is intentionally JSON-shaped at the boundary so the
-//! existing `run_record_*` and event-log persistence works without
-//! schema changes. The replay oracle reads back the topic-scoped journal
-//! entries and feeds them into [`ReplayTraceRun::approval_interactions`]
-//! / [`lifecycle_audit_log`].
+//! existing `run_record_*` persistence works without schema changes. The
+//! journal itself is the thread-local [`LIFECYCLE_RECEIPT_LOG`], which
+//! [`lifecycle_receipts_snapshot`] reads back for the replay oracle and
+//! the conformance suite, feeding
+//! [`ReplayTraceRun::approval_interactions`] / [`lifecycle_audit_log`].
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
-
-use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
-
-/// Event-log topic that carries the persisted lifecycle receipts. One
-/// topic for all three shapes keeps the replay oracle's cursor logic
-/// simple — kind discriminates suspension / resumption / drain.
-pub const LIFECYCLE_RECEIPT_TOPIC: &str = "agent.lifecycle.receipts";
 
 pub const SUSPENSION_RECEIPT_KIND: &str = "suspension_receipt";
 pub const RESUMPTION_RECEIPT_KIND: &str = "resumption_receipt";
@@ -633,22 +626,7 @@ fn record_entry(kind: &str, payload: JsonValue) -> LifecycleReceiptEntry {
         payload,
     };
     LIFECYCLE_RECEIPT_LOG.with(|log| log.borrow_mut().push(entry.clone()));
-    persist_entry(&entry);
     entry
-}
-
-fn persist_entry(entry: &LifecycleReceiptEntry) {
-    let Some(log) = active_event_log() else {
-        return;
-    };
-    let Ok(topic) = Topic::new(LIFECYCLE_RECEIPT_TOPIC) else {
-        return;
-    };
-    let mut headers = BTreeMap::new();
-    headers.insert("kind".to_string(), entry.kind.clone());
-    headers.insert("seq".to_string(), entry.seq.to_string());
-    let event = LogEvent::new(entry.kind.clone(), entry.payload.clone()).with_headers(headers);
-    let _ = futures::executor::block_on(log.append(&topic, event));
 }
 
 /// Persist a suspension receipt and return the journaled entry.

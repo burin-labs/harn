@@ -10,6 +10,7 @@ mod native;
 mod params;
 mod parse;
 mod protocol;
+mod summary;
 mod ts_value_parser;
 mod type_expr;
 
@@ -24,7 +25,8 @@ pub(crate) use name_recovery::{
     normalize_repaired_denial, recover_provider_safe_alias, schema_match_repair_result,
 };
 pub(crate) use native::{
-    apply_tool_search_native_injection_typed, extract_deferred_tool_names, vm_tools_to_native,
+    apply_tool_search_native_injection_typed, extract_deferred_tool_names, native_tool_is_deferred,
+    vm_tools_to_native,
 };
 pub(crate) use parse::ident_length;
 pub(crate) use parse::parse_text_tool_argument_payload;

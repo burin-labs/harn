@@ -518,6 +518,108 @@ genuinely unavoidable.
 - Rust files use standard `rustfmt` defaults
 - Avoid adding comments unless the logic is non-obvious
 
+## Pull request titles and descriptions
+
+Your pull request title and description are the parts of a change that outlive
+it. Six months later, `git log` and the issue tracker are what a reader has.
+
+### Title format
+
+Write titles as `[Area] Sentence case description`.
+
+```text
+[VM] Enforce execution evidence ownership boundaries
+[Stdlib] Serve compact tool descriptions to every renderer
+[CI] Reserve the Nextest runner for offline replay
+```
+
+Use one area tag, in square brackets, at the front. Capitalize only the first
+word of the description and any proper nouns. Do not end the title with a
+period. Aim for under 72 characters so the title is readable in `git log
+--oneline` and in the merge queue.
+
+The area tags are a small top-level set, coarser than the `area/*` issue
+labels. Pick the surface a reader would look in first:
+
+| Tag | Covers | Related issue labels |
+| --- | --- | --- |
+| `[Parser]` | `harn-lexer`, `harn-parser`, `harn-ir`, type checking, diagnostics | `area/parser`, `area/typechecker` |
+| `[VM]` | `harn-vm`, `harn-kernel`, bytecode, values, the runtime evaluator | `area/vm` |
+| `[Stdlib]` | `harn-stdlib`, `harn-hostlib`, builtins, `.harn.prompt` assets | `area/stdlib` |
+| `[Agent]` | Agent loop, transcripts, context assembly, compaction, judges | `area/learning`, `area/personas`, `area/supervision` |
+| `[LLM]` | `harn-vm/src/llm`, provider clients, capabilities, turn options | `area/vm` |
+| `[Models]` | The model catalog, aliases, and per-model capability entries | `area/vm` |
+| `[CLI]` | `harn-cli`, `harn-fmt`, `harn-lint`, `harn-lsp`, `harn-dap`, editors | `area/cli` |
+| `[Modules]` | `harn-modules`, imports, packages, version pinning | `area/modules`, `package-management` |
+| `[Orchestrator]` | `harn serve`, triggers, connectors, flow control, sandboxing | `area/orchestrator`, `area/triggers`, `area/connectors`, `area/flow-control`, `area/sandbox` |
+| `[ACP]` | ACP, A2A, MCP, `harn-serve` protocol surfaces, SDK bindings | `area/acp-a2a`, `area/interop` |
+| `[Evals]` | `evals/`, `conformance/`, `bench/`, determinism and measurement | `area/evals`, `area/performance` |
+| `[Docs]` | `docs/`, `spec/`, `README.md`, `website/`, this file | `documentation` |
+| `[CI]` | `.github/`, `scripts/`, `Makefile`, hooks, supply chain | `github_actions` |
+| `[Release]` | Version cuts, changelog assembly, publishing, install scripts | `production-readiness` |
+
+If a change genuinely spans two areas, tag the one that owns the behavior, not
+the one with the larger diff.
+
+### Titles that must not carry a tag
+
+Two title shapes are load-bearing and are exempt:
+
+- **Release pull requests** must stay exactly `Release vX.Y.Z`.
+  `.github/workflows/publish-release.yml` matches that commit subject before it
+  tags and publishes. Adding a `[Release]` prefix breaks the release.
+- **Bot pull requests** keep whatever their tool generates. Dependabot writes
+  `chore(deps): ...`, and rewriting those titles fights the tool for no gain.
+
+### Description format
+
+Keep the description short and specific. Five sentences is usually enough.
+Cover four things:
+
+1. What changed, in terms of behavior a user, agent, or downstream repository
+   sees.
+2. Why it changed. Name the defect or the goal.
+3. The one risk you are most worried about, or the honest blind spot.
+4. How you verified the claim, at the level of the claim.
+
+Leave out anything the pull request page already shows. The Files tab lists the
+files. The Checks tab lists the test runs. A line saying "all tests pass" adds
+nothing a reader cannot already see, and it says nothing about whether the
+tests bind to the behavior you changed.
+
+Here is a complete description that does the job:
+
+```markdown
+`ToolSchema.compact` documented a contract that no renderer read, so a tool
+that declared it was still served its full description on every call. Every
+renderer now serves the shortened text: the native wire payload and the
+OpenAI function-schema projection share one `tool_summary` in Rust, and the
+text catalog renders compact tools as one-liners. The risk is that
+`tool_summary` in Rust and `__agent_tool_summary` in the stdlib are two
+implementations of one policy, held in parity by tests on each side rather
+than by a shared owner. A conformance fixture runs the same agent turn twice
+against registries that differ only in the flag and reads the served byte
+count off a real `provider_call_request`; it fails on the pre-fix binary with
+`full=8585 compact=8585`, which is the exact comparison that measured zero in
+the issue.
+
+Closes #7767
+```
+
+If a change is hard to follow from prose alone, add a small Mermaid diagram in
+a ` ```mermaid ` fence.
+
+### Linking issues
+
+A pull request that resolves an issue says which of the issue's listed sub-asks
+it closes. Use `Closes #N items: 1, 3` when the issue enumerates sub-asks, and
+`Single-ask: #N` when it does not. Close an issue only once every listed sub-ask
+is verified on `main`. If a sub-ask survives the pull request, rescope the issue
+or file the remainder so the work keeps an owner.
+
+Keep write-ups repository-agnostic, per
+[Keep write-ups repository-agnostic](#keep-write-ups-repository-agnostic).
+
 ## Keep write-ups repository-agnostic
 
 Harn is a general agent-orchestration project. Issue bodies, PR descriptions,

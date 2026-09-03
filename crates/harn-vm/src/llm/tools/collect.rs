@@ -15,13 +15,35 @@ pub(crate) struct ToolSchema {
     pub(crate) description: String,
     #[serde(default)]
     pub(crate) params: Vec<ToolParamSchema>,
-    /// When true, render as a compact one-liner (name + params type + first
-    /// sentence of description) instead of the full TypeScript declaration with
-    /// JSDoc. Tools marked compact are still fully dispatchable — only the
-    /// prompt rendering changes. The model can call `tool_schema({ name })`
-    /// to get the full description on demand.
-    #[serde(default)]
-    pub(crate) compact: bool,
+    /// When true, every renderer serves [`tool_summary`](super::summary::tool_summary) of `description`
+    /// instead of the full text. The tool stays fully dispatchable and the
+    /// full description stays here and in the sidecar — only the copy the
+    /// model reads is shortened, and a host that offers a `tool_schema` tool
+    /// lets the model pull the rest on demand.
+    ///
+    /// Named `summary_only` in Rust, `compact` on the wire. Harn spells four
+    /// unrelated things `compact` — the OpenAI Responses request option in
+    /// `llm_options`, the `agent_session_reanchor` option, the transcript
+    /// budget recovery action, and this — and that collision is why this
+    /// field sat collected but unread from its introduction until #7767. The
+    /// serialized key stays `compact` because tool registries are authored by
+    /// hosts and replayed from persisted sidecars; renaming it would strand
+    /// every existing declaration and every recorded run.
+    #[serde(default, rename = "compact")]
+    pub(crate) summary_only: bool,
+}
+
+impl ToolSchema {
+    /// The description this tool is served with. The one place a renderer
+    /// asks; reading `description` directly is what lets a surface drift into
+    /// serving text the sidecar says was never sent.
+    pub(crate) fn served_description(&self) -> String {
+        if self.summary_only {
+            super::summary::tool_summary(&self.description)
+        } else {
+            self.description.clone()
+        }
+    }
 }
 
 fn collect_vm_tool_schemas(
@@ -65,15 +87,12 @@ fn collect_vm_tool_schemas(
                     .map(|value| value.display())
                     .unwrap_or_default();
                 let params = extract_params_from_vm_dict(td, &root_json, registry);
-                let compact = td
-                    .get("compact")
-                    .map(|value| matches!(value, VmValue::Bool(true)))
-                    .unwrap_or(false);
+                let summary_only = super::summary::entry_is_summary_only(td);
                 Some(ToolSchema {
                     name,
                     description,
                     params,
-                    compact,
+                    summary_only,
                 })
             }
             _ => None,
@@ -173,7 +192,7 @@ fn collect_provider_declared_tool_schemas(
                     &root,
                     registry,
                 ),
-                compact: false,
+                summary_only: false,
             })
         })
         .collect()

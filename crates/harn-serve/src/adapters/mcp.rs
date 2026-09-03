@@ -17,7 +17,7 @@ use crate::transport::{
 };
 use schema::{
     build_call_request, derived_server_name, paged_result, parse_error_response, request_key,
-    tool_call_error, tool_call_success, tool_entry,
+    tool_call_error, tool_call_success,
 };
 use transport::{http_post_request, notify_channel};
 
@@ -100,6 +100,8 @@ pub struct McpServer {
     server_name: String,
     server_card: Option<JsonValue>,
     catalog: ExportCatalog,
+    tool_catalog: harn_vm::tool_registry::ToolCatalog,
+    mcp_tools: Vec<JsonValue>,
     context: McpContextCatalog,
     auth_policy: AuthPolicy,
     executor: DispatchRuntime,
@@ -206,10 +208,9 @@ struct StreamJob {
     progress_token: Option<JsonValue>,
     request_profile: mcp_protocol::McpRequestProfile,
     context: RequestContext,
-    /// Set when the client asked for a task. The terminal response is then
-    /// filed against this id instead of written to the wire, because the client
-    /// already has its `tools/call` answer and is polling `tasks/get`.
-    task_id: Option<String>,
+    /// Set when the client asked for a task. This lease owns both terminal
+    /// completion and the exact cancellation token installed in dispatch.
+    task: Option<harn_vm::mcp_tasks::McpTaskLease>,
 }
 
 impl McpServer {
@@ -219,6 +220,8 @@ impl McpServer {
             .unwrap_or_else(|| derived_server_name(config.core.catalog()));
         let core = Arc::new(config.core);
         let catalog = core.catalog().clone();
+        let tool_catalog = core.tool_catalog().clone();
+        let mcp_tools = core.mcp_tools().to_vec();
         let context = McpContextCatalog::discover(&catalog.script_path);
         let auth_policy = core.auth_policy().clone();
         Self {
@@ -232,6 +235,8 @@ impl McpServer {
             server_name,
             server_card: config.server_card,
             catalog,
+            tool_catalog,
+            mcp_tools,
             context,
             auth_policy,
             executor: DispatchRuntime::start("MCP", core),
@@ -400,16 +405,23 @@ impl McpServer {
 
         let connection = session.connection();
 
-        if let Err(response) = self
+        let task_access = match self
             .authorize_protocol_method(id.clone(), method, &auth)
             .await
         {
-            return ImmediateResult::Response(response);
-        }
+            Ok(access) => access,
+            Err(response) => return ImmediateResult::Response(response),
+        };
         if let Some(response) =
             mcp_protocol::explicit_unsupported_method_response(id.clone(), method)
         {
             return ImmediateResult::Response(response);
+        }
+        if request_profile.uses_result_envelope()
+            && mcp_protocol::is_task_method(method)
+            && !mcp_protocol::client_supports_tasks(&params)
+        {
+            return ImmediateResult::Response(mcp_protocol::missing_tasks_capability_response(id));
         }
 
         let response = match method {
@@ -422,6 +434,7 @@ impl McpServer {
                 session,
                 connection,
                 auth,
+                task_access,
             ) {
                 Ok((job, Some(immediate))) => {
                     return ImmediateResult::TaskStream {
@@ -432,17 +445,12 @@ impl McpServer {
                 Ok((job, None)) => return ImmediateResult::Stream(Box::new(job)),
                 Err(response) => return ImmediateResult::Response(response),
             },
-            mcp_protocol::METHOD_TASKS_GET => {
-                self.tasks
-                    .handle_get(id, connection.client_identity(), &params)
-            }
+            mcp_protocol::METHOD_TASKS_GET => self.tasks.handle_get(&task_access, id, &params),
             mcp_protocol::METHOD_TASKS_UPDATE => {
-                self.tasks
-                    .handle_update(id, connection.client_identity(), &params)
+                self.tasks.handle_update(&task_access, id, &params)
             }
             mcp_protocol::METHOD_TASKS_CANCEL => {
-                self.tasks
-                    .handle_cancel(id, connection.client_identity(), &params)
+                self.tasks.handle_cancel(&task_access, id, &params)
             }
             "resources/list" => harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
             "resources/read" => self.handle_resources_read(id, &params),
@@ -546,12 +554,12 @@ impl McpServer {
         id: JsonValue,
         method: &str,
         auth: &AuthRequest,
-    ) -> Result<(), JsonValue> {
+    ) -> Result<harn_vm::mcp_tasks::McpTaskAccess, JsonValue> {
         if self.auth_policy.methods.is_empty() || !requires_protocol_auth(method) {
-            return Ok(());
+            return Ok(harn_vm::mcp_tasks::McpTaskAccess::unscoped());
         }
         match self.auth_policy.authorize(auth).await {
-            AuthorizationDecision::Authorized(_) => Ok(()),
+            AuthorizationDecision::Authorized(principal) => Ok(task_access(&principal)),
             AuthorizationDecision::Rejected(message) => {
                 Err(harn_vm::jsonrpc::error_response(id, -32001, &message))
             }
@@ -584,6 +592,7 @@ impl McpServer {
         session: SharedSession,
         connection: mcp_protocol::McpServerSession,
         auth: AuthRequest,
+        task_access: harn_vm::mcp_tasks::McpTaskAccess,
     ) -> Result<(StreamJob, Option<JsonValue>), JsonValue> {
         let tool_name = params
             .get("name")
@@ -614,19 +623,20 @@ impl McpServer {
             .is_some_and(|function| function.job.is_some())
             && mcp_protocol::client_supports_tasks(&params))
         .then(|| {
-            self.tasks.create(
-                connection.client_identity(),
-                Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS),
-            )
-        });
+            self.tasks
+                .begin(task_access, Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS))
+        })
+        .transpose()
+        .map_err(|error| {
+            harn_vm::jsonrpc::error_response(request_id.clone(), -32000, &error.to_string())
+        })?;
         let task_response = task.as_ref().map(|task| {
             harn_vm::mcp_tasks::task_created_response(
                 request_id.clone(),
-                task,
+                task.task(),
                 "The requested Harn job is running as an MCP task.",
             )
         });
-        let task_id = task.map(|task| task.task_id);
         let request_key = request_key(&request_id);
         let job = StreamJob {
             request_id,
@@ -640,7 +650,7 @@ impl McpServer {
                 connection,
                 auth,
             },
-            task_id,
+            task,
         };
         Ok((job, task_response))
     }
@@ -650,7 +660,11 @@ impl McpServer {
         job: StreamJob,
         notify: Arc<dyn Fn(JsonValue) + Send + Sync>,
     ) {
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = job
+            .task
+            .as_ref()
+            .map(harn_vm::mcp_tasks::McpTaskLease::cancel_token)
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let cancelled = Arc::new(AtomicBool::new(false));
         job.context.session.insert_call(
             job.request_key.clone(),
@@ -687,23 +701,31 @@ impl McpServer {
             }
         };
 
-        let result = self.executor.call(request).await;
+        let result = if let Some(task) = job.task.as_ref() {
+            run_until_task_cancelled(task, self.executor.call(request)).await
+        } else {
+            Some(self.executor.call(request).await)
+        };
         job.context.session.remove_call(&job.request_key);
+        let Some(result) = result else {
+            if let Some(task) = job.task {
+                task.cancel();
+            }
+            return;
+        };
+        let execution_cancelled = matches!(&result, Err(DispatchError::Cancelled(_)));
         if cancelled.load(Ordering::SeqCst) {
+            if let Some(task) = job.task {
+                task.cancel();
+            }
             return;
         }
 
         let response = match result {
-            Ok(response) => {
-                let output_schema = self
-                    .catalog
-                    .function(&response.function)
-                    .and_then(|function| function.output_schema.as_ref());
-                harn_vm::jsonrpc::response(
-                    job.request_id,
-                    tool_call_success(response, output_schema),
-                )
-            }
+            Ok(response) => harn_vm::jsonrpc::response(
+                job.request_id,
+                tool_call_success(response, &self.tool_catalog),
+            ),
             Err(DispatchError::Validation(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }
@@ -723,6 +745,13 @@ impl McpServer {
             Err(DispatchError::MissingExport(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }
+            Err(DispatchError::Application(error)) => harn_vm::jsonrpc::response(
+                job.request_id,
+                harn_vm::tool_registry::application_error_mcp_result(&error),
+            ),
+            Err(DispatchError::Contract(error)) => {
+                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.to_string()))
+            }
             Err(DispatchError::Execution(message))
             | Err(DispatchError::Cancelled(message))
             | Err(DispatchError::Io(message))
@@ -735,32 +764,33 @@ impl McpServer {
                 harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message()))
             }
         };
-        let response = if job.request_profile.uses_result_envelope() {
-            envelope(response, None)
-        } else {
-            response
-        };
         // A task call's client is polling `tasks/get`, not reading this stream,
         // so the terminal response is filed rather than written. Progress
         // notifications above still went to the wire: those are addressed by
         // `progressToken`, which is a property of the request and independent
         // of how the result comes back.
-        if let Some(task_id) = job.task_id {
-            self.tasks
-                .complete_with_tool_result(&task_id, task_outcome(response));
+        if let Some(task) = job.task {
+            if execution_cancelled {
+                task.cancel();
+                return;
+            }
+            match task_outcome(response) {
+                Ok(result) => task
+                    .complete_with_tool_result(result, job.request_profile.uses_result_envelope()),
+                Err(error) => task.complete(Err(error), job.request_profile.uses_result_envelope()),
+            }
             return;
         }
+        let response = if job.request_profile.uses_result_envelope() {
+            envelope(response, None)
+        } else {
+            response
+        };
         notify(response);
     }
 
     fn tools_list_result(&self, params: &JsonValue) -> JsonValue {
-        let tools = self
-            .catalog
-            .functions
-            .values()
-            .map(tool_entry)
-            .collect::<Vec<_>>();
-        paged_result("tools", tools, params)
+        paged_result("tools", self.mcp_tools.clone(), params)
     }
 
     fn resources_list_result(&self, params: &JsonValue) -> JsonValue {
@@ -901,6 +931,30 @@ impl McpServer {
     }
 }
 
+/// Await execution while giving an already-observed task cancellation the
+/// deterministic first claim when both futures become ready together.
+async fn run_until_task_cancelled<T>(
+    task: &harn_vm::mcp_tasks::McpTaskLease,
+    execution: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        () = task.cancelled() => None,
+        result = execution => Some(result),
+    }
+}
+
+fn task_access(principal: &crate::AuthenticatedPrincipal) -> harn_vm::mcp_tasks::McpTaskAccess {
+    if principal.is_anonymous() {
+        return harn_vm::mcp_tasks::McpTaskAccess::unscoped();
+    }
+    harn_vm::mcp_tasks::McpTaskAccess::authenticated(
+        principal.scheme.as_str(),
+        principal.subject.as_str(),
+        principal.tenant_id.as_ref().map(|tenant| tenant.0.as_str()),
+    )
+}
+
 /// Render a JSON-RPC request id into a stable string for the obs
 /// ambient `request_id`. Numbers and strings round-trip as-is; `null`
 /// and any other unexpected shape fall back to a fresh `req_*` id so
@@ -956,24 +1010,18 @@ fn forbidden_jsonrpc_error_response(
 
 /// Reduce a finished JSON-RPC response to the MCP result the task store files.
 ///
-/// A JSON-RPC `error` and a `result` with `isError` are the two ways this
-/// transport reports a failure; a client reading `tasks/get` should not have to
-/// know which one the tool hit, so the error shape is normalized into the
-/// `isError` result the store already understands.
-fn task_outcome(response: JsonValue) -> JsonValue {
+/// A JSON-RPC `error` means the request failed before it produced a tool
+/// result, so the task itself fails. A `result` with `isError` is still a
+/// completed tool result and is preserved intact by the task store.
+fn task_outcome(response: JsonValue) -> Result<JsonValue, String> {
     if let Some(error) = response.get("error") {
-        return json!({
-            "content": [{
-                "type": "text",
-                "text": error
-                    .get("message")
-                    .and_then(JsonValue::as_str)
-                    .unwrap_or("Tool execution failed"),
-            }],
-            "isError": true,
-        });
+        return Err(error
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("Tool execution failed")
+            .to_string());
     }
-    response.get("result").cloned().unwrap_or(json!({}))
+    Ok(response.get("result").cloned().unwrap_or(json!({})))
 }
 
 fn requires_protocol_auth(method: &str) -> bool {

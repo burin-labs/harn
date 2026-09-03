@@ -55,17 +55,21 @@ target_dir=""
 publishable_crates=()
 publishable_package_rows=()
 packaged_workspace_rows=()
+dependency_contract_rows=()
 
-while IFS=$'\t' read -r row_kind package_name package_version manifest_path crate_dir; do
+while IFS=$'\t' read -r row_kind field1 field2 field3 field4 field5 field6; do
   case "$row_kind" in
     "")
       ;;
     target_directory)
-      target_dir="$package_name"
+      target_dir="$field1"
       ;;
     package)
-      publishable_crates+=("$package_name")
-      publishable_package_rows+=("$package_name"$'\t'"$package_version"$'\t'"$manifest_path"$'\t'"$crate_dir")
+      publishable_crates+=("$field1")
+      publishable_package_rows+=("$field1"$'\t'"$field2"$'\t'"$field3"$'\t'"$field4")
+      ;;
+    dependency_contract)
+      dependency_contract_rows+=("$field1"$'\t'"$field2"$'\t'"$field3"$'\t'"$field4"$'\t'"$field5"$'\t'"$field6")
       ;;
     *)
       echo "error: unknown verify_crate_packages_plan row kind: $row_kind" >&2
@@ -109,6 +113,74 @@ package_version() {
   return 1
 }
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+    return
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+    return
+  fi
+  echo "error: sha256sum or shasum is required for packaged-crate receipts" >&2
+  return 1
+}
+
+resolved_dependency_version() {
+  local metadata_path="$1"
+  local package="$2"
+  local package_version="$3"
+  local resolution_name="$4"
+  jq -er \
+    --arg package "$package" \
+    --arg package_version "$package_version" \
+    --arg resolution_name "$resolution_name" \
+    -f "$ROOT_DIR/scripts/verify_crate_dependency_resolution.jq" \
+    "$metadata_path"
+}
+
+emit_dependency_resolution_receipts() {
+  local phase="$1"
+  local metadata_path="$2"
+  local require_minimum="$3"
+  local row package package_version dependency requirement minimum resolution_name resolved
+  for row in "${dependency_contract_rows[@]}"; do
+    IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
+    resolved="$(resolved_dependency_version \
+      "$metadata_path" "$package" "$package_version" "$resolution_name")"
+    if [[ "$require_minimum" == "1" && "$resolved" != "$minimum" ]]; then
+      echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
+      return 1
+    fi
+    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s resolved=%s\n' \
+      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$resolved"
+  done
+}
+
+select_dependency_minimums() {
+  local row _package _package_version dependency _requirement minimum _resolution_name
+  local selected=()
+  local entry selected_dependency selected_minimum found
+  for row in "${dependency_contract_rows[@]}"; do
+    IFS=$'\t' read -r _package _package_version dependency _requirement minimum _resolution_name <<<"$row"
+    found=0
+    for entry in "${selected[@]}"; do
+      IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
+      if [[ "$selected_dependency" == "$dependency" ]]; then
+        found=1
+        if [[ "$selected_minimum" != "$minimum" ]]; then
+          echo "error: dependency contracts disagree on minimum for $dependency: $selected_minimum vs $minimum" >&2
+          return 1
+        fi
+      fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+      selected+=("$dependency"$'\t'"$minimum")
+    fi
+  done
+  printf '%s\n' "${selected[@]}"
+}
+
 stdlib_version="$(package_version harn-stdlib)"
 modules_version="$(package_version harn-modules)"
 vm_version="$(package_version harn-vm)"
@@ -136,6 +208,8 @@ extract_package() {
     echo "error: expected package archive missing: $crate_archive" >&2
     exit 1
   fi
+  printf 'packaged_crate package=%s@%s archive=%s sha256=%s\n' \
+    "$crate" "$version" "$crate_archive" "$(sha256_file "$crate_archive")"
   rm -rf "$tmp/$crate-$version"
   tar -xzf "$crate_archive" -C "$tmp"
   inspect_packaged_includes "$tmp/$crate-$version" "$crate"
@@ -145,6 +219,9 @@ extract_package() {
 check_packaged_workspace() {
   local workspace_manifest="$tmp/Cargo.toml"
   local row crate package_dir package_rel
+  local resolver_metadata="$tmp/resolver-latest-metadata.json"
+  local minimum_metadata="$tmp/declared-minimum-metadata.json"
+  local dependency minimum minimum_rows
 
   # Cargo's normalized package manifests have workspace inheritance and path
   # dependencies removed. Reassemble those exact registry candidates into one
@@ -166,11 +243,34 @@ check_packaged_workspace() {
     done
   } >"$workspace_manifest"
 
-  echo "=== Check all extracted publishable packages together ==="
+  echo "=== Check all extracted publishable packages with resolver-latest dependencies ==="
   HARN_REQUIRE_CLI_AOT=1 \
     CARGO_TARGET_DIR="$package_check_target_dir" \
     CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
     cargo check --workspace --manifest-path "$workspace_manifest"
+
+  cargo metadata --locked --format-version 1 --manifest-path "$workspace_manifest" \
+    >"$resolver_metadata"
+  emit_dependency_resolution_receipts resolver-latest "$resolver_metadata" 0
+
+  if [[ "${#dependency_contract_rows[@]}" -eq 0 ]]; then
+    return
+  fi
+
+  minimum_rows="$(select_dependency_minimums)"
+  while IFS=$'\t' read -r dependency minimum; do
+    [[ -n "$dependency" ]] || continue
+    cargo update --manifest-path "$workspace_manifest" -p "$dependency" --precise "$minimum"
+  done <<<"$minimum_rows"
+
+  echo "=== Check all extracted publishable packages with declared-minimum dependencies ==="
+  HARN_REQUIRE_CLI_AOT=1 \
+    CARGO_TARGET_DIR="$package_check_target_dir" \
+    CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
+    cargo check --locked --workspace --manifest-path "$workspace_manifest"
+  cargo metadata --locked --format-version 1 --manifest-path "$workspace_manifest" \
+    >"$minimum_metadata"
+  emit_dependency_resolution_receipts declared-minimum "$minimum_metadata" 1
 }
 
 package_and_inspect_no_verify() {

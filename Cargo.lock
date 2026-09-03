@@ -2582,6 +2582,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
 name = "ecb"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3387,7 +3393,7 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-macros"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3398,18 +3404,18 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-meta"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 
 [[package]]
 name = "harn-builtin-registry"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
 ]
 
 [[package]]
 name = "harn-capability-contracts"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-macros",
  "harn-builtin-meta",
@@ -3420,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3507,7 +3513,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli-aot-gen"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-modules",
  "harn-parser",
@@ -3522,7 +3528,7 @@ dependencies = [
 
 [[package]]
 name = "harn-clock"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -3533,7 +3539,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "arcstr",
  "harn-modules",
@@ -3548,14 +3554,14 @@ dependencies = [
 
 [[package]]
 name = "harn-flock"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-fmt"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -3574,14 +3580,14 @@ dependencies = [
 
 [[package]]
 name = "harn-glob"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "globset",
 ]
 
 [[package]]
 name = "harn-guard"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-vm",
  "ort",
@@ -3595,7 +3601,7 @@ dependencies = [
 
 [[package]]
 name = "harn-hostlib"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3670,7 +3676,7 @@ dependencies = [
 
 [[package]]
 name = "harn-ir"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3681,7 +3687,7 @@ dependencies = [
 
 [[package]]
 name = "harn-kernel"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "arcstr",
  "blake3",
@@ -3700,14 +3706,14 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "harn-lint"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -3733,7 +3739,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-capability-contracts",
@@ -3758,7 +3764,7 @@ dependencies = [
 
 [[package]]
 name = "harn-mcp-compat"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "axum",
  "harn-serve",
@@ -3773,7 +3779,7 @@ dependencies = [
 
 [[package]]
 name = "harn-modules"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "blake3",
  "croner",
@@ -3791,7 +3797,7 @@ dependencies = [
 
 [[package]]
 name = "harn-opcode-macros"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3811,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3834,7 +3840,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-hostlib",
  "regex",
@@ -3849,7 +3855,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules-hostlib"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -3864,11 +3870,11 @@ dependencies = [
 
 [[package]]
 name = "harn-secret-catalog"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 
 [[package]]
 name = "harn-serve"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "arcstr",
  "async-compression",
@@ -3916,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "harn-session-store"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -3937,14 +3943,14 @@ dependencies = [
 
 [[package]]
 name = "harn-skills"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-sqlite"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-flock",
  "rusqlite",
@@ -3954,11 +3960,11 @@ dependencies = [
 
 [[package]]
 name = "harn-stdlib"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 
 [[package]]
 name = "harn-terminal"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "portable-pty",
  "serde",
@@ -3968,7 +3974,7 @@ dependencies = [
 
 [[package]]
 name = "harn-test-runner"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-lexer",
  "harn-modules",
@@ -3980,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "harn-vm"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "aes-gcm",
  "apple-native-keyring-store",
@@ -4056,6 +4062,7 @@ dependencies = [
  "rusqlite",
  "rust_decimal",
  "rustls",
+ "schemars",
  "scraper",
  "seccompiler",
  "security-framework",
@@ -4093,6 +4100,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-powershell",
+ "ts-rs",
  "unicode-normalization",
  "unicode-segmentation",
  "unicode-width",
@@ -4125,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "harn-wasm"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "harn-kernel",
  "serde_json",
@@ -7600,6 +7608,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "schemars"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 3.0.4",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7736,6 +7769,17 @@ name = "serde_derive"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9108,7 +9152,7 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-harn"
-version = "0.10.126-dev"
+version = "0.10.128-dev"
 dependencies = [
  "cc",
  "serde_json",
@@ -9337,6 +9381,29 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "ts-rs"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756050066659291d47a554a9f558125db17428b073c5ffce1daf5dcb0f7231d8"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.20",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d90eea51bc7988ef9e674bf80a85ba6804739e535e9cab48e4bb34a8b652aa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "termcolor",
+]
 
 [[package]]
 name = "tungstenite"

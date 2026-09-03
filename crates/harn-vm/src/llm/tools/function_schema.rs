@@ -19,12 +19,17 @@ use super::params::ToolParamSchema;
 use super::type_expr::{ObjectField, TypeExpr};
 
 /// Convert one canonical tool schema into an OpenAI-style function schema.
+///
+/// A `compact` tool projects the description it was *served*, not the full
+/// text the catalog row stores. Projecting the full text would reintroduce
+/// exactly the drift this module exists to prevent, one layer down: a corpus
+/// teaching a description the model never read.
 pub(crate) fn tool_schema_to_function_schema(tool: &ToolSchema) -> Value {
     serde_json::json!({
         "type": "function",
         "function": {
             "name": tool.name,
-            "description": tool.description,
+            "description": tool.served_description(),
             "parameters": params_to_json_schema(&tool.params),
         },
     })
@@ -230,7 +235,7 @@ mod tests {
                 default: None,
                 examples: Vec::new(),
             }],
-            compact: false,
+            summary_only: false,
         };
         let row = serde_json::to_value(&tool).unwrap();
         let rendered = function_schema_from_catalog_row(&row).expect("catalog row converts");

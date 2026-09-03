@@ -638,9 +638,12 @@ Available strategies:
 
 Compaction emits `TranscriptCompacted` live events and transcript
 `compaction` events with `reason`, `strategy`, `engine_strategy`,
-`estimated_tokens_before`, `estimated_tokens_after`, `instruction_mode`,
-`instruction_source`, and `compaction_policy`, so replay tools can verify which
-trigger, policy, and host/user instruction lane ran.
+`requested_strategy`, `resolved_threshold_tokens`, `threshold_source`,
+`hard_limit_tokens`, `source_measurement`, `estimated_tokens_before`,
+`estimated_tokens_after`, `instruction_mode`, `instruction_source`, and
+`compaction_policy`, so replay tools can verify which trigger, policy, engine,
+and host/user instruction lane ran. `source_measurement: nil` means the path did
+not measure source or summary bytes; contained zeroes are measured zeroes.
 
 Hosts can attach first-class compaction instructions without building custom
 prompt concatenation. The typed `CompactionPolicy` shape accepts

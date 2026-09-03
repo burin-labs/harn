@@ -80,7 +80,8 @@ admission. The VM bounds the complete checkpoint operation, including local
 setup and response parsing.
 
 `harn.completion_judge_evidence_projection.v1` records what evidence entered
-the request. `harn.completion_directive_receipt.v1` records the final action,
+the request, including how many read-only calls carried a record in the
+packet's `research_summary` and how many did not. `harn.completion_directive_receipt.v1` records the final action,
 reason, admission result, and whether repair feedback reached the next turn.
 `evidence_id` and transcript digests correlate these records and reveal changed
 input; they never substitute for a new judgment.

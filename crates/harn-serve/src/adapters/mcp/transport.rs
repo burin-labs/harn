@@ -1,6 +1,6 @@
 //! HTTP and SSE transport routing for MCP.
 use super::auth::{
-    attach_http_headers, should_stream_post_response, validate_origin, validate_protocol_header,
+    attach_http_headers, should_stream_post_response, validate_origin,
     validate_standard_routing_headers,
 };
 use super::schema::parse_error_response;
@@ -15,10 +15,6 @@ pub(super) async fn http_post_request(
     if let Err(response) = validate_origin(&headers) {
         return *response;
     }
-    if let Err(response) = validate_protocol_header(&headers) {
-        return *response;
-    }
-
     let request = match serde_json::from_slice::<JsonValue>(body.as_ref()) {
         Ok(value) => value,
         Err(error) => {
@@ -29,12 +25,11 @@ pub(super) async fn http_post_request(
                 .into_response()
         }
     };
-    // stable Streamable HTTP cross-checks the routing headers against the
-    // JSON-RPC body so a fuzzed or spoofed peer can't smuggle a tools/call
-    // past a header-only audit. A mismatch is `-32020`; we ship it as a
-    // 200 with the JSON-RPC body so the client sees the diagnostic.
+    // Stable Streamable HTTP cross-checks required routing headers against the
+    // JSON-RPC body before dispatch. Protocol validation failures are HTTP 400
+    // while retaining their structured JSON-RPC diagnostic.
     if let Err(error_body) = validate_standard_routing_headers(&headers, &request) {
-        let mut http = Json(error_body).into_response();
+        let mut http = (StatusCode::BAD_REQUEST, Json(error_body)).into_response();
         attach_http_headers(&mut http, MCP_PROTOCOL_VERSION);
         return http;
     }
@@ -45,7 +40,9 @@ pub(super) async fn http_post_request(
     match state.server.process_message(request, session, auth).await {
         ImmediateResult::Accepted => StatusCode::ACCEPTED.into_response(),
         ImmediateResult::Response(response) => {
-            let mut http = if should_stream_post_response(&headers) {
+            let mut http = if mcp_protocol::requires_http_bad_request(&response) {
+                (StatusCode::BAD_REQUEST, Json(response)).into_response()
+            } else if should_stream_post_response(&headers) {
                 sse_single_response(response).into_response()
             } else {
                 Json(response).into_response()
