@@ -104,10 +104,24 @@ mod tests {
             serde_json::json!({"ok": false})
         );
 
+        // A plain dict keeps its legacy *rendering*, which is what #6508
+        // protects. harn#7884 narrowed the claim from the payload's type to
+        // that rendering: a dict declaring a boolean outcome now travels in
+        // the text envelope so the classifier can still read the boolean, and
+        // the envelope renders to the identical display string.
         let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": false}));
-        assert!(
-            harn_handler_result_value(&ordinary).is_string(),
+        assert_eq!(
+            render_tool_result(&harn_handler_result_value(&ordinary)),
+            ordinary.display(),
             "plain dictionaries retain legacy display rendering"
+        );
+
+        // A dict declaring no outcome has nothing to carry and stays a bare
+        // display string, exactly as #6508 left it.
+        let unmarked = crate::stdlib::json_to_vm_value(&serde_json::json!({"stdout": "done"}));
+        assert!(
+            harn_handler_result_value(&unmarked).is_string(),
+            "a dict declaring no outcome keeps the bare display payload"
         );
     }
 }
