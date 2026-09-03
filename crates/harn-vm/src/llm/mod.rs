@@ -25,6 +25,7 @@ pub fn capability_snapshot_id(snapshot: &serde_json::Value) -> String {
 pub(crate) mod acp_permission;
 mod agent_config;
 mod agent_host_primitives;
+mod agent_host_tool_dispatch;
 pub(crate) mod agent_observe;
 mod agent_result_projection;
 mod agent_runtime;
