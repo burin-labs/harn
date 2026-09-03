@@ -2875,4 +2875,6 @@ mod session_scope_tests;
 #[cfg(test)]
 mod side_effect_ceiling_tests;
 #[cfg(test)]
+mod tool_failure_recording_tests;
+#[cfg(test)]
 mod tool_output_truncation_tests;
