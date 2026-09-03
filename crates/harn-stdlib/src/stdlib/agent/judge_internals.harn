@@ -1035,15 +1035,15 @@ const __COMPLETION_JUDGE_ERROR_ATTEMPTS: int = 2
  */
 pub fn __judge_checkpoint_unavailable(checkpoint: dict) -> bool {
   return checkpoint?.status == "admission_refused"
-    // A missing setting never becomes present on a retry, and a bounded
-    // retry loop that treats it as readable spends three refusals to reach
-    // the same answer.
     || checkpoint?.status == "model_unconfigured"
     || checkpoint?.status == "timeout"
     || checkpoint?.error_category == "timeout"
     || checkpoint?.error?.status == "timeout"
 }
 
+// A missing setting never becomes present on a retry, and a bounded
+// retry loop that treats it as readable spends three refusals to reach
+// the same answer.
 /**
  * Run a judge checkpoint, retrying a reply that could not be read up to a fixed
  * bound.

@@ -17,6 +17,7 @@ import { AgentSpec } from "std/agent/options"
 import { assert_false, llm_text, with_llm_script } from "std/testing"
 
 const ACTOR_MODEL = "actor-model-7937"
+
 const JUDGE_MODEL = "judge-model-7937"
 
 fn admissions(events: any) -> list {
