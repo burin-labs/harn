@@ -19,52 +19,6 @@ pub(super) fn carries_typed_outcome(
         })
 }
 
-/// The boolean outcome fields a handler's return declares, if any.
-///
-/// These are exactly the boolean signals `ok_result_failure_category` reads. A
-/// failure `status` string is deliberately not among them: keying off any
-/// `status` key would capture every dict that merely reports progress, so a
-/// dict whose only failure signal is `status: "error"` keeps the plain display
-/// path and stays misclassified. That residual is tracked on harn#7884.
-pub(super) fn declared_outcome_flags(
-    value: &serde_json::Value,
-) -> Option<Vec<(&'static str, bool)>> {
-    let object = value.as_object()?;
-    let flags: Vec<(&'static str, bool)> = ["ok", "success", "isError"]
-        .into_iter()
-        .filter_map(|key| {
-            object
-                .get(key)
-                .and_then(serde_json::Value::as_bool)
-                .map(|flag| (key, flag))
-        })
-        .collect();
-    (!flags.is_empty()).then_some(flags)
-}
-
-/// Wrap a handler's display rendering in the existing text envelope, carrying
-/// the declared boolean outcome alongside it.
-///
-/// `render_tool_result` returns an envelope's `text` verbatim, so the rendered
-/// transcript string is byte-identical to the bare display string this
-/// replaces. Only the classifier's view changes: it now sees a parseable
-/// object carrying the boolean the handler declared.
-pub(super) fn text_envelope_with_outcome(
-    display: String,
-    flags: Vec<(&'static str, bool)>,
-) -> serde_json::Value {
-    let mut object = serde_json::Map::new();
-    object.insert(
-        "schema".to_string(),
-        serde_json::Value::String("harn.agent_tool_handler_result.v1".to_string()),
-    );
-    object.insert("text".to_string(), serde_json::Value::String(display));
-    for (key, flag) in flags {
-        object.insert(key.to_string(), serde_json::Value::Bool(flag));
-    }
-    serde_json::Value::Object(object)
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::{harn_handler_result_value, render_tool_result};
@@ -104,24 +58,10 @@ mod tests {
             serde_json::json!({"ok": false})
         );
 
-        // A plain dict keeps its legacy *rendering*, which is what #6508
-        // protects. harn#7884 narrowed the claim from the payload's type to
-        // that rendering: a dict declaring a boolean outcome now travels in
-        // the text envelope so the classifier can still read the boolean, and
-        // the envelope renders to the identical display string.
         let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": false}));
-        assert_eq!(
-            render_tool_result(&harn_handler_result_value(&ordinary)),
-            ordinary.display(),
-            "plain dictionaries retain legacy display rendering"
-        );
-
-        // A dict declaring no outcome has nothing to carry and stays a bare
-        // display string, exactly as #6508 left it.
-        let unmarked = crate::stdlib::json_to_vm_value(&serde_json::json!({"stdout": "done"}));
         assert!(
-            harn_handler_result_value(&unmarked).is_string(),
-            "a dict declaring no outcome keeps the bare display payload"
+            harn_handler_result_value(&ordinary).is_string(),
+            "plain dictionaries retain legacy display rendering"
         );
     }
 }

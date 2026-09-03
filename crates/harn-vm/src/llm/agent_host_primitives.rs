@@ -1491,6 +1491,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             category: crate::value::ErrorCategory::Cancelled,
                         }),
                         executor: None,
+                        declared_failure: None,
                     },
                     true,
                 ),
@@ -1598,10 +1599,15 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // wasn't already thrown). Surface those as a failure instead of
             // laundering them into `ok:true` — the agent loop reads `ok`/`status`
             // to decide whether the tool succeeded.
+            // `declared_failure` was read off the handler's structured return
+            // before the display coercion rendered it to text. Prefer it: for a
+            // dict-returning handler the coerced payload is a display string
+            // that no longer parses, so classifying `raw_result` alone silently
+            // reported every such refusal as a success (harn#7884).
             let body_failure = if denied {
                 None
             } else {
-                agent_tools::ok_result_failure_category(&raw_result)
+                declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
             };
             let is_failure = denied || body_failure.is_some();
             let error_category = if denied {
