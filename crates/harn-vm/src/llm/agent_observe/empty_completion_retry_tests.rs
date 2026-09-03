@@ -1005,7 +1005,7 @@ fn a_discarded_empty_attempt_reaches_the_ledger_with_a_typed_reason() {
         );
         assert_eq!(
             retried.unpriced_reason,
-            Some(crate::llm::usage::UnpricedReason::NoPriceTable),
+            Some(crate::llm::usage::UnpricedReason::PricingUnknown),
             "this route has no price table, which is why nothing here is priced"
         );
         assert_eq!(

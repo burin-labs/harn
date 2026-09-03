@@ -295,6 +295,10 @@ pub struct Vm {
     pub(crate) exception_handlers: Vec<ExceptionHandler>,
     /// Spawned async task handles.
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    /// Force-cancelled tasks whose durable agent terminalization failed.
+    /// The public handle remains a retry key even though its join handle has
+    /// already stopped.
+    pub(crate) pending_task_cleanups: BTreeMap<String, super::PendingTaskCleanup>,
     /// Shared terminal process-exit latch for this execution tree.
     pub(crate) process_exit_request: Arc<ProcessExitRequest>,
     /// Shared process-local synchronization primitives inherited by child VMs.
@@ -566,6 +570,7 @@ impl VmBaseline {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            pending_task_cleanups: BTreeMap::new(),
             process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
@@ -841,6 +846,7 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            pending_task_cleanups: BTreeMap::new(),
             process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
@@ -1127,6 +1133,7 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            pending_task_cleanups: BTreeMap::new(),
             process_exit_request: Arc::clone(&self.process_exit_request),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
@@ -1233,17 +1240,6 @@ impl Vm {
 
     pub(crate) fn requested_process_exit(&self) -> Option<i32> {
         self.process_exit_request.code()
-    }
-
-    /// Request cancellation for every outstanding child task owned by this VM
-    /// and then abort the join handles. This prevents un-awaited spawned tasks
-    /// from outliving their parent execution scope.
-    pub(crate) fn cancel_spawned_tasks(&mut self) {
-        for (_, task) in std::mem::take(&mut self.spawned_tasks) {
-            task.cancel_token
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            task.handle.abort();
-        }
     }
 
     /// Set the source directory for import resolution and introspection.
@@ -1414,9 +1410,7 @@ impl Vm {
                 let scope = self.task_scopes.remove(i);
                 for id in &scope.task_ids {
                     if let Some(task) = self.spawned_tasks.remove(id) {
-                        task.cancel_token
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
-                        task.handle.abort();
+                        super::ops::abort_task_detached(task, self.agent_cleanup_runtimes());
                     }
                 }
             } else {

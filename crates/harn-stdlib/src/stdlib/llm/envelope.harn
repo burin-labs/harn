@@ -82,7 +82,10 @@ pub type LlmUsage = {
   unpriced_calls: int,
   /* Tokens the unpriced attempts did report, which is what bounds them. */
   unpriced_tokens: int,
-  /* One of no_price_table, usage_unreported, no_response, or mixed. */
+  /*
+   * One of pricing_unknown, usage_unreported, no_response, or mixed. The
+   * same field name and vocabulary std/llm/economics uses.
+   */
   unpriced_reason?: string,
   usage_unknown_calls: int,
   cache_read_tokens: int,

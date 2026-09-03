@@ -748,7 +748,7 @@ fn context_profile_fragments_join_prompt_explain_provenance() {
 fn context_manifest_carries_the_current_delegated_actor_chain() {
     crate::reset_thread_local_state();
     let chain = crate::ActorChain::new("user:test-owner").pushed("agent:reviewer");
-    let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
+    let session_id = crate::agent_sessions::open_or_create_with_actor_chain_for_test(
         Some("context-manifest-actor-chain".to_string()),
         Some(chain.clone()),
     );

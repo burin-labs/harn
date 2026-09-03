@@ -21,7 +21,8 @@
 mod arithmetic;
 mod call;
 mod call_named;
-mod call_support;
+pub(super) mod call_support;
+pub(crate) use call_support::abort_task_detached;
 mod collections;
 mod comparison;
 mod control_flow;

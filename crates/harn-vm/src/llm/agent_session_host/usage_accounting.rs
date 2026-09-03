@@ -66,6 +66,7 @@ pub(super) struct SessionUsageTotals {
     pub(super) output_tokens: i64,
     pub(super) cache_read_tokens: i64,
     pub(super) cache_write_tokens: i64,
+    pub(super) provider_call_count: i64,
     pub(super) unpriced_calls: i64,
     pub(super) usage_unknown_calls: i64,
     pub(super) priced_calls: i64,
@@ -82,6 +83,7 @@ impl From<&AgentHostSession> for SessionUsageTotals {
             output_tokens: session.output_tokens,
             cache_read_tokens: session.cache_read_tokens,
             cache_write_tokens: session.cache_write_tokens,
+            provider_call_count: session.provider_call_count,
             unpriced_calls: session.unpriced_calls,
             usage_unknown_calls: session.usage_unknown_calls,
             priced_calls: session.priced_calls,
@@ -154,6 +156,10 @@ impl SessionUsageTotals {
         out.insert(
             crate::value::intern_key("usage_unknown_calls"),
             VmValue::Int(self.usage_unknown_calls),
+        );
+        out.insert(
+            crate::value::intern_key("provider_call_count"),
+            VmValue::Int(self.provider_call_count),
         );
         VmValue::dict(out)
     }

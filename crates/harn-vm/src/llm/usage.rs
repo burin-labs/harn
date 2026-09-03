@@ -50,9 +50,13 @@ impl UsageAccountingStatus {
 /// while a route with no price table has none at any token count.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// One vocabulary, shared with `std/llm/economics`, which already emits
+/// `pricing_unknown` and `cache_read_rate_unknown` on the same field name for
+/// the price-table side of the same question. These add the usage side.
 pub enum UnpricedReason {
     /// The route has no entry in the price table, so no token count bounds it.
-    NoPriceTable,
+    /// Named to match `economics.harn`, which emits this for the same cause.
+    PricingUnknown,
     /// The route is priced but the attempt reported no usable token counts.
     UsageUnreported,
     /// The attempt produced no response at all, so neither a token count nor
@@ -66,7 +70,7 @@ pub enum UnpricedReason {
 impl UnpricedReason {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::NoPriceTable => "no_price_table",
+            Self::PricingUnknown => "pricing_unknown",
             Self::UsageUnreported => "usage_unreported",
             Self::NoResponse => "no_response",
             Self::Mixed => "mixed",
@@ -259,7 +263,7 @@ fn unpriced_projection(
     match (cost_usd, table_cost) {
         (Some(cost), _) => (None, Some(cost)),
         (None, Some(bound)) => (Some(UnpricedReason::UsageUnreported), Some(bound)),
-        (None, None) => (Some(UnpricedReason::NoPriceTable), None),
+        (None, None) => (Some(UnpricedReason::PricingUnknown), None),
     }
 }
 
@@ -531,7 +535,7 @@ impl LlmUsage {
             unpriced_tokens: unpriced_token_count(cost_usd, input_tokens, output_tokens),
             // A probe reports its own counts, so an unpriced probe is unpriced
             // because the route has no price table.
-            unpriced_reason: cost_usd.is_none().then_some(UnpricedReason::NoPriceTable),
+            unpriced_reason: cost_usd.is_none().then_some(UnpricedReason::PricingUnknown),
             projected_cost_usd: cost_usd,
         }
     }

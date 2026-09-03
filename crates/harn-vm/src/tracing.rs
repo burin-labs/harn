@@ -1200,7 +1200,7 @@ mod tests {
             unpriced_calls: 1,
             usage_unknown_calls: 0,
             unpriced_tokens: 6,
-            unpriced_reason: Some(crate::llm::usage::UnpricedReason::NoPriceTable),
+            unpriced_reason: Some(crate::llm::usage::UnpricedReason::PricingUnknown),
             projected_cost_usd: None,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage

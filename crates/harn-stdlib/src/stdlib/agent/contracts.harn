@@ -229,6 +229,7 @@ pub type AgentResult = {
   known_cost_usd: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
+  provider_call_count: int,
   session_id: string,
   run_id: string,
   started_at: string,
@@ -237,3 +238,25 @@ pub type AgentResult = {
   daemon_snapshot_path: any,
   ...rest,
 }
+
+/** Exact retained-run receipt for retrying a failed terminal persistence write. */
+pub type AgentFinalizationRetry = {
+  kind: "agent_session_finalize",
+  session_id: string,
+  run_id: string,
+}
+
+/** Additive error envelope for an agent loop that aborts by throwing. */
+pub type AgentLoopTerminalError = {
+  kind: string,
+  category: string,
+  reason: string,
+  message: string,
+  cause: unknown,
+  provider_call_count: int?,
+  retry: AgentFinalizationRetry?,
+  ...rest,
+}
+// Nil means the session ledger itself was unavailable. A measured zero is
+// always the integer 0, so consumers cannot confuse missing measurement
+// with a request that was refused before dispatch.
