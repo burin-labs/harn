@@ -80,6 +80,7 @@ pub(super) fn test_equivalent_model_with_context(
         blurb: None,
         provider: provider.to_string(),
         context_window,
+        reasoning_modes: Vec::new(),
         logical_model: None,
         equivalence_group: Some(group.to_string()),
         served_variant: None,

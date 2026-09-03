@@ -147,6 +147,18 @@ impl OpenAiResponsesProvider {
         if let Some(reasoning) = responses_reasoning_config(&opts.thinking) {
             body["reasoning"] = reasoning;
         }
+        // Must run AFTER the effort config above: pro mode shares the
+        // `reasoning` object with `effort`, and the knob merges into whatever
+        // is already there. Running it first would let the effort assignment
+        // overwrite the mode. A no-op unless the caller asked for a
+        // catalog-declared mode, so it is safe to call unconditionally — and
+        // it still fires when effort is absent, which is the single-shot
+        // oracle shape (mode without an explicit rung).
+        crate::llm::reasoning_modes::apply_request_knob(
+            &mut body,
+            &opts.model,
+            opts.reasoning_mode.as_deref(),
+        );
         match &opts.output_format {
             OutputFormat::Text => {}
             OutputFormat::JsonObject => {
@@ -579,6 +591,56 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 mod tests {
     use super::*;
     use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
+
+    /// The canonical product path for pro mode: the real Responses body
+    /// builder must emit `reasoning.mode` BESIDE the caller's effort, not
+    /// instead of it. Anything less means a caller who opted into a
+    /// several-times-more-expensive mode either loses their effort rung or
+    /// silently pays standard-mode prices for standard-mode work.
+    #[test]
+    fn responses_body_carries_pro_reasoning_mode_beside_effort() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.6-sol".to_string();
+        opts.thinking = crate::llm::api::ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::High,
+        };
+        opts.reasoning_mode = Some("pro".to_string());
+        let body = OpenAiResponsesProvider::build_request_body(&LlmRequestPayload::from(&opts));
+        assert_eq!(body["reasoning"]["mode"], "pro");
+        assert_eq!(
+            body["reasoning"]["effort"], "high",
+            "pro mode must not clobber the requested effort rung"
+        );
+    }
+
+    /// Negative control for the test above. Without it, an implementation
+    /// that inserted `mode: "pro"` unconditionally would look identical.
+    #[test]
+    fn responses_body_omits_reasoning_mode_when_none_requested() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.6-sol".to_string();
+        opts.thinking = crate::llm::api::ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::High,
+        };
+        let body = OpenAiResponsesProvider::build_request_body(&LlmRequestPayload::from(&opts));
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert!(
+            body["reasoning"].get("mode").is_none(),
+            "a request that did not ask for a mode must not carry one"
+        );
+    }
+
+    /// Pro mode without an explicit rung is the single-shot oracle shape.
+    /// `responses_reasoning_config` returns `None` there, so the mode has to
+    /// create the `reasoning` object itself rather than being dropped.
+    #[test]
+    fn responses_body_carries_pro_mode_without_an_explicit_effort() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.6-sol".to_string();
+        opts.reasoning_mode = Some("pro".to_string());
+        let body = OpenAiResponsesProvider::build_request_body(&LlmRequestPayload::from(&opts));
+        assert_eq!(body["reasoning"]["mode"], "pro");
+    }
 
     fn tool_search_native_tools() -> Vec<serde_json::Value> {
         vec![

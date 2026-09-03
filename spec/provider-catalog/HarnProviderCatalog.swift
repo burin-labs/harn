@@ -315,6 +315,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let benchmarks: [String: Double]
     /// Non-default synchronous serving tiers such as fast, priority, or flex.
     public let servingTiers: [HarnModelServingTier]
+    public let reasoningModes: [HarnModelReasoningMode]
     /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
     public let released: String?
     /// `"snapshot"` for a pinned dated id, `"selector"` for an undated moving target.
@@ -367,6 +368,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case strengths
         case benchmarks
         case servingTiers = "serving_tiers"
+        case reasoningModes = "reasoning_modes"
         case released
         case rowKind = "row_kind"
         case currentSnapshot = "current_snapshot"
@@ -416,6 +418,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
         servingTiers = try container.decodeIfPresent([HarnModelServingTier].self, forKey: .servingTiers) ?? []
+        reasoningModes = try container.decodeIfPresent([HarnModelReasoningMode].self, forKey: .reasoningModes) ?? []
         released = try container.decodeIfPresent(String.self, forKey: .released)
         rowKind = try container.decodeIfPresent(String.self, forKey: .rowKind)
         currentSnapshot = try container.decodeIfPresent(String.self, forKey: .currentSnapshot)
@@ -741,6 +744,58 @@ public struct HarnCompletionReview: Codable, Sendable, Equatable {
         scrutiny = try container.decodeIfPresent(String.self, forKey: .scrutiny) ?? "standard"
         maxJudgeCalls = try container.decodeIfPresent(Int.self, forKey: .maxJudgeCalls)
         evidence = try container.decode(String.self, forKey: .evidence)
+    }
+}
+
+public struct HarnModelReasoningModeRequest: Codable, Sendable, Equatable {
+    public let paramPath: [String]
+    public let value: String
+    public let responseValues: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case paramPath = "param_path"
+        case value
+        case responseValues = "response_values"
+    }
+}
+
+public struct HarnModelReasoningMode: Codable, Sendable, Equatable {
+    public let id: String
+    public let label: String?
+    public let economics: String
+    public let request: HarnModelReasoningModeRequest?
+    public let tokenMultiplier: Double?
+    public let status: String?
+    public let latency: String?
+    public let suitableWorkloads: [String]
+    public let unsuitableWorkloads: [String]
+    public let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case economics
+        case request
+        case tokenMultiplier = "token_multiplier"
+        case status
+        case latency
+        case suitableWorkloads = "suitable_workloads"
+        case unsuitableWorkloads = "unsuitable_workloads"
+        case note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        economics = try container.decode(String.self, forKey: .economics)
+        request = try container.decodeIfPresent(HarnModelReasoningModeRequest.self, forKey: .request)
+        tokenMultiplier = try container.decodeIfPresent(Double.self, forKey: .tokenMultiplier)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        latency = try container.decodeIfPresent(String.self, forKey: .latency)
+        suitableWorkloads = try container.decodeIfPresent([String].self, forKey: .suitableWorkloads) ?? []
+        unsuitableWorkloads = try container.decodeIfPresent([String].self, forKey: .unsuitableWorkloads) ?? []
+        note = try container.decodeIfPresent(String.self, forKey: .note)
     }
 }
 

@@ -1,0 +1,53 @@
+import { assert_eq, assert_ne, assert_true } from "std/testing"
+// Guards for the run-loop equivalence probe. The probe's whole value is that a
+// zero diff means something, so these tests attack the two ways a zero diff can
+// lie: a normalizer that erases real differences, and a stream that is not
+// reproducible on a single binary.
+import "../loop_equivalence_probe.harn"
+
+pipeline test_normalizer_keeps_a_one_character_difference_visible(harness: Harness, task: unknown) {
+  // The vacuity guard. If a one-character edit survives normalization, a zero
+  // diff from the probe proves nothing about the code under test.
+  const line = "{\"iteration\":1,\"session_id\":\"equiv-completed-a\",\"type\":\"iteration_start\"}"
+  const mutated =
+    "{\"iteration\":2,\"session_id\":\"equiv-completed-a\",\"type\":\"iteration_start\"}"
+  assert_ne(
+    loop_equivalence_normalize(line),
+    loop_equivalence_normalize(mutated),
+    "normalizer erased a one-character difference",
+  )
+}
+
+pipeline test_normalizer_erases_only_run_unique_fields(harness: Harness, task: unknown) {
+  const raw = "{\"duration_ms\":1234,\"id\":\"3f2a1b0c-1111-2222-3333-444455556666\",\"digest\":\""
+    + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"
+  assert_eq(
+    loop_equivalence_normalize(raw),
+    "{\"duration_ms\":0,\"id\":\"UUID\",\"digest\":\"HASH\"}",
+    "normalizer did not blank exactly the run-unique fields",
+  )
+}
+
+pipeline test_probe_streams_are_reproducible_on_one_binary(harness: Harness, task: unknown) {
+  // Run one binary twice. A self-difference means the probe is contaminated by
+  // carried-over state, and any A/B result taken from it is void. This caught a
+  // false 41-line regression once: fixed session ids let the second run inherit
+  // the first run's transcripts from the persisted session store, and isolating
+  // HOME did not help because that store does not live under HOME.
+  const first = loop_equivalence_streams(harness)
+  const second = loop_equivalence_streams(harness)
+  assert_eq(
+    join(first, "\n"),
+    join(second, "\n"),
+    "probe stream differs across two runs of one binary",
+  )
+}
+
+pipeline test_await_arm_actually_suspends(harness: Harness, task: unknown) {
+  // A non-vacuous control for the third case. A bare agent loop with no tools
+  // never reaches the await-resumption turn and reports done, so this arm is
+  // pinned to the status that proves it got there.
+  const lines = loop_equivalence_await_stream(harness)
+  assert_true(len(lines) > 0, "await arm produced no lines")
+  assert_eq(lines[0], "await-suspend status=suspended", "await arm did not reach the suspend path")
+}
