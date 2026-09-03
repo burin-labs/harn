@@ -1,0 +1,139 @@
+// The falsifier for burin-code#7890: a `tool_search` set once on
+// `workflow_execute` has to reach every stage's agent loop.
+//
+// It did not. The stage config is built from the stage's own typed options, so
+// a run-level key was dropped at that seam with no error and no receipt. From
+// the source both halves looked wired: the option was declared at the call site
+// and both the native and client tool-search paths were live code. The only
+// visible difference was in the tool array handed to the provider, where every
+// deferred tool was served eagerly and no search meta-tool existed.
+//
+// So this asserts that array, not the flattened options dict. A test of the
+// flattener would have passed while the product served the full catalog, which
+// is the failure this file exists to catch.
+import { llm_calls, llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
+
+const DEFERRED = "rarely_used_tool"
+
+const EAGER = "always_used_tool"
+
+const META = "__harn_tool_search"
+
+/**
+ * Two tools differing only in `defer_loading`. An all-deferred registry is
+ * rejected upstream, so the eager sibling is required, not decoration.
+ */
+fn registry() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    EAGER,
+    "Return a deterministic result for this turn.",
+    {
+      defer_loading: false,
+      handler: { _args -> return "ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    DEFERRED,
+    "Return a deterministic result the model rarely needs.",
+    {
+      defer_loading: true,
+      handler: { _args -> return "ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn stage_graph() {
+  return workflow_graph(
+    {
+      entry: "work",
+      nodes: {
+        work: {
+          kind: "agent",
+          prompt: "Report the catalog.",
+          system: "You are an agent.",
+          tools: registry(),
+          done_sentinel: "##DONE##",
+          model_policy: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 1},
+        },
+      },
+      edges: [],
+    },
+  )
+}
+
+/** The tool names one workflow stage actually handed to the provider. */
+fn served_tool_names(harness: Harness, run_options: dict) -> list {
+  return with_llm_script(
+    harness.llm,
+    [llm_text("done ##DONE##")],
+    { ->
+      workflow_execute(harness, "report the catalog", stage_graph(), [], run_options)
+      const calls = llm_calls(harness.llm)
+      // A stage that called no provider would let every comparison below pass
+      // vacuously.
+      require len(calls) >= 1, "the stage must have made at least one provider call"
+      let names = []
+      for entry in calls[0]?.tools ?? [] {
+        const name = entry?.name ?? entry?.function?.name
+        if name != nil {
+          names = names.appending(name)
+        }
+      }
+      require len(names) > 0, "the stage must have served at least one tool"
+      return names
+    },
+  )
+}
+
+fn has(names: list, wanted: string) -> bool {
+  for name in names {
+    if name == wanted {
+      return true
+    }
+  }
+  return false
+}
+
+pipeline main(harness: Harness) {
+  // The control, and the reason the case below means anything: with no
+  // run-level option the deferred tool is served eagerly and no meta-tool
+  // exists. If this stops holding, the comparison has lost its contrast and
+  // the other half proves nothing.
+  const without = served_tool_names(harness, {max_steps: 1})
+  require has(without, EAGER),
+    "the control run must serve the eager tool, saw "
+    + json_stringify(without)
+  require has(without, DEFERRED),
+    "with no run-level tool_search the deferred tool must be served eagerly, saw "
+    + json_stringify(without)
+  require !has(without, META),
+    "the control run must not carry a search meta-tool, saw "
+    + json_stringify(without)
+  // The case. `mock` advertises no native tool search, so `auto` resolves to
+  // the in-VM client strategy, which replaces the deferred tools with one
+  // search tool. Both halves of that swap are asserted: dropping the deferred
+  // tool without gaining the meta-tool is a regression a one-sided check would
+  // read as a pass.
+  const with_search = served_tool_names(harness, {max_steps: 1, tool_search: "auto"})
+  require has(with_search, EAGER),
+    "the eager tool must stay resident, saw "
+    + json_stringify(with_search)
+  require !has(with_search, DEFERRED),
+    "a run-level tool_search must keep the deferred tool out of the served catalog, saw "
+    + json_stringify(with_search)
+  require has(with_search, META),
+    "a run-level tool_search must serve the search meta-tool, saw "
+    + json_stringify(with_search)
+  harness.stdio.log("workflow run option tool search test passed")
+}

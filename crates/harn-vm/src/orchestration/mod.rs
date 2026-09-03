@@ -171,42 +171,49 @@ pub mod playground;
 
 thread_local! {
     static CURRENT_MUTATION_SESSION: RefCell<Option<MutationSessionRecord>> = const { RefCell::new(None) };
-    /// Workflow-level skill context, installed by `workflow_execute` so
+    /// Workflow-level stage context, installed by `workflow_execute` so
     /// every per-node agent loop constructed inside `execute_stage_node`
-    /// can pick up the same `skills:` / `skill_match:` registry without
-    /// threading a new parameter through every helper. Cleared on
-    /// workflow exit (success or error) by `WorkflowSkillContextGuard`.
-    static CURRENT_WORKFLOW_SKILL_CONTEXT: RefCell<Option<WorkflowSkillContext>> = const { RefCell::new(None) };
+    /// can pick up the same run-level defaults without threading a new
+    /// parameter through every helper. Cleared on workflow exit (success
+    /// or error) by `WorkflowStageContextGuard`.
+    static CURRENT_WORKFLOW_STAGE_CONTEXT: RefCell<Option<WorkflowStageContext>> = const { RefCell::new(None) };
 }
 
-/// Skill wiring threaded from `workflow_execute` into the per-stage
-/// agent loops via thread-local context. The workflow runner pins itself
-/// to one task via `LocalSet`, so every stage observes the same context
+/// Run-level agent-loop defaults threaded from `workflow_execute` into the
+/// per-stage agent loops via thread-local context. The workflow runner pins
+/// itself to one task via `LocalSet`, so every stage observes the same context
 /// without cross-task synchronization.
+///
+/// Every field here is a run-level option that has no other way to reach a
+/// stage: the stage config is built from the stage's own typed options, so a
+/// key set once on `workflow_execute` is otherwise dropped at that seam.
 #[derive(Clone, Default)]
-pub struct WorkflowSkillContext {
+pub struct WorkflowStageContext {
     pub registry: Option<VmValue>,
     pub match_config: Option<VmValue>,
+    /// Run-level `tool_search` (progressive tool disclosure). Applied as a
+    /// default only, so a stage that sets its own value still wins.
+    pub tool_search: Option<VmValue>,
 }
 
-pub fn install_workflow_skill_context(context: Option<WorkflowSkillContext>) {
-    CURRENT_WORKFLOW_SKILL_CONTEXT.with(|slot| {
+pub fn install_workflow_stage_context(context: Option<WorkflowStageContext>) {
+    CURRENT_WORKFLOW_STAGE_CONTEXT.with(|slot| {
         *slot.borrow_mut() = context;
     });
 }
 
-pub fn current_workflow_skill_context() -> Option<WorkflowSkillContext> {
-    CURRENT_WORKFLOW_SKILL_CONTEXT.with(|slot| slot.borrow().clone())
+pub fn current_workflow_stage_context() -> Option<WorkflowStageContext> {
+    CURRENT_WORKFLOW_STAGE_CONTEXT.with(|slot| slot.borrow().clone())
 }
 
-/// RAII guard that clears the workflow skill context on drop. Paired
-/// with `install_workflow_skill_context` at the top of `execute_workflow`
+/// RAII guard that clears the workflow stage context on drop. Paired
+/// with `install_workflow_stage_context` at the top of `execute_workflow`
 /// so the context never leaks past a workflow's scope.
-pub struct WorkflowSkillContextGuard;
+pub struct WorkflowStageContextGuard;
 
-impl Drop for WorkflowSkillContextGuard {
+impl Drop for WorkflowStageContextGuard {
     fn drop(&mut self) {
-        install_workflow_skill_context(None);
+        install_workflow_stage_context(None);
     }
 }
 
