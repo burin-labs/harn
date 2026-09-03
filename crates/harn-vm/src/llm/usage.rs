@@ -246,10 +246,13 @@ pub fn summarize_usage_cost_certainty<'a>(
             // projection to add. Counting its unpriced request as
             // unprojectable keeps the projected total an honest floor instead
             // of implying the request was free.
+            // Never below the measured cost. A projection is a ceiling on
+            // what a call may have cost, so one that came in under its own
+            // known spend would let a governor authorize money already spent.
             summary.projected_cost_usd += if legacy {
                 usage.cost_usd.unwrap_or(0.0)
             } else {
-                usage.projected_cost_usd
+                usage.projected_cost_usd.max(usage.known_cost_usd)
             };
             summary.unprojectable_attempts += if legacy {
                 i64::from(usage.cost_usd.is_none())
@@ -1332,6 +1335,7 @@ mod tests {
         let mut completed = LlmUsage::known_zero_attempt();
         completed.cost_usd = Some(0.25);
         completed.known_cost_usd = 0.25;
+        completed.projected_cost_usd = 0.25;
 
         let usage = LlmUsage::aggregate_with_unknown_attempts(&[completed], 2);
 
