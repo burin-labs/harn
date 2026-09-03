@@ -24,6 +24,17 @@ on:
     # the Windows nightly so the two don't contend for the same cache lookups.
     - cron: "30 7 * * *"
   workflow_dispatch:
+  pull_request:
+    # Only the code these lanes actually exercise. A fragment- or docs-only
+    # pull request cannot change what a workspace test run proves, so it does
+    # not pay for one, and the release's evidence reader treats a lane it never
+    # needed as satisfied rather than missing.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/windows-nightly.yml"
+      - ".github/workflows/macos-nightly.yml"
 
 permissions:
   contents: read
@@ -36,8 +47,14 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    runs-on: ${{ github.event_name == 'schedule' && 'macos-latest' || 'blacksmith-12vcpu-macos-15' }}
-    timeout-minutes: ${{ github.event_name == 'schedule' && 75 || 30 }}
+    # A pull-request run is cache-warming class, not exact-source proof, so it
+    # takes the same hosted runner and the same generous budget as the nightly.
+    # The paid M4 class stays reserved for release certification, and the 30
+    # minute budget would have timed out this lane's p90 of 47 minutes, which
+    # the evidence reader would then have read as a red lane rather than a slow
+    # one.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 30 || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -57,7 +74,9 @@ jobs:
           source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
-          save: true
+          # Sole writer for `workspace-macos`. Pull-request runs restore and do
+          # not write, so they never mint a cache generation of their own.
+          save: ${{ github.event_name != 'pull_request' }}
       - name: Install Go formatter
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

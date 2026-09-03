@@ -868,3 +868,210 @@ fn unsteered_run_renders_no_steering_block() {
         "control must derive zero steers; lines: {lines:?}"
     );
 }
+
+/// The reach falsifier for harn#7580's authority half.
+///
+/// The unit tests beside `operator_steer_directive` prove the helper builds a
+/// `contract`-authority directive, and the ordering test in
+/// `helpers::options::reminders` proves a `contract` directive outranks a later
+/// `corrective` one. Neither proves the two are connected: a helper that is
+/// never called, or a directive the render side never picks up, passes both and
+/// leaves the defect exactly where it was. Absence of the directive at the
+/// model is the failure mode, and absence is what reads as success.
+///
+/// So this asserts the decision rather than the code: it runs a real
+/// bridge-backed loop, pushes a steer through the same queue `session/inject`
+/// writes to, lets the real `finish_step` drain deliver it at the tool
+/// boundary, and then reads the request the model is actually handed on the
+/// next iteration.
+///
+/// The three variants share one script so the reads are directly comparable:
+///
+///   0. final status
+///   1. LLM call count
+///   2. `steer_directive_in_request` iff the operator-redirect directive is
+///      present in the next outbound request (system prompt or messages),
+///      else `no_steer_directive`
+///   3. `steer_text_in_request` iff the steered instruction itself is present,
+///      which is true in the steer variants either way because the plain user
+///      message is spliced regardless — this is the read that keeps clause 2
+///      honest by showing the delivery happened at all
+fn steer_authority_pipeline(session_id: &str, push_mode: Option<&str>) -> String {
+    let push_line = match push_mode {
+        Some(mode) => format!(
+            r#"      harness.agent.session_push_user_message(
+        "{session_id}",
+        {{content: "do not call would_force_push again", mode: "{mode}"}},
+      )"#
+        ),
+        None => String::new(),
+    };
+    format!(
+        r#"
+import {{ agent_session_push_user_message }} from "std/agent/state"
+
+pipeline main(harness: Harness, task: unknown) {{
+  harness.tools.clear_hooks()
+  const registry = tool_registry()
+  const tools = tool_define(
+    registry,
+    "would_force_push",
+    "Test stand-in for an irreversible side-effect tool.",
+    {{parameters: {{}}, handler: {{ _args -> return "would have force-pushed" }}}},
+  )
+  const iteration_state = harness.runtime.shared_cell({{scope: "task_group", key: "auth-iter-{session_id}", initial: 0}})
+  const call_counter = harness.runtime.shared_cell({{scope: "task_group", key: "auth-calls-{session_id}", initial: 0}})
+  const directive_seen = harness.runtime.shared_cell({{scope: "task_group", key: "auth-directive-{session_id}", initial: 0}})
+  const steer_text_seen = harness.runtime.shared_cell({{scope: "task_group", key: "auth-text-{session_id}", initial: 0}})
+  const mock_llm = {{ call ->
+    const csnap = harness.runtime.shared_snapshot(call_counter)
+    harness.runtime.shared_cas(call_counter, csnap, csnap.value + 1)
+    const snap = harness.runtime.shared_snapshot(iteration_state)
+    const n = snap.value
+    harness.runtime.shared_cas(iteration_state, snap, n + 1)
+    if n == 0 {{
+{push_line}
+      return {{
+        ok: true,
+        value: {{
+          text: "",
+          tool_calls: [{{id: "call_1", name: "would_force_push", arguments: {{}}}}],
+          provider: "mock",
+          model: "mock",
+        }},
+      }}
+    }}
+    // The request the model is actually handed, after the drain and after
+    // reminder rendering. Both placements are read: a directive may be folded
+    // into the system prompt or spliced into the message array, and which one
+    // it takes is not what this contract is about.
+    const request = to_string(call?.opts?.system ?? "") + "\n" + to_string(call?.opts?.messages ?? "")
+    if contains(request, "The operator redirected this run mid-turn") {{
+      const dsnap = harness.runtime.shared_snapshot(directive_seen)
+      harness.runtime.shared_cas(directive_seen, dsnap, 1)
+    }}
+    if contains(request, "do not call would_force_push again") {{
+      const tsnap = harness.runtime.shared_snapshot(steer_text_seen)
+      harness.runtime.shared_cas(steer_text_seen, tsnap, 1)
+    }}
+    return {{
+      ok: true,
+      value: {{text: "acknowledged ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
+    }}
+  }}
+  const result = agent_loop(
+    harness,
+    "do the push",
+    nil,
+    {{
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
+      max_iterations: 4,
+      loop_until_done: true,
+      session_id: "{session_id}",
+      llm_caller: mock_llm,
+    }},
+  )
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(call_counter))
+  if harness.runtime.shared_get(directive_seen) == 1 {{
+    harness.stdio.log("steer_directive_in_request")
+  }} else {{
+    harness.stdio.log("no_steer_directive")
+  }}
+  if harness.runtime.shared_get(steer_text_seen) == 1 {{
+    harness.stdio.log("steer_text_in_request")
+  }} else {{
+    harness.stdio.log("no_steer_text")
+  }}
+}}
+"#
+    )
+}
+
+/// RED ON MAIN: a delivered steer reaches the model as a plain user message
+/// with no directive at all, so nothing outranks the judge's `corrective` and
+/// the run reverts one turn later.
+#[test]
+fn a_delivered_steer_reaches_the_model_as_a_standing_directive() {
+    let raw = run_with_bridge(&steer_authority_pipeline(
+        &fresh_session_id("steer-authority"),
+        Some("steer"),
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "2", "expected two LLM calls; lines: {lines:?}");
+    assert_eq!(
+        lines[3], "steer_text_in_request",
+        "the steer must have been delivered at all before clause 2 means \
+         anything: a run where nothing was delivered would fail clause 2 for \
+         the wrong reason; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "steer_directive_in_request",
+        "the operator's redirect must reach the next model call as a standing \
+         directive, not only as a plain user message; lines: {lines:?}"
+    );
+}
+
+/// The interrupt sibling is the same control event delivered sooner, and it
+/// must arrive with the same authority.
+#[test]
+fn a_delivered_interrupt_reaches_the_model_as_a_standing_directive() {
+    let raw = run_with_bridge(&steer_authority_pipeline(
+        &fresh_session_id("interrupt-authority"),
+        Some("interrupt_immediate"),
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[2], "steer_directive_in_request",
+        "an interrupt is a steer delivered sooner, not a weaker one; lines: {lines:?}"
+    );
+}
+
+/// NEGATIVE CONTROL, and the one that keeps the fix from being "mint a
+/// directive from anything queued". `audit_only` is the one mode contracted to
+/// land in the transcript and never be rendered into a model prompt
+/// (harn#2212), so a directive minted from it would put text in front of a
+/// model that was promised not to see it.
+#[test]
+fn an_audit_only_injection_never_reaches_the_model_as_a_directive() {
+    let raw = run_with_bridge(&steer_authority_pipeline(
+        &fresh_session_id("audit-authority"),
+        Some("audit_only"),
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[2], "no_steer_directive",
+        "an audit_only injection must never become a rendered directive; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "no_steer_text",
+        "audit_only must not reach the model at all; lines: {lines:?}"
+    );
+}
+
+/// NEGATIVE CONTROL: with nothing queued, the request carries no directive, so
+/// an unsteered run's prompt is untouched by this seam.
+#[test]
+fn an_unsteered_run_carries_no_operator_directive() {
+    let raw = run_with_bridge(&steer_authority_pipeline(
+        &fresh_session_id("no-steer-authority"),
+        None,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "2", "lines: {lines:?}");
+    assert_eq!(
+        lines[2], "no_steer_directive",
+        "an unsteered run must render no operator directive; lines: {lines:?}"
+    );
+}

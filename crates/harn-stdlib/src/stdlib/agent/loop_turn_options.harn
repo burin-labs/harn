@@ -1205,3 +1205,54 @@ pub fn agent_loop_demote_empty_turn(call: dict, turn_llm_opts: dict) -> dict {
     },
   }
 }
+
+/**
+ * The line a rejected closing turn is reduced to. Fixed text, so nothing here
+ * is a per-run prose decision: the adjudicator's own directive says what the
+ * next attempt must fix, and this only records that a draft was withdrawn.
+ */
+pub const AGENT_LOOP_REJECTED_TURN_MARKER: string =
+  "[withdrawn: this closing report was rejected; see the directive that follows]"
+
+/**
+ * Retire the trailing assistant turn when an adjudicator has just rejected it
+ * and the loop is about to ask for another one.
+ *
+ * A rejected turn left whole is re-read by the model on every later round, so a
+ * run vetoed N times pays for N drafts it was already told not to keep. The
+ * adjudicator's directive is the carry-forward; the draft is not.
+ *
+ * `replacement` decides how the turn is retired, and the difference is not
+ * cosmetic. Dropping it outright shortens the transcript, which moves the turn
+ * boundary the pending directive is anchored to and delays that directive by a
+ * full round — the model would be asked to try again without being told why.
+ * Passing a replacement keeps the turn count stable, so the directive still
+ * lands on the next round. Drop only where no directive is owed.
+ *
+ * The role guard is the safety contract, not politeness. A turn whose tool
+ * calls were dispatched is followed by its tool results, so it is never the
+ * trailing message: this can only retire a bare assistant turn, which orphans
+ * nothing.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __agent_loop_pop_rejected_assistant_turn(
+  agent: HarnessAgent,
+  session_id: any,
+  replacement: string = "",
+) -> bool {
+  const messages = agent_session_messages(agent, session_id)
+  if len(messages) == 0 {
+    return false
+  }
+  const last = messages[len(messages) - 1]
+  if last?.role != "assistant" {
+    return false
+  }
+  const popped = agent_session_pop_last_assistant(agent, session_id)
+  if replacement != "" {
+    agent.inject(session_id, {role: "assistant", content: replacement})
+  }
+  return popped
+}

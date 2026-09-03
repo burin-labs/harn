@@ -47,7 +47,7 @@ if [[ -z "$pr_url" ]]; then
   pr_url="$(gh pr create \
     --base main \
     --head "$branch" \
-    --title "Start $actual development" \
+    --title "[Release] Start $actual development" \
     --body-file "$body_file")"
   gh pr edit "$pr_url" --add-label no-changelog-needed
   echo "Development bump opened: $pr_url"

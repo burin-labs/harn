@@ -223,6 +223,27 @@ impl AgentTerminalOutcome {
         self
     }
 
+    /// Carry the cause of a suspension on the same two diagnostic fields an
+    /// errored terminal uses, so one reading rule covers both: `message` is
+    /// why the run stopped, `detail` is the machine-stable specifics.
+    ///
+    /// A suspension is not an error, so it never sets `terminal_class`. What a
+    /// host needs instead is what the run is waiting for, which is what
+    /// [`AgentTerminalSuspension::detail`] projects. Applied only for the
+    /// suspended kind: a status the loop sealed as something else does not
+    /// acquire a suspension cause because a stale record was in scope.
+    #[must_use]
+    pub fn with_suspension(mut self, suspension: Option<&super::AgentTerminalSuspension>) -> Self {
+        if self.kind != AgentTerminalKind::Suspended {
+            return self;
+        }
+        if let Some(suspension) = suspension {
+            self.message = Some(suspension.reason.clone());
+            self.detail = suspension.detail();
+        }
+        self
+    }
+
     /// Preserve the two stable human-diagnostic fields from a structured
     /// terminal error. Unknown/nested fields remain available in the durable
     /// run record and are deliberately not copied onto the public wire shape.

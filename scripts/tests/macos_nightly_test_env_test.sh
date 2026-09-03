@@ -3,8 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
-dispatch_runner="runs-on: \${{ github.event_name == 'schedule' && 'macos-latest' || 'blacksmith-12vcpu-macos-15' }}"
-dispatch_timeout="timeout-minutes: \${{ github.event_name == 'schedule' && 75 || 30 }}"
+# The paid M4 class is reserved for exact-source dispatches, which are the
+# release's blocking proof. Everything else — the schedule, and pull requests
+# once this lane runs on them — takes the hosted runner. Naming the dispatch
+# event rather than excluding the schedule is what keeps a third event off the
+# paid class by default instead of routing it there.
+dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}"
+# The 30 minute budget belongs to the dispatch, which restores a warm cache.
+# A cold pull-request or scheduled run needs the nightly's budget: this lane's
+# p90 is 47 minutes, and a timeout reads as a red lane rather than a slow one.
+dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && 30 || 75 }}"
 
 if ! grep -Fq "$dispatch_runner" "$workflow"; then
   echo "macOS nightly must reserve the proven M4 runner for exact-source dispatches" >&2
@@ -12,7 +20,15 @@ if ! grep -Fq "$dispatch_runner" "$workflow"; then
 fi
 
 if ! grep -Fq "$dispatch_timeout" "$workflow"; then
-  echo "macOS nightly must bound scheduled and exact-source hangs independently" >&2
+  echo "macOS nightly must bound dispatch and non-dispatch hangs independently" >&2
+  exit 1
+fi
+
+# A pull-request run must never reach the paid class or the short budget. Both
+# expressions name the dispatch event positively, so any event that is not a
+# dispatch falls to the hosted runner and the generous budget by construction.
+if grep -Fq "github.event_name != 'pull_request' && 'blacksmith" "$workflow"; then
+  echo "macOS nightly must not route pull requests to the paid M4 class" >&2
   exit 1
 fi
 

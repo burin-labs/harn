@@ -418,6 +418,7 @@ fn catalog_model(
     let embedding_model = model.is_embedding_model();
     CatalogModel {
         aliases,
+        data_controls: model.data_controls.clone(),
         blurb: model.blurb.clone(),
         logical_model: model.logical_model.clone(),
         equivalence_group: model.equivalence_group.clone(),
