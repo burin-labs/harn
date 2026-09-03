@@ -17,6 +17,13 @@ set -euo pipefail
 #      launched from a command line that names an entry must still collect it.
 #   5. An empty cache root reports a scanned count, so "found no orphans" is
 #      distinguishable from "scanned nothing".
+#   6. The retention cap bounds what rule 1 keeps. Two live worktrees both hold
+#      warm trees nobody has built in months; with room for one, the newer is
+#      the working set and the older is cache.
+#   7. Rank alone must not retire anything. The same pair, with the idle bound
+#      widened past their age, keeps both.
+#   8. A live process outranks the cap. With room for nothing, a tree a build
+#      is holding is still kept.
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 gc="$repo_root/scripts/prune_stale_targets.sh"
@@ -137,10 +144,62 @@ HARN_DEV_SETUP_STORAGE_ROOT="$tmp_root/empty" \
 grep -Fq 'scanned=0' "$empty" \
   || fail "an empty cache root did not report a zero scanned count" "$empty"
 
+# The retention cap, over entries rule 1 keeps. Two more live worktrees, whose
+# trees differ only in which was built more recently.
+git -C "$repos/live" worktree add -q "$repos/warm-new" -b warm-new
+git -C "$repos/live" worktree add -q "$repos/warm-old" -b warm-old
+warm_new="$targets/${repos_leaf}-warm-new"
+warm_old="$targets/${repos_leaf}-warm-old"
+mkdir -p "$warm_new" "$warm_old"
+touch -t 202006010000 "$warm_new"
+touch -t 202001010000 "$warm_old"
+
+capped="$tmp_root/capped.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=1 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=1 \
+  bash "$gc" --dry-run >"$capped" 2>&1
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$capped" \
+  || fail "the coldest warm tree past the cap was not retired" "$capped"
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-new" "$capped" \
+  && fail "the most recent warm tree was retired" "$capped"
+
+# Rank alone decides nothing: widen the idle bound and the same pair survives.
+uncapped="$tmp_root/uncapped.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=1 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=99999999999 \
+  bash "$gc" --dry-run >"$uncapped" 2>&1
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$uncapped" \
+  && fail "a warm tree inside the idle bound was retired on rank alone" "$uncapped"
+
+# A live process outranks the cap even with room for nothing.
+nocap="$tmp_root/nocap.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=0 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=1 \
+  bash "$gc" --dry-run >"$nocap" 2>&1
+for held in "${repos_leaf}-lockheld" "${repos_leaf}-cmdline"; do
+  grep -Fq "would remove cold cache: $held" "$nocap" \
+    && fail "a tree a live process is holding was retired by the cap" "$nocap"
+done
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$nocap" \
+  || fail "with room for nothing, an idle warm tree was still kept" "$nocap"
+
 # Print what the pass actually decided. A green run that shows only "ok"
 # cannot be told apart from one that scanned nothing.
 echo "--- retention report (dry run) ---"
 cat "$dry"
 echo "--- empty cache root (negative control) ---"
 cat "$empty"
+echo "--- retention cap ---"
+cat "$capped"
+echo "--- retention cap, idle bound widened (negative control) ---"
+cat "$uncapped"
 echo "prune_stale_targets_retention_test: ok"
