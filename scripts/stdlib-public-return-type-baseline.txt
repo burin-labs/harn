@@ -358,7 +358,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_emit_thra
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_final_wrapup
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_has_host_wrapup_directive
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_monologue_recovery_feedback
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_pop_structural_veto_turn
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_render_wrapup_context
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_repeated_observation_recovery_feedback
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_stall_warning_receipt
