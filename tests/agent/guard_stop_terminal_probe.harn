@@ -1,0 +1,44 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn run(harness: Harness, dir: string, thrown: unknown) {
+  const r = try {
+    with_llm_script(
+      harness.llm,
+      [llm_text("working ##DONE##")],
+      { ->
+        return agent_loop(
+          harness,
+          "Do it.",
+          nil,
+          {
+            provider: "mock",
+            model: "probe-actor",
+            session_id: "probe-" + harness.random.uuid(),
+            max_iterations: 2,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            llm_transcript_dir: dir,
+            verify_completion: { info -> throw thrown },
+          },
+        )
+      },
+    )
+  }
+  harness.stdio.println("is_err=" + to_string(is_err(r)))
+  const sidecar = try { harness.fs.read_text(path_join(dir, "llm_transcript.jsonl")) }
+  if is_err(sidecar) {
+    harness.stdio.println("no sidecar")
+    return
+  }
+  const text = unwrap(sidecar)
+  harness.stdio.println("cancelled=" + to_string(contains(text, "\"final_status\":\"cancelled\"")))
+  harness.stdio.println("failed=" + to_string(contains(text, "\"final_status\":\"failed\"")))
+}
+
+pipeline test_probe(harness: Harness, task: unknown) {
+  harness.stdio.println("-- cancelled category --")
+  run(harness, "/tmp/probe7909/a", {category: "cancelled", message: "session cancelled"})
+  harness.stdio.println("-- generic category --")
+  run(harness, "/tmp/probe7909/b", {category: "generic", message: "real bug"})
+}

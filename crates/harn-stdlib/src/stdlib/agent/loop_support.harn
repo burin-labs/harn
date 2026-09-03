@@ -374,6 +374,44 @@ fn __agent_loop_measured_error(
   return __agent_loop_terminal_error(error, max(0, totals.provider_call_count))
 }
 
+/**
+ * The terminal a boundary throw seals, given what the throw actually was.
+ *
+ * A throw that reaches the loop boundary is not automatically a failure. When
+ * a stop is accepted, the session is torn down under whatever call was in
+ * flight, and that call throws because its session vanished, not because
+ * anything went wrong. Stamping every boundary throw `failed`/`error` recorded
+ * a deliberate stop as a runtime error with a failed lifecycle, so a run that
+ * was told to stop and a run that broke were indistinguishable downstream.
+ *
+ * The category is the evidence and it is already computed: a torn-down
+ * execution carries the `cancelled` category, which three sibling paths in
+ * this directory (tool dispatch, post-turn, guardrails) already read as "the
+ * caller is tearing this run down" before rethrowing. The terminal classifier
+ * already maps a `cancelled` status to a user-cancelled kind, ahead of its
+ * error arm, so this seam is the only place the distinction was being lost.
+ *
+ * The cancelled record deliberately carries no `error` key. It is not an
+ * error, and passing one fires the session-error hook, which is the other half
+ * of the failed lifecycle. The cause is not lost: the same terminal record is
+ * returned to the caller and rethrown.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __agent_loop_boundary_terminal_record("cancelled", 3, error)
+ */
+pub fn __agent_loop_boundary_terminal_record(
+  category: string,
+  iteration: int,
+  error: unknown,
+) -> dict {
+  if category == "cancelled" {
+    return {final_status: "cancelled", stop_reason: "cancelled", iterations: iteration}
+  }
+  return {final_status: "failed", stop_reason: "error", iterations: iteration, error: error}
+}
+
 pub fn __agent_loop_finalize_failed(
   agent: HarnessAgent,
   session: dict,
@@ -385,7 +423,11 @@ pub fn __agent_loop_finalize_failed(
     agent_session_finalize(
       agent,
       session.session_id,
-      {final_status: "failed", stop_reason: "error", iterations: iteration, error: error},
+      __agent_loop_boundary_terminal_record(
+        to_string(terminal?.category ?? ""),
+        iteration,
+        error,
+      ),
     )
   }
   if is_err(finalized) {
