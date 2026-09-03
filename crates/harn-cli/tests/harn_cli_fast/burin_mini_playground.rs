@@ -931,17 +931,35 @@ fn windows_run_tool_env_probe_through_execute_playground_inputs() {
 /// `crate::shells::default_shell_invocation`'s outer shell, while the probe
 /// wrapped everything in an explicit inner `cmd.exe /D /C`.
 ///
-/// This test runs 7 commands through the identical seam
+/// Addendum (still round 2): `default_shell_invocation` read from
+/// shells.rs on this branch answers what the outer invocation IS without
+/// another CI round — COMSPEC resolves to shell id `cmd`,
+/// `default_args_for_id("cmd")` is `["/C"]`, so the real fixture spawns as
+/// `Command::new(<COMSPEC>)` with args `["/C", "node scripts/verify-comment.js"]`,
+/// and Rust's Windows arg quoting wraps the second arg in one `"..."`
+/// string — meaning the earlier `where`-node probe actually ran as
+/// `cmd /C "cmd.exe /D /C where node & ..."`, an extra layer of inner cmd
+/// neither this test nor the failing fixture has. What is still open: a
+/// status-0 `where node` only proves a match was found on PATH, not that
+/// cmd would actually execute it — `where` also matches an extensionless
+/// file, and if a shim earlier on PATH (e.g. a package-manager shim dir)
+/// comes before the real `nodejs` directory, `where`'s first hit can differ
+/// from what bare `node` resolves to.
+///
+/// This test runs 8 commands through the identical seam
 /// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
 /// `run_captured_spawn`) to isolate exactly which layer of that shape
 /// matters: a bare `node --version` (matches the real failure's shape);
 /// the same wrapped in `cmd.exe /D /C` and in `cmd.exe /C` (no `/D`, to
-/// check AutoRun); `where node`; `echo %PATH%` and `echo %PATHEXT%` as BARE
-/// commands (so we see what the OUTER shell's own child inherits, with no
-/// inner cmd in between); and an absolute-path node invocation. It also
-/// prints `default_shell_invocation` for the real fixture's exact command
-/// string, so the outer program/args/default_args are on record rather than
-/// inferred from shells.rs source reading.
+/// check AutoRun); `where node` (its stdout — the matched path(s), not just
+/// its exit status — is what settles whether a shim shadows the real
+/// binary); `echo %PATH%` and `echo %PATHEXT%` as BARE commands (so we see
+/// what the OUTER shell's own child inherits, with no inner cmd in
+/// between); an absolute-path node invocation; and `dir` on that same
+/// absolute path, to confirm the file is actually there regardless of what
+/// PATH says. It also prints `default_shell_invocation` for the real
+/// fixture's exact command string, so the outer program/args/default_args
+/// are on record from a live call, not only from source reading.
 ///
 /// Always panics (never green) so nextest's `failure-output =
 /// "immediate-final"` guarantees the dump prints in full regardless of
@@ -981,9 +999,10 @@ fn windows_only_temporary_command_shape_probe_delete_after_harn_7993() {
          === windows_only_temporary_command_shape_probe_delete_after_harn_7993 ===\n\
          default_shell_invocation({fixture_command:?}) = {shell_invocation_dump}\n\
          playground stdout/error:\n{stdout}\n\
-         run tool transcript (7 commands: bare node --version; cmd /D /C node \
+         run tool transcript (8 commands: bare node --version; cmd /D /C node \
          --version; cmd /C node --version; where node; bare echo %PATH%; bare \
-         echo %PATHEXT%; absolute-path node.exe):\n{transcript_dump}\n\
+         echo %PATHEXT%; absolute-path node.exe; dir on that same absolute \
+         path):\n{transcript_dump}\n\
          === end probe ==="
     );
 }
