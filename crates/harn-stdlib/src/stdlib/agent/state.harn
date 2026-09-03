@@ -1,4 +1,4 @@
-import { AgentResult } from "std/agent/contracts"
+import { AgentFinalizationRetry, AgentResult } from "std/agent/contracts"
 
 // Thin Harn wrappers over host session-state primitives. These are CRUD only;
 // no decision logic lives here. The agent loop holds the session dict locally
@@ -32,7 +32,7 @@ pub fn agent_session_init(
  * agent_session_finalize.
  *
  * @effects: [host]
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: experimental
  */
 pub type AgentSessionFinalization = {
@@ -44,7 +44,7 @@ pub type AgentSessionFinalization = {
 
 pub fn agent_session_finalize(
   agent: HarnessAgent,
-  session_id: any,
+  session_id: string,
   status: string | AgentSessionFinalization,
 ) -> AgentResult {
   const finalization = if type_of(status) == "string" {
@@ -53,6 +53,22 @@ pub fn agent_session_finalize(
     status
   }
   return agent.session_finalize(session_id, finalization)
+}
+
+/**
+ * Resume the exact retained terminal write named by a failed finalization.
+ * The host rejects a stale receipt rather than applying it to a successor run
+ * that reused the same session id.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_session_retry_finalization(
+  agent: HarnessAgent,
+  receipt: AgentFinalizationRetry,
+) -> AgentResult {
+  return agent.session_finalize(receipt.session_id, {retry_run_id: receipt.run_id})
 }
 
 /**

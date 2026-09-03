@@ -53,8 +53,8 @@ fn parse_ids(text: &str) -> Vec<String> {
 #[test]
 fn parse_tool_call_ids_are_session_scoped_across_turns() {
     crate::agent_sessions::reset_session_store();
-    let session_a = crate::agent_sessions::open_or_create(Some("parse-id-a".to_string()));
-    let session_b = crate::agent_sessions::open_or_create(Some("parse-id-b".to_string()));
+    let session_a = crate::agent_sessions::open_or_create_for_test(Some("parse-id-a".to_string()));
+    let session_b = crate::agent_sessions::open_or_create_for_test(Some("parse-id-b".to_string()));
     let text = "<tool_call>\nlook({ file: \"Cargo.toml\", intent: \"read\" })\n</tool_call>";
 
     {
@@ -77,7 +77,8 @@ fn parse_tool_call_ids_are_session_scoped_across_turns() {
 #[test]
 fn parse_tool_call_ids_are_unique_within_one_turn() {
     crate::agent_sessions::reset_session_store();
-    let session = crate::agent_sessions::open_or_create(Some("parse-id-batch".to_string()));
+    let session =
+        crate::agent_sessions::open_or_create_for_test(Some("parse-id-batch".to_string()));
     let _guard = crate::agent_sessions::enter_current_session(session);
     let text = [
         "<tool_call>\nlook({ file: \"Cargo.toml\", intent: \"read\" })\n</tool_call>",

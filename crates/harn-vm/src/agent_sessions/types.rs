@@ -80,6 +80,7 @@ pub struct SessionRedoEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionCheckpointError {
     UnknownSession,
+    TerminalSession,
     NoCheckpoint,
     NoRedo,
 }

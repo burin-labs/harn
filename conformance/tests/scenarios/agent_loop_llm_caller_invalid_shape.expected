@@ -1,2 +1,3 @@
-agent_loop: llm_caller must return a dict; got string
-agent_loop: llm_caller returned ok=true but `value` is not a dict
+{category: generic, cause: agent_loop: llm_caller must return a dict; got string, kind: agent_loop_terminal, message: agent_loop: llm_caller must return a dict; got string, provider_call_count: 0, reason: uncaught_exception}
+{category: generic, cause: agent_loop: llm_caller returned ok=true but `value` is not a dict, kind: agent_loop_terminal, message: agent_loop: llm_caller returned ok=true but `value` is not a dict, provider_call_count: 0, reason: uncaught_exception}
+{category: generic, cause: spoofed, kind: agent_loop_terminal, message: spoofed, provider_call_count: 0, reason: spoofed}

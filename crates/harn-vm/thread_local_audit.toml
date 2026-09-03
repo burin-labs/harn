@@ -95,7 +95,13 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/agent_sessions.rs"
-statics = ["ACTIVE_SESSION_RUNTIME", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
+statics = ["CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/agent_sessions/runtime_store.rs"
+statics = ["ACTIVE_SESSION_RUNTIME"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 

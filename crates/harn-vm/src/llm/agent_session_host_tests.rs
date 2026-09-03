@@ -151,7 +151,8 @@ fn taint_on_write_records_untrusted_origin_paths() {
     use crate::security::TrustLevel;
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("file-prov-write".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("file-prov-write".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
 
@@ -212,7 +213,8 @@ fn distrust_on_read_only_fires_for_reads_of_tainted_paths() {
     use crate::security::TrustLevel;
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("file-prov-read-unit".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("file-prov-read-unit".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
     super::record_file_provenance(&session_id, "vendor/dep/README.md", "fetch:clone");
@@ -254,7 +256,8 @@ fn record_tool_results_taints_reads_of_untrusted_origin_files() {
     use crate::security::{pop_policy, push_policy, SecurityPolicy};
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("file-prov-e2e".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("file-prov-e2e".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
     push_policy(SecurityPolicy::from_config(&SecurityConfig {
@@ -296,7 +299,8 @@ fn record_tool_results_taints_command_laundered_reads() {
     use crate::security::{pop_policy, push_policy, SecurityPolicy};
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("cmd-prov-e2e".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("cmd-prov-e2e".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
     push_policy(SecurityPolicy::from_config(&SecurityConfig {
@@ -340,7 +344,8 @@ fn command_laundered_reads_are_not_tainted_by_default() {
     use crate::security::{pop_policy, push_policy, SecurityPolicy};
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("cmd-prov-off-e2e".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("cmd-prov-off-e2e".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
     // File provenance ON, command reads OFF: the laundering read is out of scope.
@@ -385,7 +390,8 @@ fn record_loop_stamps_endpoints_and_narrows_live_gate() {
     use crate::security::{pop_policy, precise_exfil_gate_fires, push_policy, SecurityPolicy};
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("exfil-precision-e2e".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("exfil-precision-e2e".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
     // Default (Spotlight) security: a Fetch-kind result classifies untrusted by
@@ -454,7 +460,8 @@ fn live_record_loop_decloaks_hidden_exfil_endpoint() {
     use crate::security::{pop_policy, precise_exfil_gate_fires, push_policy, SecurityPolicy};
 
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some("exfil-decloak-e2e".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("exfil-decloak-e2e".to_string()));
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
     push_execution_policy(file_provenance_execution_policy());
     push_policy(SecurityPolicy::from_config(&SecurityConfig::default()));
@@ -919,7 +926,7 @@ fn orphaned_tool_use_ids(messages: &[serde_json::Value]) -> Vec<String> {
 #[test]
 fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_session() {
     reset_agent_session_host_state();
-    let session_id = crate::agent_sessions::open_or_create(Some(
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
         "orphan-repair-text-lock-anthropic".to_string(),
     ));
     // PRIMARY model was text-format: the session lock is pinned to `text` and is
@@ -995,8 +1002,9 @@ fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_sess
 #[test]
 fn escalation_orphan_repaired_via_production_path_openai_shape() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("orphan-repair-text-lock-openai".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "orphan-repair-text-lock-openai".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "local", "Qwen/Qwen3.6-35B-A3B");
 
