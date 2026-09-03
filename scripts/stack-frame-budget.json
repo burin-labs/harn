@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "threshold_bytes": 100000,
+  "ceiling_bytes": 512000,
+  "comment": [
+    "Per-file ceilings on the worst stack frame clippy measures in that file.",
+    "Keyed by file, the same way the source-length ratchet budgets, because a",
+    "large_stack_frames primary span is not always a function signature and a",
+    "function name is therefore not a stable key.",
+    "",
+    "This budget covers RE-ENTRANT paths only. Frame size alone is not the",
+    "hazard: a large frame in a command entry point is entered once. The frames",
+    "that overflow a worker stack are the ones a nested descent re-enters, and",
+    "on 2026-09-03 a census of main found 157 frames over 100000 bytes across 96",
+    "files, most of them command entry points that carry no such risk.",
+    "",
+    "Add a file here only with evidence that it is re-entered on a nested",
+    "agent, tool, or sub-agent descent. Shrinkage is tightened with --write."
+  ],
+  "files": [
+    {
+      "path": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+      "max_bytes": 490185,
+      "why": "Nested tool dispatch. Re-entered once per nested tool call; the frame a deep sub-agent descent overflowed on in harn#7804."
+    },
+    {
+      "path": "crates/harn-vm/src/llm/agent_tools.rs",
+      "max_bytes": 140819,
+      "why": "The dispatch callee on that same chain, entered inside the frame above."
+    }
+  ]
+}
