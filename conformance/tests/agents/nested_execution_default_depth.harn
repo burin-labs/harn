@@ -87,19 +87,15 @@ pipeline main(harness: Harness) {
         },
       )
       const reached = harness.runtime.shared_snapshot(counter).value
-
       // Reaching this line at all is the primary claim: an unbounded descent
       // used to abort the process before any assertion could run.
       harness.stdio.println("survived_an_unbounded_descent=true")
-
       // The descent actually happened, so nothing below passes vacuously.
       harness.stdio.println("descent_started=" + to_string(reached > 0))
-
       // It stopped at the declared default rather than running until the
       // stack died. The exact depth is the budget's, not this test's, so the
       // clause is a bound rather than a golden number.
       harness.stdio.println("descent_bounded=" + to_string(reached <= 8))
-
       // The parent still terminates normally: a refused descent is a denial
       // inside the run, not a failure of the run.
       harness.stdio.println("parent_terminated=" + to_string(parent?.status != nil))
