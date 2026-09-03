@@ -427,9 +427,7 @@ impl SessionEnvironment {
         } else {
             launcher_snapshot
                 .into_iter()
-                .filter(|(name, _)| {
-                    super::environment_policy::ENV_ALLOWLIST.contains(&name.as_str())
-                })
+                .filter(|(name, _)| super::environment_policy::allowlist_admits(name))
                 .collect()
         };
         Ok(SessionEnvironment {

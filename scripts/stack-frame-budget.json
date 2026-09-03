@@ -347,7 +347,7 @@
       "path": "crates/harn-vm/src/llm/agent_config.rs"
     },
     {
-      "max_bytes": 355352,
+      "max_bytes": 374757,
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs"
     },
     {

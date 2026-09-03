@@ -11,6 +11,7 @@
 2	agents/approval_reviewer.harn	HARN-LNT-075
 1	agents/approval_reviewer_loop.harn	HARN-LNT-014
 1	agents/approval_reviewer_loop.harn	HARN-LNT-049
+1	agents/approval_reviewer_side_effect_ceiling.harn	HARN-LNT-049
 4	agents/artifact_emit.harn	HARN-LNT-018
 1	agents/effects_inheritance_empty_child.harn	HARN-LNT-014
 1	agents/effects_inheritance_subset_allowed.harn	HARN-LNT-014
