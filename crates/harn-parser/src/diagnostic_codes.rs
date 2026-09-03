@@ -353,6 +353,7 @@ diagnostic_codes! {
     LintNonSourceCallableBuiltin, "HARN-LNT-072", Lnt, "call names a builtin whose declared exposure keeps Harn source from naming it";
     LintCapabilityParameterName, "HARN-LNT-073", Lnt, "parameter carrying a narrow capability handle is not named for that capability";
     LintUnusedPipelineInput, "HARN-LNT-074", Lnt, "explicitly unused test pipeline input can be removed";
+    LintUntypedToolHandlerResult, "HARN-LNT-075", Lnt, "tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";

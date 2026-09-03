@@ -1,0 +1,160 @@
+import {
+  __agent_loop_budget_exhaustion,
+  __agent_loop_emit_budget_exhausted,
+  __agent_loop_iteration_info,
+  __agent_loop_pop_rejected_assistant_turn,
+  __agent_loop_record_budget_stop,
+} from "std/agent/loop_turn_options"
+import {
+  agent_emit_event,
+  agent_session_inject_feedback,
+  agent_session_record_usage,
+} from "std/agent/state"
+
+/** Whether the turn loop breaks out or starts its next iteration. */
+pub type AgentLoopStructuralVetoAction = "break" | "continue"
+
+/** Everything the vetoed turn reads from the loop that owns it. */
+pub type AgentLoopStructuralVetoContext = {
+  budget: any,
+  budget_decisions: any,
+  current_max: int,
+  iteration: int,
+  iteration_index: int,
+  llm_result: any,
+  loop_start_ms: int | float,
+  structural_validator_attempts: int,
+  structural_verdict: any,
+  turn_llm_opts: any,
+  visible_text: string,
+}
+
+/** The loop state this turn hands back, plus what the loop should do next. */
+pub type AgentLoopStructuralVetoOutcome = {
+  action: AgentLoopStructuralVetoAction,
+  final_status: string,
+  stop_reason: any,
+  structural_validator_attempts: int,
+  budget_exhausted_emitted: bool,
+  budget_decisions: any,
+}
+
+/**
+ * Handle the turn a structural validator vetoed.
+ *
+ * Moved out of the run loop unchanged. It is expressed as an outcome rather
+ * than as inline control flow for one reason only: a function cannot `break`
+ * its caller's loop, so the one break and the fall-through continue become an
+ * `action` the caller re-dispatches. Every other line is the code that was
+ * inline. A `raise` failure policy still throws, which needs no action because
+ * it unwinds the caller too.
+ *
+ * A vetoed turn never dispatches. It records the rejected usage, asks for a
+ * revision, and either stops on an exhausted budget or takes another
+ * iteration.
+ *
+ * @effects: [event, agent]
+ * @errors: [structural validator diagnostic when the failure policy is raise]
+ * @api_stability: internal
+ * @example: __agent_loop_structural_veto_turn(harness, session, ctx)
+ */
+pub fn __agent_loop_structural_veto_turn(
+  harness: Harness,
+  session: any,
+  ctx: AgentLoopStructuralVetoContext,
+) -> AgentLoopStructuralVetoOutcome {
+  const budget = ctx.budget
+  const current_max = ctx.current_max
+  const iteration = ctx.iteration
+  const iteration_index = ctx.iteration_index
+  const llm_result = ctx.llm_result
+  const loop_start_ms = ctx.loop_start_ms
+  const structural_verdict = ctx.structural_verdict
+  const turn_llm_opts = ctx.turn_llm_opts
+  const visible_text = ctx.visible_text
+  let budget_decisions = ctx.budget_decisions
+  let structural_validator_attempts = ctx.structural_validator_attempts
+  const on_failure = structural_verdict?.on_failure ?? "regenerate_with_feedback"
+  if on_failure == "raise" {
+    throw structural_verdict?.diagnostic
+      ?? "structural validator rejected assistant turn"
+  }
+  structural_validator_attempts = structural_validator_attempts + 1
+  __agent_loop_pop_rejected_assistant_turn(harness.agent, session.session_id)
+  const feedback = to_string(structural_verdict?.feedback ?? "")
+  if feedback != "" {
+    agent_session_inject_feedback(
+      harness.agent,
+      session.session_id,
+      "structural_validator",
+      feedback,
+      1,
+    )
+  }
+  const structural_totals = agent_session_record_usage(
+    harness.agent,
+    session.session_id,
+    llm_result,
+    turn_llm_opts,
+    iteration_index + 1,
+  )
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: __agent_loop_iteration_info(
+        harness.agent,
+        harness.clock,
+        session.session_id,
+        llm_result,
+        0,
+        visible_text,
+        structural_totals,
+        loop_start_ms,
+      )
+        + {
+          dispatch_skipped: true,
+          skip_reason: "structural_validator_revise",
+          structural_validator_attempts: structural_validator_attempts,
+          structural_validator_rule: structural_verdict?.rule ?? "",
+        },
+    },
+  )
+  const structural_exhaustion = __agent_loop_budget_exhaustion(
+    harness.agent,
+    harness.clock,
+    session.session_id,
+    budget,
+    iteration,
+    structural_totals,
+    loop_start_ms,
+    current_max,
+  )
+  if structural_exhaustion.exhausted {
+    __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, structural_exhaustion)
+    budget_decisions = __agent_loop_record_budget_stop(
+      budget_decisions,
+      iteration,
+      current_max,
+      structural_exhaustion.kind,
+    )
+    return {
+      action: "break",
+      final_status: "budget_exhausted",
+      stop_reason: structural_exhaustion.kind,
+      structural_validator_attempts: structural_validator_attempts,
+      budget_exhausted_emitted: true,
+      budget_decisions: budget_decisions,
+    }
+  }
+  return {
+    action: "continue",
+    final_status: "",
+    stop_reason: nil,
+    structural_validator_attempts: structural_validator_attempts,
+    budget_exhausted_emitted: false,
+    budget_decisions: budget_decisions,
+  }
+}

@@ -121,9 +121,15 @@ pub type LlmCallOptions = {
   // Requested provider retention/training posture. "default" sends nothing
   // and lets the provider's own server-side default apply; "strictest_
   // available" applies every per-request control the resolved provider
-  // declares. The per-request receipt on telemetry.data_controls says which
+  // declares, and REFUSES the call outright when the catalog records that
+  // the route trains on API traffic and publishes no control that would stop
+  // it. Applying zero controls on such a route would send the request
+  // unchanged and report success, so the refusal is what makes the posture
+  // mean anything there. A route nobody has researched still proceeds.
+  // The per-request receipt on telemetry.data_controls says which
   // of applied / no_control_available / provider_unresearched actually
-  // happened, because all three look identical on the wire.
+  // happened, because all three look identical on the wire, and carries the
+  // route's own training posture.
   data_controls?: "default" | "strictest_available",
   // Generation.
   max_tokens?: int,

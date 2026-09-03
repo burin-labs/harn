@@ -609,18 +609,32 @@ pub fn __visible_text(parsed: dict, raw_text: any) {
   return __strip_internal_verdict_json(text)
 }
 
-pub fn __internal_verdict_object(value: dict) -> bool {
+/**
+ * Whether a parsed value is one of the loop's own internal verdict envelopes.
+ *
+ * The parameter is `any` on purpose. Its caller hands over whatever
+ * `json_parse` made of assistant text, and `true`, `42`, `null` and
+ * `[1, 2, 3]` are all valid JSON. A `dict` annotation makes the runtime
+ * parameter check reject those before the body runs, which turns an ordinary
+ * final answer into a thrown type error and leaves the guard below dead for
+ * exactly the inputs it exists to handle.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __internal_verdict_object(value: any) -> bool {
   if type_of(value) != "dict" {
     return false
   }
-  const verdict = lowercase(trim(to_string(value?.verdict ?? "")))
+  const envelope: dict = value
+  const verdict = lowercase(trim(to_string(envelope?.verdict ?? "")))
   if verdict == "" {
     return false
   }
   const completion = contains(["done", "continue"], verdict)
-    && __dict_has_any(value, ["reasoning", "reason", "next_step", "nextStep"])
+    && __dict_has_any(envelope, ["reasoning", "reason", "next_step", "nextStep"])
   const judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
-    && __dict_has_any(value, ["critique", "confidence", "category", "error"])
+    && __dict_has_any(envelope, ["critique", "confidence", "category", "error"])
   if !(completion || judged) {
     return false
   }
@@ -635,7 +649,7 @@ pub fn __internal_verdict_object(value: dict) -> bool {
     "category",
     "error",
   ]
-  for key in value.keys() {
+  for key in envelope.keys() {
     if !contains(allowed, key) {
       return false
     }
