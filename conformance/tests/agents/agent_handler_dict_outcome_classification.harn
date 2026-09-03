@@ -9,6 +9,10 @@ import { agent_dispatch_tool_call } from "std/agent/primitives"
  * to the display rendering, reaching the classifier as an unparseable string
  * like `{ok: false, error: boom}`, and every one of them was reported `ok`.
  *
+ * The rendered text is printed alongside the verdict because harn#6508 pinned
+ * that string, and this fix must not change one byte of it: the classification
+ * now travels beside the text rather than instead of it.
+ *
  * `status_error` is the known residual: its only failure signal is a status
  * string, which the structured path deliberately does not key off, so it is
  * still reported ok. It is pinned here so a later fix flips it deliberately.
@@ -55,7 +59,7 @@ pipeline default(harness: Harness) {
     harness.stdio.println(
       shape.name + " ok=" + to_string(envelope?.ok)
         + " status=" + to_string(envelope?.status)
-        + " structured=" + to_string(type_of(envelope?.result) == "dict")
+        + " rendered=" + to_string(envelope?.rendered_result)
     )
   }
 

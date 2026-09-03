@@ -339,17 +339,28 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
 /// Coerce a Harn tool handler's return value into the tool-result payload.
 /// Preserve explicit text envelopes, computer screenshots, and typed domain
 /// outcomes. Boolean `ok` or `success` distinguishes return from operation
-/// success, whether the handler returned a typed struct or a plain dict;
-/// other values retain historical display rendering.
+/// success; other values retain historical display rendering.
+///
+/// A plain dict that declares a boolean outcome is the third case. #6508
+/// deliberately kept such dicts on the display path, and that rendering is
+/// preserved here byte for byte — but rendering them to text also destroyed
+/// the declaration, so `ok_result_failure_category` received an unparseable
+/// string like `{ok: false, error: boom}` and every dict-shaped refusal was
+/// classified a success (harn#7884). Carry the display text through the
+/// existing text envelope instead, which renders to exactly that same string,
+/// and keep the boolean beside it where the classifier can still read it.
 pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
     let json = crate::llm::vm_value_to_json(val);
     if agent_tool_handler_result_text(&json).is_some()
         || json_carries_screenshot(&json)
-        || handler_result::carries_typed_outcome(&json)
+        || handler_result::carries_typed_outcome(val, &json)
     {
-        json
-    } else {
-        serde_json::Value::String(val.display())
+        return json;
+    }
+    let display = val.display();
+    match handler_result::declared_outcome_flags(&json) {
+        Some(flags) => handler_result::text_envelope_with_outcome(display, flags),
+        None => serde_json::Value::String(display),
     }
 }
 
@@ -1394,16 +1405,13 @@ mod tests {
             serde_json::json!({"ok": false, "status": "blocked", "message": "apply blocked"}),
             serde_json::json!({"ok": false, "error": "boom"}),
             serde_json::json!({"success": false, "message": "rejected"}),
+            serde_json::json!({"isError": true, "message": "mcp shape"}),
         ];
         for shape in failure_shapes {
             // A plain dict, not a typed struct — what a `tool_define` handler
             // returns unless it goes out of its way to build a struct.
             let returned = crate::stdlib::json_to_vm_value(&shape);
             let coerced = harn_handler_result_value(&returned);
-            assert!(
-                coerced.is_object(),
-                "a dict carrying a boolean outcome must stay structured, got {coerced:?}"
-            );
             assert_eq!(
                 ok_result_failure_category(&coerced),
                 Some("tool_error"),
@@ -1415,6 +1423,34 @@ mod tests {
         let ok_shape = serde_json::json!({"ok": true, "message": "fine"});
         let coerced = harn_handler_result_value(&crate::stdlib::json_to_vm_value(&ok_shape));
         assert_eq!(ok_result_failure_category(&coerced), None);
+    }
+
+    /// The constraint #6508 established: a plain dict renders to the display
+    /// string, and harn#7884 must not change one byte of it. The envelope that
+    /// carries the outcome renders to its `text` verbatim, so this holds by
+    /// construction — but it holds only as long as that stays true, which is
+    /// what this pins.
+    #[test]
+    fn carrying_the_outcome_does_not_change_one_byte_of_the_rendered_text() {
+        let shapes = [
+            serde_json::json!({"ok": false, "status": "blocked", "message": "apply blocked"}),
+            serde_json::json!({"ok": true, "message": "fine"}),
+            serde_json::json!({"success": false, "message": "rejected"}),
+            serde_json::json!({"isError": true, "message": "mcp shape"}),
+            // Declares no boolean outcome: still the bare display string.
+            serde_json::json!({"stdout": "done", "exit_code": 0}),
+        ];
+        for shape in shapes {
+            let returned = crate::stdlib::json_to_vm_value(&shape);
+            // What #6508 rendered, taken from the same source value rather
+            // than restated, so the two cannot drift apart.
+            let before = returned.display();
+            assert_eq!(
+                render_tool_result(&harn_handler_result_value(&returned)),
+                before,
+                "rendered text must be unchanged for {shape:?}"
+            );
+        }
     }
 
     #[test]

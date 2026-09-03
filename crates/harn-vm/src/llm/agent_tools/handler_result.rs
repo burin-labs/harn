@@ -6,29 +6,63 @@ pub(super) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Optio
     object.get("text")?.as_str()
 }
 
-/// Whether a handler's return declares its own operation outcome.
+pub(super) fn carries_typed_outcome(
+    source: &crate::value::VmValue,
+    value: &serde_json::Value,
+) -> bool {
+    source.struct_data().is_some()
+        && value.as_object().is_some_and(|object| {
+            object.get("ok").is_some_and(serde_json::Value::is_boolean)
+                || object
+                    .get("success")
+                    .is_some_and(serde_json::Value::is_boolean)
+        })
+}
+
+/// The boolean outcome fields a handler's return declares, if any.
 ///
-/// A **boolean** `ok`, `success`, or `isError` is that declaration: a handler
-/// writes one precisely to distinguish "the call returned" from "the operation
-/// succeeded". This deliberately does **not** require the source to be a typed
-/// struct.
+/// These are exactly the boolean signals `ok_result_failure_category` reads. A
+/// failure `status` string is deliberately not among them: keying off any
+/// `status` key would capture every dict that merely reports progress, so a
+/// dict whose only failure signal is `status: "error"` keeps the plain display
+/// path and stays misclassified. That residual is tracked on harn#7884.
+pub(super) fn declared_outcome_flags(
+    value: &serde_json::Value,
+) -> Option<Vec<(&'static str, bool)>> {
+    let object = value.as_object()?;
+    let flags: Vec<(&'static str, bool)> = ["ok", "success", "isError"]
+        .into_iter()
+        .filter_map(|key| {
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_bool)
+                .map(|flag| (key, flag))
+        })
+        .collect();
+    (!flags.is_empty()).then_some(flags)
+}
+
+/// Wrap a handler's display rendering in the existing text envelope, carrying
+/// the declared boolean outcome alongside it.
 ///
-/// The rule is boolean-only on purpose. A failure `status` string is also read
-/// by `ok_result_failure_category`, but keying the structured path off any
-/// `status` key would hold open every dict that reports progress, so a dict
-/// whose only failure signal is `status: "error"` still takes the display path
-/// and is still misclassified. That residual is tracked on harn#7884 rather
-/// than fixed by widening this predicate. Requiring one meant a plain dict carrying
-/// `{ok: false}` fell through to the display rendering below, arriving at
-/// `ok_result_failure_category` as an unparseable string like
-/// `{ok: false, error: boom}` — so every dict-shaped refusal was classified a
-/// success and the loop could not see it (harn#7884).
-pub(super) fn carries_typed_outcome(value: &serde_json::Value) -> bool {
-    value.as_object().is_some_and(|object| {
-        ["ok", "success", "isError"]
-            .iter()
-            .any(|key| object.get(*key).is_some_and(serde_json::Value::is_boolean))
-    })
+/// `render_tool_result` returns an envelope's `text` verbatim, so the rendered
+/// transcript string is byte-identical to the bare display string this
+/// replaces. Only the classifier's view changes: it now sees a parseable
+/// object carrying the boolean the handler declared.
+pub(super) fn text_envelope_with_outcome(
+    display: String,
+    flags: Vec<(&'static str, bool)>,
+) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "schema".to_string(),
+        serde_json::Value::String("harn.agent_tool_handler_result.v1".to_string()),
+    );
+    object.insert("text".to_string(), serde_json::Value::String(display));
+    for (key, flag) in flags {
+        object.insert(key.to_string(), serde_json::Value::Bool(flag));
+    }
+    serde_json::Value::Object(object)
 }
 
 #[cfg(test)]
@@ -70,25 +104,10 @@ mod tests {
             serde_json::json!({"ok": false})
         );
 
-        // Reversed by harn#7884. #6508 limited the structured path to typed
-        // structs, which meant a plain dict declaring `{ok: false}` was
-        // display-rendered into `{ok: false}` as *text* and reached the
-        // failure classifier as an unparseable string, so every dict-shaped
-        // refusal was reported a success. A boolean outcome now keeps the
-        // return structured whatever built it.
         let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": false}));
-        assert_eq!(
-            harn_handler_result_value(&ordinary),
-            serde_json::json!({"ok": false}),
-            "a dict declaring a boolean outcome must stay structured"
-        );
-
-        // A dict with no boolean outcome is untouched by that reversal and
-        // keeps #6508's display rendering.
-        let unmarked = crate::stdlib::json_to_vm_value(&serde_json::json!({"stdout": "done"}));
         assert!(
-            harn_handler_result_value(&unmarked).is_string(),
-            "a dict declaring no outcome retains legacy display rendering"
+            harn_handler_result_value(&ordinary).is_string(),
+            "plain dictionaries retain legacy display rendering"
         );
     }
 }

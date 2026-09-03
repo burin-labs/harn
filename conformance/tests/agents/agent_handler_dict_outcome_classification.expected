@@ -1,8 +1,8 @@
-ok_false_blocked ok=false status=error structured=true
-ok_false_error ok=false status=error structured=true
-success_false ok=false status=error structured=true
-status_error ok=true status=ok structured=false
-ok_false_categorized ok=false status=error structured=true
-is_error_true ok=false status=error structured=true
-ok_true ok=true status=ok structured=true
+ok_false_blocked ok=false status=error rendered={message: apply blocked, ok: false, status: blocked}
+ok_false_error ok=false status=error rendered={error: boom, ok: false}
+success_false ok=false status=error rendered={message: rejected, success: false}
+status_error ok=true status=ok rendered={message: nope, status: error}
+ok_false_categorized ok=false status=error rendered={error: boom, error_category: tool_error, ok: false}
+is_error_true ok=false status=error rendered={isError: true, message: mcp shape}
+ok_true ok=true status=ok rendered={message: fine, ok: true}
 raises ok=false status=error
