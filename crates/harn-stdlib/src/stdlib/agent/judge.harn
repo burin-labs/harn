@@ -133,6 +133,7 @@ pub type CompletionDirective = {
   repair?: string?,
   receipt: CompletionDirectiveReceipt,
   feedback_history: dict,
+  knowledge_state: string,
 }
 
 /** Normalized result from either a deterministic or model completion check. */
@@ -1123,6 +1124,10 @@ fn __judge_directive(
     repair: verdict?.next_step,
     receipt: receipt,
     feedback_history: feedback_history,
+    // A caller that owns delivery needs the same composition context the
+    // inline emit above would have used, or its feedback is deduplicated
+    // against a knowledge state it cannot see.
+    knowledge_state: payload.knowledge_state,
   }
 }
 

@@ -1,0 +1,460 @@
+//! The TypeScript half of the checked-in provider-catalog binding.
+//!
+//! Split out of `bindings.rs` only because the two type blocks together put
+//! that file over the source file-length cap. The generator functions stay in
+//! `bindings.rs`; this file is the literal text they emit, and nothing else.
+
+pub(super) const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
+  schema_version: 10
+  schema: string
+  generated_by: string
+  providers: HarnCatalogProvider[]
+  models: HarnCatalogModel[]
+  aliases: HarnCatalogAlias[]
+  variants: HarnCatalogVariant[]
+  families: HarnCatalogModelFamily[]
+  routing_routes?: HarnCatalogRoutingRoute[]
+  qc_defaults: Record<string, string>
+}
+
+export interface HarnCatalogProvider {
+  id: string
+  display_name: string
+  icon?: string
+  classification: "hosted" | "local"
+  endpoint: HarnProviderEndpoint
+  auth: HarnProviderAuth
+  extra_headers?: Record<string, string>
+  healthcheck?: HarnProviderHealthcheck
+  cache_usage_accounting?: boolean
+  data_controls?: HarnProviderDataControls
+  stream_usage_accounting?: boolean
+  protocols: string[]
+  features: string[]
+  caveats: string[]
+  rpm?: number
+  rate_limits?: HarnRateLimits
+  local_runtime?: HarnLocalRuntime
+  latency_p50_ms?: number
+  performance?: HarnServingPerformance
+}
+
+export interface HarnLocalRuntime {
+  kind: "daemon_api" | "managed_process" | "external"
+  wire_protocol: "ollama_api" | "open_ai_compatible"
+  command?: string
+  prefix_args?: string[]
+  model_source?: string
+  model_source_env?: string
+  default_port?: number
+  model_arg?: string
+  served_model_arg?: string
+  host_arg?: string
+  port_arg?: string
+  ctx_arg?: string
+  parallel_arg?: string
+  gpu_layers_arg?: string
+  cache_type_k_arg?: string
+  cache_type_v_arg?: string
+  cache_ram_arg?: string
+  chat_template_kwargs_arg?: string
+  jinja_arg?: string
+  reasoning_arg?: string
+  reasoning_format_arg?: string
+  flash_attn_arg?: string
+  metrics_arg?: string
+  enable_lora_arg?: string
+  lora_modules_arg?: string
+  lora_modules_value_format?: "name_path" | "json_with_base_model"
+  max_lora_rank_arg?: string
+  default_args?: string[]
+  stop: "keep_alive_zero" | "pid" | "external"
+  source_url?: string
+  last_verified?: string
+  notes?: string
+}
+
+export interface HarnProviderEndpoint {
+  base_url: string
+  base_url_env?: string
+  region_env?: string
+  regions?: Record<string, HarnProviderEndpointRegion>
+  chat_endpoint: string
+  completion_endpoint?: string
+  embeddings_endpoint?: string
+}
+
+export interface HarnProviderEndpointRegion {
+  base_url: string
+  label?: string
+  source_url?: string
+  last_verified?: string
+  notes?: string
+}
+
+export interface HarnProviderAuth {
+  style: string
+  header?: string
+  env: string[]
+  required: boolean
+}
+
+export interface HarnProviderDataControls {
+  control_scope: "per_request" | "account" | "none"
+  retention_default: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  training_default: "trains" | "does_not_train" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+  request_controls?: HarnProviderDataControl[]
+}
+
+export interface HarnModelDataControls {
+  training_default: "trains" | "does_not_train" | "unspecified"
+  retention_default?: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified"
+  checked_on: string
+  sources: string[]
+  note?: string
+}
+
+export interface HarnProviderDataControl {
+  location: "body" | "header"
+  name: string
+  value_kind: "bool" | "string"
+  value: string
+  effect: "retention" | "training"
+  applies_to?: ("anthropic_sse" | "open_ai_sse" | "ollama_ndjson" | "gemini_json" | "gemini_interactions_sse")[]
+  caveat?: string
+}
+
+export interface HarnProviderHealthcheck {
+  method: string
+  path?: string
+  url?: string
+  body?: string
+}
+
+export interface HarnCatalogAlias {
+  name: string
+  model_id: string
+  provider: string
+  tool_format?: string
+  tool_calling?: HarnAliasToolCalling
+}
+
+export interface HarnAliasToolCalling {
+  native?: string
+  text?: string
+  streaming_native?: string
+  fallback_mode?: string
+  failure_reason?: string
+  last_probe_at?: string
+}
+
+export interface HarnCatalogModel {
+  id: string
+  name: string
+  data_controls?: HarnModelDataControls
+  display_name: string
+  blurb?: string
+  provider: string
+  aliases: string[]
+  context_window: number
+  logical_model?: string
+  equivalence_group?: string
+  served_variant?: string
+  wire_model?: string
+  api_dialect?: string
+  rate_limits?: HarnRateLimits
+  performance?: HarnServingPerformance
+  architecture?: HarnModelArchitecture
+  local_memory?: HarnLocalMemory
+  runtime_context_window?: number
+  stream_timeout?: number
+  modalities: { input: string[]; output: string[] }
+  tool_support: {
+    native: boolean
+    text: boolean
+    preferred_format?: string
+    parity?: string
+    parity_source?: 'declared' | 'derived'
+    parity_notes?: string
+    empirical_parity?: HarnToolEmpiricalParity
+    tool_search: string[]
+    max_tools?: number
+  }
+  structured_output: string
+  format_preferences: {
+    prefers_xml_scaffolding: boolean
+    prefers_markdown_scaffolding: boolean
+    structured_output_mode: "native_json" | "delimited" | "xml_tagged" | "none"
+    supports_assistant_prefill: boolean
+    prefers_role_developer: boolean
+    prefers_xml_tools: boolean
+    thinking_block_style: "none" | "thinking_blocks" | "reasoning_summary" | "inline"
+  }
+  reasoning: {
+    modes: string[]
+    effort_supported: boolean
+    effort_levels: string[]
+    none_supported: boolean
+    interleaved_supported: boolean
+    preserve_thinking: boolean
+  }
+  prompt_cache: boolean
+  batch?: HarnModelBatchSupport
+  pricing?: HarnModelPricing
+  deprecation: { status: "active" | "deprecated"; note?: string; sunset_date?: string; superseded_by?: string }
+  availability: "serverless" | "dedicated" | "unknown"
+  quality_tags: string[]
+  capability_tags: string[]
+  family: string
+  lineage: string
+  complementary_with?: string[]
+  avoid_as_reviewer_for?: string[]
+  completion_review?: HarnCompletionReview
+  tier: "small" | "mid" | "frontier" | "reasoning"
+  open_weight?: boolean
+  strengths?: string[]
+  benchmarks?: Record<string, number>
+  serving_tiers?: HarnModelServingTier[]
+  reasoning_modes?: HarnModelReasoningMode[]
+  released?: string
+  row_kind?: "snapshot" | "selector"
+  current_snapshot?: string
+  embedding_dim?: number
+  embedding_max_tokens?: number
+}
+
+export interface HarnModelBatchSupport {
+  wire_format: "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai"
+  input_mode: "jsonl_file" | "inline_requests" | "jsonl_or_inline"
+  result_ordering: "custom_id_rejoin" | "provider_ordered" | "unknown"
+  partial_failure: "per_request" | "whole_batch" | "unknown"
+  cancellation: "supported" | "not_supported" | "unknown"
+  discount_percent?: number
+  turnaround_hours?: number
+  max_requests?: number
+  max_input_bytes?: number
+  result_retention_days?: number
+  security_notes?: string[]
+  operational_notes?: string[]
+}
+
+export interface HarnToolEmpiricalParity {
+  verdict: string
+  preferred_format: string
+  confidence: string
+  sample_size: number
+  last_evaluated: string
+  native_pass_rate: number
+  text_pass_rate: number
+  verifier_divergence_rate: number
+}
+
+export interface HarnModelPricing {
+  input_per_mtok: number
+  output_per_mtok: number
+  cache_read_per_mtok?: number | null
+  cache_write_per_mtok?: number | null
+  input_token_bands?: HarnInputTokenPricingBand[]
+  promotions?: HarnPromotionalPricing[]
+}
+
+export interface HarnPromotionalPricing {
+  id: string
+  starts_on: string
+  starts_at?: string
+  ends_on?: string
+  ends_at?: string
+  review_after?: string
+  source_url: string
+  input_per_mtok: number
+  output_per_mtok: number
+  cache_read_per_mtok?: number | null
+  cache_write_per_mtok?: number | null
+}
+
+export interface HarnInputTokenPricingBand {
+  minimum_input_tokens: number
+  input_multiplier: number
+  output_multiplier: number
+}
+
+export interface HarnRateLimits {
+  rpm?: number
+  rph?: number
+  rpd?: number
+  tpm?: number
+  tph?: number
+  tpd?: number
+  input_tpm?: number
+  output_tpm?: number
+  concurrency?: number
+  tier?: string
+  source_url?: string
+  last_verified?: string
+  notes?: string
+}
+
+export interface HarnServingPerformance {
+  observed_ttft_ms?: number
+  output_tokens_per_sec?: number
+  time_to_answer_s?: number
+  source?: string
+  source_url?: string
+  last_verified?: string
+  sample_size?: number
+  notes?: string
+}
+
+export interface HarnModelArchitecture {
+  parameter_count_b?: number
+  active_parameter_count_b?: number
+  moe?: boolean
+  quantization?: string
+  precision?: string
+  license?: string
+  tokenizer?: string
+  knowledge_cutoff?: string
+  source_url?: string
+  last_verified?: string
+}
+
+export interface HarnLocalMemory {
+  measured_resident_gib?: number
+  measured_context_window?: number
+  measured_cache_type?: string
+  base_resident_gib?: number
+  kv_cache_gib_per_1k_ctx?: number
+  cache_type_multipliers?: Record<string, number>
+  default_cache_type?: string
+  safety_margin_gib?: number
+  max_recommended_context?: number
+  source_url?: string
+  last_verified?: string
+  notes?: string
+}
+
+export interface HarnCompletionReview {
+  scrutiny: "standard" | "light"
+  max_judge_calls?: number
+  evidence: string
+}
+
+export interface HarnModelReasoningModeRequest {
+  param_path: string[]
+  value: string
+  response_values?: string[]
+}
+
+export interface HarnModelReasoningMode {
+  id: string
+  label?: string
+  economics: "discounted" | "standard" | "premium"
+  request?: HarnModelReasoningModeRequest
+  token_multiplier?: number
+  status?: string
+  latency?: string
+  suitable_workloads?: string[]
+  unsuitable_workloads?: string[]
+  note?: string
+}
+
+export interface HarnModelServingTierRequest {
+  param: string
+  value: string
+  response_values?: string[]
+  beta_header?: string
+}
+
+export interface HarnModelServingTier {
+  id: string
+  label?: string
+  mode: "synchronous"
+  economics: "discounted" | "standard" | "premium"
+  request?: HarnModelServingTierRequest
+  otps_speedup?: number
+  cost_multiplier?: number
+  discount_percent?: number
+  status?: string
+  pricing?: HarnModelPricing
+  latency?: string
+  reliability?: string
+  quota?: string
+  suitable_workloads?: string[]
+  unsuitable_workloads?: string[]
+  note?: string
+}
+
+export interface HarnCatalogVariant {
+  id: string
+  label: string
+  description: string
+  model_id: string
+  provider: string
+  source: string
+  automatic_eligibility?: HarnAutomaticModelEligibility
+}
+
+export interface HarnAutomaticModelEligibility {
+  schema: "harn.automatic_model_eligibility.v1"
+  decision: "eligible"
+  receipts: HarnModelEligibilityMeasurement[]
+}
+
+export interface HarnModelEligibilityMeasurement {
+  kind: "meter_holdout" | "tool_call_fidelity" | "provider_health"
+  source: string
+  observed_at: string
+  harn_version: string
+  passed: number
+  trials: number
+}
+
+export interface HarnCatalogModelFamily {
+  id: string
+  label: string
+  plain_description: string
+  provider: string
+  model_id?: string
+  dimensions: HarnModelFamilyDimension[]
+  presets: HarnModelFamilyPreset[]
+}
+
+export interface HarnModelFamilyDimension {
+  key: string
+  label: string
+  plain_description: string
+  kind: "model" | "reasoning_effort"
+  ordered_values: HarnModelFamilyValue[]
+}
+
+export interface HarnModelFamilyValue {
+  value: string
+  label: string
+  plain_description: string
+  relative_cost_hint: number
+  relative_speed_hint: number
+  model_id?: string
+}
+
+export interface HarnModelFamilyPreset {
+  id: string
+  label: string
+  plain_blurb: string
+  coordinates: Record<string, string>
+}
+
+export interface HarnCatalogRoutingRoute {
+  provider: string
+  model: string
+  base_url?: string
+  secret_env?: string
+  timeout_ms?: number
+  label?: string
+  family?: string
+  capabilities?: string[]
+}
+
+"#;

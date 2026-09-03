@@ -7,6 +7,10 @@ import {
   with_required_reason,
 } from "std/llm/tool_middleware"
 
+struct ReceiptEcho {
+  echoed: string
+}
+
 fn smoke_tools() {
   const registry = tool_registry()
   return tool_define(
@@ -14,7 +18,7 @@ fn smoke_tools() {
     "receipt_echo",
     "Echo receipt smoke input",
     {
-      handler: { args -> return {echoed: to_string(args?.message ?? "")} },
+      handler: { args -> return ReceiptEcho {echoed: to_string(args?.message ?? "")} },
       parameters: {message: {type: "string"}, token: {type: "string"}},
     },
   )

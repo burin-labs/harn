@@ -32,6 +32,7 @@ mod lifecycle;
 mod registry;
 mod sinks;
 mod terminal;
+mod terminal_suspension;
 mod tool;
 mod worker;
 
@@ -72,6 +73,7 @@ pub use terminal::{
     classify_agent_terminal, classify_agent_terminal_with_class, terminal_outcome_for_finalize,
     AgentTerminalKind, AgentTerminalOutcome,
 };
+pub use terminal_suspension::{AgentTerminalSuspension, ResumeWait};
 pub use tool::{
     DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, ToolCallErrorCategory,
     ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,

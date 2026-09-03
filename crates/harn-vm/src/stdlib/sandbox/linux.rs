@@ -153,13 +153,19 @@ fn landlock_profile(
     let abi = landlock_abi_version();
     if abi == 0 {
         return match super::effective_fallback(profile) {
-            SandboxFallback::Enforce => Err(sandbox_rejection(
-                "Linux Landlock is not available; OsHardened profile requires it (set HARN_HANDLER_SANDBOX=warn or off, or pick the worktree profile, to run without filesystem isolation)".to_string(),
-            )),
+            SandboxFallback::Enforce => Err(super::SandboxMechanismUnavailable::new(
+                super::SandboxMechanism::LinuxLandlock,
+                super::SandboxMechanismAvailability::AbsentOnHost,
+                profile,
+            )
+            .into_error()),
             SandboxFallback::Warn => {
                 warn_once(
                     "handler_sandbox_linux_landlock_unavailable",
-                    "Linux Landlock is not available; process filesystem isolation is disabled",
+                    &super::mechanism_skipped_warning(
+                        super::SandboxMechanism::LinuxLandlock,
+                        super::SandboxMechanismAvailability::AbsentOnHost,
+                    ),
                 );
                 Ok(None)
             }

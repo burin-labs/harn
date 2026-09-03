@@ -18,6 +18,8 @@ import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
 import "std/agent/loop_purpose_labels"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
+import { __agent_loop_skipped_dispatch_turn } from "std/agent/loop_skipped_dispatch"
+import { __agent_loop_structural_veto_turn } from "std/agent/loop_structural_veto"
 import "std/agent/loop_support"
 import "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
@@ -491,79 +493,29 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           structural_validator_attempts,
         )
         if structural_verdict.vetoed {
-          const on_failure = structural_verdict?.on_failure ?? "regenerate_with_feedback"
-          if on_failure == "raise" {
-            throw structural_verdict?.diagnostic
-              ?? "structural validator rejected assistant turn"
-          }
-          structural_validator_attempts = structural_validator_attempts + 1
-          __agent_loop_pop_structural_veto_turn(harness.agent, session.session_id)
-          const feedback = to_string(structural_verdict?.feedback ?? "")
-          if feedback != "" {
-            agent_session_inject_feedback(
-              harness.agent,
-              session.session_id,
-              "structural_validator",
-              feedback,
-              1,
-            )
-          }
-          const structural_totals = agent_session_record_usage(
-            harness.agent,
-            session.session_id,
-            llm_result,
-            turn_llm_opts,
-            iteration_index + 1,
-          )
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "iteration_end",
+          const veto_outcome = __agent_loop_structural_veto_turn(
+            harness,
+            session,
             {
-              iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
-                harness.agent,
-                harness.clock,
-                session.session_id,
-                llm_result,
-                0,
-                visible_text,
-                structural_totals,
-                loop_start_ms,
-              )
-                + {
-                  dispatch_skipped: true,
-                  skip_reason: "structural_validator_revise",
-                  structural_validator_attempts: structural_validator_attempts,
-                  structural_validator_rule: structural_verdict?.rule ?? "",
-                },
+              budget: budget,
+              budget_decisions: budget_decisions,
+              current_max: current_max,
+              iteration: iteration,
+              iteration_index: iteration_index,
+              llm_result: llm_result,
+              loop_start_ms: loop_start_ms,
+              structural_validator_attempts: structural_validator_attempts,
+              structural_verdict: structural_verdict,
+              turn_llm_opts: turn_llm_opts,
+              visible_text: visible_text,
             },
           )
-          const structural_exhaustion = __agent_loop_budget_exhaustion(
-            harness.agent,
-            harness.clock,
-            session.session_id,
-            budget,
-            iteration,
-            structural_totals,
-            loop_start_ms,
-            current_max,
-          )
-          if structural_exhaustion.exhausted {
-            __agent_loop_emit_budget_exhausted(
-              harness.agent,
-              session.session_id,
-              structural_exhaustion,
-            )
-            budget_exhausted_emitted = true
-            budget_decisions = __agent_loop_record_budget_stop(
-              budget_decisions,
-              iteration,
-              current_max,
-              structural_exhaustion.kind,
-            )
-            final_status = "budget_exhausted"
-            stop_reason = structural_exhaustion.kind
+          budget_decisions = veto_outcome.budget_decisions
+          structural_validator_attempts = veto_outcome.structural_validator_attempts
+          if veto_outcome.action == "break" {
+            budget_exhausted_emitted = veto_outcome.budget_exhausted_emitted
+            final_status = veto_outcome.final_status
+            stop_reason = veto_outcome.stop_reason
             break
           }
           continue
@@ -1023,76 +975,36 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           {iteration: iteration_index + 1},
         )
         if pre_dispatch_checkpoint.dispatch_skipped {
-          agent_session_record_undispatched_tool_results(
-            harness.agent,
-            session.session_id,
-            tool_calls,
-            "interrupted",
-            "a user interrupt arrived before this tool call was dispatched",
-          )
-          const tool_count_skipped = len(tool_calls)
-          const totals_skipped = agent_session_record_usage(
-            harness.agent,
-            session.session_id,
-            llm_result,
-            turn_llm_opts,
-            iteration_index + 1,
-          )
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "iteration_end",
+          const skipped_outcome = __agent_loop_skipped_dispatch_turn(
+            harness,
+            session,
             {
-              iteration: iteration_index + 1,
-              iteration_info: __agent_loop_iteration_info(
-                harness.agent,
-                harness.clock,
-                session.session_id,
-                llm_result,
-                tool_count_skipped,
-                visible_text,
-                totals_skipped,
-                loop_start_ms,
-              )
-                + {dispatch_skipped: true, skip_reason: "interrupt_immediate"},
+              budget: budget,
+              budget_decisions: budget_decisions,
+              consecutive_text_only: consecutive_text_only,
+              current_max: current_max,
+              iteration: iteration,
+              iteration_index: iteration_index,
+              last_tool_count: last_tool_count,
+              llm_result: llm_result,
+              loop_start_ms: loop_start_ms,
+              tool_calls: tool_calls,
+              turn_llm_opts: turn_llm_opts,
+              turn_opts: turn_opts,
+              turns_since_progress: turns_since_progress,
+              visible_text: visible_text,
             },
           )
-          const skipped_exhaustion = __agent_loop_budget_exhaustion(
-            harness.agent,
-            harness.clock,
-            session.session_id,
-            budget,
-            iteration,
-            totals_skipped,
-            loop_start_ms,
-            current_max,
-          )
-          if skipped_exhaustion.exhausted {
-            __agent_loop_emit_budget_exhausted(
-              harness.agent,
-              session.session_id,
-              skipped_exhaustion,
-            )
-            budget_exhausted_emitted = true
-            budget_decisions = __agent_loop_record_budget_stop(
-              budget_decisions,
-              iteration,
-              current_max,
-              skipped_exhaustion.kind,
-            )
-            final_status = "budget_exhausted"
-            stop_reason = skipped_exhaustion.kind
+          budget_decisions = skipped_outcome.budget_decisions
+          consecutive_text_only = skipped_outcome.consecutive_text_only
+          last_tool_count = skipped_outcome.last_tool_count
+          turns_since_progress = skipped_outcome.turns_since_progress
+          if skipped_outcome.action == "break" {
+            budget_exhausted_emitted = skipped_outcome.budget_exhausted_emitted
+            final_status = skipped_outcome.final_status
+            stop_reason = skipped_outcome.stop_reason
             break
           }
-          const skipped_budget_stop = agent_budget_post_call_stop_reason(totals_skipped, turn_opts)
-          if skipped_budget_stop != "" {
-            final_status = "budget_exhausted"
-            stop_reason = skipped_budget_stop
-            break
-          }
-          consecutive_text_only = __next_text_only_count(0, consecutive_text_only)
-          turns_since_progress = __next_progress_count(false, turns_since_progress)
-          last_tool_count = 0
           continue
         }
         const dispatched = __dispatch_tool_calls(

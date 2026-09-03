@@ -9,24 +9,24 @@ homepage.workspace = true
 description = "Host capability exposing the harn-rules declarative rule engine to Harn (`rules.search` / `rules.report` / `rules.apply`)."
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.128-dev" }
-harn-rules = { path = "../harn-rules", version = "=0.10.128-dev" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.129-dev" }
+harn-rules = { path = "../harn-rules", version = "=0.10.129-dev" }
 # AST + Harn grammar for rules/lint over `.harn`. Other grammar families are
 # opted in by the embedder (or by `harn-hostlib/full`) so lean clients are not
 # forced through `grammars-all` (#6416).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.128-dev", default-features = false, features = [
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.129-dev", default-features = false, features = [
     "ast",
     "grammar-harn",
 ] }
 # Keep the VM lean; do not re-assert `harn-vm/full` for embedders that disabled it.
-harn-vm = { path = "../harn-vm", version = "=0.10.128-dev", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.129-dev", default-features = false }
 # Formatter for the codemod fmt post-pass (#2847): normalize rewritten .harn so
 # a batch lands fmt-stable. harn-fmt has no harn-rules dep, so no cycle.
-harn-fmt = { path = "../harn-fmt", version = "=0.10.128-dev" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.129-dev" }
 # The linter, exposed to Harn as the `lint.run` builtin (#2851). harn-lint
 # depends on harn-rules (not on this crate), so no cycle.
-harn-lint = { path = "../harn-lint", version = "=0.10.128-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.128-dev" }
+harn-lint = { path = "../harn-lint", version = "=0.10.129-dev" }
+harn-parser = { path = "../harn-parser", version = "=0.10.129-dev" }
 serde_json = "1"
 
 [dev-dependencies]
@@ -34,7 +34,7 @@ tempfile = "3"
 # Library stays lean (`ast` only); tests exercise multi-language rules and need
 # the grammar families those fixtures use. Cargo unifies these into the test
 # build without forcing grammars on embedders (#6416).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.128-dev", default-features = false, features = [
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.129-dev", default-features = false, features = [
     "ast",
     "grammar-harn",
     "grammar-web",

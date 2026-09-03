@@ -88,7 +88,11 @@ fn wrap_with_sandbox_exec(
     profile: SandboxProfile,
 ) -> Result<PrepareOutcome, VmError> {
     if !Path::new(SANDBOX_EXEC_PATH).exists() {
-        return unavailable("macOS sandbox-exec is not available", profile);
+        return unavailable(
+            super::SandboxMechanism::MacosSandboxExec,
+            super::SandboxMechanismAvailability::AbsentOnHost,
+            profile,
+        );
     }
     let mut wrapped_args = vec![
         "-p".to_string(),
