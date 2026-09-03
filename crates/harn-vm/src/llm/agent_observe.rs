@@ -678,24 +678,15 @@ pub(crate) async fn observed_llm_call(
                         opts.provider_contract_probe,
                     )
                 {
-                    let retry_usage = result.usage();
-                    // A discarded attempt that reported no tokens on any axis
-                    // measured zero; it did not fail to measure. Folding its raw
-                    // `unknown` ledger instead let one empty retry mark the whole
-                    // call unpriced, which nulls `cost_usd` beside a populated
-                    // `known_cost_usd` and makes a cost governor consume its
-                    // entire ceiling on a call that recovered cleanly. A
-                    // rate-limited retry is already folded as a known zero for
-                    // exactly this reason.
-                    //
-                    // An actionless turn that DID report tokens keeps its
-                    // measured ledger: that spend was real, and the governor must
-                    // keep failing closed on it.
-                    completed_retry_usage.push(if retry_usage.reports_no_tokens() {
-                        crate::llm::usage::LlmUsage::known_zero_attempt()
-                    } else {
-                        retry_usage.clone()
-                    });
+                    // The discarded attempt is folded exactly as it was
+                    // measured. It is never rewritten into a known zero: an
+                    // attempt whose usage the provider did not report is an
+                    // unknown, and converting it would hand a reader a
+                    // measurement nobody took. The ledger keeps the priced
+                    // siblings readable on its own, and carries this attempt as
+                    // an enumerated unpriced attempt with a worst-case
+                    // projection for the governor to consume.
+                    completed_retry_usage.push(result.usage());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
                         ("status", serde_json::json!("retrying")),
