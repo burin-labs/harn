@@ -1,4 +1,5 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import { relative_path } from "std/fs"
 
 // Test roots whose files are enumerated one by one inside a Makefile recipe
 // rather than discovered by walking the directory. A file added to one of
@@ -12,6 +13,112 @@ const HAND_LISTED_TEST_ROOTS = [
     suffix: ".harn",
     target: "test-harn-scripts",
     reason: "Focused stdlib owners are listed individually so each runs as its own case.",
+  },
+]
+
+/**
+ * The reason a directory holding committed Harn source is reached by no lint
+ * walk. The vocabulary is closed so a reason cannot be a shrug: each value says
+ * something different about whether the absence is correct.
+ *
+ * `rejected_by_design` — the files exist to be REFUSED. A lint walk over them
+ * is not missing coverage, it is the wrong question, and a walk that reported
+ * findings there would be reporting the fixture working.
+ *
+ * `fixture_input` — the files are inputs a specific test or contract check
+ * reads, and that reader owns what they must contain. Linting them would put a
+ * second opinion on a shape one owner already decides.
+ *
+ * `unlinted_backlog` — the files are ordinary Harn that SHOULD be linted and
+ * are not, with the finding count measured rather than assumed. This is the
+ * only value that admits a gap, which is what keeps the list from being a way
+ * to excuse one.
+ */
+type UnlintedRootKind = "fixture_input" | "rejected_by_design" | "unlinted_backlog"
+
+/**
+ * Directories holding committed Harn source that the `lint-harn` recipe does
+ * not walk, each with the reason.
+ *
+ * This registry is the gate. Adding a top-level directory of Harn source and
+ * wiring nothing to walk it used to be invisible, because a root nobody lints
+ * and a root with no findings print exactly the same thing: nothing. A root
+ * that is neither walked nor named here now fails the check.
+ *
+ * The list is also checked in the other direction. A row whose root has become
+ * walked, or whose root no longer holds any Harn source, fails too — otherwise
+ * the first accurate exception would rot into a standing excuse and the gate
+ * would go on passing while measuring less and less.
+ */
+/** One registry row: the root, why it is not walked, and the measurement behind that. */
+type UnlintedRoot = {root: string, kind: UnlintedRootKind, reason: string}
+
+const UNLINTED_HARN_ROOTS: list<UnlintedRoot> = [
+  {
+    root: "conformance/errors",
+    kind: "rejected_by_design",
+    reason:
+      "Every file here is a source the parser or checker must REJECT, paired with a sibling declaring the diagnostic it must produce. The conformance runner owns that verdict.",
+  },
+  {
+    root: "conformance/fixtures",
+    kind: "fixture_input",
+    reason:
+      "Connector-contract inputs read by conformance cases, including shapes deliberately built to fail a contract check.",
+  },
+  {
+    root: "conformance/helpers",
+    kind: "fixture_input",
+    reason:
+      "Servers a conformance case launches as a subprocess. What they must do is asserted by the case that runs them.",
+  },
+  {
+    root: "crates/harn-hostlib",
+    kind: "fixture_input",
+    reason:
+      "One parser fixture under tests/fixtures, read by a Rust test that owns the tree it must produce.",
+  },
+  {
+    root: "crates/harn-cli/assets/evals",
+    kind: "unlinted_backlog",
+    reason:
+      "A shipped eval suite. Measured at 1 finding under lint --strict, so it is a fix rather than a recipe line. Tracked by #7975.",
+  },
+  {
+    root: "crates/harn-cli/tests/fixtures",
+    kind: "fixture_input",
+    reason:
+      "Inputs to Rust tests that assert what each one migrates or diagnoses to. Measured at 11 findings, several of them the shape the fixture exists to present.",
+  },
+  {
+    root: "docs/fixtures",
+    kind: "fixture_input",
+    reason:
+      "A demo connector embedded in a documentation walkthrough. check-docs-snippets owns whether the doc is right.",
+  },
+  {
+    root: "spec",
+    kind: "fixture_input",
+    reason:
+      "Replay-source and provider-catalog inputs, each consumed by the contract check that owns its shape.",
+  },
+  {
+    root: "examples",
+    kind: "unlinted_backlog",
+    reason:
+      "Ordinary Harn, and for many readers the first Harn they see. Measured at 19 findings under lint --strict, so adopting it is a fix job rather than a recipe line. Tracked by #7975.",
+  },
+  {
+    root: "experiments",
+    kind: "unlinted_backlog",
+    reason:
+      "Four burin-mini modules are type-checked by name and the rest of the tree is reached by nothing. Measured at 39 findings under lint --strict. Tracked by #7975.",
+  },
+  {
+    root: "personas",
+    kind: "unlinted_backlog",
+    reason:
+      "Shipped persona sources. Measured at 2 findings under lint --strict. Tracked by #7975.",
   },
 ]
 
@@ -34,6 +141,13 @@ pub fn makefile_target_block(makefile_text: string, target: string) -> string {
       continue
     }
     if line.trim() == "" {
+      continue
+    }
+    // A full-line comment sits at column zero between two recipe lines in this
+    // Makefile wherever a recipe line needed explaining. Breaking on it read
+    // the recipe as ending at its first explained step, which silently halved
+    // what any caller measured.
+    if line.starts_with("#") {
       continue
     }
     if !line.starts_with("\t") {
@@ -130,6 +244,259 @@ pub fn check_test_target_coverage(fs: HarnessFs, root: string = "") -> dict {
   }
 }
 
+/** Split a recipe line into bare tokens, dropping shell punctuation. */
+fn recipe_tokens(line: string) -> list<string> {
+  let cleaned = line
+  for noise in ["\t", "\"", "'", ";", "(", ")", "`", ","] {
+    cleaned = cleaned.replace(noise, " ")
+  }
+  let out: list<string> = []
+  for raw in cleaned.split(" ") {
+    const token = raw.trim()
+    if token != "" {
+      out = out + [token]
+    }
+  }
+  return out
+}
+
+/** True when a recipe line only prints a banner. */
+fn recipe_line_is_echo(line: string) -> bool {
+  for token in recipe_tokens(line) {
+    return token == "echo" || token == "@echo"
+  }
+  return false
+}
+
+/**
+ * The repository paths a recipe hands to a tool, taken from the filesystem
+ * rather than from a pattern.
+ *
+ * A token counts as a path when a path by that name exists. That is deliberate:
+ * every rule for recognising a path by shape gets the answer wrong somewhere,
+ * and the question here is only ever "does the recipe name something real".
+ *
+ * One level of indirection is followed. A recipe that invokes a repository
+ * script hands its roots to that script, and `lint-harn` does exactly this for
+ * the conformance tree, so a reader that stopped at the recipe would report the
+ * largest walked root in the repository as reached by nothing.
+ */
+pub fn recipe_walked_paths(
+  fs: HarnessFs,
+  repo: string,
+  makefile_text: string,
+  target: string,
+) -> list<string> {
+  let seen: list<string> = []
+  let out: list<string> = []
+  let scripts: list<string> = []
+  for line in makefile_target_block(makefile_text, target).lines() {
+    // An `echo` line is the recipe narrating itself. Its words are prose, and
+    // one of them is the name of a directory that exists, so reading them as
+    // arguments reported three deliberately-unlinted trees as walked.
+    if recipe_line_is_echo(line) {
+      continue
+    }
+    for token in recipe_tokens(line) {
+      const candidate = if token.starts_with("$(") && token.ends_with(")") {
+        makefile_variable_tokens(makefile_text, token)
+      } else {
+        [token]
+      }
+      for path in candidate {
+        if path == "." || path == ".." || !fs.exists(path_join(repo, path)) {
+          continue
+        }
+        if !seen.contains(path) {
+          seen = seen + [path]
+          out = out + [path]
+        }
+        if path.ends_with(".sh") {
+          scripts = scripts + [path]
+        }
+      }
+    }
+  }
+  for script in scripts {
+    for line in fs.read_text(path_join(repo, script)).lines() {
+      if line.trim().starts_with("#") {
+        continue
+      }
+      for token in recipe_tokens(line.replace("$repo_root/", "").replace("${repo_root}/", "")) {
+        const path = token.trim()
+        // Inside a followed script a bare directory word is too weak a signal:
+        // `conformance` appears in a diagnostic message there, and accepting it
+        // reported the three deliberately-unlinted trees beneath it as walked.
+        // A path handed to a tool in this repository has a separator in it.
+        if !path.contains("/") || path == "." || path == ".." || !fs.exists(path_join(repo, path)) {
+          continue
+        }
+        if !seen.contains(path) {
+          seen = seen + [path]
+          out = out + [path]
+        }
+      }
+    }
+  }
+  return out.sort()
+}
+
+/** The tokens a `$(NAME)` reference expands to, or none when it is not a plain list. */
+fn makefile_variable_tokens(makefile_text: string, reference: string) -> list<string> {
+  const name = reference.substring(2, len(reference) - 1)
+  for line in makefile_text.lines() {
+    for separator in [" := ", " ?= ", " = "] {
+      if line.starts_with(name + separator) {
+        return recipe_tokens(line.substring(len(name + separator)))
+      }
+    }
+  }
+  return []
+}
+
+/** True when `walked` is `path` itself or a directory containing it. */
+fn path_is_covered_by(path: string, walked: string) -> bool {
+  return path == walked || path.starts_with(walked + "/")
+}
+
+/**
+ * The root a Harn file is attributed to when nothing walks it: the registry row
+ * that owns it if there is one, otherwise its first two path segments.
+ *
+ * Falling back to two segments rather than one is what makes the gate name a
+ * new root usefully. A file dropped at `playground/demo/a.harn` is reported as
+ * `playground/demo`, which is the thing somebody has to decide about, not
+ * `playground`, which they would then have to go and find.
+ */
+fn attributed_root(path: string) -> string {
+  for entry in UNLINTED_HARN_ROOTS {
+    if path_is_covered_by(path, to_string(entry.root)) {
+      return to_string(entry.root)
+    }
+  }
+  const parts = path.split("/")
+  if len(parts) <= 2 {
+    return parts[0]
+  }
+  return parts[0] + "/" + parts[1]
+}
+
+/** Add one to the tally for `name`, starting it at one when it is new. */
+fn count_one_more(rows: list<dict>, name: string) -> list<dict> {
+  let out: list<dict> = []
+  let found = false
+  for row in rows {
+    if to_string(row.root) == name {
+      found = true
+      out = out + [{root: name, files: to_int(row.files) + 1}]
+    } else {
+      out = out + [row]
+    }
+  }
+  if found {
+    return out
+  }
+  return out + [{root: name, files: 1}]
+}
+
+/** How many unwalked Harn files were attributed to `name`. */
+fn root_file_count(rows: list<dict>, name: string) -> int {
+  for row in rows {
+    if to_string(row.root) == name {
+      return to_int(row.files)
+    }
+  }
+  return 0
+}
+
+/** True when the registry accounts for `name`. */
+fn root_is_declared(name: string) -> bool {
+  for entry in UNLINTED_HARN_ROOTS {
+    if to_string(entry.root) == name {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Which roots holding committed Harn source no lint walk reaches.
+ *
+ * Reports the walked-path count and the scanned-file count on the pass line for
+ * the same reason the test census does: a run that globbed nothing, or read a
+ * recipe by the wrong name and found no paths, would otherwise print the same
+ * clean verdict as a run that looked at everything.
+ */
+pub fn check_lint_root_coverage(fs: HarnessFs, root: string = "") -> dict {
+  const repo = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  const makefile_text = fs.read_text(path_join(repo, "Makefile"))
+  const walked = recipe_walked_paths(fs, repo, makefile_text, "lint-harn")
+  let scanned = 0
+  let unwalked: list<dict> = []
+  for absolute in fs.glob("**/*.harn", {base: repo}).sorted() {
+    const path = relative_path(repo, absolute)
+    if path == "" || path.starts_with("target/") {
+      continue
+    }
+    scanned = scanned + 1
+    let covered = false
+    for reached in walked {
+      if path_is_covered_by(path, reached) {
+        covered = true
+        break
+      }
+    }
+    if covered {
+      continue
+    }
+    unwalked = count_one_more(unwalked, attributed_root(path))
+  }
+  let violations: list<dict> = []
+  for row in unwalked {
+    if !root_is_declared(to_string(row.root)) {
+      violations = violations
+        + [
+          {
+            kind: "unreached",
+            root: to_string(row.root),
+            files: to_int(row.files),
+            detail: "holds Harn source that no lint walk reaches and no registry row accounts for",
+          },
+        ]
+    }
+  }
+  // The other direction. Without this the first accurate exception rots into a
+  // standing excuse: the root gets walked, or empties out, and the gate goes on
+  // passing while the registry describes a repository that no longer exists.
+  for entry in UNLINTED_HARN_ROOTS {
+    if root_file_count(unwalked, to_string(entry.root)) == 0 {
+      violations = violations
+        + [
+          {
+            kind: "stale",
+            root: to_string(entry.root),
+            files: 0,
+            detail:
+              "is listed as unlinted but is now walked, or holds no Harn source; remove the row",
+          },
+        ]
+    }
+  }
+  return {
+    root: repo,
+    walked: walked,
+    walked_count: len(walked),
+    scanned_count: scanned,
+    unwalked_roots: unwalked,
+    violations: violations,
+    violation_count: len(violations),
+  }
+}
+
 fn render_report(report: dict) -> string {
   // Report the scanned count on the pass line too: a gate that walked an empty
   // or mis-rooted directory would otherwise print the same clean verdict as a
@@ -149,6 +516,38 @@ fn render_report(report: dict) -> string {
     lines = lines
       + [
         "- " + to_string(violation.path) + " (not listed in `" + to_string(violation.target) + "`)",
+      ]
+  }
+  return join(lines, "\n")
+}
+
+/** The lint-root census as text. */
+fn render_lint_root_report(report: dict) -> string {
+  // Both counts on the pass line, for the reason the test census reports its
+  // own: a run that read the wrong recipe name would find no walked paths and
+  // a run that globbed nothing would scan no files, and either would otherwise
+  // print this same clean verdict.
+  if report.violation_count == 0 {
+    return "lint root coverage passed: "
+      + to_string(report.scanned_count)
+      + " Harn file(s) under "
+      + to_string(report.walked_count)
+      + " walked path(s); every root is walked or has a reasoned registry row."
+  }
+  let lines = [
+    "lint root coverage failed: " + to_string(report.violation_count) + " root(s)",
+    "",
+    "A root holding Harn source must be walked by the `lint-harn` recipe, or",
+    "carry a row in UNLINTED_HARN_ROOTS saying why it is not. A row whose root",
+    "has become walked, or which holds no Harn source, must be removed.",
+  ]
+  for violation in report.violations {
+    lines = lines
+      + [
+        "- " + to_string(violation.root) + " (" + to_string(violation.kind) + ", "
+          + to_string(violation.files)
+          + " file(s)) "
+          + to_string(violation.detail),
       ]
   }
   return join(lines, "\n")
@@ -179,18 +578,24 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_test_target_coverage(harness.fs, to_string(parsed?.root ?? ""))
+  const where = to_string(parsed?.root ?? "")
+  const report = check_test_target_coverage(harness.fs, where)
+  const lint_roots = check_lint_root_coverage(harness.fs, where)
   if parsed?.json ?? false {
-    harness.stdio.println(json_stringify_pretty(report))
+    harness.stdio.println(json_stringify_pretty({test_targets: report, lint_roots: lint_roots}))
   } else {
-    const out = render_report(report)
-    if report.violation_count == 0 {
-      harness.stdio.println(out)
-    } else {
-      harness.stdio.eprintln(out)
+    for pair in [
+      {report: report, text: render_report(report)},
+      {report: lint_roots, text: render_lint_root_report(lint_roots)},
+    ] {
+      if to_int(pair.report.violation_count) == 0 {
+        harness.stdio.println(to_string(pair.text))
+      } else {
+        harness.stdio.eprintln(to_string(pair.text))
+      }
     }
   }
-  if report.violation_count > 0 {
+  if report.violation_count > 0 || lint_roots.violation_count > 0 {
     harness.runtime.exit(1)
   }
   return nil
