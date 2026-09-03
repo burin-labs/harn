@@ -169,7 +169,7 @@ impl UnpricedAttempt {
     }
 
     fn to_vm_value(&self) -> VmValue {
-        let mut attempt = crate::value::VmDict::default();
+        let mut attempt = crate::value::DictMap::new();
         attempt.put_str("reason", self.reason_str());
         attempt.insert(
             crate::value::intern_key("input_tokens"),
@@ -188,7 +188,7 @@ impl UnpricedAttempt {
             crate::value::intern_key("projected_cost_usd"),
             self.projected_cost_usd.map_or(VmValue::Nil, VmValue::Float),
         );
-        VmValue::dict(attempt)
+        VmValue::dict_map(attempt)
     }
 }
 
@@ -776,12 +776,12 @@ impl LlmUsage {
         );
         usage.insert(
             crate::value::intern_key("unpriced_attempts"),
-            VmValue::list(
+            VmValue::List(std::sync::Arc::new(
                 self.unpriced_attempts
                     .iter()
                     .map(UnpricedAttempt::to_vm_value)
                     .collect::<Vec<_>>(),
-            ),
+            )),
         );
         usage
     }
