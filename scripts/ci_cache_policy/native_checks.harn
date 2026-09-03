@@ -242,7 +242,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) ->
     errors = errors
       + ["native Windows feedback must consume the cache-policy.json main warm-artifact owner"]
   }
-  if trim(job?.["runs-on"] ?? "") != windows_blacksmith_runner_expression() {
+  if trim(job["runs-on"] ?? "") != windows_blacksmith_runner_expression() {
     errors = errors
       + [
         "ci.yml:windows must use ${BLACKSMITH_8CPU_WINDOWS_RUNNER} for candidate and main fallback proof, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true falling back to ${HOSTED_WINDOWS_RUNNER}",
@@ -251,7 +251,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) ->
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
     errors = errors + ["ci.yml:windows must mirror its Blacksmith/hosted runner tier"]
   }
-  if trim(producer?.["runs-on"] ?? "") != HOSTED_WINDOWS_RUNNER {
+  if trim(producer["runs-on"] ?? "") != HOSTED_WINDOWS_RUNNER {
     errors = errors
       + [
         "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must remain on ${HOSTED_WINDOWS_RUNNER}",

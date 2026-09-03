@@ -1,3 +1,5 @@
+import { agent_dispatch_tool_batch } from "std/agent/primitives"
+
 fn bench_tools() {
   let tools = tool_registry()
   tools = tool_define(

@@ -20,6 +20,7 @@
 // supposed to be the fallback.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import { agent_options } from "std/agent/options"
 
 const BARE_ENVELOPE = "{\"name\": \"add\", \"args\": {\"left\": 2, \"right\": 3}}"
 
@@ -40,9 +41,9 @@ fn _tools() {
   )
 }
 
-fn _bump(harness: Harness, cell: any) {
-  const snap = harness.runtime.shared_snapshot(cell)
-  harness.runtime.shared_cas(cell, snap, snap.value + 1)
+fn _bump(runtime: HarnessRuntime, cell: any) {
+  const snap = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snap, snap.value + 1)
 }
 
 /**
@@ -69,10 +70,10 @@ fn _run_bare_envelope_turn(
   )
   const mock_llm = { call ->
     if call?.opts?._next_tool_claim_applied == true {
-      _bump(harness, contracted)
+      _bump(harness.runtime, contracted)
     }
     const seen = harness.runtime.shared_snapshot(turns).value
-    _bump(harness, turns)
+    _bump(harness.runtime, turns)
     if seen == 0 {
       return {ok: true, value: {text: BARE_ENVELOPE, provider: "mock", model: "mock"}}
     }
@@ -85,23 +86,25 @@ fn _run_bare_envelope_turn(
       harness,
       "Add 2 and 3, then finish.",
       nil,
-      {
-        provider: "mock",
-        session_id: session,
-        tools: _tools(),
-        tool_format: "json",
-        loop_until_done: true,
-        done_sentinel: "##DONE##",
-        turn_end_condition: nil,
-        max_iterations: 3,
-        llm_caller: mock_llm,
-        missing_tool_call_recovery: {output_contract: output_contract},
-        _next_tool_claim: if claimed {
-          {tool_name: "add", source: "missing_tool_call_recovery"}
-        } else {
-          nil
+      agent_options(
+        {
+          provider: "mock",
+          session_id: session,
+          tools: _tools(),
+          tool_format: "json",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          turn_end_condition: nil,
+          max_iterations: 3,
+          llm_caller: mock_llm,
+          missing_tool_call_recovery: {output_contract: output_contract},
+          _next_tool_claim: if claimed {
+            {tool_name: "add", source: "missing_tool_call_recovery"}
+          } else {
+            nil
+          },
         },
-      },
+      ),
     ) },
   )
   let boundary_failures = 0

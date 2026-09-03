@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { agent_options } from "std/agent/options"
 import { agent_session_messages } from "std/agent/state"
 
 /*
@@ -60,19 +61,21 @@ fn __probe_run(harness: Harness, session: string, veto_below_iteration: int) -> 
     harness,
     "Write the closing report.",
     nil,
-    {
-      provider: "mock",
-      model: "resend-probe",
-      session_id: session,
-      llm_caller: caller,
-      loop_until_done: true,
-      turn_end_condition: false,
-      max_iterations: 6,
-      tool_format: "text",
-      done_sentinel: "##DONE##",
-      final_wrapup: false,
-      verify_completion: gate,
-    },
+    agent_options(
+      {
+        provider: "mock",
+        model: "resend-probe",
+        session_id: session,
+        llm_caller: caller,
+        loop_until_done: true,
+        turn_end_condition: false,
+        max_iterations: 6,
+        tool_format: "text",
+        done_sentinel: "##DONE##",
+        final_wrapup: false,
+        verify_completion: gate,
+      },
+    ),
   )
   return observed
 }
@@ -121,19 +124,21 @@ pipeline test_judge_continue_reason_still_reaches_the_model_once(harness: Harnes
     harness,
     "Write the closing report.",
     nil,
-    {
-      provider: "mock",
-      model: "resend-probe",
-      session_id: session,
-      llm_caller: caller,
-      loop_until_done: true,
-      turn_end_condition: false,
-      max_iterations: 6,
-      tool_format: "text",
-      done_sentinel: "##DONE##",
-      final_wrapup: false,
-      verify_completion: gate,
-    },
+    agent_options(
+      {
+        provider: "mock",
+        model: "resend-probe",
+        session_id: session,
+        llm_caller: caller,
+        loop_until_done: true,
+        turn_end_condition: false,
+        max_iterations: 6,
+        tool_format: "text",
+        done_sentinel: "##DONE##",
+        final_wrapup: false,
+        verify_completion: gate,
+      },
+    ),
   )
   // Three rounds: the first draft and one after each of the two vetoes.
   assert_eq(len(seen), 3)
