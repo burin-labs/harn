@@ -1198,3 +1198,32 @@ pub fn agent_loop_demote_empty_turn(call: dict, turn_llm_opts: dict) -> dict {
     },
   }
 }
+
+/**
+ * Discard the trailing assistant turn when an adjudicator has just rejected it
+ * and the loop is about to regenerate.
+ *
+ * A rejected turn that stays in the transcript is re-read by the model on every
+ * later round, so a run that is vetoed N times pays for N drafts it was already
+ * told not to keep. The adjudicator's directive is the carry-forward; the draft
+ * itself is not.
+ *
+ * The role guard is the safety contract, not politeness. A turn whose tool
+ * calls were dispatched is followed by its tool results, so it is never the
+ * trailing message and is never popped: this can only remove a bare assistant
+ * turn, which orphans nothing.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __agent_loop_pop_rejected_assistant_turn(agent: HarnessAgent, session_id: any) {
+  const messages = agent_session_messages(agent, session_id)
+  if len(messages) == 0 {
+    return false
+  }
+  const last = messages[len(messages) - 1]
+  if last?.role != "assistant" {
+    return false
+  }
+  return agent_session_pop_last_assistant(agent, session_id)
+}

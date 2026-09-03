@@ -1,0 +1,160 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_session_messages } from "std/agent/state"
+
+/*
+ * harn#7874: a completion-judge `continue` used to leave the rejected closing
+ * report in the transcript, so every later round re-read every earlier draft.
+ *
+ * The falsifier reads what actually reaches the provider: `call.opts.messages`
+ * is the message list the dispatcher hands the caller, so counting the
+ * rejected-draft marker there measures context, not presentation.
+ */
+
+const REPORT_MARKER: string = "RESEND-PROBE-CLOSING-REPORT"
+const JUDGE_REASON: string = "RESEND-PROBE-JUDGE-REASON name the file you changed"
+
+fn __marker_copies(messages: any, role: string, marker: string) -> int {
+  let seen = 0
+  for message in messages ?? [] {
+    if to_string(message?.role ?? "") == role
+      && contains(json_stringify(message?.content ?? ""), marker) {
+      seen = seen + 1
+    }
+  }
+  return seen
+}
+
+fn __any_role_copies(messages: any, marker: string) -> int {
+  let seen = 0
+  for message in messages ?? [] {
+    if contains(json_stringify(message ?? ""), marker) {
+      seen = seen + 1
+    }
+  }
+  return seen
+}
+
+fn __probe_run(harness: Harness, session: string, veto_below_iteration: int) -> list<int> {
+  let observed: list<int> = []
+  const caller = { call ->
+    observed = observed.appending(
+      __marker_copies(call?.opts?.messages, "assistant", REPORT_MARKER),
+    )
+    return {
+      ok: true,
+      value: {
+        text: "<user_response>" + REPORT_MARKER
+          + " I finished the task.</user_response>\n<done>##DONE##</done>",
+        provider: call?.opts?.provider ?? "",
+        model: call?.opts?.model ?? "",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  const gate = { payload ->
+    if payload.iteration < veto_below_iteration {
+      return JUDGE_REASON
+    }
+    return ""
+  }
+  const _ = agent_loop(
+    harness,
+    "Write the closing report.",
+    nil,
+    {
+      provider: "mock",
+      model: "resend-probe",
+      session_id: session,
+      llm_caller: caller,
+      loop_until_done: true,
+      turn_end_condition: false,
+      max_iterations: 6,
+      tool_format: "text",
+      done_sentinel: "##DONE##",
+      final_wrapup: false,
+      verify_completion: gate,
+    },
+  )
+  return observed
+}
+
+pipeline test_judge_continue_does_not_resend_the_rejected_closing_report(
+  harness: Harness,
+  task: unknown,
+) {
+  const session = "judge-resend-" + harness.random.uuid()
+  const observed = __probe_run(harness, session, 3)
+  // Three model calls: the first draft, and one after each of the two vetoes.
+  assert_eq(len(observed), 3)
+  // Round 1 has no prior draft to carry.
+  assert_eq(observed[0], 0)
+  // The falsifier. On main these read 1 and 2: each rejected draft stayed in
+  // the transcript, so round N+1 re-read every earlier one.
+  assert_eq(observed[1], 0)
+  assert_eq(observed[2], 0)
+}
+
+pipeline test_judge_continue_reason_still_reaches_the_model_once(
+  harness: Harness,
+  task: unknown,
+) {
+  // Negative control. Dropping the rejected draft must not drop the judge's
+  // reason: without this the first test passes by sending nothing at all.
+  const session = "judge-resend-reason-" + harness.random.uuid()
+  let seen: list<int> = []
+  const caller = { call ->
+    seen = seen.appending(__any_role_copies(call?.opts?.messages, JUDGE_REASON))
+    return {
+      ok: true,
+      value: {
+        text: "<user_response>" + REPORT_MARKER
+          + " I finished the task.</user_response>\n<done>##DONE##</done>",
+        provider: "mock",
+        model: "resend-probe",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  const gate = { payload ->
+    if payload.iteration < 2 {
+      return JUDGE_REASON
+    }
+    return ""
+  }
+  const _ = agent_loop(
+    harness,
+    "Write the closing report.",
+    nil,
+    {
+      provider: "mock",
+      model: "resend-probe",
+      session_id: session,
+      llm_caller: caller,
+      loop_until_done: true,
+      turn_end_condition: false,
+      max_iterations: 6,
+      tool_format: "text",
+      done_sentinel: "##DONE##",
+      final_wrapup: false,
+      verify_completion: gate,
+    },
+  )
+  assert_eq(len(seen), 2)
+  assert_eq(seen[0], 0)
+  assert_eq(seen[1], 1)
+}
+
+pipeline test_user_turns_survive_a_judge_continue(harness: Harness, task: unknown) {
+  // Negative control. Removing the rejected draft must not disturb the user's
+  // own turns, which are not the judge's to edit.
+  const session = "judge-resend-user-" + harness.random.uuid()
+  const observed = __probe_run(harness, session, 3)
+  assert_eq(len(observed), 3)
+  const messages = agent_session_messages(harness.agent, session)
+  assert_eq(__marker_copies(messages, "user", "Write the closing report."), 1)
+  // Exactly one accepted closing report survives; a fix that drops every
+  // assistant turn would read zero here.
+  assert_eq(__marker_copies(messages, "assistant", REPORT_MARKER), 1)
+}

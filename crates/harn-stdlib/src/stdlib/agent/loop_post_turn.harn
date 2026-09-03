@@ -19,6 +19,7 @@ import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
 import { __inject_feedback_with_tool_repair } from "std/agent/loop_tool_calls"
 import {
+  __agent_loop_pop_rejected_assistant_turn,
   __agent_loop_post_edit_reverify_mandated,
   __agent_loop_state_budget_fields,
   __apply_post_turn_options,
@@ -438,6 +439,11 @@ pub fn agent_loop_post_turn_transition(
             },
         }
       } else if verdict.action == "continue" {
+        // The judge rejected this closing turn and the loop is about to ask for
+        // another one. Drop the rejected draft: its directive already carries
+        // forward what the next attempt must fix, and leaving the draft in the
+        // transcript makes every later round re-read every earlier one.
+        __agent_loop_pop_rejected_assistant_turn(harness.agent, session.session_id)
         should_continue = true
         next = next
           + {
