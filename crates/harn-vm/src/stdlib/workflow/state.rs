@@ -971,6 +971,38 @@ fn complete_harn_map_stage_call(
     }
 }
 
+/// Read the run-level agent-loop defaults out of `workflow_execute` options and
+/// install them for every stage of this workflow.
+///
+/// Its own function so the intermediate locals do not land in
+/// `prepare_workflow_stage_state`'s stack frame; that frame is budgeted
+/// shrink-only because a nested descent pays it once per level.
+#[inline(never)]
+fn install_workflow_stage_context_from_options(
+    options: &crate::value::DictMap,
+) -> WorkflowStageContextGuard {
+    let registry = options
+        .get("skills")
+        .cloned()
+        .and_then(validate_workflow_skill_registry);
+    let match_config = options.get("skill_match").cloned();
+    // Run-level `tool_search` reaches a stage only through this context. The
+    // stage config is built from the stage's own typed options, so a key set
+    // once on `workflow_execute` is dropped at that seam without this thread.
+    let tool_search = options
+        .get("tool_search")
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned();
+    if registry.is_some() || match_config.is_some() || tool_search.is_some() {
+        install_workflow_stage_context(Some(WorkflowStageContext {
+            registry,
+            match_config,
+            tool_search,
+        }));
+    }
+    WorkflowStageContextGuard
+}
+
 pub(super) async fn prepare_workflow_stage_state(
     ctx: &AsyncBuiltinCtx,
     mut state: WorkflowRunState,
@@ -1011,29 +1043,10 @@ pub(super) async fn prepare_workflow_stage_state(
     install_current_mutation_session(Some(state.mutation_session.clone()));
     let mutation_session_guard = MutationSessionResetGuard;
 
-    let workflow_skill_registry = options
-        .get("skills")
-        .cloned()
-        .and_then(validate_workflow_skill_registry);
-    let workflow_skill_match = options.get("skill_match").cloned();
-    // Run-level `tool_search` reaches a stage only through this context. The
-    // stage config is built from the stage's own typed options, so a key set
-    // once on `workflow_execute` is dropped at that seam without this thread.
-    let workflow_tool_search = options
-        .get("tool_search")
-        .filter(|value| !matches!(value, VmValue::Nil))
-        .cloned();
-    if workflow_skill_registry.is_some()
-        || workflow_skill_match.is_some()
-        || workflow_tool_search.is_some()
-    {
-        install_workflow_stage_context(Some(WorkflowStageContext {
-            registry: workflow_skill_registry,
-            match_config: workflow_skill_match,
-            tool_search: workflow_tool_search,
-        }));
-    }
-    let workflow_stage_guard = WorkflowStageContextGuard;
+    // Reading the run-level defaults in a helper keeps their locals out of this
+    // function's stack frame, which is budgeted shrink-only because it is paid
+    // once per nested workflow descent.
+    let workflow_stage_guard = install_workflow_stage_context_from_options(options);
 
     let workflow_approval_guard = match state.mutation_session.approval_policy.clone() {
         Some(policy) => {
