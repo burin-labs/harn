@@ -64,10 +64,25 @@ mod tests {
             serde_json::json!({"ok": false})
         );
 
+        // Reversed by harn#7884. #6508 limited the structured path to typed
+        // structs, which meant a plain dict declaring `{ok: false}` was
+        // display-rendered into `{ok: false}` as *text* and reached the
+        // failure classifier as an unparseable string, so every dict-shaped
+        // refusal was reported a success. A boolean outcome now keeps the
+        // return structured whatever built it.
         let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": false}));
+        assert_eq!(
+            harn_handler_result_value(&ordinary),
+            serde_json::json!({"ok": false}),
+            "a dict declaring a boolean outcome must stay structured"
+        );
+
+        // A dict with no boolean outcome is untouched by that reversal and
+        // keeps #6508's display rendering.
+        let unmarked = crate::stdlib::json_to_vm_value(&serde_json::json!({"stdout": "done"}));
         assert!(
-            harn_handler_result_value(&ordinary).is_string(),
-            "plain dictionaries retain legacy display rendering"
+            harn_handler_result_value(&unmarked).is_string(),
+            "a dict declaring no outcome retains legacy display rendering"
         );
     }
 }
