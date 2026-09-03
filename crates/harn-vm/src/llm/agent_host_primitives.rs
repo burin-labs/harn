@@ -1500,6 +1500,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None => (dispatch_future.await, false),
     };
     let execution_duration_ms = started.elapsed().as_millis() as u64;
+    let declared_failure = outcome.declared_failure;
     let executor = outcome
         .executor
         .as_ref()
