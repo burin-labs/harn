@@ -199,7 +199,7 @@ fn gemini_3_8_flash_routes_and_introductory_pricing_are_live() {
         "gemini-3.8-pro",
     ] {
         assert!(
-            config.models.get(unknown).is_none(),
+            !config.models.contains_key(unknown),
             "{unknown} is not a model Google serves us; it must not gain a row"
         );
     }
