@@ -323,6 +323,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/judge_itemization" => "stdlib/agent/judge_itemization.harn",
     "agent/loop_await_turn" => "stdlib/agent/loop_await_turn.harn",
     "agent/loop_structural_veto" => "stdlib/agent/loop_structural_veto.harn",
+    "agent/loop_skipped_dispatch" => "stdlib/agent/loop_skipped_dispatch.harn",
     "agent/judge_verdict" => "stdlib/agent/judge_verdict.harn",
     "agent/completion_gate" => "stdlib/agent/completion_gate.harn",
     "agent/completion_review" => "stdlib/agent/completion_review.harn",
