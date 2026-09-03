@@ -67,7 +67,8 @@ mod tests {
     #[test]
     fn empty_session_reports_that_nothing_was_removed() {
         super::super::reset_session_store();
-        let session_id = super::super::open_or_create(Some("empty-pop".to_string()));
+        let session_id = super::super::open_or_create(Some("empty-pop".to_string()))
+            .expect("open fixture session");
 
         assert!(!super::pop_last_if_assistant(&session_id).expect("pop empty session"));
 

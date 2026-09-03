@@ -1,0 +1,356 @@
+/**
+ * Refuse growth in the stack frames a nested descent re-enters.
+ *
+ * A frame that is merely large is not a hazard: a command entry point is
+ * entered once. The frames that overflow a worker stack are the ones a nested
+ * agent, tool, or sub-agent descent re-enters, because the cost is paid per
+ * level. harn#7804 lost a conformance worker to exactly that, on a function
+ * whose frame had been sitting a few percent under the ceiling on main.
+ *
+ * The census comes from `scripts/ci/collect_stack_frames.sh`, which runs
+ * clippy under a lowered `stack-size-threshold` so a frame is visible long
+ * before it reaches the ceiling that aborts a worker.
+ *
+ * Observed failure this gate exists to refuse, reported on harn#7911 by a lane
+ * that hit it while verifying an unrelated change. At base
+ * `825c052af432930725c4487cd9560395a521cbd4`, with no local modifications, two
+ * cases abort under the debug test runner:
+ *
+ *   agent_loop_final_wrapup::final_wrapup_records_and_surfaces_a_parsed_unconsumed_tool_call
+ *   agent_loop_final_wrapup::final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic
+ *
+ * Both die as SIGABRT with has overflowed its stack, in about 1.5s and 2.6s.
+ * The other seven cases in that module pass, and both reproduce on two
+ * unrelated branches off the same base, so the cause is the shared dispatch
+ * descent rather than wrap-up. Reproduce with the workspace test runner scoped
+ * to `-p harn-vm` and the filter `test(agent_loop_final_wrapup)`.
+ */
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+const BUDGET_PATH = "scripts/stack-frame-budget.json"
+
+const LARGE_FRAME_CODE = "clippy::large_stack_frames"
+
+/** The clippy diagnostic shape this gate reads, open to fields it ignores. */
+pub type ClippySpan = {file_name: string, is_primary: bool, ...dict<string, unknown>}
+
+pub type ClippyMessage = {
+  code: {code: string, ...dict<string, unknown>},
+  message: string,
+  spans: list<ClippySpan>,
+  ...dict<string, unknown>,
+}
+
+pub type ClippyRecord = {reason: string, message: ClippyMessage, ...dict<string, unknown>}
+
+pub type StackFrameBudgetFile = {path: string, max_bytes: int}
+
+pub type StackFrameException = {path: string, max_bytes: int, expires: string, why: string}
+
+pub type StackFrameBudget = {
+  version: int,
+  threshold_bytes: int,
+  ceiling_bytes: int,
+  near_ceiling_fraction: float,
+  comment: list<string>,
+  exceptions: list<StackFrameException>,
+  files: list<StackFrameBudgetFile>,
+}
+
+pub type FrameFinding = {
+  kind: string,
+  path: string,
+  budget_bytes: int,
+  observed_bytes?: int,
+  detail: string,
+}
+
+pub type FrameReport = {
+  scanned_files: int,
+  budgeted_files: int,
+  findings: list<FrameFinding>,
+  violation_count: int,
+}
+
+/** Reduce raw clippy JSON lines to the worst frame per source file. */
+pub fn worst_frame_by_file(census_text: string) {
+  let worst: dict<string, int> = {}
+  for line in census_text.split("\n") {
+    const trimmed = line.trim()
+    if !trimmed.starts_with("{") {
+      continue
+    }
+    if !contains(trimmed, LARGE_FRAME_CODE) {
+      continue
+    }
+    const parsed = json_parse(trimmed)
+    // The narrowing has to be a positive schema_is block. A negated guard with
+    // an early continue still reads as unvalidated to HARN-OWN-004, and a
+    // census line that does not match the shape is skipped rather than thrown
+    // on, so schema_expect is the wrong tool here.
+    if schema_is(parsed, schema_of(ClippyRecord)) {
+      const record: ClippyRecord = parsed
+      if record.reason == "compiler-message" {
+        const message = record.message
+        const bytes = frame_bytes(message.message)
+        if message.code.code == LARGE_FRAME_CODE && bytes != nil {
+          for span in message.spans {
+            if span.is_primary && span.file_name != "" {
+              if bytes > (worst[span.file_name] ?? 0) {
+                worst[span.file_name] = bytes
+              }
+              break
+            }
+          }
+        }
+      }
+    }
+  }
+  return worst
+}
+
+/** Pull the byte count out of clippy's own sentence. */
+pub fn frame_bytes(message: string) {
+  const matches = regex_captures("allocate ([0-9]+) bytes", message)
+  if len(matches) == 0 {
+    return nil
+  }
+  const groups = matches[0].groups
+  if len(groups) == 0 {
+    return nil
+  }
+  return to_int(groups[0])
+}
+
+/**
+ * Judge one census against one budget.
+ *
+ * A budgeted file that is ABSENT from the census is a finding, never a pass.
+ * Absence means its worst frame fell under the collection threshold, which is
+ * a large shrink that must tighten the budget rather than quietly satisfy it.
+ * That is the same reason the collector refuses an empty census: a run that
+ * measured nothing must not read like a clean tree.
+ */
+pub fn judge_stack_frames(worst: dict<string, int>, budget: StackFrameBudget, today: string) {
+  const near_floor = to_int(to_float(budget.ceiling_bytes) * (1.0 - budget.near_ceiling_fraction))
+  let exception_for: dict<string, StackFrameException> = {}
+  for allowed in budget.exceptions {
+    exception_for[allowed.path] = allowed
+  }
+  let budgeted: dict<string, int> = {}
+  for entry in budget.files {
+    budgeted[entry.path] = entry.max_bytes
+  }
+  let findings = []
+  for entry in budget.files {
+    const observed = worst[entry.path]
+    if observed == nil {
+      findings = findings
+        + [
+          {
+            kind: "shrunk_below_threshold",
+            path: entry.path,
+            budget_bytes: entry.max_bytes,
+            detail: "budgeted file has no measured frame above the collection "
+              + "threshold; it shrank, so bank that with --write",
+          },
+        ]
+    } else if observed > entry.max_bytes {
+      findings = findings
+        + [
+          {
+            kind: "growth",
+            path: entry.path,
+            budget_bytes: entry.max_bytes,
+            observed_bytes: observed,
+            detail: "worst stack frame grew beyond its budget; this budget is "
+              + "shrink-only because a frame is paid once per nested descent level",
+          },
+        ]
+    } else if observed < entry.max_bytes {
+      findings = findings
+        + [
+          {
+            kind: "tighten",
+            path: entry.path,
+            budget_bytes: entry.max_bytes,
+            observed_bytes: observed,
+            detail: "worst stack frame shrank; run with --write so the budget "
+              + "keeps the ground it gained",
+          },
+        ]
+    }
+  }
+  for path in keys(worst) {
+    const observed = worst[path] ?? 0
+    if budgeted[path] == nil {
+      findings = findings
+        + [
+          {
+            kind: "unlisted",
+            path: path,
+            budget_bytes: 0,
+            observed_bytes: observed,
+            detail: "a frame crossed the collection threshold for the first time "
+              + "and is absent from the budget; an incomplete census is not a gate, "
+              + "so record it with --write",
+          },
+        ]
+    }
+    if observed < near_floor {
+      continue
+    }
+    const allowed = exception_for[path]
+    if allowed == nil {
+      findings = findings
+        + [
+          {
+            kind: "near_ceiling",
+            path: path,
+            budget_bytes: near_floor,
+            observed_bytes: observed,
+            detail: "frame is within "
+              + to_string(budget.near_ceiling_fraction * 100.0)
+              + " percent of the "
+              + to_string(budget.ceiling_bytes)
+              + "-byte ceiling; that is the band a nested descent overflows in, and "
+              + "it is refused regardless of any budget",
+          },
+        ]
+    } else if today > allowed.expires {
+      findings = findings
+        + [
+          {
+            kind: "expired_exception",
+            path: path,
+            budget_bytes: allowed.max_bytes,
+            observed_bytes: observed,
+            detail: "near-ceiling exception expired on " + allowed.expires
+              + "; box or split the frame, or have the owner re-date the exception",
+          },
+        ]
+    }
+  }
+  return {
+    scanned_files: len(keys(worst)),
+    budgeted_files: len(budget.files),
+    findings: findings,
+    violation_count: len(findings),
+  }
+}
+
+pub fn render_report(report: FrameReport) {
+  if report.violation_count == 0 {
+    return "stack-frame budget passed: " + to_string(report.budgeted_files)
+      + " budgeted file(s) within budget; "
+      + to_string(report.scanned_files)
+      + " file(s) measured above the collection threshold."
+  }
+  let out = "stack-frame budget failed: " + to_string(report.violation_count)
+    + " finding(s)\n"
+  for finding in report.findings {
+    const observed = if finding.observed_bytes == nil {
+      "absent"
+    } else {
+      to_string(finding.observed_bytes)
+    }
+    out = out + "\n- " + finding.path + ": "
+      + finding.kind
+      + " actual="
+      + observed
+      + " budget="
+      + to_string(finding.budget_bytes)
+      + "\n  "
+      + finding.detail
+  }
+  out = out + "\n\nRegenerate the census with scripts/ci/collect_stack_frames.sh, "
+    + "then re-run this gate with --write to accept a shrink."
+  return out
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_stack_frames",
+      args: [
+        {kind: "flag", name: "census", long: "--census", parse: "string", default: ""},
+        {kind: "flag", name: "budget", long: "--budget", parse: "string", default: BUDGET_PATH},
+        {kind: "flag", name: "today", long: "--today", parse: "string", default: ""},
+        {kind: "switch", name: "write", long: "--write", default: false},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_stack_frames.harn -- --census PATH [--budget PATH] [--write] [--json]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const census_path = to_string(parsed?.census ?? "")
+  if census_path == "" {
+    harness.stdio.eprintln("error: --census is required; this gate judges a census it did not take")
+    harness.runtime.exit(2)
+  }
+  const budget_path = to_string(parsed?.budget ?? BUDGET_PATH)
+  const budget_value = json_parse(harness.fs.read_text(budget_path))
+  if !schema_is(budget_value, schema_of(StackFrameBudget)) {
+    harness.stdio.eprintln("error: " + budget_path + " does not match the stack-frame budget shape")
+    harness.runtime.exit(2)
+  }
+  const budget: StackFrameBudget = budget_value
+  const worst = worst_frame_by_file(harness.fs.read_text(census_path))
+  if len(keys(worst)) == 0 {
+    harness.stdio.eprintln(
+      "error: the census carries no large_stack_frames diagnostics. A census "
+        + "that measured nothing must not read as a clean tree; re-collect it.",
+    )
+    harness.runtime.exit(1)
+  }
+  const today = to_string(parsed?.today ?? "")
+  if today == "" && len(budget.exceptions) > 0 {
+    harness.stdio.eprintln(
+      "error: --today YYYY-MM-DD is required while near-ceiling exceptions "
+        + "exist, so an expiry can never pass by not being checked",
+    )
+    harness.runtime.exit(2)
+  }
+  const report = judge_stack_frames(worst, budget, today)
+  if parsed?.write ?? false {
+    // Rewrite from the CENSUS, not from the previous budget. Walking the old
+    // entries could only ever adjust files that were already listed, so a
+    // frame crossing the threshold for the first time stayed "unlisted"
+    // forever and the remediation this gate prints was a dead end. Building
+    // from the measurement also drops a file that fell back under it.
+    let files = []
+    for path in keys(worst).sorted() {
+      files = files + [{path: path, max_bytes: worst[path] ?? 0}]
+    }
+    harness.fs.write_text(budget_path, json_stringify_pretty({...budget, files: files}) + "\n")
+    harness.stdio.println("stack-frame budget rewritten to the observed frame sizes.")
+    return nil
+  }
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    const out = render_report(report)
+    if report.violation_count == 0 {
+      harness.stdio.println(out)
+    } else {
+      harness.stdio.eprintln(out)
+    }
+  }
+  if report.violation_count > 0 {
+    harness.runtime.exit(1)
+  }
+  return nil
+}

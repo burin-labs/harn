@@ -54,7 +54,9 @@ fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::R
 
 const WORKER_SESSION_ID_METADATA_KEY: &str = "worker_session_id";
 
-fn worker_stage_session_id(node: &crate::orchestration::WorkflowNode) -> Option<String> {
+pub(in super::super) fn worker_stage_session_id(
+    node: &crate::orchestration::WorkflowNode,
+) -> Option<String> {
     node.raw_model_policy
         .as_ref()
         .and_then(|value| value.as_dict())
@@ -121,7 +123,8 @@ fn restore_worker_transcript(
 ) -> Result<(), VmError> {
     let Some(transcript) = transcript.cloned() else {
         if let WorkerConfig::SubAgent { spec } = config {
-            crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
+            crate::agent_sessions::open_or_create(Some(spec.session_id.clone()))
+                .map_err(|error| VmError::Runtime(error.to_string()))?;
             crate::agent_sessions::reset_transcript(&spec.session_id);
         }
         return Ok(());
@@ -129,13 +132,15 @@ fn restore_worker_transcript(
     match config {
         WorkerConfig::Stage { node, .. } => {
             if let Some(session_id) = worker_stage_session_id(node) {
-                crate::agent_sessions::open_or_create(Some(session_id.clone()));
+                crate::agent_sessions::open_or_create(Some(session_id.clone()))
+                    .map_err(|error| VmError::Runtime(error.to_string()))?;
                 crate::agent_sessions::store_transcript(&session_id, transcript)
                     .map_err(VmError::Runtime)?;
             }
         }
         WorkerConfig::SubAgent { spec } => {
-            crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
+            crate::agent_sessions::open_or_create(Some(spec.session_id.clone()))
+                .map_err(|error| VmError::Runtime(error.to_string()))?;
             crate::agent_sessions::store_transcript(&spec.session_id, transcript)
                 .map_err(VmError::Runtime)?;
         }

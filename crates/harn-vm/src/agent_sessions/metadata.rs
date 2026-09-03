@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 pub fn set_active_skills(id: &str, skills: Vec<String>) {
     SESSIONS.with(|s| {
@@ -73,7 +74,6 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
             return Err(format!("agent session '{id}' does not exist"));
         };
         let changed = state.system_prompt.as_deref() != Some(system_prompt);
-        state.system_prompt = Some(system_prompt.to_string());
         let dict = state
             .transcript
             .as_dict()
@@ -101,6 +101,7 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
             );
         }
         apply_transcript_with_budget(state, VmValue::dict(next), "record_system_prompt")?;
+        state.system_prompt = Some(system_prompt.to_string());
         Ok(())
     })
 }
@@ -714,31 +715,81 @@ pub(super) fn session_snapshot(state: &SessionState) -> VmValue {
     VmValue::dict(next)
 }
 
+pub(super) struct PreparedLineageUpdate {
+    old_parent_id: Option<String>,
+    child_transcript: VmValue,
+}
+
+pub(super) fn prepare_lineage_update(
+    map: &HashMap<String, SessionState>,
+    parent_id: &str,
+    child_id: &str,
+) -> Result<PreparedLineageUpdate, SessionOpenError> {
+    let (old_parent_id, child_transcript) = match map.get(child_id) {
+        Some(child) => {
+            child
+                .ensure_run_accepts_mutation("update_lineage")
+                .map_err(|reason| SessionOpenError::LineageRejected {
+                    session_id: child_id.to_string(),
+                    reason,
+                })?;
+            (
+                child.parent_id.clone(),
+                clone_transcript_with_parent(&child.transcript, parent_id),
+            )
+        }
+        None => (
+            None,
+            clone_transcript_with_parent(&empty_transcript(child_id), parent_id),
+        ),
+    };
+    Ok(PreparedLineageUpdate {
+        old_parent_id,
+        child_transcript,
+    })
+}
+
+impl PreparedLineageUpdate {
+    pub(super) fn commit(
+        self,
+        map: &mut HashMap<String, SessionState>,
+        parent_id: &str,
+        child_id: &str,
+        branched_at_event_index: Option<usize>,
+    ) {
+        let child = map
+            .get_mut(child_id)
+            .expect("lineage admission installs the prepared child before commit");
+        child
+            .replace_transcript(self.child_transcript)
+            .expect("prepared lineage validated the child's terminal state");
+        child.parent_id = Some(parent_id.to_string());
+        child.branched_at_event_index = branched_at_event_index;
+
+        if let Some(old_parent_id) = self.old_parent_id.filter(|id| id != parent_id) {
+            if let Some(old_parent) = map.get_mut(&old_parent_id) {
+                old_parent.child_ids.retain(|id| id != child_id);
+                old_parent.touch();
+            }
+        }
+        if let Some(parent) = map.get_mut(parent_id) {
+            parent.touch();
+            if !parent.child_ids.iter().any(|id| id == child_id) {
+                parent.child_ids.push(child_id.to_string());
+            }
+        }
+    }
+}
+
 pub(super) fn update_lineage(
     map: &mut HashMap<String, SessionState>,
     parent_id: &str,
     child_id: &str,
     branched_at_event_index: Option<usize>,
-) {
-    let old_parent_id = map.get(child_id).and_then(|child| child.parent_id.clone());
-    if let Some(old_parent_id) = old_parent_id.filter(|old_parent_id| old_parent_id != parent_id) {
-        if let Some(old_parent) = map.get_mut(&old_parent_id) {
-            old_parent.child_ids.retain(|id| id != child_id);
-            old_parent.touch();
-        }
-    }
-    if let Some(parent) = map.get_mut(parent_id) {
-        parent.touch();
-        if !parent.child_ids.iter().any(|id| id == child_id) {
-            parent.child_ids.push(child_id.to_string());
-        }
-    }
-    if let Some(child) = map.get_mut(child_id) {
-        child.touch();
-        child.parent_id = Some(parent_id.to_string());
-        child.branched_at_event_index = branched_at_event_index;
-        child.transcript = clone_transcript_with_parent(&child.transcript, parent_id);
-    }
+) -> Result<(), SessionOpenError> {
+    let update = prepare_lineage_update(map, parent_id, child_id)?;
+    update.commit(map, parent_id, child_id, branched_at_event_index);
+    Ok(())
 }
 
 pub(super) fn branch_event_index(transcript: &VmValue, keep_first: usize) -> usize {

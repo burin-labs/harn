@@ -119,7 +119,7 @@ fn record_changed_path_builtin_honors_explicit_session_argument() {
 fn actor_chain_returns_current_session_chain() {
     crate::reset_thread_local_state();
     let chain = crate::ActorChain::new("user:kenneth").pushed("agent:root");
-    let id = crate::agent_sessions::open_or_create_with_actor_chain(
+    let id = crate::agent_sessions::open_or_create_with_actor_chain_for_test(
         Some("actor-chain-current".to_string()),
         Some(chain.clone()),
     );

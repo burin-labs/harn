@@ -15,7 +15,7 @@ async fn stable_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
             let server_url = format!("{base_url}/mcp");
             let resource = crate::mcp_auth::canonical_resource_indicator(&server_url).unwrap();
             let session_id =
-                crate::agent_sessions::open_or_create(Some("mcp-auth-retry".to_string()));
+                crate::agent_sessions::open_or_create_for_test(Some("mcp-auth-retry".to_string()));
             let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
             let _bridge_guard = CurrentHostBridgeGuard::install();
             let captured_events = install_capturing_agent_sink(&session_id);
@@ -85,8 +85,9 @@ async fn stable_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_c
             let handle = stable_http_handle(&base_url).await;
             let server_url = format!("{base_url}/mcp");
             let resource = crate::mcp_auth::canonical_resource_indicator(&server_url).unwrap();
-            let session_id =
-                crate::agent_sessions::open_or_create(Some("mcp-scope-stepup".to_string()));
+            let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+                "mcp-scope-stepup".to_string(),
+            ));
             let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
             let _bridge_guard = CurrentHostBridgeGuard::install();
             let captured_events = install_capturing_agent_sink(&session_id);
@@ -156,8 +157,9 @@ async fn stable_http_401_without_interactive_host_returns_auth_error() {
             let (base_url, mut requests, _auth_challenged) =
                 spawn_auth_required_stable_http_mcp_server().await;
             let handle = stable_http_handle(&base_url).await;
-            let session_id =
-                crate::agent_sessions::open_or_create(Some("mcp-auth-headless".to_string()));
+            let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+                "mcp-auth-headless".to_string(),
+            ));
             let _session_guard = crate::agent_sessions::enter_current_session(session_id);
             let error = call_mcp_tool(
                 &handle,
@@ -203,7 +205,7 @@ async fn stable_http_token_exchange_sends_delegated_bearer_for_actor_chain() {
             let actor_chain =
                 crate::actor_chain::ActorChain::new_with_scopes("user:kenneth", ["repo"])
                     .pushed_with_scopes("agent:merge-captain", ["repo"]);
-            let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
+            let session_id = crate::agent_sessions::open_or_create_with_actor_chain_for_test(
                 Some("mcp-token-exchange".to_string()),
                 Some(actor_chain),
             );
@@ -276,7 +278,7 @@ async fn stable_http_token_exchange_unsupported_grant_falls_back_to_plain_bearer
                 .expect("stable HTTP MCP server should connect");
             let actor_chain =
                 crate::actor_chain::ActorChain::new("user:kenneth").pushed("agent:merge-captain");
-            let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
+            let session_id = crate::agent_sessions::open_or_create_with_actor_chain_for_test(
                 Some("mcp-token-exchange-fallback".to_string()),
                 Some(actor_chain),
             );

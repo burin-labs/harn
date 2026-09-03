@@ -54,6 +54,11 @@ pub(crate) struct JournalState {
     config: JournalConfig,
     pending: VecDeque<TranscriptMutation>,
     first_event_id: Option<u64>,
+    terminal_queued: bool,
+    execution_id: Option<String>,
+    task_id: Option<String>,
+    owns_session: bool,
+    lifecycle_reservation: Option<crate::agent_lifecycle_cleanup::LifecycleReservation>,
     _writer_lease: RunWriterLease,
 }
 
@@ -68,6 +73,50 @@ impl JournalState {
 
     pub(crate) fn first_event_id(&self) -> Option<u64> {
         self.first_event_id
+    }
+
+    pub(crate) fn terminal_queued(&self) -> bool {
+        self.terminal_queued
+    }
+
+    pub(crate) fn mark_terminal_queued(&mut self) {
+        self.terminal_queued = true;
+    }
+
+    pub(crate) fn claim_task(
+        &mut self,
+        execution_id: &str,
+        session_id: &str,
+        task_id: String,
+        owns_session: bool,
+    ) -> Result<(), VmError> {
+        let reservation = crate::agent_lifecycle_cleanup::reserve(
+            execution_id,
+            session_id,
+            self.run_id(),
+            &task_id,
+        )?;
+        self.execution_id = Some(execution_id.to_string());
+        self.task_id = Some(task_id);
+        self.owns_session = owns_session;
+        self.lifecycle_reservation = Some(reservation);
+        Ok(())
+    }
+
+    pub(crate) fn task_id(&self) -> Option<&str> {
+        self.task_id.as_deref()
+    }
+
+    pub(crate) fn execution_id(&self) -> Option<&str> {
+        self.execution_id.as_deref()
+    }
+
+    pub(crate) fn owns_session(&self) -> bool {
+        self.owns_session
+    }
+
+    pub(crate) fn is_claimed(&self) -> bool {
+        self.lifecycle_reservation.is_some()
     }
 
     pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
@@ -210,6 +259,11 @@ pub(crate) async fn prepare(
             },
             pending: VecDeque::new(),
             first_event_id: None,
+            terminal_queued: false,
+            execution_id: None,
+            task_id: None,
+            owns_session: false,
+            lifecycle_reservation: None,
             _writer_lease: writer_lease,
         },
     })
@@ -618,7 +672,7 @@ mod tests {
         let prepared = prepare(session_id, options, run_id.to_string(), turn_id.to_string())
             .await
             .expect("prepare journal");
-        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
         (prepared.transcript, Some(prepared.state))
     }
 
@@ -874,7 +928,7 @@ mod tests {
         .await
         .expect("prepare journal");
         let store = prepared.state.config.store.clone();
-        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
         let mut journal = Some(prepared.state);
         enqueue_message(
             &mut journal,
@@ -905,7 +959,8 @@ mod tests {
         crate::agent_sessions::reset_session_store();
         let root = tempfile::tempdir().expect("temp root");
         let options = options(root.path());
-        let session_id = crate::agent_sessions::open_or_create(Some("journal-active-run".into()));
+        let session_id =
+            crate::agent_sessions::open_or_create_for_test(Some("journal-active-run".into()));
         let first = prepare(
             &session_id,
             &options,

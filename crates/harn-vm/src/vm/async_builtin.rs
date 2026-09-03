@@ -78,6 +78,11 @@ impl AsyncBuiltinCtx {
         self.child.lock().execution_id().to_string()
     }
 
+    /// Runtime task that owns this builtin invocation.
+    pub(crate) fn task_id(&self) -> String {
+        self.child.lock().runtime_context.task_id.clone()
+    }
+
     /// Pool tasks may execute on any Tokio worker thread, so pool lookup state
     /// is shared through the VM context rather than thread-local storage.
     pub(crate) fn pool_registry(&self) -> Arc<crate::stdlib::pool::PoolRegistry> {

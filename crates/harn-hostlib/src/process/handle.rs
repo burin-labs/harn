@@ -254,7 +254,15 @@ pub enum WaitOutcome {
 /// Kill side of a [`ProcessHandle`]. Cloneable via `Arc` so cancellation
 /// works after the waiter thread has taken ownership of the handle itself.
 pub trait ProcessKiller: Send + Sync {
-    /// Send SIGKILL to the process tree/group when applicable.
+    /// Terminate the process tree/group with escalation where the platform
+    /// supports it: SIGTERM, a grace period of
+    /// `harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE`, then SIGKILL for
+    /// whatever ignored the first signal.
+    ///
+    /// This is the cancellation path (`cancel_handle`, and the session-end
+    /// hook that reclaims a session's handles), not the timeout path;
+    /// [`ProcessHandle::wait_with_timeout`] keeps its immediate-SIGKILL
+    /// semantics on timeout.
     fn kill(&self) -> ProcessCleanupReport;
 }
 
