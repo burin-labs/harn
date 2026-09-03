@@ -118,8 +118,8 @@ pub struct LlmUsage {
     pub usage_unknown_calls: i64,
     /// Every unpriced provider request this ledger covers, with the reason and
     /// the tokens it reported.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub unpriced_attempts: Vec<UnpricedAttempt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unpriced_attempts: Option<Box<[UnpricedAttempt]>>,
     /// `known_cost_usd` plus a worst-case projection for each unpriced
     /// attempt. This is the number a spend governor must consume: it never
     /// under-reports what a call may have cost, and it never blacks out a
@@ -146,17 +146,27 @@ fn unpriced_attempt_for(
     output_tokens: i64,
     reported_total_tokens: Option<i64>,
     projected: Option<f64>,
-) -> Vec<UnpricedAttempt> {
+) -> Option<Box<[UnpricedAttempt]>> {
     if cost_usd.is_some() {
-        return Vec::new();
+        return None;
     }
-    vec![UnpricedAttempt {
+    Some(Box::new([UnpricedAttempt {
         reason,
         input_tokens,
         output_tokens,
         reported_total_tokens,
         projected_cost_usd: projected,
-    }]
+    }]))
+}
+
+impl LlmUsage {
+    /// The unpriced requests this ledger covers, empty when everything
+    /// priced. Stored behind one pointer because this ledger is copied
+    /// through deeply recursive projections where an inline collection is
+    /// paid on every frame.
+    pub fn unpriced_attempt_slice(&self) -> &[UnpricedAttempt] {
+        self.unpriced_attempts.as_deref().unwrap_or(&[])
+    }
 }
 
 impl UnpricedAttempt {
@@ -321,10 +331,13 @@ impl LlmUsage {
             provider_call_count: certainty.provider_call_count,
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
-            unpriced_attempts: usages
-                .iter()
-                .flat_map(|usage| usage.unpriced_attempts.iter().cloned())
-                .collect(),
+            unpriced_attempts: {
+                let attempts: Vec<UnpricedAttempt> = usages
+                    .iter()
+                    .flat_map(|usage| usage.unpriced_attempt_slice().iter().cloned())
+                    .collect();
+                (!attempts.is_empty()).then(|| attempts.into_boxed_slice())
+            },
             projected_cost_usd: certainty.projected_cost_usd,
             unprojectable_attempts: certainty.unprojectable_attempts,
         }
@@ -359,7 +372,7 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
-            unpriced_attempts: Vec::new(),
+            unpriced_attempts: None,
             projected_cost_usd: 0.0,
             unprojectable_attempts: 0,
             ..Self::unknown_attempt()
@@ -397,15 +410,18 @@ impl LlmUsage {
             // No response reached us, so there are no tokens to project from
             // and no route to price. Each attempt is recorded as an
             // unprojectable hole rather than as a zero.
-            unpriced_attempts: (0..count)
-                .map(|_| UnpricedAttempt {
-                    reason: UnpricedReason::ProviderUnreported,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    reported_total_tokens: None,
-                    projected_cost_usd: None,
-                })
-                .collect(),
+            unpriced_attempts: Some(
+                (0..count)
+                    .map(|_| UnpricedAttempt {
+                        reason: UnpricedReason::ProviderUnreported,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        reported_total_tokens: None,
+                        projected_cost_usd: None,
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            ),
             projected_cost_usd: 0.0,
             unprojectable_attempts: count,
         }
@@ -485,12 +501,14 @@ impl LlmUsage {
         );
         let unprojectable_attempts = i64::from(
             unpriced_attempts
-                .first()
+                .as_deref()
+                .and_then(<[UnpricedAttempt]>::first)
                 .is_some_and(|attempt| attempt.projected_cost_usd.is_none()),
         );
         let projected_cost_usd = cost_usd.unwrap_or_else(|| {
             unpriced_attempts
-                .first()
+                .as_deref()
+                .and_then(<[UnpricedAttempt]>::first)
                 .and_then(|attempt| attempt.projected_cost_usd)
                 .unwrap_or(0.0)
         });
@@ -778,7 +796,7 @@ impl LlmUsage {
         usage.insert(
             crate::value::intern_key("unpriced_attempts"),
             VmValue::List(std::sync::Arc::new(
-                self.unpriced_attempts
+                self.unpriced_attempt_slice()
                     .iter()
                     .map(UnpricedAttempt::to_vm_value)
                     .collect::<Vec<_>>(),
@@ -848,7 +866,7 @@ impl LlmUsage {
         // measured at zero or never measured at all.
         fields.insert(
             "unpriced_attempts".to_string(),
-            serde_json::to_value(&self.unpriced_attempts).unwrap_or(Value::Null),
+            serde_json::to_value(self.unpriced_attempt_slice()).unwrap_or(Value::Null),
         );
         fields.insert(
             "cache_read_tokens".to_string(),
@@ -1326,9 +1344,9 @@ mod tests {
         assert_eq!(usage.unpriced_calls, 2);
         assert_eq!(usage.usage_unknown_calls, 2);
         assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
-        assert_eq!(usage.unpriced_attempts.len(), 2);
+        assert_eq!(usage.unpriced_attempt_slice().len(), 2);
         assert!(usage
-            .unpriced_attempts
+            .unpriced_attempt_slice()
             .iter()
             .all(|attempt| attempt.reason == super::UnpricedReason::ProviderUnreported),);
         // No response arrived, so there is nothing to project from and the
@@ -1428,7 +1446,7 @@ mod tests {
         assert_eq!(vm_usage["accounting_status"], "partial");
         assert_eq!(usage.unprojectable_attempts, 0);
         let unreported = usage
-            .unpriced_attempts
+            .unpriced_attempt_slice()
             .iter()
             .filter(|attempt| attempt.reason == super::UnpricedReason::ProviderUnreported)
             .count();
