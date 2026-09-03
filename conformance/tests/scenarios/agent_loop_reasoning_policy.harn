@@ -6,7 +6,7 @@ pipeline test(harness: Harness, task: unknown) {
     {
       provider: "openai",
       model: "gpt-5",
-      tools: [{name: "read", description: "read", input_schema: {type: "object"}}],
+      tools: [{name: "read", description: "read", inputSchema: {type: "object"}}],
       reasoning_policy: "auto",
       reasoning_task: "agent",
       reasoning_scale: "medium",
