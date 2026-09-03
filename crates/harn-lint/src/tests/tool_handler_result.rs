@@ -75,3 +75,60 @@ fn an_ordinary_function_returning_a_dict_is_not_reported() {
         "only tool handlers are in scope: {diagnostics:?}"
     );
 }
+
+/// The envelope the rule's own suggestion recommends for a text result. It is
+/// a dict literal, so a rule keyed only on "is a dict" would warn about the
+/// shape it just asked for. Paired with the freeform-dict falsifier at the top
+/// of this file, which must keep firing for this exemption to mean anything.
+#[test]
+fn a_handler_returning_the_typed_result_envelope_is_not_reported() {
+    let diagnostics = lint_source(
+        "pub fn build(tools: any) -> any {\n\
+         \x20 return tool_define(tools, \"search\", \"searches\", {\n\
+         \x20   handler: { args ->\n\
+         \x20     return {\n\
+         \x20       schema: \"harn.agent_tool_handler_result.v1\",\n\
+         \x20       text: \"3 matches\",\n\
+         \x20       data: {matches: 3},\n\
+         \x20     }\n\
+         \x20   },\n\
+         \x20   parameters: {},\n\
+         \x20 })\n\
+         }\n",
+    );
+    assert_eq!(
+        diagnostics.iter().filter(|d| d.rule == RULE).count(),
+        0,
+        "the typed result envelope must not be reported: {diagnostics:?}"
+    );
+}
+
+/// The exemption is the exact schema string, not the presence of a `schema`
+/// key. A dict that names some other schema declares no outcome, so the rule
+/// still has something true to say about it.
+#[test]
+fn a_dict_naming_a_different_schema_is_still_reported() {
+    let diagnostics = lint_source(
+        "pub fn build(tools: any) -> any {\n\
+         \x20 return tool_define(tools, \"search\", \"searches\", {\n\
+         \x20   handler: { args -> {schema: \"something.else.v1\", ok: false} },\n\
+         \x20   parameters: {},\n\
+         \x20 })\n\
+         }\n",
+    );
+    assert!(
+        has_rule(&diagnostics, RULE),
+        "only the handler-result envelope is exempt: {diagnostics:?}"
+    );
+}
+
+/// The lint and the runtime must match on one string. If the runtime's owner
+/// changes, this fails rather than letting the rule quietly warn about the
+/// envelope again.
+#[test]
+fn the_exempt_schema_is_the_runtime_owner_string() {
+    assert_eq!(
+        harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+        "harn.agent_tool_handler_result.v1"
+    );
+}

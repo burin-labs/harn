@@ -1,6 +1,16 @@
+/// The `schema` value that marks a handler's return as the typed result
+/// envelope rather than a freeform dict.
+///
+/// The runtime reader below and the `untyped-tool-handler-result` lint must
+/// agree on this string exactly: the lint stays quiet for an envelope
+/// precisely because the runtime reads its `text` verbatim. Two spellings of
+/// it would let the lint warn about the very shape it recommends, so this is
+/// the one owner and `harn-lint` reads it from here.
+pub const AGENT_TOOL_HANDLER_RESULT_SCHEMA: &str = "harn.agent_tool_handler_result.v1";
+
 pub(super) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Option<&str> {
     let object = value.as_object()?;
-    if object.get("schema")?.as_str()? != "harn.agent_tool_handler_result.v1" {
+    if object.get("schema")?.as_str()? != AGENT_TOOL_HANDLER_RESULT_SCHEMA {
         return None;
     }
     object.get("text")?.as_str()

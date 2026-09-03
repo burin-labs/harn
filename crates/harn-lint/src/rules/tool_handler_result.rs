@@ -14,6 +14,7 @@
 use harn_lexer::Span;
 use harn_parser::visit;
 use harn_parser::{DiagnosticCode as Code, DictEntry, Node, SNode};
+use harn_vm::llm::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -49,27 +50,53 @@ pub(crate) fn check_untyped_tool_handler_result(
 ///
 /// Deliberately shallow. A dict built up in a local and returned by name is not
 /// reported, because the rule would then need type inference to say anything
-/// true, and a warning that fires on a value it cannot see is worse than one
-/// that stays quiet.
+/// true, and a warning that stays quiet on a value it cannot see is better than
+/// one that guesses.
+///
+/// The typed result envelope is a dict literal too, and it is the shape this
+/// rule's own suggestion recommends for a text result, so reporting it would
+/// make the rule contradict itself. It is excluded by its `schema` key rather
+/// than by its other keys: that key is what the runtime reads to decide the
+/// value is an envelope, so the lint and the runtime agree by construction.
 fn returned_dict_literals(body: &[SNode]) -> Vec<Span> {
     let mut spans = Vec::new();
     for statement in body {
         visit::walk_node(statement, &mut |node| {
             if let Node::ReturnStmt { value: Some(value) } = &node.node {
-                if let Node::DictLiteral(_) = &value.node {
-                    spans.push(value.span);
+                if let Node::DictLiteral(entries) = &value.node {
+                    if !is_handler_result_envelope(entries) {
+                        spans.push(value.span);
+                    }
                 }
             }
         });
     }
     if let Some(last) = body.last() {
-        if let Node::DictLiteral(_) = &last.node {
-            spans.push(last.span);
+        if let Node::DictLiteral(entries) = &last.node {
+            if !is_handler_result_envelope(entries) {
+                spans.push(last.span);
+            }
         }
     }
     spans.sort_by_key(|span| (span.start, span.end));
     spans.dedup_by_key(|span| (span.start, span.end));
     spans
+}
+
+/// Whether this dict declares itself the typed handler-result envelope, by
+/// carrying the exact `schema` string the runtime matches on.
+///
+/// A computed `schema` value does not qualify. The rule cannot evaluate it, and
+/// treating an unreadable value as an envelope would silence the warning on
+/// every dict that merely mentions the key.
+fn is_handler_result_envelope(entries: &[DictEntry]) -> bool {
+    entry_for_key(entries, "schema").is_some_and(|entry| {
+        matches!(
+            &entry.value.node,
+            Node::StringLiteral(value) | Node::RawStringLiteral(value)
+                if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
+        )
+    })
 }
 
 fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
