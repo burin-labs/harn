@@ -1,0 +1,90 @@
+// Waiting on a background command finds what it printed before the wait
+// attached.
+//
+// The sibling case `command_wait_for_output.harn` stubs the host response with
+// `harness.testing.respond`, so it pins the shape of the Harn wrapper and can
+// say nothing about what the host actually searched. This case runs real
+// commands, because the defect was entirely on the host side: once a command
+// had finished, its live output feed was gone and the call returned
+// `status: "exited"` without searching anything at all.
+//
+// That answer is indistinguishable from the honest one. "The pattern was never
+// printed" and "the pattern was printed before I looked" arrived as the same
+// two fields, so a caller checking readiness reported a healthy command as a
+// failure. The losing shape is the natural one for an agent: start the job,
+// think, then wait. Only the thinking has to outlast the job.
+//
+// The negative clauses are what stop this from passing vacuously. A fix that
+// simply answered "matched" would satisfy the positive clause and fail both of
+// them.
+import { command_run, command_wait_for_output } from "std/command"
+
+/**
+ * Start a background command, optionally let it finish first, then wait.
+ *
+ * The delay is the whole experiment. With none, the wait attaches while the
+ * command is still live and reads its feed; with one, the command is already
+ * gone and only its receipt remains.
+ */
+fn wait_after(
+  tools: HarnessTools,
+  clock: HarnessClock,
+  command: string,
+  pattern: string,
+  delay_ms: int,
+) {
+  const handle = command_run(tools, ["bash", "-lc", command], {background: true})
+  if delay_ms > 0 {
+    clock.sleep_ms(delay_ms)
+  }
+  return command_wait_for_output(tools, handle, pattern, {timeout_ms: 15000})
+}
+
+/** Long enough that a command which merely echoes has certainly finished. */
+const AFTER_IT_FINISHED = 1500
+
+pipeline default(harness: Harness) {
+  // The defect. Same command and same pattern as the live case below; the only
+  // difference is that the wait attached too late.
+  const late = wait_after(
+    harness.tools,
+    harness.clock,
+    "echo BUILD_OK",
+    "BUILD_OK",
+    AFTER_IT_FINISHED,
+  )
+  harness.stdio.println("printed_before_attach_is_found=" + to_string(late.matched))
+
+  // Control: matching a live command still works, so a failure above is about
+  // the attach race and not about pattern matching.
+  const live = wait_after(harness.tools, harness.clock, "sleep 1; echo BUILD_OK", "BUILD_OK", 0)
+  harness.stdio.println("printed_while_running_is_found=" + to_string(live.matched))
+
+  // Combined output is the default source, and a finished command's receipt
+  // does not populate it, so a stderr-only command is the case that catches a
+  // fix which only looked at stdout.
+  const on_stderr = wait_after(
+    harness.tools,
+    harness.clock,
+    "echo BUILD_OK 1>&2",
+    "BUILD_OK",
+    AFTER_IT_FINISHED,
+  )
+  harness.stdio.println("stderr_before_attach_is_found=" + to_string(on_stderr.matched))
+
+  // Negative: a command that printed something else must still report no
+  // match. Without this clause, answering "matched" unconditionally passes.
+  const other = wait_after(
+    harness.tools,
+    harness.clock,
+    "echo SOMETHING_ELSE",
+    "BUILD_OK",
+    AFTER_IT_FINISHED,
+  )
+  harness.stdio.println("absent_pattern_still_reports_no_match=" + to_string(!other.matched))
+
+  // Negative: a command that printed nothing at all is the other way to be
+  // wrong, and it is the one an empty-buffer search gets right by accident.
+  const silent = wait_after(harness.tools, harness.clock, "true", "BUILD_OK", AFTER_IT_FINISHED)
+  harness.stdio.println("silent_command_still_reports_no_match=" + to_string(!silent.matched))
+}
