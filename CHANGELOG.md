@@ -9,6 +9,331 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.129
+
+### Breaking
+
+- `harn contracts builtins` now emits schema version 3 and includes the
+  `runtime_control_plane` boolean on every builtin row. Consumers must accept
+  version 3 before reading the new field. Rust consumers must construct
+  `BuiltinContract` through its public constructors rather than struct
+  literals so contract invariants remain enforced.
+- **The Swift binding's producer-owned vocabularies are now open enums
+  (#7889).** `HarnAgentTerminalClass`,
+  `HarnAgentTerminalKind`, `HarnAgentTerminalOwner`, `HarnLlmErrorCategory`,
+  `HarnLlmErrorKind`, and `HarnLlmErrorReason` are emitted as
+  `RawRepresentable` structs whose initializer cannot fail, matching the Rust
+  binding's `Unrecognized(String)` escape, so a wire value a newer Harn
+  introduces round-trips verbatim instead of throwing `DataCorrupted` and
+  taking the whole containing payload with it. Swift callers that switch
+  exhaustively over one of these types now need a `default` arm; comparisons
+  against a member, `allCases`, and `rawValue` are unchanged.
+- **A schema declared under a spelling the registry does not read is now
+  refused instead of silently emptied (#7907).** An entry whose schema was
+  spelled `input_schema` projected `inputSchema: {properties: {}}`, which a
+  model reads as a tool that takes no arguments, with nothing reporting a
+  fault. A registry entry now spells a complete JSON Schema `inputSchema` and a
+  per-parameter map `parameters`, and any other spelling is refused by name.
+  An object-root JSON Schema placed under `parameters` is likewise refused with
+  a message naming the tool and pointing at `inputSchema`, rather than the
+  previous complaint about a parameter named `required`. `tool_define`'s config
+  still accepts `input_schema` and normalizes it.
+
+### Added
+
+- A new `check-test-target-coverage` gate fails when a test file exists under a
+  hand-listed test root that no CI target runs. Enumerating test files one by
+  one in a Makefile recipe meant a newly added test passed locally and never
+  ran in CI, so its absence from the suite read exactly like a passing test
+  (#7881).
+- **New lint: a tool handler that returns a freeform dict (#7901).**
+  `untyped-tool-handler-result` (HARN-LNT-075) reports a handler whose return
+  value is a dict literal, because nothing in such a value declares whether the
+  operation succeeded and every reader has to infer it from key names. Warning
+  severity while in-tree handlers migrate; it becomes an error once none remain.
+- A repository gate now holds every measured stack frame to a recorded budget.
+  A frame that grows is refused by name at review time, and any frame inside the
+  band that overflows a worker stack is refused outright, so an overflow is
+  caught in review rather than discovered as a crashed worker.
+- Gemini 3.8 Flash is in the provider catalog, on the direct Google route and the
+  OpenRouter mirror. Its thinking effort ladder is low, medium and high; the
+  lowest rung Google refuses is not offered, and temperature, top_p and top_k stay
+  unsupported because Google's guidance is to strip them.
+- **The Meta Model API is in the provider catalog, and a model row can now
+  declare its own training posture.** Meta's Muse Spark routes are served over
+  the existing OpenAI-compatible wire, so no adapter was added. Meta publishes
+  each generation twice: `muse-spark-1.3` at list price, and
+  `muse-spark-1.3-contributor` about 12x cheaper on input in exchange for
+  permission to train on the traffic. That posture varies *within* one
+  provider, which the provider-level `data_controls` declaration cannot
+  express, so model rows now carry an optional `data_controls` of their own and
+  a row's declaration overrides its provider's.
+- **The `strictest_available` data-controls posture now refuses a route that
+  trains on API traffic.** Previously it applied every declared per-request
+  control, which on such a route is zero controls: the request went out
+  unchanged and the receipt read `no_control_available`, so a strict call could
+  quietly achieve nothing. It now fails with a message naming the route and
+  citing the source behind the claim. This also closes the same gap for
+  DeepSeek and Cohere, which the catalog already classified as training on API
+  traffic with nothing stopping a strict run from reaching them. The shipped
+  `default` posture is unchanged and refuses nothing, and an unresearched
+  provider still reports through the receipt rather than failing the call.
+- **The per-request data-controls receipt now names the route it describes and
+  carries that route's own training posture and note.** A receipt that named
+  only the provider reported Meta's standard-tier wording, "not used to improve
+  our products", on traffic that is trained on, because the posture varies
+  between two model ids under one provider.
+
+### Changed
+
+- **Sandbox mechanism refusals are structured (#7899).** When a spawn is refused
+  because the platform hardening mechanism cannot be attached, the error now
+  carries the mechanism, the requested profile, the unsatisfied requirement, and
+  whether the fallback selector is honored at all as typed fields, so an embedder
+  reads what happened instead of matching a sentence. Harn's own text states the
+  mechanism fact alone; the remedy sentence belongs to whichever layer owns the
+  control an operator actually has.
+- **The agent run loop's interrupt-skipped dispatch turn moved to its own
+  module (#7918).** `std/agent/loop_skipped_dispatch` now owns the turn in which
+  a user interrupt arrives before the model's tool calls are dispatched.
+  Behaviour is unchanged; the run module drops from 1359 to 1320 lines against
+  the 1500-line source cap, which is the headroom the remaining seams need.
+
+### Fixed
+
+- **An accepted steer is no longer undone by the harness one turn later
+  (#7580).** `session/inject` with `mode: "steer"` spliced the operator's
+  instruction into the transcript as a plain `role: user` message carrying no
+  directive authority, while the turn-end judge's veto feedback is stamped
+  `corrective`. Because the envelope ranks contract over corrective over
+  advisory, a judge re-deriving acceptance from the *original* task outranked
+  the operator's live steer: the model complied on the next turn, then reverted
+  and ran a tool the steer had forbidden. A delivered steer (and its
+  `interrupt` sibling) now also registers a standing `contract`-authority
+  directive tagged `operator_steer`, so a later corrective cannot contradict
+  it. `audit_only` injections are unchanged — they still never reach a model
+  prompt. The steer still does not retarget the typed `GoalSpec.objective`;
+  that half of #7580 remains open.
+- Report the exact physical provider request count on successful and exceptional
+  agent-loop terminals, including an explicit measured zero when dispatch never
+  occurred.
+- **A served session can run an agent turn again.** Every ACP/Agents-API
+  session starts in the `ask` mode, whose autonomy tier installs a `read_only`
+  side-effect ceiling for the turn. `harness.agent.open` declares
+  `state:mutate (agent-sessions)`, which the coarse side-effect ladder ranks as
+  `workspace_write`, so the agent loop's own session bookkeeping was judged as
+  if it were a model-facing workspace mutation and every served turn died
+  before its first model call with `harness.agent.open exceeds the active
+  effect ceiling: state:mutate (agent-sessions)`. `harn run` never saw it — it
+  installs no ceiling at all. A builtin contract can now declare
+  `runtime_control_plane`, meaning the operation mutates Harn-owned session
+  state rather than the user's workspace or an external system. That exempts
+  its effects from the user-world side-effect ladder while leaving the
+  capability gate, receipts, and lineage untouched;
+  every agent-session control-plane method that writes session state declares
+  it. Workspace-root changes remain user-world operations because they inspect
+  caller-supplied paths. The machine-readable `harn contracts builtins`
+  artifact is now schema
+  version 3 because each builtin row exposes this new contract field.
+- Nested tool dispatch no longer keeps the scoped dispatch future resident in its
+  caller's stack frame, so a deep sub-agent descent stops spending a tokio worker
+  stack on state that belongs on the heap.
+- A test fixture that scripts a `usage` object now gets the token counts it
+  names. The mock accepted the field and dropped it, so a scripted zero-token
+  completion fell through to the thirty-token default: the response an author
+  wrote as an empty provider turn came back reporting billed work, and a caller
+  that classifies emptiness by token count could never see it. Both the flat
+  names and the OpenAI-compat `prompt_tokens` / `completion_tokens` spellings
+  are read, a flat field still wins over `usage`, and a misspelled key inside
+  `usage` is now an error rather than another silent drop (#7860).
+- **A rejected closing turn no longer follows the agent into the next round
+  (#7874).** When the completion judge answers `continue`, the loop now drops
+  the turn it just rejected instead of leaving it in the transcript. The
+  judge's directive is the carry-forward; the draft is not. A run vetoed
+  repeatedly used to re-read every earlier draft on every later round, so
+  input tokens grew for output that never changed.
+- **Harness directives no longer read as something the person said (#7877).**
+  The context-directive envelope now declares who wrote it
+  (`<context-directives speaker="harness">` or `speaker="person"`), and the
+  envelope instructions tell the model to act on a harness block without
+  answering it back to the reader or naming the machinery. Previously every
+  directive arrived as a plain `user` turn, so corrective feedback such as a
+  completion judge's `continue` detail was indistinguishable from the person's
+  own words and leaked into closing messages as apologies about directives and
+  judge caps. The wire role is still `user`, the only mid-conversation role
+  every provider dialect accepts; the speaker is now a typed choice rather than
+  a literal.
+- A `command_policy` consent gate can now ask its host while running under the
+  capability ceiling of whichever tool triggered it. A tool that runs commands
+  declares `process: ["exec"]` and has no other use for a `permission`
+  capability, so the gate's `host_call("permission.request", ...)` was refused
+  inside the VM and the command failed as though no approver existed, with the
+  host reachable the whole time. While the VM is inside one of its own
+  command-policy hooks that one operation now carries the policy machinery's
+  capability instead of the tool's. Every other capability, the side-effect
+  ceiling, and the never-approvable catastrophic floor are unchanged, and a tool
+  that calls `permission.request` itself is still refused.
+- A supervised Cargo run whose worker binary is replaced while the run is in
+  flight now says so in its receipt, so a swapped binary is no longer reported
+  as an unexplained worker exit.
+- The Harn LLM mock now honours a scripted `usage` block instead of discarding
+  it, so a fixture that scripts zero output tokens produces an unbilled empty
+  completion rather than the default token counts (#7881).
+- Five `tests/stdlib` suites that were never listed in `test-harn-scripts` now
+  run in CI, adding 44 test cases that had been passing locally and shipping
+  unverified (#7881).
+- A scripted `usage.total_tokens` is now checked against the input and output
+  counts it accompanies rather than accepted and discarded, so a fixture whose
+  total contradicts its own split fails instead of asserting the mock's
+  defaults against each other (#7881).
+- **A tool handler's plain-dict refusal is now classified a failure (#7884).**
+  A handler that returned `{ok: false}`, `{success: false}`, `{status: "error"}`
+  or `{isError: true}` as an ordinary dict had that declaration rendered to
+  display text before anything read it, so the dispatch envelope, the receipt,
+  and the model all saw a success. Only a handler that raised was recorded as
+  failing. The declaration is now read while the return value is still
+  structured. The tool result's rendered text and payload are byte-identical to
+  before, so a downstream host reading that payload sees no change.
+- **A tool handler's own refusal now counts toward the repeated-denial cutoff
+  (#7888).** The cutoff read a typed denial only where the runtime writes one
+  before dispatch, so a handler that ran, refused internally, and reported a
+  non-retryable denial in its result looked to every reader like a call that
+  had not been refused. The loop kept reissuing a command that could only be
+  refused again. A handler-reported permanent denial is now a failed call and
+  cuts the run on the second identical refusal, exactly as a pre-dispatch
+  denial does. A retryable handler denial and an ordinary successful result are
+  unchanged.
+- **The shared Cargo target cache reclaims trees whose worktree is gone
+  (#7892).** `scripts/prune_stale_targets.sh` built its keep-set from
+  `git worktree list`, which keeps reporting a worktree deleted with `rm -rf`
+  until its metadata is pruned, so the pass protected exactly the entries it
+  exists to collect and a cache tree could outlive its worktree indefinitely.
+  An entry is now kept only while its worktree directory exists, liveness is
+  decided by the process that owns the tree rather than by modification time,
+  and every run reports the number of entries it scanned beside its verdict.
+- **A suspended run now says why it stopped and what would resume it
+  (#7900).** The terminal record for a suspension carried the word
+  `suspended` as both its kind and its reason and nothing else, so a host had
+  no typed field to read and had to scan the transcript to tell a person why
+  the run parked. The loop now passes its own suspension record through the
+  finalize seam, and the terminal outcome carries the reason the suspending
+  call declared as `message` plus the resume conditions as `detail`
+  (`resume_when=on_event:workspace_trusted`). Absent fields keep their
+  meaning: no `detail` means the run declared no resume condition.
+- **A tool registry entry now has one owner for how it spells its input schema
+  (#7907).** `tool_define` accepted `parameters` and `input_schema` but not
+  MCP-style `inputSchema`, so a config that declared `inputSchema` alone was
+  told it declared two schemas: the builtin inserted a default `parameters`
+  beside the caller's key and the registry then saw both. `tool_define` now
+  resolves all three config spellings once, refuses two of them together by
+  name, and normalizes a complete schema onto the single entry key
+  `inputSchema`.
+- A final assistant message that is a bare JSON scalar or array now ends the run
+  with a result instead of throwing a type error and leaving no terminal record.
+- **A completion judge that accepts while naming an unmet obligation no longer
+  ends the run (#7910).** `verdict: "done"` arriving beside a `gap_class` of
+  `missing_artifact`, `unmet_manner_clause`, `failed_verification` or
+  `unresolved_authorization` accepts and refuses inside one object. The loop
+  took the verdict and dropped the gap class, so a run that had been blocked
+  from doing its work reached a host as `status: "done"`, `terminal.kind:
+  "natural"`, with no stop reason. The gap class is the half backed by
+  evidence, so the turn now continues and records
+  `completion_judge_gap_contradicts_done`. The neutral class `other` still
+  accepts: it is what the schema documents for `done` and what an absent or
+  unrecognized field decodes to.
+- **An agent that keeps delegating is now stopped, not aborted (#7911).** An
+  agent whose tool starts another agent descended with no depth budget at all:
+  the default was declared in the runtime's limits but carried only by the
+  workflow ceiling, so the agent path never saw one. Nothing decremented,
+  nothing reached zero, and the descent ended when the native stack ran out and
+  the process aborted. An abort records nothing, so there was no transcript, no
+  terminal and no event to read afterwards. A delegating agent now stops at the
+  declared depth and reports an ordinary budget refusal inside the run. The VM's
+  thread stack grew to match, because a descent costs roughly 2 MiB per level
+  and the old size could not carry the depth the budget declares: the refusal
+  used to land on the one level the stack could not reach.
+- A provider call that recovered from a discarded attempt now reports the cost it
+  measured instead of reporting no measurement at all. The call's accounting is
+  partial rather than unknown, the discarded attempt stays visible with its token
+  count and a typed reason for carrying no price, and cost governors and budgets
+  now spend against a worst-case projection. A recovered retry no longer consumes
+  a whole USD ceiling, while a call nothing bounds still stops fail-closed.
+- **Waiting on a background command now finds what it already printed
+  (#7914).** `command_wait_for_output` read a command's output from the moment
+  it attached. If the command had already finished, its live output feed was
+  gone and the call reported no match without searching anything, which is
+  exactly what it reports when the pattern was never printed. A caller could
+  not tell a healthy build from a readiness failure, and the shape that lost is
+  the natural one for an agent: start the job, think, then wait. The completed
+  command's own receipt is now searched, so output produced before the wait
+  attached is still found.
+- A run that gave up now says so. When a run reaches its own end having attempted
+  tool calls without a single one succeeding, or without a required tool ever
+  succeeding, its terminal is `completion_unverified` with the cause named,
+  instead of the `natural` / `completed` terminal that was byte-identical to a run
+  that did the work. The run's own stop reason is kept verbatim and the evidence
+  that convicted it — the call counts and the last refusal's category — rides
+  beside it on the result. The decision is independent of the completion judge,
+  which is optional and costs a model call, and it convicts only on positive
+  evidence: a run that used no tools, or whose tool succeeded, still finishes
+  naturally.
+- **Stopping a worker now kills what that worker started (#7917).** `agent_stop`
+  ended the loop and wrote a `stopped` terminal, but a background command the
+  worker had started through a runtime-owned handle kept running: the stop
+  aborts the worker's task, which drops the loop mid-await, so the normal
+  finalize never runs and the session-end hooks that reclaim a session's command
+  handles never fire. A job was still writing ten seconds after an accepted
+  stop. Every worker stop now releases the agent sessions that worker owns
+  before its terminal is emitted, so a reader that sees the terminal can rely on
+  the children already being gone. Sub-agent, workflow and stage workers are all
+  covered, and a stop waits briefly for the aborted task to unwind before
+  tearing down, bounded so a task parked in a non-cancellable section cannot
+  hold the stop open. The children are also asked before they are shot: a
+  reclaimed command handle used to send SIGKILL directly, and now escalates,
+  sending SIGTERM, allowing the same grace period the rest of Harn's process
+  termination uses, and only then killing whatever ignored it. A cancelled job
+  gets its chance to flush a buffer, unlink a lock file, or close a socket.
+- **The formatter's corpus audit now says the formatter changed the file, and
+  stops failing on grouping parentheses it is entitled to drop (#7927).** A
+  contributor who wrote `for span in (message?.spans ?? [])` saw a red job
+  naming their own file and no mention of the formatter, and edited correct
+  code. The audit allows a difference that is only where parentheses sit and
+  that still parses to the same program; a dropped statement separator, a `?.`
+  rewritten to `.`, and a pair whose removal reassociates the expression all
+  still fail.
+- **A `for` header whose iterable ends in `}` keeps its grouping (#7927).** An
+  `if` or `match` used as an iterable, or a nullish default falling back to a
+  dict, printed as `} {` with nothing separating the brace that closed the
+  iterable from the brace that opened the body. Three modules formatted this
+  header from their own copy of the same string and now share one function.
+- A hard billing or quota stop from a provider now ends the call instead of being
+  retried. An account with no credit, an exhausted quota, or an enforced spend
+  ceiling arrives as a 429 whose body also says quota, and it was classified as a
+  rate limit, so every remaining call in the run retried into a condition that a
+  backoff can never clear. It is now its own terminal billing_limit reason, read
+  from the provider's structured error code where one exists, and the rate
+  governor no longer counts it as a throttle signal.
+- The worktree binary resolver now distinguishes a missing uplifted link from a
+  missing build. When Cargo left a compiled artifact under `deps/` but the copy at
+  the profile root is gone, the refusal names the link rather than reading as a
+  compile failure.
+- **The shared per-worktree Cargo target cache now has a size bound, not only
+  an orphan reaper (#7892).** Dropping orphans bounds nothing on a machine
+  whose worktrees are all alive: every live worktree kept its tree forever, so
+  the cache grew with the number of worktrees the machine had ever had at once.
+  Warm trees are now ranked by recency within their root; the newest
+  `HARN_TARGET_GC_KEEP_RECENT` (default 10) are the working set and are kept
+  whatever their age, and the rest are retired once nothing has built them for
+  `HARN_TARGET_GC_MAX_IDLE_SECS` (default three days). A tree a live process is
+  holding, and a tree whose mtime this run could not read, never reach the
+  ranking.
+- The stack-frame budget is measured from a build of its own. Clippy replays
+  cached diagnostics, so a census taken in a warm target directory reported
+  whatever threshold the previous build used and silently under-measured every
+  crate it did not rebuild. The banked baseline was therefore too low for most of
+  the workspace, and continuous integration, which builds cold, refused pull
+  requests that had changed nothing it measures.
+
 ## v0.10.128
 
 ### Breaking
