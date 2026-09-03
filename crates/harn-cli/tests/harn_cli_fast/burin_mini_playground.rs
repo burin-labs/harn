@@ -206,9 +206,16 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
         write_instruction.contains("Auth guard middleware"),
         "write_instruction={write_instruction}\nreport={report_json}"
     );
+    // The verification is deliberately a Node script and not a shell `grep`.
+    // `grep -n 'Auth guard middleware' <path>` is Unix-shell-shaped twice over:
+    // `grep` is absent from a stock Windows PATH, and cmd.exe does not strip
+    // single quotes, so even where grep exists the pattern arrives as three
+    // arguments. That command failed on Windows, and before harn#7915 a run
+    // whose only verification failed still sealed `done`, so this test was
+    // green on a run that verified nothing (harn#7968).
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("grep -n 'Auth guard middleware' packages/server/src/middleware/auth-guard.ts")
+        Some("node scripts/verify-comment.js")
     );
 
     let auth_guard = experiment_root.join("workspace/packages/server/src/middleware/auth-guard.ts");
@@ -305,7 +312,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("./scripts/verify-rate-limit.sh")
+        Some("node scripts/verify-rate-limit.js")
     );
     for action in [create_action, export_action, wire_action] {
         assert_eq!(action["command"].as_str().unwrap_or(""), "");
@@ -424,7 +431,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("./scripts/verify-rate-limit.sh")
+        Some("node scripts/verify-rate-limit.js")
     );
     assert!(
         !actions.iter().any(|item| item["id"] == "verify_output"),

@@ -315,3 +315,43 @@ fn runtime_paths_uses_configurable_state_roots() {
     reset_process_state();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn child_cwd_drops_the_verbatim_prefix_a_shell_cannot_start_in() {
+    // The positive case: this is the exact shape `canonicalize` hands back on
+    // Windows, and the exact shape `cmd.exe` answered with "UNC paths are not
+    // supported" before starting in the Windows directory instead.
+    assert_eq!(
+        super::child_process_cwd(std::path::PathBuf::from(r"\\?\C:\work\repo")),
+        std::path::PathBuf::from(r"C:\work\repo"),
+    );
+    // A bare drive root still has a drive letter and still gets stripped.
+    assert_eq!(
+        super::child_process_cwd(std::path::PathBuf::from(r"\\?\C:\")),
+        std::path::PathBuf::from(r"C:\"),
+    );
+}
+
+#[test]
+fn child_cwd_leaves_every_path_that_is_not_a_verbatim_disk_path_alone() {
+    // The controls. Without these the test above would also pass for an
+    // implementation that stripped four characters off anything.
+    for path in [
+        // A true UNC verbatim path has no drive-letter form to fall back to.
+        r"\\?\UNC\server\share",
+        // Already startable.
+        r"C:\work\repo",
+        // POSIX, where the prefix never appears. This is the case that makes
+        // applying the rule unconditionally safe.
+        "/work/repo",
+        "relative/path",
+        // Prefix present but not followed by a drive letter.
+        r"\\?\Volume{9c8f1a}\work",
+    ] {
+        assert_eq!(
+            super::child_process_cwd(std::path::PathBuf::from(path)),
+            std::path::PathBuf::from(path),
+            "{path} must be handed to the child unchanged",
+        );
+    }
+}

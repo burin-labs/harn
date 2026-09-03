@@ -6,7 +6,7 @@
   "workflow_status": "completed",
   "plan": {
     "ready": true,
-    "plan_summary": "Create packages/server/src/middleware/rate-limit.ts, export rateLimit from packages/server/src/middleware/index.ts, preserve withMiddleware in packages/server/src/routes/api.ts, then verify with ./scripts/verify-rate-limit.sh."
+    "plan_summary": "Create packages/server/src/middleware/rate-limit.ts, export rateLimit from packages/server/src/middleware/index.ts, preserve withMiddleware in packages/server/src/routes/api.ts, then verify with node scripts/verify-rate-limit.js."
   },
   "action_graph": {
     "actions": [
@@ -30,7 +30,7 @@
       },
       {
         "id": "verify_rate_limit",
-        "command": "./scripts/verify-rate-limit.sh"
+        "command": "node scripts/verify-rate-limit.js"
       }
     ]
   },
@@ -43,7 +43,7 @@
     }
   ],
   "verification_contract": {
-    "command": "./scripts/verify-rate-limit.sh",
+    "command": "node scripts/verify-rate-limit.js",
     "required_paths": [
       "packages/server/src/middleware/rate-limit.ts",
       "packages/server/src/middleware/index.ts",
