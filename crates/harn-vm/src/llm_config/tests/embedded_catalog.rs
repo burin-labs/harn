@@ -162,7 +162,7 @@ fn gemini_3_8_flash_routes_and_introductory_pricing_are_live() {
     assert_eq!(openrouter.provider, "openrouter");
 
     // Limits read off Google's live models endpoint on 2026-09-03.
-    assert_eq!(direct.context_window, Some(1_048_576));
+    assert_eq!(direct.context_window, 1_048_576);
     for capability in ["tools", "vision", "streaming", "prompt_caching", "thinking"] {
         assert!(
             direct.capabilities.iter().any(|value| value == capability),

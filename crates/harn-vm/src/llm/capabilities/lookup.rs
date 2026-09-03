@@ -345,7 +345,7 @@ mod tests {
         // Probed: native function call returned a real functionCall part, and
         // a responseSchema request returned parseable JSON.
         assert!(flash_38.native_tools);
-        assert_eq!(flash_38.preferred_tool_format, "native");
+        assert_eq!(flash_38.preferred_tool_format.as_deref(), Some("native"));
         assert_eq!(flash_38.structured_output_mode, "native_json");
 
         // Probed: low / medium / high all returned 200, MINIMAL returned 400
@@ -382,7 +382,10 @@ mod tests {
         // text-tool default.
         let via_openrouter = lookup("openrouter", "google/gemini-3.8-flash");
         assert!(via_openrouter.native_tools);
-        assert_eq!(via_openrouter.preferred_tool_format, "native");
+        assert_eq!(
+            via_openrouter.preferred_tool_format.as_deref(),
+            Some("native")
+        );
     }
 
     #[test]
