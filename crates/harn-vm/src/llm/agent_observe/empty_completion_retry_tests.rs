@@ -1004,12 +1004,13 @@ fn a_discarded_empty_attempt_reaches_the_ledger_with_a_typed_reason() {
             "it keeps its own measured ledger; it is not rewritten to a known zero"
         );
         assert_eq!(
-            retried.unpriced_reason,
+            retried.unpriced_reason(),
             Some(crate::llm::usage::UnpricedReason::PricingUnknown),
             "this route has no price table, which is why nothing here is priced"
         );
         assert_eq!(
-            retried.projected_cost_usd, None,
+            retried.projected_cost_usd(),
+            None,
             "no price table means no bound at any token count, so a ceiling fails closed"
         );
         assert_eq!(

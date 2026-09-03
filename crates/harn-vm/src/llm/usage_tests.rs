@@ -234,7 +234,7 @@ fn a_recovered_retry_reports_partial_accounting_instead_of_a_black_out() {
     );
     assert_eq!(call.provider_call_count, 2);
     assert_eq!(
-        call.unpriced_reason,
+        call.unpriced_reason(),
         Some(super::UnpricedReason::UsageUnreported),
         "the route is priced; what is missing is the attempt's token counts"
     );
@@ -259,7 +259,7 @@ fn a_recovered_retry_projects_close_to_what_it_measured() {
     let call = LlmUsage::aggregate(&[priced.clone(), discarded]);
 
     let projected = call
-        .projected_cost_usd
+        .projected_cost_usd()
         .expect("a priced route bounds its own unreported attempt");
     assert!(
         projected >= priced.known_cost_usd,
@@ -287,11 +287,12 @@ fn an_unprojectable_attempt_still_refuses_the_projection() {
     let call = LlmUsage::aggregate(&[priced.clone(), LlmUsage::unknown_attempt()]);
 
     assert_eq!(
-        call.projected_cost_usd, None,
+        call.projected_cost_usd(),
+        None,
         "nothing bounds an attempt that produced no response"
     );
     assert_eq!(
-        call.unpriced_reason,
+        call.unpriced_reason(),
         Some(super::UnpricedReason::NoResponse)
     );
     assert_eq!(
@@ -309,7 +310,7 @@ fn a_call_that_priced_nothing_still_blacks_out() {
     let call = LlmUsage::aggregate(&[LlmUsage::unknown_attempt(), LlmUsage::unknown_attempt()]);
 
     assert_eq!(call.cost_usd, None);
-    assert_eq!(call.projected_cost_usd, None);
+    assert_eq!(call.projected_cost_usd(), None);
     assert_eq!(call.accounting_status, UsageAccountingStatus::Unknown);
     assert_eq!(call.unpriced_calls, 2);
 }
@@ -338,7 +339,7 @@ fn terminal_ledger_preserves_completed_receipts_before_unknown_attempts() {
     // that never answered do not unmeasure it. What they do is refuse the
     // projection, which is what a ceiling consumer fails closed on.
     assert_eq!(usage.cost_usd, Some(0.25));
-    assert_eq!(usage.projected_cost_usd, None);
+    assert_eq!(usage.projected_cost_usd(), None);
     assert_eq!(usage.provider_call_count, 3);
     assert_eq!(usage.unpriced_calls, 2);
     assert_eq!(usage.usage_unknown_calls, 2);

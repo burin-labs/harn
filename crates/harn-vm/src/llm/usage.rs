@@ -43,6 +43,25 @@ impl UsageAccountingStatus {
     }
 }
 
+/// What a ledger's unpriced attempts amount to, absent when every attempt was
+/// priced.
+///
+/// Boxed, and behind an `Option`, because `LlmUsage` is embedded in stack
+/// frames throughout the CLI and those frames are budgeted: carrying these
+/// three fields inline grew 107 of them past their budget. The common ledger
+/// prices every attempt and pays one null pointer for this.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnpricedFacts {
+    /// Tokens the unpriced attempts did report, which is what bounds them.
+    pub tokens: i64,
+    /// Why they carry no price.
+    pub reason: UnpricedReason,
+    /// Worst case USD for the unpriced attempts alone, on top of the ledger's
+    /// `known_cost_usd`. `None` means at least one of them has no bound at any
+    /// token count, and a ceiling consumer must fail closed on that.
+    pub projection_usd: Option<f64>,
+}
+
 /// Why an attempt in a ledger carries no price.
 ///
 /// A ceiling consumer needs this to tell a bound it can compute from one it
@@ -125,25 +144,43 @@ pub struct LlmUsage {
     pub unpriced_calls: i64,
     #[serde(default)]
     pub usage_unknown_calls: i64,
-    /// Tokens the unpriced attempts in this ledger did report. This is what
-    /// the worst-case projection below is priced from, so a reader can see
-    /// how much of that bound rests on measured counts.
-    #[serde(default)]
-    pub unpriced_tokens: i64,
-    /// Why the unpriced attempts carry no price. `None` when nothing here is
-    /// unpriced.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unpriced_reason: Option<UnpricedReason>,
-    /// Worst case USD for this ledger: the priced portion plus a price-table
-    /// bound on every unpriced attempt's reported tokens. `None` means at
-    /// least one unpriced attempt is unprojectable, and a ceiling consumer
-    /// must fail closed on it.
+    /// What this ledger's unpriced attempts amount to. `None` when every
+    /// attempt was priced, which is both the common case and the one the
+    /// stack-frame budget cares about.
     ///
-    /// A ledger deserialized from before this field existed reads `None`.
-    /// `summarize_usage_cost_certainty` reconstructs those from `cost_usd`
-    /// rather than letting the absent field read as a refusal.
-    #[serde(default)]
-    pub projected_cost_usd: Option<f64>,
+    /// A ledger deserialized from before this field existed reads `None`,
+    /// which would say "nothing unpriced" about a ledger that may have had
+    /// unpriced attempts. `summarize_usage_cost_certainty` reconstructs those
+    /// from `cost_usd` rather than letting the absent field read as clean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unpriced: Option<Box<UnpricedFacts>>,
+}
+
+impl LlmUsage {
+    /// Tokens the unpriced attempts reported, zero when nothing is unpriced.
+    #[must_use]
+    pub fn unpriced_tokens(&self) -> i64 {
+        self.unpriced.as_ref().map_or(0, |facts| facts.tokens)
+    }
+
+    /// Why the unpriced attempts carry no price, `None` when nothing is.
+    #[must_use]
+    pub fn unpriced_reason(&self) -> Option<UnpricedReason> {
+        self.unpriced.as_ref().map(|facts| facts.reason)
+    }
+
+    /// Worst case USD for the whole ledger: everything priced, plus a bound on
+    /// everything that was not. `None` refuses, and a ceiling consumer that
+    /// gets `None` must fail closed.
+    #[must_use]
+    pub fn projected_cost_usd(&self) -> Option<f64> {
+        match &self.unpriced {
+            None => Some(self.known_cost_usd),
+            Some(facts) => facts
+                .projection_usd
+                .map(|projection| self.known_cost_usd + projection),
+        }
+    }
 }
 
 /// Aggregate cost certainty for a collection of canonical call ledgers.
@@ -211,12 +248,12 @@ pub fn summarize_usage_cost_certainty<'a>(
                     0
                 }
             } else {
-                usage.unpriced_tokens
+                usage.unpriced_tokens()
             };
             let reason = if legacy {
                 usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
             } else {
-                usage.unpriced_reason
+                usage.unpriced_reason()
             };
             if let Some(reason) = reason {
                 summary.unpriced_reason = Some(
@@ -231,7 +268,7 @@ pub fn summarize_usage_cost_certainty<'a>(
             let member_projection = if legacy {
                 usage.cost_usd
             } else {
-                usage.projected_cost_usd
+                usage.projected_cost_usd()
             };
             let member_known = if legacy {
                 usage.cost_usd.unwrap_or(0.0)
@@ -265,6 +302,25 @@ fn unpriced_projection(
         (None, Some(bound)) => (Some(UnpricedReason::UsageUnreported), Some(bound)),
         (None, None) => (Some(UnpricedReason::PricingUnknown), None),
     }
+}
+
+/// Build the boxed unpriced record, or `None` when nothing here is unpriced.
+///
+/// `projected` is the worst case for the WHOLE ledger as the caller computed
+/// it; what the record stores is the part above `known_cost_usd`, so a fold can
+/// add members without double counting the priced portion.
+fn unpriced_facts(
+    tokens: i64,
+    reason: Option<UnpricedReason>,
+    projected: Option<f64>,
+) -> Option<Box<UnpricedFacts>> {
+    reason.map(|reason| {
+        Box::new(UnpricedFacts {
+            tokens,
+            reason,
+            projection_usd: projected,
+        })
+    })
 }
 
 /// Tokens attributable to an attempt only when that attempt went unpriced.
@@ -345,9 +401,11 @@ impl LlmUsage {
             provider_call_count: certainty.provider_call_count,
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
-            unpriced_tokens: certainty.unpriced_tokens,
-            unpriced_reason: certainty.unpriced_reason,
-            projected_cost_usd: certainty.projected_cost_usd(),
+            unpriced: unpriced_facts(
+                certainty.unpriced_tokens,
+                certainty.unpriced_reason,
+                (!certainty.unprojectable).then_some(certainty.unpriced_projection_usd),
+            ),
         }
     }
 
@@ -375,9 +433,7 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
-            unpriced_tokens: 0,
-            unpriced_reason: None,
-            projected_cost_usd: Some(0.0),
+            unpriced: None,
             ..Self::unknown_attempt()
         }
     }
@@ -410,12 +466,14 @@ impl LlmUsage {
             provider_call_count: count,
             unpriced_calls: count,
             usage_unknown_calls: count,
-            unpriced_tokens: 0,
             // No response arrived, so neither a token count nor a price table
             // bounds what it may have cost. That refuses the projection, which
             // is what keeps a ceiling consumer failing closed.
-            unpriced_reason: Some(UnpricedReason::NoResponse),
-            projected_cost_usd: None,
+            unpriced: Some(Box::new(UnpricedFacts {
+                tokens: 0,
+                reason: UnpricedReason::NoResponse,
+                projection_usd: None,
+            })),
         }
     }
 
@@ -496,13 +554,11 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
-            unpriced_tokens: unpriced_token_count(
-                cost_usd,
-                result.input_tokens,
-                result.output_tokens,
+            unpriced: unpriced_facts(
+                unpriced_token_count(cost_usd, result.input_tokens, result.output_tokens),
+                unpriced_reason,
+                projected_cost_usd,
             ),
-            unpriced_reason,
-            projected_cost_usd,
         }
     }
 
@@ -532,11 +588,13 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: 0,
-            unpriced_tokens: unpriced_token_count(cost_usd, input_tokens, output_tokens),
             // A probe reports its own counts, so an unpriced probe is unpriced
-            // because the route has no price table.
-            unpriced_reason: cost_usd.is_none().then_some(UnpricedReason::PricingUnknown),
-            projected_cost_usd: cost_usd,
+            // because the route has no price table, which has no bound.
+            unpriced: unpriced_facts(
+                unpriced_token_count(cost_usd, input_tokens, output_tokens),
+                cost_usd.is_none().then_some(UnpricedReason::PricingUnknown),
+                None,
+            ),
         }
     }
 
@@ -610,9 +668,11 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: usage_unknown,
-            unpriced_tokens: unpriced_token_count(cost_usd, input_tokens, output_tokens),
-            unpriced_reason,
-            projected_cost_usd,
+            unpriced: unpriced_facts(
+                unpriced_token_count(cost_usd, input_tokens, output_tokens),
+                unpriced_reason,
+                projected_cost_usd,
+            ),
         }
     }
 
@@ -671,16 +731,17 @@ impl LlmUsage {
         );
         usage.insert(
             crate::value::intern_key("unpriced_tokens"),
-            VmValue::Int(self.unpriced_tokens),
+            VmValue::Int(self.unpriced_tokens()),
         );
         usage.insert(
             crate::value::intern_key("unpriced_reason"),
-            self.unpriced_reason
+            self.unpriced_reason()
                 .map_or(VmValue::Nil, |reason| VmValue::string(reason.as_str())),
         );
         usage.insert(
             crate::value::intern_key("projected_cost_usd"),
-            self.projected_cost_usd.map_or(VmValue::Nil, VmValue::Float),
+            self.projected_cost_usd()
+                .map_or(VmValue::Nil, VmValue::Float),
         );
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
@@ -768,15 +829,15 @@ impl LlmUsage {
             "usage_unknown_calls".to_string(),
             self.usage_unknown_calls.into(),
         );
-        fields.insert("unpriced_tokens".to_string(), self.unpriced_tokens.into());
+        fields.insert("unpriced_tokens".to_string(), self.unpriced_tokens().into());
         fields.insert(
             "unpriced_reason".to_string(),
-            self.unpriced_reason
+            self.unpriced_reason()
                 .map_or(Value::Null, |reason| reason.as_str().into()),
         );
         fields.insert(
             "projected_cost_usd".to_string(),
-            self.projected_cost_usd
+            self.projected_cost_usd()
                 .map_or(Value::Null, serde_json::Value::from),
         );
         fields.insert(
