@@ -24,6 +24,11 @@ pub(crate) use receipt::ProviderUsageReceipt;
 #[serde(rename_all = "snake_case")]
 pub enum UsageAccountingStatus {
     Reported,
+    /// Some attempt in this ledger was priced and some was not. The priced
+    /// portion is a real measurement, so it is reported rather than blacked
+    /// out; the unpriced attempts stay visible in `unpriced_calls`,
+    /// `unpriced_tokens`, and `unpriced_reason`.
+    Partial,
     #[default]
     Unknown,
 }
@@ -32,7 +37,71 @@ impl UsageAccountingStatus {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Reported => "reported",
+            Self::Partial => "partial",
             Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// What a ledger's unpriced attempts amount to, absent when every attempt was
+/// priced.
+///
+/// Boxed, and behind an `Option`, because `LlmUsage` is embedded in stack
+/// frames throughout the CLI and those frames are budgeted: carrying these
+/// three fields inline grew 107 of them past their budget. The common ledger
+/// prices every attempt and pays one null pointer for this.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnpricedFacts {
+    /// Tokens the unpriced attempts did report, which is what bounds them.
+    pub tokens: i64,
+    /// Why they carry no price.
+    pub reason: UnpricedReason,
+    /// Worst case USD for the unpriced attempts alone, on top of the ledger's
+    /// `known_cost_usd`. `None` means at least one of them has no bound at any
+    /// token count, and a ceiling consumer must fail closed on that.
+    pub projection_usd: Option<f64>,
+}
+
+/// Why an attempt in a ledger carries no price.
+///
+/// A ceiling consumer needs this to tell a bound it can compute from one it
+/// cannot: an attempt that reported tokens on a priced route has a worst case,
+/// while a route with no price table has none at any token count.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// One vocabulary, shared with `std/llm/economics`, which already emits
+/// `pricing_unknown` and `cache_read_rate_unknown` on the same field name for
+/// the price-table side of the same question. These add the usage side.
+pub enum UnpricedReason {
+    /// The route has no entry in the price table, so no token count bounds it.
+    /// Named to match `economics.harn`, which emits this for the same cause.
+    PricingUnknown,
+    /// The route is priced but the attempt reported no usable token counts.
+    UsageUnreported,
+    /// The attempt produced no response at all, so neither a token count nor
+    /// a price table bounds it.
+    NoResponse,
+    /// Unpriced attempts in this ledger disagree, or the ledger predates this
+    /// field. Either way the projection refuses.
+    Mixed,
+}
+
+impl UnpricedReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::PricingUnknown => "pricing_unknown",
+            Self::UsageUnreported => "usage_unreported",
+            Self::NoResponse => "no_response",
+            Self::Mixed => "mixed",
+        }
+    }
+
+    /// Fold two reasons from sibling attempts into the one this ledger carries.
+    fn merge(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            Self::Mixed
         }
     }
 }
@@ -75,6 +144,43 @@ pub struct LlmUsage {
     pub unpriced_calls: i64,
     #[serde(default)]
     pub usage_unknown_calls: i64,
+    /// What this ledger's unpriced attempts amount to. `None` when every
+    /// attempt was priced, which is both the common case and the one the
+    /// stack-frame budget cares about.
+    ///
+    /// A ledger deserialized from before this field existed reads `None`,
+    /// which would say "nothing unpriced" about a ledger that may have had
+    /// unpriced attempts. `summarize_usage_cost_certainty` reconstructs those
+    /// from `cost_usd` rather than letting the absent field read as clean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unpriced: Option<Box<UnpricedFacts>>,
+}
+
+impl LlmUsage {
+    /// Tokens the unpriced attempts reported, zero when nothing is unpriced.
+    #[must_use]
+    pub fn unpriced_tokens(&self) -> i64 {
+        self.unpriced.as_ref().map_or(0, |facts| facts.tokens)
+    }
+
+    /// Why the unpriced attempts carry no price, `None` when nothing is.
+    #[must_use]
+    pub fn unpriced_reason(&self) -> Option<UnpricedReason> {
+        self.unpriced.as_ref().map(|facts| facts.reason)
+    }
+
+    /// Worst case USD for the whole ledger: everything priced, plus a bound on
+    /// everything that was not. `None` refuses, and a ceiling consumer that
+    /// gets `None` must fail closed.
+    #[must_use]
+    pub fn projected_cost_usd(&self) -> Option<f64> {
+        match &self.unpriced {
+            None => Some(self.known_cost_usd),
+            Some(facts) => facts
+                .projection_usd
+                .map(|projection| self.known_cost_usd + projection),
+        }
+    }
 }
 
 /// Aggregate cost certainty for a collection of canonical call ledgers.
@@ -84,6 +190,28 @@ pub struct UsageCostCertainty {
     pub provider_call_count: i64,
     pub unpriced_calls: i64,
     pub usage_unknown_calls: i64,
+    pub unpriced_tokens: i64,
+    pub unpriced_reason: Option<UnpricedReason>,
+    /// Worst case USD attributable to the unpriced attempts alone.
+    pub unpriced_projection_usd: f64,
+    /// At least one unpriced attempt has no computable bound.
+    pub unprojectable: bool,
+}
+
+impl UsageCostCertainty {
+    /// The number a ceiling consumer spends against: everything measured plus
+    /// the worst case for everything that was not. `None` refuses, and a
+    /// governor or budget that gets `None` must fail closed.
+    #[must_use]
+    pub fn projected_cost_usd(&self) -> Option<f64> {
+        (!self.unprojectable).then_some(self.known_cost_usd + self.unpriced_projection_usd)
+    }
+
+    /// Whether any attempt folded here carried a price.
+    #[must_use]
+    pub const fn has_priced_attempt(&self) -> bool {
+        self.unpriced_calls < self.provider_call_count
+    }
 }
 
 /// Fold cost and accounting certainty once for every reporting projection.
@@ -113,8 +241,95 @@ pub fn summarize_usage_cost_certainty<'a>(
             } else {
                 usage.usage_unknown_calls
             };
+            summary.unpriced_tokens += if legacy {
+                if usage.cost_usd.is_none() {
+                    usage.input_tokens.saturating_add(usage.output_tokens)
+                } else {
+                    0
+                }
+            } else {
+                usage.unpriced_tokens()
+            };
+            let reason = if legacy {
+                usage.cost_usd.is_none().then_some(UnpricedReason::Mixed)
+            } else {
+                usage.unpriced_reason()
+            };
+            if let Some(reason) = reason {
+                summary.unpriced_reason = Some(
+                    summary
+                        .unpriced_reason
+                        .map_or(reason, |existing| existing.merge(reason)),
+                );
+            }
+            // A legacy ledger has no stored projection, so its own cost stands
+            // in: priced members project to exactly what they cost, unpriced
+            // ones refuse.
+            let member_projection = if legacy {
+                usage.cost_usd
+            } else {
+                usage.projected_cost_usd()
+            };
+            let member_known = if legacy {
+                usage.cost_usd.unwrap_or(0.0)
+            } else {
+                usage.known_cost_usd
+            };
+            match member_projection {
+                Some(projected) => {
+                    summary.unpriced_projection_usd += (projected - member_known).max(0.0);
+                }
+                None => summary.unprojectable = true,
+            }
             summary
         })
+}
+
+/// Classify one attempt's missing price and bound what it may have cost.
+///
+/// `table_cost` is what the route's price table makes of the counts the
+/// attempt reported, independent of whether those counts were usable. A priced
+/// attempt projects to its own cost. An unpriced attempt on a priced route is
+/// bounded by that table figure, which is zero when it reported no tokens. An
+/// unpriced attempt on a route with no price table has no bound at any token
+/// count, so its projection refuses.
+fn unpriced_projection(
+    cost_usd: Option<f64>,
+    table_cost: Option<f64>,
+) -> (Option<UnpricedReason>, Option<f64>) {
+    match (cost_usd, table_cost) {
+        (Some(cost), _) => (None, Some(cost)),
+        (None, Some(bound)) => (Some(UnpricedReason::UsageUnreported), Some(bound)),
+        (None, None) => (Some(UnpricedReason::PricingUnknown), None),
+    }
+}
+
+/// Build the boxed unpriced record, or `None` when nothing here is unpriced.
+///
+/// `projected` is the worst case for the WHOLE ledger as the caller computed
+/// it; what the record stores is the part above `known_cost_usd`, so a fold can
+/// add members without double counting the priced portion.
+fn unpriced_facts(
+    tokens: i64,
+    reason: Option<UnpricedReason>,
+    projected: Option<f64>,
+) -> Option<Box<UnpricedFacts>> {
+    reason.map(|reason| {
+        Box::new(UnpricedFacts {
+            tokens,
+            reason,
+            projection_usd: projected,
+        })
+    })
+}
+
+/// Tokens attributable to an attempt only when that attempt went unpriced.
+const fn unpriced_token_count(cost_usd: Option<f64>, input: i64, output: i64) -> i64 {
+    if cost_usd.is_some() {
+        0
+    } else {
+        input.saturating_add(output)
+    }
 }
 
 impl LlmUsage {
@@ -150,7 +365,12 @@ impl LlmUsage {
             input_tokens,
             output_tokens,
             reported_total_tokens,
-            cost_usd: (certainty.unpriced_calls == 0).then_some(certainty.known_cost_usd),
+            // The priced attempts measured something real. Reporting their
+            // sum as null because a sibling was unpriced turns a measurement
+            // into no measurement; the unpriced siblings stay visible in
+            // `unpriced_calls`, `unpriced_tokens`, and `unpriced_reason`.
+            cost_usd: (certainty.unpriced_calls == 0 || certainty.has_priced_attempt())
+                .then_some(certainty.known_cost_usd),
             cache_read_tokens,
             cache_write_tokens,
             cache_supported,
@@ -167,8 +387,13 @@ impl LlmUsage {
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
             served_fast: usages.iter().any(|usage| usage.served_fast),
-            accounting_status: if certainty.usage_unknown_calls == 0 {
+            accounting_status: if certainty.usage_unknown_calls == 0
+                && certainty.unpriced_calls == 0
+            {
                 UsageAccountingStatus::Reported
+            } else if certainty.has_priced_attempt() {
+                // Only a call that priced nothing at all blacks out.
+                UsageAccountingStatus::Partial
             } else {
                 UsageAccountingStatus::Unknown
             },
@@ -176,6 +401,11 @@ impl LlmUsage {
             provider_call_count: certainty.provider_call_count,
             unpriced_calls: certainty.unpriced_calls,
             usage_unknown_calls: certainty.usage_unknown_calls,
+            unpriced: unpriced_facts(
+                certainty.unpriced_tokens,
+                certainty.unpriced_reason,
+                (!certainty.unprojectable).then_some(certainty.unpriced_projection_usd),
+            ),
         }
     }
 
@@ -203,6 +433,7 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
+            unpriced: None,
             ..Self::unknown_attempt()
         }
     }
@@ -235,6 +466,14 @@ impl LlmUsage {
             provider_call_count: count,
             unpriced_calls: count,
             usage_unknown_calls: count,
+            // No response arrived, so neither a token count nor a price table
+            // bounds what it may have cost. That refuses the projection, which
+            // is what keeps a ceiling consumer failing closed.
+            unpriced: Some(Box::new(UnpricedFacts {
+                tokens: 0,
+                reason: UnpricedReason::NoResponse,
+                projection_usd: None,
+            })),
         }
     }
 
@@ -256,28 +495,28 @@ impl LlmUsage {
         // ceiling whole. `usage_unknown_calls` still records that the token
         // counts were missing: that stays unknown, only the cost does not.
         let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
+        // The price table is looked up whether or not the counts are usable,
+        // because it is what separates an unpriced attempt that still has a
+        // worst case from one that has none at any token count.
+        let table_cost = super::cost::pricing_detail_for_tier(
+            &result.provider,
+            &result.model,
+            result.served_fast,
+            result.input_tokens,
+        )
+        .map(|detail| {
+            super::cost::project_call_cost(
+                &detail,
+                result.input_tokens,
+                result.output_tokens,
+                result.cache_read_tokens,
+                result.cache_write_tokens,
+            )
+        });
         let cost_usd = authoritative_cost
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| {
-                if !component_usage_known {
-                    return None;
-                }
-                super::cost::pricing_detail_for_tier(
-                    &result.provider,
-                    &result.model,
-                    result.served_fast,
-                    result.input_tokens,
-                )
-                .map(|detail| {
-                    super::cost::project_call_cost(
-                        &detail,
-                        result.input_tokens,
-                        result.output_tokens,
-                        result.cache_read_tokens,
-                        result.cache_write_tokens,
-                    )
-                })
-            });
+            .or_else(|| component_usage_known.then_some(table_cost).flatten());
+        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
         let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
             && result.cache_supported)
             .then(|| {
@@ -315,6 +554,11 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
+            unpriced: unpriced_facts(
+                unpriced_token_count(cost_usd, result.input_tokens, result.output_tokens),
+                unpriced_reason,
+                projected_cost_usd,
+            ),
         }
     }
 
@@ -344,6 +588,13 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: 0,
+            // A probe reports its own counts, so an unpriced probe is unpriced
+            // because the route has no price table, which has no bound.
+            unpriced: unpriced_facts(
+                unpriced_token_count(cost_usd, input_tokens, output_tokens),
+                cost_usd.is_none().then_some(UnpricedReason::PricingUnknown),
+                None,
+            ),
         }
     }
 
@@ -360,30 +611,26 @@ impl LlmUsage {
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
         let free_route = crate::llm_config::provider_is_self_hosted(provider);
+        let table_cost = super::cost::pricing_detail_for_tier(
+            provider,
+            model,
+            receipt.served_fast,
+            input_tokens,
+        )
+        .map(|detail| {
+            super::cost::project_call_cost(
+                &detail,
+                input_tokens,
+                output_tokens,
+                receipt.cache_read_tokens,
+                receipt.cache_write_tokens,
+            )
+        });
         let cost_usd = receipt
             .provider_cost_usd
             .or_else(|| free_route.then_some(0.0))
-            .or_else(|| {
-                complete_counts
-                    .then(|| {
-                        super::cost::pricing_detail_for_tier(
-                            provider,
-                            model,
-                            receipt.served_fast,
-                            input_tokens,
-                        )
-                    })
-                    .flatten()
-                    .map(|detail| {
-                        super::cost::project_call_cost(
-                            &detail,
-                            input_tokens,
-                            output_tokens,
-                            receipt.cache_read_tokens,
-                            receipt.cache_write_tokens,
-                        )
-                    })
-            });
+            .or_else(|| complete_counts.then_some(table_cost).flatten());
+        let (unpriced_reason, projected_cost_usd) = unpriced_projection(cost_usd, table_cost);
         let usage_unknown = i64::from(!complete_counts);
         Self {
             input_tokens,
@@ -421,6 +668,11 @@ impl LlmUsage {
             provider_call_count: 1,
             unpriced_calls: i64::from(cost_usd.is_none()),
             usage_unknown_calls: usage_unknown,
+            unpriced: unpriced_facts(
+                unpriced_token_count(cost_usd, input_tokens, output_tokens),
+                unpriced_reason,
+                projected_cost_usd,
+            ),
         }
     }
 
@@ -476,6 +728,20 @@ impl LlmUsage {
         usage.insert(
             crate::value::intern_key("usage_unknown_calls"),
             VmValue::Int(self.usage_unknown_calls),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_tokens"),
+            VmValue::Int(self.unpriced_tokens()),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_reason"),
+            self.unpriced_reason()
+                .map_or(VmValue::Nil, |reason| VmValue::string(reason.as_str())),
+        );
+        usage.insert(
+            crate::value::intern_key("projected_cost_usd"),
+            self.projected_cost_usd()
+                .map_or(VmValue::Nil, VmValue::Float),
         );
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
@@ -562,6 +828,17 @@ impl LlmUsage {
         fields.insert(
             "usage_unknown_calls".to_string(),
             self.usage_unknown_calls.into(),
+        );
+        fields.insert("unpriced_tokens".to_string(), self.unpriced_tokens().into());
+        fields.insert(
+            "unpriced_reason".to_string(),
+            self.unpriced_reason()
+                .map_or(Value::Null, |reason| reason.as_str().into()),
+        );
+        fields.insert(
+            "projected_cost_usd".to_string(),
+            self.projected_cost_usd()
+                .map_or(Value::Null, serde_json::Value::from),
         );
         fields.insert(
             "cache_read_tokens".to_string(),
@@ -812,528 +1089,5 @@ fn first_i64_field(value: &Value, names: &[&str]) -> Option<i64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::{
-        extract_probe_usage, summarize_usage_cost_certainty, LlmUsage, ProviderUsageReceipt,
-        ToolProbeUsage, UsageAccountingStatus,
-    };
-    use crate::llm::api::{LlmResult, ProviderAttempts, ProviderTelemetry};
-    use crate::value::VmValue;
-
-    fn accounted_result() -> LlmResult {
-        LlmResult {
-            text: "ok".to_string(),
-            tool_calls: Vec::new(),
-            text_projection: None,
-            raw_tool_calls: Vec::new(),
-            input_tokens: 1_000,
-            output_tokens: 100,
-            cache_read_tokens: 800,
-            cache_write_tokens: 25,
-            cache_supported: true,
-            model: "claude-sonnet-4-20250514".to_string(),
-            provider: "anthropic".to_string(),
-            thinking: None,
-            thinking_summary: None,
-            stop_reason: Some("end_turn".to_string()),
-            served_fast: false,
-            blocks: Vec::new(),
-            logprobs: Vec::new(),
-            telemetry: ProviderTelemetry {
-                cache_accounting_declared: Some(true),
-                ..ProviderTelemetry::default()
-            },
-            attempts: ProviderAttempts {
-                total: 3,
-                rate_limited: 1,
-                empty_completion: 1,
-                other: 0,
-                completed_retry_usage: vec![super::LlmUsage::from_probe_counts(
-                    "anthropic",
-                    "claude-sonnet-4-20250514",
-                    250,
-                    10,
-                )],
-            },
-        }
-    }
-
-    /// A locally served call that reports no token usage at all, which is what
-    /// a streaming llama.cpp server sends. Its cost is still known, because the
-    /// route bills nothing; only its token counts are missing.
-    fn self_hosted_result_without_usage() -> LlmResult {
-        LlmResult {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: false,
-            model: "some-locally-served-model".to_string(),
-            provider: "llamacpp".to_string(),
-            telemetry: ProviderTelemetry {
-                cache_accounting_declared: Some(false),
-                ..ProviderTelemetry::default()
-            },
-            attempts: ProviderAttempts::default(),
-            ..accounted_result()
-        }
-    }
-
-    #[test]
-    fn self_hosted_call_without_reported_usage_is_priced_but_still_usage_unknown() {
-        let usage = self_hosted_result_without_usage().usage();
-
-        // The half that was wrong: an unpriced call spends a whole USD ceiling,
-        // so this is what ended budgeted local runs after one model call.
-        assert_eq!(usage.cost_usd, Some(0.0));
-        assert_eq!(usage.unpriced_calls, 0);
-
-        // The half that must stay honest: nothing here tells us how many
-        // tokens the call used, and the ledger should not pretend otherwise.
-        assert_eq!(usage.usage_unknown_calls, 1);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
-    }
-
-    #[test]
-    fn live_tool_probe_preserves_missing_usage_as_unknown() {
-        let result = LlmResult {
-            provider: "together".to_string(),
-            model: "Qwen/Qwen3.6-Plus".to_string(),
-            input_tokens: 0,
-            output_tokens: 0,
-            telemetry: ProviderTelemetry::default(),
-            attempts: ProviderAttempts::default(),
-            ..accounted_result()
-        };
-
-        let usage = ToolProbeUsage::from_llm_result(&result);
-        let report = serde_json::to_value(&usage).expect("serialize probe usage");
-
-        assert_eq!(usage.input_tokens, Some(0));
-        assert_eq!(usage.output_tokens, Some(0));
-        assert_eq!(usage.cost_usd, None);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
-        assert_eq!(report["accounting_status"], "unknown");
-        assert!(report.get("cost_usd").is_none());
-
-        let reported_zero = ToolProbeUsage::from_llm_result(&LlmResult {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            telemetry: ProviderTelemetry {
-                server_prompt_tokens: Some(0),
-                server_output_tokens: Some(0),
-                ..ProviderTelemetry::default()
-            },
-            ..accounted_result()
-        });
-        assert_eq!(
-            reported_zero.accounting_status,
-            UsageAccountingStatus::Reported
-        );
-        assert_eq!(reported_zero.cost_usd, Some(0.0));
-    }
-
-    #[test]
-    fn paid_call_without_reported_usage_stays_unpriced() {
-        let result = LlmResult {
-            provider: "anthropic".to_string(),
-            ..self_hosted_result_without_usage()
-        };
-        let usage = result.usage();
-
-        assert_eq!(
-            usage.cost_usd, None,
-            "a paid route with no usage counts and no provider cost cannot be priced"
-        );
-        assert_eq!(usage.unpriced_calls, 1);
-    }
-
-    #[test]
-    fn partial_provider_error_receipt_stays_explicitly_unknown() {
-        let receipt = ProviderUsageReceipt::new(Some(9), None, Some(0.25), false).with_cache(
-            3,
-            2,
-            Some(true),
-            true,
-        );
-        let VmValue::Dict(fields) = receipt.to_vm_value() else {
-            panic!("receipt must lower to a dictionary");
-        };
-        assert_eq!(
-            fields.get("input_tokens").and_then(VmValue::as_int),
-            Some(9)
-        );
-        assert!(matches!(fields.get("output_tokens"), Some(VmValue::Nil)));
-        assert_eq!(
-            fields.get("cache_read_tokens").and_then(VmValue::as_int),
-            Some(3)
-        );
-
-        let usage = LlmUsage::from_provider_error_receipt(
-            "anthropic",
-            "claude-sonnet-4-20250514",
-            &receipt,
-        );
-
-        assert_eq!(usage.input_tokens, 9);
-        assert_eq!(usage.output_tokens, 0);
-        assert_eq!(usage.cost_usd, Some(0.25));
-        assert_eq!(usage.known_cost_usd, 0.25);
-        assert_eq!(usage.cache_read_tokens, 3);
-        assert_eq!(usage.cache_write_tokens, 2);
-        assert!(usage.cache_hit);
-        assert_eq!(usage.unpriced_calls, 0);
-        assert_eq!(usage.usage_unknown_calls, 1);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
-    }
-
-    #[test]
-    fn cost_certainty_fold_preserves_known_floor_and_unknown_counts() {
-        let priced = accounted_result().usage();
-        let mut unpriced = priced.clone();
-        unpriced.cost_usd = None;
-        unpriced.accounting_status = UsageAccountingStatus::Unknown;
-        unpriced.known_cost_usd = 0.0;
-        unpriced.unpriced_calls = 1;
-        unpriced.usage_unknown_calls = 1;
-
-        let summary = summarize_usage_cost_certainty([&priced, &unpriced]);
-
-        assert_eq!(
-            summary.known_cost_usd,
-            priced.cost_usd.expect("priced call")
-        );
-        assert_eq!(summary.unpriced_calls, 1);
-        assert_eq!(summary.usage_unknown_calls, 1);
-    }
-
-    #[test]
-    fn terminal_unknown_ledger_counts_every_physical_attempt() {
-        let usage = LlmUsage::unknown_attempts(3);
-
-        assert_eq!(usage.provider_call_count, 3);
-        assert_eq!(usage.unpriced_calls, 3);
-        assert_eq!(usage.usage_unknown_calls, 3);
-        assert_eq!(usage.cost_usd, None);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
-    }
-
-    #[test]
-    fn terminal_ledger_preserves_completed_receipts_before_unknown_attempts() {
-        let mut completed = LlmUsage::known_zero_attempt();
-        completed.cost_usd = Some(0.25);
-        completed.known_cost_usd = 0.25;
-
-        let usage = LlmUsage::aggregate_with_unknown_attempts(&[completed], 2);
-
-        assert_eq!(usage.known_cost_usd, 0.25);
-        assert_eq!(usage.cost_usd, None);
-        assert_eq!(usage.provider_call_count, 3);
-        assert_eq!(usage.unpriced_calls, 2);
-        assert_eq!(usage.usage_unknown_calls, 2);
-        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
-    }
-
-    #[test]
-    fn legacy_ledger_reconstructs_one_call_without_losing_known_cost() {
-        let mut usage = LlmUsage::known_zero_attempt();
-        usage.cost_usd = Some(0.25);
-        usage.known_cost_usd = 0.0;
-        usage.provider_call_count = 0;
-
-        let summary = summarize_usage_cost_certainty([&usage]);
-
-        assert_eq!(summary.known_cost_usd, 0.25);
-        assert_eq!(summary.provider_call_count, 1);
-        assert_eq!(summary.unpriced_calls, 0);
-        assert_eq!(summary.usage_unknown_calls, 0);
-    }
-
-    #[test]
-    fn one_ledger_projects_matching_vm_event_and_trace_accounting() {
-        let mut result = accounted_result();
-        result.telemetry.server_total_tokens = Some(1_100);
-        result.attempts = ProviderAttempts::default();
-        let usage = result.usage();
-        let tool_usage = ToolProbeUsage::from_llm_result(&result);
-        let vm_usage =
-            crate::llm::vm_value_to_json(&VmValue::Dict(usage.to_vm_dict(&result.attempts).into()));
-        let mut event = json!({});
-        usage.project_onto_event(&mut event);
-        let trace = usage
-            .metadata_pairs(&result.provider, &result.model)
-            .into_iter()
-            .collect::<std::collections::BTreeMap<_, _>>();
-
-        for field in [
-            "input_tokens",
-            "output_tokens",
-            "reported_total_tokens",
-            "cost_usd",
-            "cache_read_tokens",
-            "cache_write_tokens",
-            "cache_hit_ratio",
-            "cache_savings_usd",
-            "served_fast",
-        ] {
-            assert_eq!(
-                vm_usage.get(field),
-                event.get(field),
-                "{field} drifted between canonical projections"
-            );
-        }
-        assert_eq!(
-            trace[crate::tracing::meta::INPUT_TOKENS],
-            event["input_tokens"]
-        );
-        assert_eq!(
-            trace[crate::tracing::meta::OUTPUT_TOKENS],
-            event["output_tokens"]
-        );
-        assert_eq!(
-            trace[crate::tracing::meta::REPORTED_TOTAL_TOKENS],
-            event["reported_total_tokens"]
-        );
-        assert_eq!(
-            tool_usage.reported_total_tokens, usage.reported_total_tokens,
-            "tool probes must retain the same measured whole-call total"
-        );
-        assert_eq!(trace[crate::tracing::meta::COST_USD], event["cost_usd"]);
-        assert_eq!(vm_usage["provider_attempts"]["retries"], json!(0));
-    }
-
-    #[test]
-    fn missing_stream_usage_stays_unknown_instead_of_becoming_free() {
-        let mut result = accounted_result();
-        result.provider = "fireworks".to_string();
-        result.model = "accounts/fireworks/models/minimax-m3".to_string();
-        result.input_tokens = 0;
-        result.output_tokens = 0;
-        result.telemetry = ProviderTelemetry::from_openai_response(
-            &serde_json::json!({"usage": {}}),
-            Some("chatcmpl-without-usage"),
-        );
-
-        let usage = result.usage();
-        let vm_usage =
-            crate::llm::vm_value_to_json(&VmValue::Dict(usage.to_vm_dict(&result.attempts).into()));
-
-        assert_eq!(usage.cost_usd, None);
-        assert_eq!(vm_usage["accounting_status"], "unknown");
-        assert_eq!(vm_usage["cost_usd"], serde_json::Value::Null);
-    }
-
-    #[test]
-    fn pre_accounting_status_record_replays_as_unknown() {
-        let mut recorded = serde_json::to_value(accounted_result().usage()).expect("serialize");
-        recorded
-            .as_object_mut()
-            .expect("usage object")
-            .remove("accounting_status");
-
-        let replayed: super::LlmUsage = serde_json::from_value(recorded).expect("old recording");
-
-        assert_eq!(
-            replayed.accounting_status,
-            super::UsageAccountingStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn public_usage_projections_do_not_recompute_accounting() {
-        let projection_sources = [
-            (
-                "transcript",
-                include_str!("agent_observe/transcript_observability.rs"),
-            ),
-            (
-                "structured envelope",
-                include_str!("structured_envelope.rs"),
-            ),
-            ("trace", include_str!("trace.rs")),
-            ("agent result", include_str!("agent_config.rs")),
-        ];
-        for (name, source) in projection_sources {
-            for forbidden in [
-                "priced_cost_usd(",
-                "cache_hit_ratio(",
-                "cache_savings_usd_for_provider(",
-                "struct LlmCallUsage",
-            ] {
-                assert!(
-                    !source.contains(forbidden),
-                    "{name} rebuilt canonical usage via {forbidden}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn extracts_openai_responses_usage() {
-        let response = json!({
-            "usage": {
-                "input_tokens": 11,
-                "output_tokens": 7
-            }
-        });
-
-        let usage = extract_probe_usage("unknown", "unknown", &response).expect("usage");
-
-        assert_eq!(usage.input_tokens, Some(11));
-        assert_eq!(usage.output_tokens, Some(7));
-        assert_eq!(usage.cost_usd, None);
-    }
-
-    #[test]
-    fn extracts_gemini_usage_metadata_with_thoughts() {
-        let response = json!({
-            "usageMetadata": {
-                "promptTokenCount": 3,
-                "candidatesTokenCount": 4,
-                "thoughtsTokenCount": 9
-            }
-        });
-
-        let usage = extract_probe_usage("gemini", "gemini-2.5-pro", &response).expect("usage");
-
-        assert_eq!(usage.input_tokens, Some(3));
-        assert_eq!(usage.output_tokens, Some(13));
-    }
-
-    #[test]
-    fn extracts_vertex_usage_metadata_from_message_wrapper() {
-        let response = json!({
-            "message": {
-                "usageMetadata": {
-                    "promptTokenCount": 5,
-                    "candidatesTokenCount": 8
-                }
-            }
-        });
-
-        let usage = extract_probe_usage("vertex", "gemini-2.5-flash", &response).expect("usage");
-
-        assert_eq!(usage.input_tokens, Some(5));
-        assert_eq!(usage.output_tokens, Some(8));
-    }
-
-    #[test]
-    fn extracts_bedrock_usage_tokens() {
-        let response = json!({
-            "usage": {
-                "inputTokens": 17,
-                "outputTokens": 23
-            }
-        });
-
-        let usage = extract_probe_usage("bedrock", "claude-sonnet-5", &response).expect("usage");
-
-        assert_eq!(usage.input_tokens, Some(17));
-        assert_eq!(usage.output_tokens, Some(23));
-    }
-
-    #[test]
-    fn uses_final_stream_usage_without_double_counting_prior_frames() {
-        let response = json!({
-            "frames": [
-                {
-                    "usage": {
-                        "prompt_tokens": 1,
-                        "completion_tokens": 1
-                    }
-                },
-                {
-                    "usage": {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 2
-                    }
-                }
-            ]
-        });
-
-        let usage = extract_probe_usage("unknown", "unknown", &response).expect("usage");
-
-        assert_eq!(usage.input_tokens, Some(10));
-        assert_eq!(usage.output_tokens, Some(2));
-    }
-
-    #[test]
-    fn root_usage_dominates_copied_stream_frames() {
-        let response = json!({
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 2
-            },
-            "frames": [
-                {
-                    "usage": {
-                        "prompt_tokens": 10,
-                        "completion_tokens": 2
-                    }
-                }
-            ]
-        });
-
-        let usage = extract_probe_usage("unknown", "unknown", &response).expect("usage");
-
-        assert_eq!(usage.input_tokens, Some(10));
-        assert_eq!(usage.output_tokens, Some(2));
-    }
-
-    fn usage_with_declaration(declared: Option<bool>) -> LlmUsage {
-        let mut result = accounted_result();
-        result.telemetry.cache_accounting_declared = declared;
-        result.attempts = ProviderAttempts::default();
-        LlmUsage::from_result(&result)
-    }
-
-    #[test]
-    fn cache_visibility_projects_three_states() {
-        let declared_true = usage_with_declaration(Some(true));
-        let mut fields = serde_json::Map::new();
-        declared_true.project_onto_fields(&mut fields);
-        assert_eq!(fields["cache_visibility"], serde_json::Value::Null);
-
-        let declared_false = usage_with_declaration(Some(false));
-        assert_eq!(declared_false.cache_hit_ratio, None);
-        let mut fields = serde_json::Map::new();
-        declared_false.project_onto_fields(&mut fields);
-        assert_eq!(fields["cache_visibility"], json!("unsupported"));
-
-        // The load-bearing state: an undeclared route's zeros carry no
-        // information, and must not read as either audited or unsupported.
-        let undeclared = usage_with_declaration(None);
-        assert_eq!(undeclared.cache_hit_ratio, None);
-        let mut fields = serde_json::Map::new();
-        undeclared.project_onto_fields(&mut fields);
-        assert_eq!(fields["cache_hit_ratio"], serde_json::Value::Null);
-        assert_eq!(fields["cache_visibility"], json!("undeclared"));
-    }
-
-    #[test]
-    fn one_undeclared_call_poisons_the_aggregate_to_undeclared() {
-        let declared = usage_with_declaration(Some(true));
-        let undeclared = usage_with_declaration(None);
-
-        let all_declared = LlmUsage::aggregate(&[declared.clone(), declared.clone()]);
-        assert_eq!(all_declared.cache_accounting_declared, Some(true));
-
-        let poisoned = LlmUsage::aggregate(&[declared, undeclared]);
-        assert_eq!(poisoned.cache_accounting_declared, None);
-        assert_eq!(poisoned.cache_hit_ratio, None);
-        let mut fields = serde_json::Map::new();
-        poisoned.project_onto_fields(&mut fields);
-        assert_eq!(fields["cache_visibility"], json!("undeclared"));
-    }
-
-    #[test]
-    fn unknown_attempts_stay_neutral_for_the_accounting_declaration() {
-        let declared = usage_with_declaration(Some(true));
-        let usage = LlmUsage::aggregate_with_unknown_attempts(&[declared], 1);
-        assert_eq!(usage.cache_accounting_declared, Some(true));
-    }
-}
+#[path = "usage_tests.rs"]
+mod tests;

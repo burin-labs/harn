@@ -26,6 +26,7 @@ mod discarded_result;
 mod execution_safety;
 pub(crate) mod harness_facts;
 mod parameters;
+mod predicates;
 mod program;
 mod spans;
 mod type_facts;
@@ -275,26 +276,6 @@ impl<'a> Linter<'a> {
         harn_vm::stdlib::stdlib_builtin_names()
             .into_iter()
             .collect()
-    }
-
-    pub(super) fn in_test_pipeline(&self) -> bool {
-        self.test_pipeline_depth > 0
-    }
-
-    pub(super) fn is_test_pipeline_name(name: &str) -> bool {
-        name == "test" || name.starts_with("test_")
-    }
-
-    pub(super) fn is_entry_pipeline_name(name: &str) -> bool {
-        matches!(name, "default" | "main" | "auto")
-    }
-
-    pub(super) fn is_assert_builtin(name: &str) -> bool {
-        matches!(name, "assert" | "assert_eq" | "assert_ne")
-    }
-
-    pub(super) fn is_approval_record_builtin(name: &str) -> bool {
-        name == "request_approval"
     }
 
     /// Warn when a public stdlib `pub fn` is missing one or more of the

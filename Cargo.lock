@@ -3565,6 +3565,7 @@ version = "0.10.129-dev"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+ "serde_json",
  "unicode-width",
 ]
 

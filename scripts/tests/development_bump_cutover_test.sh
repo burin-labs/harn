@@ -28,6 +28,18 @@ git -C "$fixture" config commit.gpgsign false
 git -C "$fixture" add .
 git -C "$fixture" commit --quiet -m initial
 
+# The opener re-reads origin/main before it opens anything, so the fixture needs
+# a real remote rather than a detached working copy.
+origin="$tmp_root/origin.git"
+git init --quiet --bare "$origin"
+git -C "$fixture" remote add origin "$origin"
+git -C "$fixture" push --quiet origin HEAD:refs/heads/main
+# The bare repository's HEAD follows whatever init.defaultBranch the host is
+# configured with, so name the branch this fixture actually pushed. Without it a
+# host defaulting to master clones an empty working tree.
+git -C "$origin" symbolic-ref HEAD refs/heads/main
+git -C "$fixture" fetch --quiet origin main
+
 cat > "$bin_dir/harn" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -97,6 +109,65 @@ PATH="$bin_dir:$PATH" \
 grep -Fq 'version = "1.2.4-dev"' "$fixture/Cargo.toml"
 grep -Fq $'gh\tpr create ' "$record"
 grep -Fq 'pr_url=https://example.invalid/pull/42' "$outputs"
+grep -Fq 'skipped=false' "$outputs"
+
+# Falsifier for the duplicate this script used to open. The drift decision was
+# taken while main was still on the released version, the bump it was about
+# merged while this job was running, and the job then opened a second one seven
+# minutes later. Reproduce that exactly: main already carries the target, and
+# no pull request is open for the branch, because the first one merged.
+stale_fixture="$tmp_root/stale-workspace"
+cp -R "$fixture" "$stale_fixture"
+git -C "$stale_fixture" checkout --quiet -- Cargo.toml Cargo.lock
+merged="$tmp_root/merged"
+git clone --quiet "$origin" "$merged"
+git -C "$merged" config user.name "Development Cutover Test"
+git -C "$merged" config user.email "development-cutover-test@example.com"
+git -C "$merged" config commit.gpgsign false
+sed 's/version = "1.2.3"/version = "1.2.4-dev"/' "$merged/Cargo.toml" > "$merged/Cargo.toml.next"
+mv "$merged/Cargo.toml.next" "$merged/Cargo.toml"
+git -C "$merged" commit --quiet -am "Start 1.2.4-dev development"
+git -C "$merged" push --quiet origin HEAD:refs/heads/main
+
+stale_record="$tmp_root/stale.record"
+stale_outputs="$tmp_root/stale.outputs"
+CUTOVER_RECORD="$stale_record" \
+HARN_RELEASE_ROOT="$stale_fixture" \
+HARN_BIN="$bin_dir/harn" \
+EXPECTED_DEVELOPMENT_VERSION=1.2.4-dev \
+GH_TOKEN=fixture-token \
+GITHUB_OUTPUT="$stale_outputs" \
+PATH="$bin_dir:$PATH" \
+  "$repo_root/scripts/open_development_bump.sh"
+
+grep -Fq 'skipped=true' "$stale_outputs"
+grep -Fq 'pr_url=' "$stale_outputs"
+if grep -Fq $'gh\tpr create ' "$stale_record"; then
+  echo "opener created a second development bump for a version already on main" >&2
+  exit 1
+fi
+
+# A branch it cannot read is not a branch with nothing on it. Break the remote
+# and prove the opener refuses instead of opening on unproved state.
+broken_fixture="$tmp_root/broken-workspace"
+cp -R "$fixture" "$broken_fixture"
+git -C "$broken_fixture" checkout --quiet -- Cargo.toml Cargo.lock
+git -C "$broken_fixture" remote set-url origin "$tmp_root/no-such-origin.git"
+broken_record="$tmp_root/broken.record"
+if CUTOVER_RECORD="$broken_record" \
+  HARN_RELEASE_ROOT="$broken_fixture" \
+  HARN_BIN="$bin_dir/harn" \
+  EXPECTED_DEVELOPMENT_VERSION=1.2.4-dev \
+  GH_TOKEN=fixture-token \
+  PATH="$bin_dir:$PATH" \
+    "$repo_root/scripts/open_development_bump.sh" 2>/dev/null; then
+  echo "opener proceeded without being able to read origin/main" >&2
+  exit 1
+fi
+if [[ -f "$broken_record" ]] && grep -Fq $'gh\tpr create ' "$broken_record"; then
+  echo "opener created a development bump it could not prove was needed" >&2
+  exit 1
+fi
 
 # Falsifier: the corpus is red after the PR is opened. The validation fails,
 # but the PR creation remains recorded and auto-merge was never armed.

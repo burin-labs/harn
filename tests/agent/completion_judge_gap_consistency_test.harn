@@ -1,0 +1,109 @@
+// Run: harn test tests/agent/completion_judge_gap_consistency_test.harn
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_done, with_llm_script } from "std/testing"
+
+/**
+ * harn#7910. The judge accepted a stop on work that was never done and said so
+ * in the same object: `verdict: "done"` beside a `gap_class` naming an
+ * unresolved gap. The loop took the verdict and dropped the gap class, so a
+ * host reading the typed result saw `done`, `natural`, no stop reason, for a
+ * run that had been blocked from doing its work.
+ */
+fn judge_opts(session: string) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 4,
+    verify_completion_judge: {provider: "mock"},
+  }
+}
+
+fn judge_reply(verdict: string, gap_class: string) -> dict {
+  return {
+    text: json_stringify(
+      {
+        verdict: verdict,
+        detail: "The workspace is read-only and the file write operation failed.",
+        gap_class: gap_class,
+      },
+    ),
+  }
+}
+
+fn run_with_judge_replies(harness: Harness, label: string, replies: list) -> dict {
+  let script = [llm_done()]
+  for reply in replies {
+    script = script + [reply, llm_done()]
+  }
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, judge_opts(session)) },
+      )
+      return {status: captured.result.status, result: captured.result}
+    },
+  )
+}
+
+/**
+ * The reported pair. Three of the five judge verdicts on the issue's task
+ * accepted while naming `unresolved_authorization`.
+ */
+pipeline test_done_beside_a_named_gap_is_not_an_acceptance(harness: Harness, task: unknown) {
+  const contradiction = run_with_judge_replies(
+    harness,
+    "judge-gap",
+    [
+      judge_reply("done", "unresolved_authorization"),
+      judge_reply("done", "unresolved_authorization"),
+      judge_reply("done", "unresolved_authorization"),
+      judge_reply("done", "unresolved_authorization"),
+      judge_reply("done", "unresolved_authorization"),
+    ],
+  )
+  assert(
+    contradiction.status != "done",
+    "a judge that named an unresolved gap still produced a finished run: "
+      + to_string(contradiction.status),
+  )
+}
+
+/**
+ * The control that keeps the rule from swallowing every acceptance. `other` is
+ * what the schema documents for `done`, and what an absent or unrecognized gap
+ * class decodes to, so it must stay an acceptance.
+ */
+pipeline test_done_with_the_neutral_gap_class_still_accepts(harness: Harness, task: unknown) {
+  const neutral = run_with_judge_replies(harness, "judge-neutral", [judge_reply("done", "other")])
+  assert_eq(neutral.status, "done")
+  // And a reply that carries no gap class at all, which is every cached and
+  // older-pin judge response.
+  const absent = with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The greeting was printed."})},
+      llm_done(),
+    ],
+    { ->
+      const session = "judge-absent-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Say hello.", nil, judge_opts(session)) },
+      )
+      return captured.result
+    },
+  )
+  assert_eq(absent.status, "done")
+}

@@ -9,7 +9,7 @@ import { __judge_evidence_projection } from "std/agent/judge"
 import { __judge_completion_admission } from "std/agent/judge_internals"
 import { agent_loop } from "std/agent/loop"
 import { __agent_loop_deadline_contract } from "std/agent/loop_foundation"
-import { AgentSpec } from "std/agent/options"
+import { AgentSpec, agent_options } from "std/agent/options"
 import { command_result_ok } from "std/command"
 import { llm_done, llm_text, with_capability_fixtures, with_llm_script } from "std/testing"
 
@@ -23,7 +23,7 @@ fn __feedback_contents(captured: dict, kind: string) -> list<string> {
   return contents
 }
 
-/*
+/**
  * The completion-judge window as an ordered list of its own boundary events.
  *
  * Ordering is the whole contract: a host renders "checking the work" on
@@ -554,16 +554,18 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
           harness,
           "Implement experiment deletion with a behavior-sensitive regression.",
           nil,
-          {
-            provider: "mock",
-            session_id: session,
-            tools: tools,
-            tool_format: "native",
-            loop_until_done: true,
-            done_sentinel: "##DONE##",
-            max_iterations: 4,
-            verify_completion_judge: {provider: "mock", max_invocations: 1},
-          },
+          agent_options(
+            {
+              provider: "mock",
+              session_id: session,
+              tools: tools,
+              tool_format: "native",
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              max_iterations: 4,
+              verify_completion_judge: {provider: "mock", max_invocations: 1},
+            },
+          ),
         ) },
       )
       assert_eq(captured.result.status, "completion_unverified")
@@ -603,21 +605,23 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
           harness,
           "Finish with a typed terminal receipt.",
           nil,
-          {
-            provider: "mock",
-            session_id: session,
-            loop_until_done: true,
-            done_sentinel: "##DONE##",
-            max_iterations: 2,
-            deadline_ms: 1,
-            verify_completion_judge: {
+          agent_options(
+            {
               provider: "mock",
-              max_invocations: 1,
-              operation_timeout_ms: 100,
-              deadline_reserve_ms: 0,
+              session_id: session,
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              max_iterations: 2,
+              deadline_ms: 1,
+              verify_completion_judge: {
+                provider: "mock",
+                max_invocations: 1,
+                operation_timeout_ms: 100,
+                deadline_reserve_ms: 0,
+              },
+              turn_end_condition: {provider: "mock", max_invocations: 1},
             },
-            turn_end_condition: {provider: "mock", max_invocations: 1},
-          },
+          ),
         ) },
       )
       assert_eq(len(harness.llm.mock_calls()), 1, "only the primary model turn may dispatch")
@@ -752,14 +756,16 @@ pipeline test_invalid_deterministic_completion_result_stops_unverified(
           harness,
           "Finish only after the deterministic completion check decides.",
           nil,
-          {
-            provider: "mock",
-            session_id: session,
-            loop_until_done: true,
-            done_sentinel: "##DONE##",
-            max_iterations: 1,
-            verify_completion: { _payload -> 42 },
-          },
+          agent_options(
+            {
+              provider: "mock",
+              session_id: session,
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              max_iterations: 1,
+              verify_completion: { _payload -> 42 },
+            },
+          ),
         ) },
       )
       assert_eq(captured.result.status, "completion_unverified")
@@ -785,16 +791,18 @@ pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, t
           harness,
           "Do not spend a model judge call after a deterministic veto.",
           nil,
-          {
-            provider: "mock",
-            session_id: session,
-            loop_until_done: true,
-            done_sentinel: "##DONE##",
-            max_iterations: 1,
-            verify_completion: { _payload -> "deterministic repair" },
-            verify_completion_judge: {provider: "mock", max_invocations: 1},
-            turn_end_condition: {provider: "mock", max_invocations: 1},
-          },
+          agent_options(
+            {
+              provider: "mock",
+              session_id: session,
+              loop_until_done: true,
+              done_sentinel: "##DONE##",
+              max_iterations: 1,
+              verify_completion: { _payload -> "deterministic repair" },
+              verify_completion_judge: {provider: "mock", max_invocations: 1},
+              turn_end_condition: {provider: "mock", max_invocations: 1},
+            },
+          ),
         ) },
       )
       assert_eq(len(harness.llm.mock_calls()), 1)
@@ -807,8 +815,10 @@ pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, t
   )
 }
 
-// The read-only tool registry used by the research-summary fixtures below.
-// `delete` is a canonical workspace mutation; the rest are pure reads.
+/**
+ * The read-only tool registry used by the research-summary fixtures below.
+ * `delete` is a canonical workspace mutation; the rest are pure reads.
+ */
 fn __research_tools() -> list {
   return [
     {name: "grep", annotations: {kind: "read", side_effect_level: "read_only"}},
@@ -828,7 +838,7 @@ fn __read_turn(ordinal: int, name: string, target: string, result: string) -> li
   ]
 }
 
-/*
+/**
  * harn#7797. A turn that proves no work is warranted produces read-only
  * evidence and nothing else. Before the research summary the packet kept the
  * single mutation and dropped every read, so the judge saw a bare `delete` and
@@ -874,7 +884,7 @@ pipeline test_completion_evidence_carries_read_only_research(harness: Harness, t
   assert_eq(projected.packet.actions[0].name, "delete")
 }
 
-/*
+/**
  * The budget degrades to counts, never to silence. Nine reads exceed the
  * record budget; the recent ones keep records and the rest stay visible as a
  * non-zero omitted count.
@@ -901,7 +911,7 @@ pipeline test_completion_evidence_research_budget_degrades_to_counts(
   assert_eq(projected.stats.omitted_read_only_call_count, 3)
 }
 
-/*
+/**
  * Negative control. A turn with only mutations gains no research records and
  * keeps its action selection unchanged.
  */
@@ -1076,7 +1086,7 @@ pipeline test_declared_role_decides_whether_a_poll_reaches_the_judge(_task: any)
   )
 }
 
-/*
+/**
  * THE END-TO-END ARM for #7895.
  *
  * The census proves the annotation is declared. This proves the production

@@ -330,7 +330,7 @@ impl<'a> Linter<'a> {
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
                 self.check_builtin_call_rules(snode);
-                if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
+                if Self::is_assert_builtin(name) && !self.in_test_source() {
                     self.diagnostics.push(LintDiagnostic {
                         code: Code::LintAssertOutsideTest,
                         rule: "assert-outside-test".into(),

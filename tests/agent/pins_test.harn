@@ -9,7 +9,7 @@
 // `conformance/tests/agents/agent_pins.harn`.
 import { pin, pin_compaction_policy, pin_kinds, pin_reminder } from "std/agent/pins"
 
-// --- Taxonomy registration (additive; default-off) -----------------------------
+/** --- Taxonomy registration (additive; default-off) ----------------------------- */
 pipeline test_pin_default_taxonomy_unchanged(harness: Harness, task: unknown) {
   // Byte-identical: the fixed 5 kinds still validate, an unknown kind still
   // throws, and the built-in discovery surface is untouched.
@@ -59,7 +59,7 @@ pipeline test_pin_register_kinds_validated(harness: Harness, task: unknown) {
   assert(is_err(bad), "non-list register_kinds throws loudly")
 }
 
-// --- pin_reminder opts (additive; default-off) ---------------------------------
+/** --- pin_reminder opts (additive; default-off) --------------------------------- */
 pipeline test_pin_reminder_default_shape_unchanged(harness: Harness, task: unknown) {
   const p = pin(harness.random, "goal", "Ship it", {dedupe_key: "pin/goal"})
   const r = pin_reminder(harness.agent, p)
@@ -96,7 +96,7 @@ pipeline test_pin_reminder_opts_validated(harness: Harness, task: unknown) {
   assert(is_err(bad_limit), "non-int max_body throws loudly")
 }
 
-// --- pin_compaction_policy merge / label-preserve (additive; default-off) ------
+/** --- pin_compaction_policy merge / label-preserve (additive; default-off) ------ */
 pipeline test_pin_compaction_policy_default_unchanged(harness: Harness, task: unknown) {
   const pins = [
     pin(harness.random, "goal", "Ship the migration"),

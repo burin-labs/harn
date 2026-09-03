@@ -492,8 +492,16 @@ lint-harn:
 	@HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh
 	@echo "=== Checking Harn experiment support modules ==="
 	@$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK)
+# Directories, not globs. `scripts/*.harn scripts/tests/*.harn` was flat, so a
+# nested script directory had no lint gate at all and its absence of findings
+# was indistinguishable from clean code. The same omission left the whole
+# `tests/` tree and `bench/` unwalked.
 	@echo "=== Linting Harn-authored scripts ==="
-	@$(HARN_CMD) lint --strict scripts/*.harn scripts/tests/*.harn
+	@$(HARN_CMD) lint --strict scripts
+	@echo "=== Linting the Harn test tree ==="
+	@$(HARN_CMD) lint --strict tests
+	@echo "=== Linting Harn benchmarks ==="
+	@$(HARN_CMD) lint --strict bench
 # `lint --strict` does not typecheck: it reported no issues for scripts that
 # `harn run` refuses to execute. Whether a script was typed came down to
 # whether some other target happened to run that exact file, so a script only
@@ -504,9 +512,14 @@ lint-harn:
 # document to be validated at the boundary that reads it rather than
 # dereferenced on faith.
 	@echo "=== Type-checking Harn-authored scripts ==="
-	@$(HARN_CMD) check --strict-types scripts/*.harn scripts/tests/*.harn
+	@$(HARN_CMD) check --strict-types scripts
 	@echo "=== Linting bundled demo scenarios ==="
 	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
+# Three more roots of ordinary Harn that nothing walked. Each was measured at
+# zero findings before being adopted, so this line is a gate rather than a
+# migration: they are clean today and now have to stay that way.
+	@echo "=== Linting shipped persona templates, wasm demos and evals ==="
+	@$(HARN_CMD) lint --strict crates/harn-cli/assets/persona-templates crates/harn-wasm evals
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
 	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 	tmp=$$(mktemp); \

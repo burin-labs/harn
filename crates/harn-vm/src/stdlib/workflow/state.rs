@@ -5,12 +5,12 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::orchestration::{
-    builtin_ceiling, install_current_mutation_session, install_workflow_skill_context,
+    builtin_ceiling, install_current_mutation_session, install_workflow_stage_context,
     load_run_record, normalize_run_record, push_execution_policy, validate_workflow,
     workflow_verification_contracts, ArtifactRecord, MutationSessionRecord,
     PreparedWorkflowStageNode, RunRecord, RunStageRecord, RunTransitionRecord,
-    VerificationContract, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
-    WorkflowSkillContextGuard,
+    VerificationContract, WorkflowEdge, WorkflowGraph, WorkflowStageContext,
+    WorkflowStageContextGuard,
 };
 use crate::stdlib::args::{Args, ErrorKind};
 use crate::value::{VmError, VmValue};
@@ -63,7 +63,7 @@ pub(super) struct StageExecutionScope {
     pub(super) started_at: String,
     pub(super) execution: StageExecution,
     pub(super) _mutation_session_guard: MutationSessionResetGuard,
-    pub(super) _workflow_skill_guard: WorkflowSkillContextGuard,
+    pub(super) _workflow_stage_guard: WorkflowStageContextGuard,
     pub(super) _workflow_approval_guard: WorkflowApprovalPolicyGuard,
     pub(super) _stage_execution_policy_guard: WorkflowExecutionPolicyGuard,
     pub(super) _stage_approval_guard: WorkflowApprovalPolicyGuard,
@@ -971,6 +971,38 @@ fn complete_harn_map_stage_call(
     }
 }
 
+/// Read the run-level agent-loop defaults out of `workflow_execute` options and
+/// install them for every stage of this workflow.
+///
+/// Its own function so the intermediate locals do not land in
+/// `prepare_workflow_stage_state`'s stack frame; that frame is budgeted
+/// shrink-only because a nested descent pays it once per level.
+#[inline(never)]
+fn install_workflow_stage_context_from_options(
+    options: &crate::value::DictMap,
+) -> WorkflowStageContextGuard {
+    let registry = options
+        .get("skills")
+        .cloned()
+        .and_then(validate_workflow_skill_registry);
+    let match_config = options.get("skill_match").cloned();
+    // Run-level `tool_search` reaches a stage only through this context. The
+    // stage config is built from the stage's own typed options, so a key set
+    // once on `workflow_execute` is dropped at that seam without this thread.
+    let tool_search = options
+        .get("tool_search")
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned();
+    if registry.is_some() || match_config.is_some() || tool_search.is_some() {
+        install_workflow_stage_context(Some(WorkflowStageContext {
+            registry,
+            match_config,
+            tool_search,
+        }));
+    }
+    WorkflowStageContextGuard
+}
+
 pub(super) async fn prepare_workflow_stage_state(
     ctx: &AsyncBuiltinCtx,
     mut state: WorkflowRunState,
@@ -1011,18 +1043,10 @@ pub(super) async fn prepare_workflow_stage_state(
     install_current_mutation_session(Some(state.mutation_session.clone()));
     let mutation_session_guard = MutationSessionResetGuard;
 
-    let workflow_skill_registry = options
-        .get("skills")
-        .cloned()
-        .and_then(validate_workflow_skill_registry);
-    let workflow_skill_match = options.get("skill_match").cloned();
-    if workflow_skill_registry.is_some() || workflow_skill_match.is_some() {
-        install_workflow_skill_context(Some(WorkflowSkillContext {
-            registry: workflow_skill_registry,
-            match_config: workflow_skill_match,
-        }));
-    }
-    let workflow_skill_guard = WorkflowSkillContextGuard;
+    // Reading the run-level defaults in a helper keeps their locals out of this
+    // function's stack frame, which is budgeted shrink-only because it is paid
+    // once per nested workflow descent.
+    let workflow_stage_guard = install_workflow_stage_context_from_options(options);
 
     let workflow_approval_guard = match state.mutation_session.approval_policy.clone() {
         Some(policy) => {
@@ -1147,7 +1171,7 @@ pub(super) async fn prepare_workflow_stage_state(
         started_at,
         execution,
         _mutation_session_guard: mutation_session_guard,
-        _workflow_skill_guard: workflow_skill_guard,
+        _workflow_stage_guard: workflow_stage_guard,
         _workflow_approval_guard: workflow_approval_guard,
         _stage_execution_policy_guard: stage_execution_policy_guard,
         _stage_approval_guard: stage_approval_guard,
@@ -1181,7 +1205,7 @@ pub(super) async fn complete_workflow_stage_state(
         started_at,
         execution,
         _mutation_session_guard,
-        _workflow_skill_guard,
+        _workflow_stage_guard,
         _workflow_approval_guard,
         _stage_execution_policy_guard,
         _stage_approval_guard,
