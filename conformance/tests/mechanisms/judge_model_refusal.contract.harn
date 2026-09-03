@@ -87,7 +87,7 @@ fn unconfigured_case(harness: Harness) {
       contract_effect(
         harness.stdio,
         "effect_unconfigured_judge_never_uses_the_actors_model",
-        !judge_models(captured.events).contains(ACTOR_MODEL),
+        !contains(judge_models(captured.events), ACTOR_MODEL),
       )
     },
   )
@@ -118,8 +118,8 @@ fn configured_case(harness: Harness) {
       contract_negative(
         harness.stdio,
         "negative_a_configured_judge_still_grades_on_its_own_model",
-        !judge_models(captured.events).contains(JUDGE_MODEL)
-          || judge_models(captured.events).contains(ACTOR_MODEL),
+        !contains(judge_models(captured.events), JUDGE_MODEL)
+          || contains(judge_models(captured.events), ACTOR_MODEL),
       )
     },
   )

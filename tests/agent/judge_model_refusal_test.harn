@@ -14,7 +14,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
-import { llm_text, with_llm_script } from "std/testing"
+import { assert_false, llm_text, with_llm_script } from "std/testing"
 
 const ACTOR_MODEL = "actor-model-7937"
 const JUDGE_MODEL = "judge-model-7937"
@@ -67,7 +67,7 @@ pipeline test_an_unconfigured_judge_never_grades_on_the_actors_model(
       const models = judge_models(captured.events)
       // The whole point: the actor's model never appears as a judge model.
       assert_false(
-        models.contains(ACTOR_MODEL),
+        contains(models, ACTOR_MODEL),
         "an unconfigured judge must not be dispatched on the actor's own model",
       )
       // And the refusal is recorded, so this is a measured absence and not an
@@ -116,10 +116,10 @@ pipeline test_a_configured_judge_grades_on_its_own_model(harness: Harness, task:
       )
       const models = judge_models(captured.events)
       assert(
-        models.contains(JUDGE_MODEL),
+        contains(models, JUDGE_MODEL),
         "a configured judge must record the model it graded with",
       )
-      assert_false(models.contains(ACTOR_MODEL), "and it is never the actor's model")
+      assert_false(contains(models, ACTOR_MODEL), "and it is never the actor's model")
     },
   )
 }
