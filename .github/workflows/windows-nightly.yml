@@ -76,15 +76,14 @@ jobs:
     # ci.yml, because this lane compiles and runs the WHOLE workspace rather
     # than an affected-crate closure — the one native Windows lane where core
     # count buys real wall time. Both lanes fall back to GitHub-hosted capacity
-    # through the same single HARN_CI_DISABLE_BLACKSMITH_WINDOWS variable, so
-    # one flip moves the whole native Windows surface back together.
+    # through the same explicit HARN_CI_ENABLE_BLACKSMITH_WINDOWS opt-in, so
+    # the public repository remains on free GitHub-hosted capacity by default.
     #
     # This job is the sole writer of the shared `workspace-windows` rust-cache.
-    # Moving it here puts the writer on the SAME cache backend as its main
-    # consumer, which also runs on Blacksmith; the provider-neutral warm
-    # artifact below is unaffected, because it is an ordinary GitHub Actions
-    # artifact and every consumer tries it before rust-cache.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-16vcpu-windows-2025' }}
+    # The producer and its PR consumer share the same selected tier, while the
+    # provider-neutral warm artifact below remains an ordinary GitHub Actions
+    # artifact that every consumer tries before rust-cache.
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest' }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     env:
@@ -93,7 +92,7 @@ jobs:
       # `self-hosted` on them and any step branching on that context takes the
       # wrong branch. One job-level tier variable is the single owner every step
       # branches on instead.
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith' }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
       # Cache WRITER half of the rust-lld experiment — MUST stay byte-identical
       # to ci.yml's `windows` job (the restore-only consumer) or the shared-cache
       # policy's consumer/producer input comparison fails. Toggled together via

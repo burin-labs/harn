@@ -6,7 +6,7 @@ POLICY="${HARN_RELEASE_RUNNER_POLICY:-${ROOT}/.github/release-runner-policy.json
 MODE=""
 PROFILE="policy"
 TARGETS=""
-FORCE_STANDARD_MACOS="${HARN_RELEASE_FORCE_STANDARD_MACOS:-false}"
+ENABLE_BLACKSMITH_MACOS="${HARN_RELEASE_ENABLE_BLACKSMITH_MACOS:-false}"
 
 usage() {
   cat <<'EOF'
@@ -57,10 +57,10 @@ case "$MODE:$PROFILE" in
     ;;
 esac
 
-case "$FORCE_STANDARD_MACOS" in
+case "$ENABLE_BLACKSMITH_MACOS" in
   true|false) ;;
   *)
-    echo 'HARN_RELEASE_FORCE_STANDARD_MACOS must be true or false' >&2
+    echo 'HARN_RELEASE_ENABLE_BLACKSMITH_MACOS must be true or false' >&2
     exit 2
     ;;
 esac
@@ -139,7 +139,7 @@ fi
 
 jq -c \
   --arg runner_key "$RUNNER_KEY" \
-  --argjson force_standard_macos "$FORCE_STANDARD_MACOS" \
+  --argjson enable_blacksmith_macos "$ENABLE_BLACKSMITH_MACOS" \
   --argjson requested "$REQUESTED_JSON" '
     def rust_cache_broad_restore_prefix($target):
       if $target == "x86_64-apple-darwin" then
@@ -163,9 +163,9 @@ jq -c \
           target,
           glibc_max,
           runner: (
-            if $force_standard_macos
-              and ($runner_key == "primary" or $runner_key == "recovery" or $runner_key == "candidate")
+            if ($runner_key == "primary" or $runner_key == "recovery" or $runner_key == "candidate")
               and .target == "x86_64-apple-darwin"
+              and ($enable_blacksmith_macos | not)
             then .runners.standard
             else .runners[$runner_key]
             end

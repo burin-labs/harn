@@ -36,22 +36,21 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 
 ## Current decision
 
-Use `blacksmith-12vcpu-macos-15` for primary `x86_64-apple-darwin` builds and
-exact-source macOS workspace certification, and use the independent
-GitHub-hosted `macos-15-xlarge` runner for release-archive recovery. Keep
-`warm` and `standard` on `macos-15-intel`. Routine main pushes and scheduled
-cache refreshes stay free; workflow-dispatched certification, shipping, and
-recovery use paid capacity.
+Use `macos-15-intel` for policy-selected `x86_64-apple-darwin` builds and
+`macos-latest` for native workspace certification by default. Keep the proven
+Blacksmith M4 and GitHub xlarge profiles available only for explicit incident
+or benchmark dispatches. Routine main pushes, scheduled cache refreshes,
+certification, and shipping therefore stay on the public repository's free
+standard capacity unless an owner opts into a paid profile.
 
-Set the repository Actions variable `HARN_RELEASE_FORCE_STANDARD_MACOS=true`
-to route policy-selected primary and recovery Intel builds back to
-`macos-15-intel` without a code change. Unset the variable, or set it to
-`false`, to restore the checked-in policy. Explicit `standard` and `fast`
-recovery or benchmark profiles still honor the operator's selected profile.
-Set `HARN_RELEASE_FORCE_STANDARD_LINUX=true` to move release and benchmark CLI
-AOT preparation from Blacksmith back to `ubuntu-latest`; warm-cache runs use
-`ubuntu-latest` regardless. These variables are kill switches, not routine
-profile selectors.
+The public repository uses GitHub-hosted release capacity by default. Set the
+repository Actions variable `HARN_RELEASE_ENABLE_BLACKSMITH_MACOS=true` to opt
+policy-selected primary and recovery Intel builds into Blacksmith. Explicit
+`standard` and `fast` recovery or benchmark profiles still honor the operator's
+selected profile. Set `HARN_RELEASE_ENABLE_BLACKSMITH_LINUX=true` to opt release
+and benchmark CLI AOT preparation into Blacksmith; warm-cache runs use
+`ubuntu-latest` regardless. Leave both variables unset unless a reviewed
+release incident justifies paid capacity.
 
 The primary and recovery choice is based on a same-source cold-cache pair.
 Both runs used Harn source commit

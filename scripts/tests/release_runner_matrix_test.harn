@@ -64,21 +64,19 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unkn
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
   const primary = ["x86_64-apple-darwin=blacksmith-12vcpu-macos-15"]
     + standard.slice(1, len(standard))
-  const recovery = ["x86_64-apple-darwin=macos-15-xlarge"]
-    + standard.slice(1, len(standard))
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), primary)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode candidate")), primary)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), recovery)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode candidate")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), standard)
   assert_eq(
     runners(
       matrix_with_env(
         harness.fs,
         harness.process,
-        "HARN_RELEASE_FORCE_STANDARD_MACOS=true",
+        "HARN_RELEASE_ENABLE_BLACKSMITH_MACOS=true",
         "--mode primary",
       ),
     ),
-    standard,
+    primary,
   )
   assert_eq(
     codegen_units(matrix(harness.fs, harness.process, "--mode primary")),
@@ -150,7 +148,7 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
   assert_eq(
     harness.process.shell_at(
       root,
-      "HARN_RELEASE_FORCE_STANDARD_MACOS=maybe bash scripts/release_runner_matrix.sh --mode primary",
+      "HARN_RELEASE_ENABLE_BLACKSMITH_MACOS=maybe bash scripts/release_runner_matrix.sh --mode primary",
     ).success,
     false,
   )

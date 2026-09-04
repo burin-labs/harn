@@ -3,19 +3,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
-# The paid M4 class is reserved for exact-source dispatches, which are the
-# release's blocking proof. Everything else — the schedule, and pull requests
-# once this lane runs on them — takes the hosted runner. Naming the dispatch
-# event rather than excluding the schedule is what keeps a third event off the
-# paid class by default instead of routing it there.
-dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}"
+# The paid M4 class requires both an exact-source dispatch and the explicit
+# repository opt-in. An unset or malformed variable therefore stays on the
+# hosted runner instead of silently restoring paid capacity.
+dispatch_runner="runs-on: \${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}"
 # The 30 minute budget belongs to the dispatch, which restores a warm cache.
 # A cold pull-request or scheduled run needs the nightly's budget: this lane's
 # p90 is 47 minutes, and a timeout reads as a red lane rather than a slow one.
-dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && 30 || 75 }}"
+dispatch_timeout="timeout-minutes: \${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 30 || 75 }}"
 
 if ! grep -Fq "$dispatch_runner" "$workflow"; then
-  echo "macOS nightly must reserve the proven M4 runner for exact-source dispatches" >&2
+  echo "macOS nightly must require an explicit opt-in for the paid M4 runner" >&2
   exit 1
 fi
 

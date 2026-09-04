@@ -136,9 +136,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Emergency cost/capacity rollback. Repository owners can set this Actions
-  # variable to true without changing release source or waiting for a PR.
-  HARN_RELEASE_FORCE_STANDARD_MACOS: ${{ vars.HARN_RELEASE_FORCE_STANDARD_MACOS || 'false' }}
+  # Paid release capacity is disabled unless explicitly enabled by an owner.
+  HARN_RELEASE_ENABLE_BLACKSMITH_MACOS: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_MACOS || 'false' }}
 
 jobs:
   setup:
@@ -806,9 +805,9 @@ jobs:
     # The generator compiles the complete Rust workspace and sits on every
     # shipping target's critical path. Use bounded paid capacity only when it
     # has real work; warm-cache runs retain the standard public runner. The
-    # repository variable is an immediate hosted fallback if Blacksmith is
-    # unhealthy, without changing release source or credentials.
-    runs-on: ${{ ((needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate' || needs.setup.outputs.build_mode == 'candidate') && vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
+    # repository opt-in enables paid capacity without changing release source
+    # or credentials; the public repository otherwise uses free hosted capacity.
+    runs-on: ${{ vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && (needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
