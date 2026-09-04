@@ -4,7 +4,10 @@ use harn_vm::event_log::EventLog as _;
 use harn_vm::orchestration::{save_run_record, RunRecord, RunTraceSpanRecord};
 use harn_vm::session_timeline::SESSION_TIMELINE_SCHEMA_VERSION;
 
+mod prompt_output;
 mod typed_observability;
+
+use prompt_output::run_json_prompt;
 
 async fn run_prompt_with_project_capability(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
@@ -69,55 +72,6 @@ async fn run_prompt_with_project_capability(
     }
     assert!(saw_completed, "prompt {id} should complete successfully");
     output
-}
-
-async fn run_json_prompt(
-    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
-    response_rx: &mut mpsc::UnboundedReceiver<String>,
-    session_id: &str,
-    id: i64,
-    prompt_text: &str,
-) -> serde_json::Value {
-    request_tx
-        .send(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": "session/prompt",
-            "params": {
-                "sessionId": session_id,
-                "prompt": [{"type": "text", "text": prompt_text}],
-            },
-        }))
-        .expect("send session/prompt");
-
-    let mut output = String::new();
-    for _ in 0..64 {
-        let message = recv_json(response_rx).await;
-        match message.get("method").and_then(|value| value.as_str()) {
-            Some("host/capabilities") => {
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": message["id"].clone(),
-                        "result": {},
-                    }))
-                    .expect("send host/capabilities response");
-            }
-            Some("session/update")
-                if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk" =>
-            {
-                if let Some(text) = message["params"]["update"]["content"]["text"].as_str() {
-                    output.push_str(text);
-                }
-            }
-            _ if message["id"] == id => {
-                assert_eq!(message["result"]["stopReason"], "end_turn");
-                return serde_json::from_str(output.trim()).expect("prompt JSON output");
-            }
-            _ => {}
-        }
-    }
-    panic!("prompt {id} did not complete")
 }
 
 async fn recv_response_with_id(
@@ -806,6 +760,7 @@ harness.agent.session_record_assistant(sid, {text: "alpha"})
 const messages = harness.agent.session_messages(sid)
 harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
+                Some("alpha"),
             )
             .await;
             assert_eq!(first["len"], 1);
@@ -821,6 +776,7 @@ harness.agent.session_record_assistant(sid, {text: "beta"})
 const messages = harness.agent.session_messages(sid)
 harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
+                Some("beta"),
             )
             .await;
             assert_eq!(second["len"], 2);
@@ -876,6 +832,7 @@ guard sid != nil else { throw "missing session id" }
 const messages = harness.agent.session_messages(sid)
 harness.stdio.println(json_stringify({len: len(messages), messages: messages}))
 "#,
+                None,
             )
             .await;
             assert_eq!(snapshot["len"], 1);
