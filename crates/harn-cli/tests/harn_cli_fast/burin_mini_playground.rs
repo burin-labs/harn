@@ -872,27 +872,66 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
         "Comment what this file does".to_string(),
         "windows_write_confinement_probe.jsonl",
     );
-    let stdout = match &outcome {
+    // NOTE (harn#7993 review): the child's `%TEMP%` is not the parent's.
+    // `environment_block` applies the AppContainer's own overrides last, so
+    // `TEMP` resolves inside the container's profile and this arm cannot
+    // observe an escape. It is kept only so the pair of targets stays on the
+    // record; `USERPROFILE` is the arm that actually binds. Replacing it with
+    // a target the backend does not redirect is tracked for this test's owner.
+    assert_writes_stay_confined(
+        &experiment_root,
+        &outcome,
+        &[
+            (
+                "USERPROFILE",
+                std::env::var_os("USERPROFILE")
+                    .map(|dir| Path::new(&dir).join("harn-escape-7993-userprofile.txt")),
+            ),
+            (
+                "TEMP",
+                std::env::var_os("TEMP")
+                    .map(|dir| Path::new(&dir).join("harn-escape-7993-temp.txt")),
+            ),
+        ],
+    );
+}
+
+/// The write-confinement assertion the Windows, macOS and Linux backends
+/// share. Each platform's test supplies its own escape targets, because the
+/// paths a normal process can write to outside a workspace differ by OS; the
+/// verdict below does not.
+///
+/// The check reads the real filesystem rather than the shell's own stdout
+/// wording. Denial text and exit codes differ across the three backends, but
+/// the file either exists on disk or it does not, and that is
+/// mechanism-agnostic.
+///
+/// The write inside the workspace is the non-null control. Without it a
+/// backend that refused every write would pass this assertion while being
+/// completely broken, and absence of an escape file would be indistinguishable
+/// from absence of any write at all.
+///
+/// Any escape file found is deleted before the panic, so a broken backend does
+/// not leave stray files behind for the next run to trip over.
+fn assert_writes_stay_confined(
+    experiment_root: &Path,
+    outcome: &Result<String, String>,
+    escape_targets: &[(&str, Option<PathBuf>)],
+) {
+    let stdout = match outcome {
         Ok(stdout) => stdout.clone(),
         Err(error) => error.clone(),
     };
-
-    let userprofile_escape = std::env::var("USERPROFILE")
-        .map(|dir| Path::new(&dir).join("harn-escape-7993-userprofile.txt"));
-    let temp_escape =
-        std::env::var("TEMP").map(|dir| Path::new(&dir).join("harn-escape-7993-temp.txt"));
     let inside_write = experiment_root
         .join("workspace")
         .join("harn-write-confinement-7993-inside.txt");
 
     let mut failures = Vec::new();
-    for (label, escape_path) in [
-        ("USERPROFILE", userprofile_escape.as_ref().ok()),
-        ("TEMP", temp_escape.as_ref().ok()),
-    ] {
+    for (label, escape_path) in escape_targets {
         let Some(escape_path) = escape_path else {
             failures.push(format!(
-                "  {label}: environment variable not set, could not check for an escape file"
+                "  {label}: no path to check -- the environment did not name one, so this \
+                 target proved nothing"
             ));
             continue;
         };
@@ -914,7 +953,8 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
         )),
         Err(error) => failures.push(format!(
             "  WRITE INSIDE THE WORKSPACE DID NOT HAPPEN: {} ({error}) -- a confinement fix \
-             must not also break writes the sandbox is supposed to allow",
+             must not also break writes the sandbox is supposed to allow, and without this \
+             write the escape checks above prove nothing",
             inside_write.display()
         )),
     }
@@ -922,7 +962,7 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     if failures.is_empty() {
         return;
     }
-    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let report_path = generated_report_path(experiment_root, &stdout, "comment_file-latest.json");
     let report_dump = if report_path.exists() {
         format!("{}", read_json(&report_path))
     } else {
@@ -931,5 +971,87 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     panic!(
         "write-confinement check failed:\n{}\nplayground stdout/error:\n{stdout}\nfull report:\n{report_dump}",
         failures.join("\n")
+    );
+}
+
+/// The macOS/Linux half of the same adversarial check the Windows test above
+/// runs (harn#7993 swarm brief). The three OS backends confine writes through
+/// three different mechanisms -- seatbelt on macOS, Landlock on Linux, an
+/// AppContainer plus file permissions on Windows -- so the confinement claim
+/// is only as good as its weakest backend, and until now only Windows was
+/// asserted.
+///
+/// Picking escape targets is the whole difficulty, and getting it wrong in
+/// either direction produces a test that proves nothing:
+///
+/// * The system temporary directory is NOT a valid target. The `UserTemp`
+///   preset grants writes there on purpose whenever workspace writes are
+///   allowed, so a file appearing in `/tmp` or `$TMPDIR` is the policy
+///   working, not an escape. An earlier version of this test aimed there and
+///   reported a false violation.
+/// * `$TMPDIR` is doubly wrong, because the sandbox also injects its own
+///   workspace-scoped temporary directory, so the child would write somewhere
+///   the test is not even looking and the absence would read as confinement.
+///
+/// Both targets below sit under the user's home directory, which no preset
+/// grants: the presets open specific subdirectories such as `~/.cargo` and
+/// `~/.gradle`, never the root and never an arbitrary sibling. One target is
+/// the home root itself. The other is a directory this test creates and
+/// proves writable by the parent process before the run, so a missing file
+/// afterwards cannot be an ambient permission the account never had. It is a
+/// temporary directory, removed when the test ends.
+///
+/// The created directory's path is not known until the test runs, so the
+/// fixture is a template and the concrete path is substituted into the copied
+/// experiment before the playground reads it.
+#[cfg(unix)]
+#[test]
+fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME names the user's home"));
+    // Under the home directory on purpose: the system temporary directory is a
+    // granted preset root, so an escape file there would be policy working.
+    let escape_dir =
+        TempDir::new_in(&home).expect("create the outside-the-workspace escape directory");
+
+    // Non-null control on the escape directory itself.
+    let control = escape_dir.path().join("parent-can-write.txt");
+    fs::write(&control, "the parent process can write here")
+        .expect("the escape directory must be writable by this process, or the check is vacuous");
+    fs::remove_file(&control).expect("remove the control file");
+
+    let template = fs::read_to_string(
+        repo_root()
+            .join("experiments/burin-mini/fixtures/unix_write_confinement_probe.jsonl.template"),
+    )
+    .expect("read the write-confinement fixture template");
+    let fixture_name = "unix_write_confinement_probe.jsonl";
+    fs::write(
+        experiment_root.join("fixtures").join(fixture_name),
+        template.replace(
+            "__HARN_ESCAPE_DIR__",
+            escape_dir
+                .path()
+                .to_str()
+                .expect("the escape directory path is valid UTF-8"),
+        ),
+    )
+    .expect("write the resolved write-confinement fixture");
+
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        fixture_name,
+    );
+    assert_writes_stay_confined(
+        &experiment_root,
+        &outcome,
+        &[
+            (
+                "outside-the-workspace directory",
+                Some(escape_dir.path().join("harn-escape-7993-outside.txt")),
+            ),
+            ("HOME", Some(home.join("harn-escape-7993-home.txt"))),
+        ],
     );
 }
