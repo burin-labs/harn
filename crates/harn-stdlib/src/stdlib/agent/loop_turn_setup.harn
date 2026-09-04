@@ -1,0 +1,292 @@
+import "std/agent/loop_call_budget"
+import "std/agent/loop_call_resolution"
+import "std/agent/loop_denial_cutoff"
+import "std/agent/loop_finalize"
+import "std/agent/loop_foundation"
+import "std/agent/loop_purpose_labels"
+import "std/agent/loop_resource_dispatch"
+import "std/agent/loop_result_status"
+import "std/agent/loop_support"
+import "std/agent/loop_terminal"
+import "std/agent/loop_tool_calls"
+import "std/agent/loop_turn_options"
+import "std/agent/loop_turn_scope"
+
+// The turn-setup phase of the agent loop: everything between the top of an
+// iteration and the request that is about to be sent (harn#7753).
+//
+// WHY THIS IS ITS OWN MODULE. `loop_run.harn` was one function carrying the
+// whole iteration, and it sat against the hard source-length cap with a handful
+// of lines to spare, so any change to the agent loop had to fight the file
+// before it could fight the problem. The loop's later phases already live in
+// owned siblings — call resolution, denial cutoff, tool calls, the terminal
+// boundary — and this is the same treatment for the phase that runs first.
+//
+// WHAT IT OWNS. Four guards that can end the run before a request is made
+// (iteration budget, a suspend checkpoint, the pre-call budget block, and the
+// input guardrail / pre-turn scope classifier pair), and the assembly of the
+// options, prompt and prefill that the request is built from.
+//
+// CONTROL FLOW CONTRACT. Same shape as `std/agent/loop_terminal`: the caller
+// gets an explicit `action` rather than a `break` smuggled across a module
+// boundary. `action: "break"` means a guard ended the run and the returned
+// record carries exactly the state that guard mutated; `action: "proceed"`
+// means the turn is assembled and the returned record carries the values the
+// request phase consumes. This is a pure relocation of existing behavior: no
+// guard changed, no order changed, and no state that was written before is
+// left unwritten.
+/**
+ * Run the turn-setup phase for one agent-loop iteration.
+ *
+ * @effects: [host, agent]
+ * @errors: [runtime]
+ */
+pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> dict {
+  const message = state.message
+  let opts = state.opts
+  const iteration = state.iteration
+  let call_budget = state.call_budget
+  let stall_state = state.stall_state
+  let command_hold_cap_tokens = state.command_hold_cap_tokens
+  let budget_decisions = state.budget_decisions
+  let audit_background_tasks = state.audit_background_tasks
+  const budget = state.budget
+  const current_max = state.current_max
+  const loop_start_ms = state.loop_start_ms
+  const primary_provider = state.primary_provider
+  const primary_model = state.primary_model
+  const boundary_exhaustion = __agent_loop_budget_exhaustion(
+    harness.agent,
+    harness.clock,
+    session.session_id,
+    budget,
+    iteration,
+    nil,
+    loop_start_ms,
+    current_max,
+  )
+  if boundary_exhaustion.exhausted {
+    __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, boundary_exhaustion)
+    budget_decisions = __agent_loop_record_budget_stop(
+      budget_decisions,
+      iteration,
+      current_max,
+      boundary_exhaustion.kind,
+    )
+    return state
+      + {
+        action: "break",
+        final_status: "budget_exhausted",
+        stop_reason: boundary_exhaustion.kind,
+        budget_decisions: budget_decisions,
+        budget_exhausted_emitted: true,
+      }
+  }
+  const checkpoint = __agent_loop_suspend_checkpoint(
+    harness.agent,
+    harness.runtime,
+    session,
+    iteration,
+  )
+  if checkpoint != nil {
+    __drain_audit_flushes(audit_background_tasks)
+    audit_background_tasks = []
+    return state
+      + {
+        action: "break",
+        suspend_result: checkpoint,
+        audit_background_tasks: [],
+        final_status: "suspended",
+        stop_reason: "suspended",
+      }
+  }
+  const turn_budget = call_budget + {iteration: iteration, max: current_max}
+  call_budget = __agent_loop_project_call_budget(harness, session, turn_budget)
+  if agent_budget_pre_call_blocked(harness.agent, session, opts) {
+    // Unset, this gate is indistinguishable from an unexplained break:
+    // `loop_finalize.harn` stamps `kind: "unattributed"` for this path.
+    return state
+      + {
+        action: "break",
+        call_budget: call_budget,
+        final_status: "budget_exhausted",
+        stop_reason: "pre_call_budget_block",
+      }
+  }
+  const iteration_index = iteration
+  const monologue_actuation_prior_read_streak = stall_state.monologue_actuation.read_only_streak
+  stall_state = stall_state
+    + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
+  const pending_prefill = __purpose_label_arm(harness.agent, session, opts)
+  opts = pending_prefill.options
+  const iteration_opts = __agent_loop_effective_llm_options(harness.llm, opts)
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
+    "iteration_start",
+    {
+      iteration: iteration_index + 1,
+      provider: iteration_opts?.provider ?? "",
+      model: iteration_opts?.model ?? "",
+    },
+  )
+  try {
+    __host_drain_file_edits(session.session_id)
+  } catch (e) {
+    nil
+  }
+  agent_stage(
+    harness.agent,
+    session.session_id,
+    "iteration_start",
+    {iteration: iteration_index + 1},
+  )
+  let turn_opts = agent_skills_match(harness.agent, session, iteration_opts, iteration_index)
+  if turn_opts?._skill_activated_this_turn ?? false {
+    opts = agent_reset_tool_surface_narrowing(opts)
+    turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
+  }
+  if opts?.mid_conversation_mcp_mount ?? false {
+    const skill_mcp_specs = __agent_loop_active_skill_mcp_specs(turn_opts?.active_skills)
+    if len(skill_mcp_specs) > 0 {
+      opts = agent_mcp_mount_additional(harness.tools, session, opts, skill_mcp_specs)
+      const mcp_delta = opts?._mcp_delta_bootstrap
+      if mcp_delta != nil {
+        turn_opts = agent_mcp_admit_bootstrap(turn_opts, mcp_delta)
+      }
+    }
+  }
+  turn_opts = agent_tool_search_inject_if_needed(harness.llm, turn_opts)
+  turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
+  turn_opts = agent_stance_apply(turn_opts)
+  if command_hold_cap_tokens != nil {
+    turn_opts = turn_opts + {max_tokens: command_hold_cap_tokens}
+    command_hold_cap_tokens = nil
+  }
+  const turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
+  turn_opts = turn_opts + {purpose_labels: opts?.purpose_labels}
+  agent_stage(harness.agent, session.session_id, "pre_compact", {iteration: iteration_index + 1})
+  agent_autocompact_if_needed(harness.agent, session, turn_llm_opts)
+  agent_stage(harness.agent, session.session_id, "post_compact", {iteration: iteration_index + 1})
+  const input_guardrail_verdict = __run_input_guardrail(
+    harness.agent,
+    turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,
+    session,
+    message,
+    turn_llm_opts,
+    iteration_index,
+  )
+  if input_guardrail_verdict != nil && (input_guardrail_verdict.tripwire ?? false) {
+    __input_guardrail_record_skip_turn(
+      harness.agent,
+      harness.llm,
+      session,
+      input_guardrail_verdict,
+      iteration_index,
+    )
+    return state
+      + {
+        action: "break",
+        opts: opts,
+        call_budget: call_budget,
+        stall_state: stall_state,
+        command_hold_cap_tokens: command_hold_cap_tokens,
+        iteration: iteration + 1,
+        final_status: "input_guardrail",
+        stop_reason: "input_guardrail_tripwire",
+      }
+  }
+  const scope_verdict = __run_pre_turn_scope_classifier(
+    harness.agent,
+    turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
+    session,
+    message,
+    turn_llm_opts,
+    iteration_index,
+  )
+  if __scope_classifier_skip_main(scope_verdict) {
+    __scope_classifier_record_skip_turn(
+      harness.agent,
+      harness.llm,
+      session,
+      scope_verdict,
+      iteration_index,
+    )
+    return state
+      + {
+        action: "break",
+        opts: opts,
+        call_budget: call_budget,
+        stall_state: stall_state,
+        command_hold_cap_tokens: command_hold_cap_tokens,
+        iteration: iteration + 1,
+        final_status: "scope_alert",
+        stop_reason: "out_of_scope",
+      }
+  }
+  const turn_prompt = __agent_loop_build_turn_prompt(
+    harness,
+    session,
+    turn_llm_opts,
+    iteration_index,
+  )
+  const direct_llm_opts = agent_direct_llm_options(
+    turn_llm_opts,
+    turn_prompt,
+    session.session_id,
+    iteration_index + 1,
+  )
+  const monologue_actuation = agent_monologue_actuation_take_for_turn(
+    harness.agent,
+    harness.llm,
+    session.session_id,
+    iteration_index + 1,
+    stall_state.monologue_actuation,
+    turn_opts,
+    turn_llm_opts,
+    pending_prefill.prefill == "",
+    agent_tool_call_paradigm(harness.llm, turn_llm_opts),
+  )
+  stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
+  const one_shot_prefill = if monologue_actuation.applied {
+    monologue_actuation.prefill
+  } else {
+    pending_prefill.prefill
+  }
+  const prefill_eligibility = agent_prefill_eligibility(
+    harness.llm,
+    one_shot_prefill,
+    direct_llm_opts,
+  )
+  // A prefill is a request-level continuation and therefore pins this
+  // one request to the route whose capability was checked. Ordinary
+  // requests retain equivalent-route failover.
+  const base_llm_opts = if prefill_eligibility.allowed {
+    direct_llm_opts
+  } else {
+    __agent_loop_enable_equivalent_failover(direct_llm_opts, primary_provider, primary_model, opts)
+  }
+  // Caller-supplied and recovery-generated prefills converge here. The
+  // typed eligibility decision above is shared with monologue actuation,
+  // so no path can bypass caller, routing, or catalog capability checks.
+  const llm_opts = if prefill_eligibility.allowed {
+    llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)
+  } else {
+    base_llm_opts
+  }
+  return state
+    + {
+      action: "proceed",
+      opts: opts,
+      iteration: iteration,
+      call_budget: call_budget,
+      stall_state: stall_state,
+      command_hold_cap_tokens: command_hold_cap_tokens,
+      iteration_index: iteration_index,
+      monologue_actuation_prior_read_streak: monologue_actuation_prior_read_streak,
+      turn_opts: turn_opts,
+      turn_llm_opts: turn_llm_opts,
+      turn_prompt: turn_prompt,
+      llm_opts: llm_opts,
+    }
+}
