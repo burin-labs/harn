@@ -504,13 +504,27 @@ fn launching_user_sid() -> io::Result<SidBuffer> {
 /// succeed wherever the first one already did, so reads resolve through
 /// the ordinary ACLs the machine already has.
 ///
-/// This relaxes only a DACL check. Writes outside the workspace stay
-/// blocked by the mandatory integrity check, which runs before the DACL
-/// checks and does not consider capability SIDs at all: an AppContainer
-/// process is Low integrity, and a Low integrity subject cannot write to
-/// an object at Medium integrity or above under the default
-/// `NO_WRITE_UP` policy. Reads are unaffected by that policy, which is
-/// exactly the asymmetry the product contract wants.
+/// This relaxes a DACL check and nothing else, and the design rests on
+/// writes being held by a check the added SIDs cannot reach: the
+/// mandatory integrity check runs ahead of the DACL checks and does not
+/// consider capability SIDs, an AppContainer process is Low integrity,
+/// and under the default `NO_WRITE_UP` policy a Low integrity subject
+/// cannot write to an object at Medium integrity or above. Reads are not
+/// subject to that policy, which is the asymmetry the product contract
+/// wants.
+///
+/// That reasoning is not yet verified here, and one argument cuts against
+/// it. `NO_WRITE_UP` bites only on an object carrying a mandatory label,
+/// most NTFS objects carry none by default, and the launching user's SID
+/// is now in the token specifically so ordinary ACLs satisfy the second
+/// check — so a DACL grant to that user could permit a write regardless
+/// of integrity. `windows_sandbox_fix_keeps_writes_confined_to_the_workspace`
+/// is the falsifier: it writes through this seam to a freshly created
+/// directory under the user's profile, having first proved that target
+/// host-writable, so an absent file is a real denial and not a broken
+/// probe. If that test finds the file, this paragraph is wrong and the
+/// confinement has to come from a mandatory label on the workspace roots
+/// instead.
 struct ProcessCapabilities {
     // The attribute records point into these allocations. Boxes keep the SID
     // addresses stable if the owning vector or this struct moves.
