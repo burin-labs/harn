@@ -177,6 +177,17 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
 /// tool. Returns a formatted dump (never panics) so callers can fold it into
 /// their own failure message regardless of whether this probe itself
 /// resolved `node`.
+///
+/// Each command below is its OWN `harness.process.exec` call, and status is
+/// read from Harn's own structured `result.status`/`result.success`, never
+/// from a same-line `%ERRORLEVEL%` expansion: cmd.exe parses and expands
+/// every `%VAR%` on a logical line BEFORE running any of the `&`-joined
+/// commands on it, so `cmd & set X=%ERRORLEVEL% & echo %X%` always reports
+/// the errorlevel from BEFORE `cmd` ran, not its actual result — a real
+/// defect an earlier version of this probe had (harn#7993 round 2), which
+/// made two earlier "PASS" verdicts on this exact check vacuous. Splitting
+/// each command into its own call sidesteps the whole class of same-line
+/// expansion timing bugs.
 #[cfg(windows)]
 fn windows_env_probe_dump() -> String {
     let temp = TempDir::new().unwrap();
@@ -185,16 +196,24 @@ fn windows_env_probe_dump() -> String {
     fs::write(
         &script,
         r#"
-fn main(harness: Harness) {
-  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & set PROBE_WHERE_STATUS=%ERRORLEVEL% & echo PROBE_WHERE_STATUS=%PROBE_WHERE_STATUS% & echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
-  harness.stdio.println("PROBE_STATUS=${result.status}")
-  harness.stdio.println("PROBE_SUCCESS=${result.success}")
-  harness.stdio.println("PROBE_STDOUT_START")
+fn dump(harness: Harness, label: string, command: string) {
+  let result = harness.process.exec("cmd.exe", "/D", "/C", command)
+  harness.stdio.println("${label}_STATUS=${result.status}")
+  harness.stdio.println("${label}_SUCCESS=${result.success}")
+  harness.stdio.println("${label}_STDOUT_START")
   harness.stdio.println(result.stdout)
-  harness.stdio.println("PROBE_STDOUT_END")
-  harness.stdio.println("PROBE_STDERR_START")
+  harness.stdio.println("${label}_STDOUT_END")
+  harness.stdio.println("${label}_STDERR_START")
   harness.stdio.println(result.stderr)
-  harness.stdio.println("PROBE_STDERR_END")
+  harness.stdio.println("${label}_STDERR_END")
+}
+
+fn main(harness: Harness) {
+  dump(harness, "WHERE", "where node")
+  dump(harness, "WHOAMI", "whoami /groups /fo list")
+  dump(harness, "ICACLS", "icacls \"C:\\Program Files\\nodejs\"")
+  dump(harness, "TYPE", "type \"C:\\Program Files\\nodejs\\package.json\"")
+  dump(harness, "ENV", "echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
 }
 "#,
     )
@@ -221,9 +240,9 @@ fn main(harness: Harness) {
     let where_status_ok = outcome
         .stdout
         .lines()
-        .any(|line| line.trim() == "PROBE_WHERE_STATUS=0");
+        .any(|line| line.trim() == "WHERE_STATUS=0");
     format!(
-        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (contains PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list, PROBE_ENV_START..PROBE_ENV_END, as the child itself saw them):\n{}\nfull script stderr:\n{}",
+        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; WHOAMI = the token's groups and integrity level; ICACLS = the nodejs install dir's ACL; TYPE = a plain read of a file inside it; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
         outcome.exit_code, outcome.stdout, outcome.stderr
     )
 }
