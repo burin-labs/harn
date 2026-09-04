@@ -925,14 +925,23 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
       "Windows test steps must set identical RUST_MIN_STACK=16777216 runtime stacks",
     ),
   )
-  const migrated_writer = {
+  // The producer and its pull-request consumer ride the same Blacksmith ladder
+  // through one fallback variable, but they are pinned to different sizes: the
+  // nightly compiles and runs the whole workspace, so it holds the 16 vCPU rung.
+  // A producer wearing the consumer's own 8 vCPU expression keeps every other
+  // property this checker reads -- the runner family, the tier, and the single
+  // HARN_CI_DISABLE_BLACKSMITH_WINDOWS fallback -- so it is the case that decides
+  // whether the size is genuinely pinned or merely implied by the family.
+  const consumer_sized_writer = {
     ...nightly,
-    jobs: {nextest: {...producer, "runs-on": "blacksmith-8vcpu-windows-2025"}},
+    jobs: {nextest: {...producer, "runs-on": windows_runner_expression()}},
   }
   assert(
-    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], migrated_writer).contains(
-      "windows-nightly.yml:nextest must remain on windows-latest",
-    ),
+    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], consumer_sized_writer)
+      .contains(
+        "windows-nightly.yml:nextest must use blacksmith-16vcpu-windows-2025, with "
+          + "HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true falling back to windows-latest",
+      ),
   )
 }
 
