@@ -73,6 +73,9 @@ grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VE
   || fail "declared -dev workspace state does not bypass publication"
 grep -Fq 'release_development_bump_plan "$version" "$latest_tag"' "$publish_workflow" \
   || fail "post-release bump bypasses the fixture-backed release-state plan"
+grep -Fq "github.event_name != 'workflow_dispatch' && needs.detect-drift.outputs.development_bump == 'true'" \
+  "$publish_workflow" \
+  || fail "manual publication recovery can redundantly open a development bump"
 grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$publish_workflow" \
   || fail "post-release bump skip does not report its typed reason"
 grep -Fq 'HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh' "$publish_workflow" \
