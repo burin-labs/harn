@@ -1936,10 +1936,13 @@ jobs:
             CARGO_TARGET_DIR="$target_dir" sh -c \
               '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
           )"
-          if [[ "$harn_bin" != "$target_dir/debug/harn.exe" \
-            || "$hook_resolved" != "$harn_bin" ]]; then
+          expected_bin="$target_dir/debug/harn.exe"
+          # Git Bash can spell one Windows file as either E:/target/... or
+          # /e/target/.... Compare filesystem identity, not path text.
+          if [[ ! "$harn_bin" -ef "$expected_bin" \
+            || ! "$hook_resolved" -ef "$harn_bin" ]]; then
             printf 'Windows proof mismatch: resolved=%q hook=%q expected=%q\n' \
-              "$harn_bin" "$hook_resolved" "$target_dir/debug/harn.exe" >&2
+              "$harn_bin" "$hook_resolved" "$expected_bin" >&2
             exit 1
           fi
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
