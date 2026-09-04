@@ -619,6 +619,12 @@ async fn execute_routing_schema_retry_loop(
                 }
                 Err(error) => match parse_schema_stream_abort(&error) {
                     Some(abort) => {
+                        // The provider billed the partial output it generated
+                        // before the stream was severed and never sent its
+                        // usage frame. Recording the attempt keeps it in the
+                        // ledger's request count with its cost refusing;
+                        // dropping it would let the call read as free.
+                        usages.push(super::usage::LlmUsage::stream_aborted_attempt());
                         let errors = vec![schema_stream_abort_message(&abort)];
                         let vm_result = schema_stream_aborted_result_value(&abort);
                         (vm_result, String::new(), errors)
@@ -804,6 +810,10 @@ pub(crate) async fn execute_schema_retry_loop(
             }
             Err(error) => match parse_schema_stream_abort(&error) {
                 Some(abort) => {
+                    // Same ledger rule as the routed loop above: a severed
+                    // stream is a real provider request with no measurement,
+                    // not an absent one.
+                    usages.push(super::usage::LlmUsage::stream_aborted_attempt());
                     let errors = vec![schema_stream_abort_message(&abort)];
                     let vm_result = schema_stream_aborted_result_value(&abort);
                     (vm_result, String::new(), errors)
@@ -1430,6 +1440,123 @@ mod schema_stream_abort_retry_tests {
             assert!(
                 !outcome.errors.is_empty(),
                 "post-hoc validation should still flag the malformed response"
+            );
+
+            reset_agent_trace_state();
+        });
+    }
+
+    /// A call whose every attempt is severed mid-stream still consumed
+    /// provider supply, and the ledger has to say so.
+    ///
+    /// Before this was fixed the aborting attempts were dropped from `usages`
+    /// entirely and the stand-in envelope carried top-level `input_tokens: 0`
+    /// and `output_tokens: 0` with no `usage` block at all, so a severed call
+    /// read back as a real measurement of zero. Downstream that priced the
+    /// trial at nothing and then skipped it as accounting-incomplete. Each
+    /// assertion below fails on that shape.
+    #[test]
+    fn exhausted_stream_aborts_are_unpriced_requests_not_a_measured_zero() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            reset_agent_trace_state();
+
+            // Both attempts violate the schema mid-stream, so the retry
+            // budget is spent and the caller sees the abort stand-in.
+            let aborting_turn = || {
+                FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("{\"age\": ".into()),
+                    FakeLlmEvent::Token("\"twenty\"}".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])
+            };
+            let _script_guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(aborting_turn())
+                    .push(aborting_turn()),
+            );
+
+            let outcome = execute_schema_retry_loop(
+                None,
+                fake_opts_with_schema(),
+                Some(options_with_retries(1)),
+                None,
+                None,
+            )
+            .await
+            .expect("retry loop returns the exhausted outcome");
+
+            assert_eq!(outcome.attempts, 2, "both attempts should have run");
+            assert!(
+                !outcome.errors.is_empty(),
+                "an exhausted abort surfaces as a schema failure"
+            );
+
+            assert_eq!(
+                outcome.usages.len(),
+                2,
+                "each severed provider request stays in the ledger; got {:?}",
+                outcome.usages
+            );
+            let ledger = crate::llm::usage::LlmUsage::aggregate(&outcome.usages);
+            assert_eq!(
+                ledger.accounting_status,
+                crate::llm::usage::UsageAccountingStatus::Unknown,
+                "no usage frame arrived, so the accounting is unknown, not reported"
+            );
+            assert_eq!(ledger.provider_call_count, 2);
+            assert_eq!(ledger.usage_unknown_calls, 2);
+            assert_eq!(ledger.unpriced_calls, 2);
+            assert_eq!(
+                ledger.unpriced_reason(),
+                Some(crate::llm::usage::UnpricedReason::StreamAborted),
+                "a severed stream is distinguishable from a request that never answered"
+            );
+            assert_eq!(
+                ledger.cost_usd, None,
+                "an unmeasured request must not price as free"
+            );
+            assert_eq!(
+                ledger.projected_cost_usd(),
+                None,
+                "nothing bounds a severed stream, so a ceiling consumer fails closed"
+            );
+
+            let dict = outcome.vm_result.as_dict().expect("stand-in dict");
+            assert!(
+                !dict.contains_key("input_tokens") && !dict.contains_key("output_tokens"),
+                "usage is the single owner of accounting; the stand-in must not \
+                 duplicate token counts at the top level: {dict:?}"
+            );
+            let usage = dict
+                .get("usage")
+                .and_then(|usage| usage.as_dict())
+                .expect("stand-in carries the canonical usage envelope");
+            assert_eq!(
+                usage
+                    .get("accounting_status")
+                    .map(|v| v.as_str_cow())
+                    .as_deref(),
+                Some("unknown"),
+                "the envelope a host reads must say the accounting is absent"
+            );
+            assert!(
+                matches!(usage.get("cost_usd"), Some(VmValue::Nil)),
+                "a severed stream has no measured cost; got {:?}",
+                usage.get("cost_usd")
+            );
+
+            // The only partial evidence the abort has stays reachable.
+            let abort_meta = dict
+                .get("schema_stream_aborted")
+                .and_then(|meta| meta.as_dict())
+                .expect("abort metadata");
+            assert!(
+                matches!(abort_meta.get("chunks_consumed"), Some(VmValue::Int(n)) if *n > 0),
+                "chunks_consumed is the partial evidence: {abort_meta:?}"
             );
 
             reset_agent_trace_state();

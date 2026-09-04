@@ -315,6 +315,39 @@ fn a_call_that_priced_nothing_still_blacks_out() {
     assert_eq!(call.unpriced_calls, 2);
 }
 
+/// A severed stream and a request that never answered are both unmeasured,
+/// but only one of them consumed provider supply. Collapsing them would make
+/// a mid-stream abort untriageable in the ledger, which is the same flattening
+/// harn#7324 was filed about on the error envelope.
+#[test]
+fn a_severed_stream_reads_apart_from_a_request_that_never_answered() {
+    let priced = LlmUsage::from_result(&accounted_result());
+
+    let severed = LlmUsage::aggregate(&[priced.clone(), LlmUsage::stream_aborted_attempt()]);
+    let silent = LlmUsage::aggregate(&[priced.clone(), LlmUsage::unknown_attempt()]);
+
+    assert_eq!(
+        severed.unpriced_reason(),
+        Some(super::UnpricedReason::StreamAborted)
+    );
+    assert_eq!(
+        silent.unpriced_reason(),
+        Some(super::UnpricedReason::NoResponse)
+    );
+    assert_eq!(
+        severed.projected_cost_usd(),
+        None,
+        "partial output was billed and nothing bounds it, so the ceiling fails closed"
+    );
+    assert_eq!(
+        severed.cost_usd,
+        Some(priced.known_cost_usd),
+        "the priced sibling stays a measurement"
+    );
+    assert_eq!(severed.provider_call_count, 2);
+    assert_eq!(severed.usage_unknown_calls, 1);
+}
+
 #[test]
 fn terminal_unknown_ledger_counts_every_physical_attempt() {
     let usage = LlmUsage::unknown_attempts(3);
