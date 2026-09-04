@@ -1,4 +1,8 @@
 import { find_files } from "std/fs"
+import { path_visibility, visibility_failure } from "./path_visibility.harn"
+
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "verify-tree-sitter-parse"
 
 const GENERATED_PARSER_SOURCES = ["grammar.js", "grammar/keywords.js"]
 
@@ -142,7 +146,14 @@ pub fn positive_harn_files(fs: HarnessFs, root: string) -> list<string> {
   let paths: list<string> = []
   for rel_root in SCAN_ROOTS {
     const scan_root = path_join(root, rel_root)
-    if !fs.exists(scan_root) {
+    // Dropping a scan root shrinks the sweep silently. The empty-paths guard
+    // downstream only fires when every root drops, so a single denied root
+    // still reads as a full sweep.
+    const seen = path_visibility(fs, CHECK_NAME, scan_root)
+    if seen.denial != "" {
+      throw seen.denial
+    }
+    if !seen.exists {
       continue
     }
     for candidate in find_files(fs, scan_root, "**/*.harn") {
@@ -186,7 +197,14 @@ fn emit_parse_failure(stdio: HarnessStdio, strict: bool, result: dict) -> int {
 
 pub fn verify_tree_sitter_parse(harness: Harness, root: string, strict: bool) -> int {
   const dir = grammar_dir(root)
-  if !harness.fs.exists(dir) {
+  const grammar = path_visibility(harness.fs, CHECK_NAME, dir)
+  if grammar.denial != "" {
+    // Skipping the whole sweep and returning 0 is the strongest form of this
+    // defect: a denial there proves nothing and reports success.
+    harness.stdio.eprintln(visibility_failure(CHECK_NAME, [grammar.denial]))
+    return 1
+  }
+  if !grammar.exists {
     harness.stdio.println("warning: tree-sitter-harn not present; skipping parse sweep")
     return 0
   }
