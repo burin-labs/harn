@@ -67,25 +67,17 @@ pipeline default(harness: Harness) {{
     )
 }
 
-/// The agent loop needs more stack than a test thread is given by default.
-///
-/// CI exports `RUST_MIN_STACK`, but a test that only passes because of an
-/// ambient environment variable is not asserting anything about the code: run
-/// it locally without that export and it aborts on a stack overflow, which is
-/// indistinguishable from the assertion failing. Own the stack here so the
-/// result means the same thing wherever it runs.
-const PIPELINE_STACK_BYTES: usize = 16 * 1024 * 1024;
-
 /// Run one pipeline against a fresh session store and return its stdout.
+///
+/// The VM must not run on the libtest thread's stack: it is large enough
+/// only because the CI lanes export `RUST_MIN_STACK`, and an overflow aborts
+/// the whole binary instead of failing this case. `on_vm_stack` enters the
+/// VM on a thread sized for the contract regardless of the ambient
+/// environment.
 fn run_pipeline(source: &str, store: &tempfile::TempDir) -> Result<String, String> {
     let source = source.to_string();
     let _ = store;
-    std::thread::Builder::new()
-        .stack_size(PIPELINE_STACK_BYTES)
-        .spawn(move || run_pipeline_here(&source))
-        .expect("spawn pipeline thread")
-        .join()
-        .expect("pipeline thread panicked")
+    harn_vm::on_vm_stack(move || run_pipeline_here(&source))
 }
 
 fn run_pipeline_here(source: &str) -> Result<String, String> {
