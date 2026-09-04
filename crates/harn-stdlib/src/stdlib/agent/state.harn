@@ -93,6 +93,21 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
   return agent.session_messages(session_id)
 }
 
+pub type AgentSessionControlEvent = {
+  schema: string,
+  kind: "control",
+  action: "stop" | "steer" | "interrupt" | "queue",
+  method: string,
+  control_id: string,
+  status: string,
+  requested_mode?: string,
+  delivery_mode?: string,
+  message_id?: string,
+  text?: string,
+  actor?: unknown,
+  provenance: "recorded" | "heuristic",
+}
+
 /**
  * The accepted control words this session recorded.
  *
@@ -110,7 +125,10 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_control_events(agent: HarnessAgent, session_id: any) {
+pub fn agent_session_control_events(
+  agent: HarnessAgent,
+  session_id: any,
+) -> list<AgentSessionControlEvent> {
   return agent.session_control_events(session_id)
 }
 
