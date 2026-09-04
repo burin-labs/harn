@@ -48,6 +48,19 @@ on:
         required: false
         type: string
         default: test(burin_mini_playground)
+      scope:
+        description: >-
+          Which test binaries the filterset may select from. The default keeps
+          this lane's original `-p harn-cli --test harn_cli_fast` target
+          byte-identical. `harn-vm` widens it to that package's unit and
+          integration tests, which is where the Windows sandbox behaviour
+          lives; the filterset still decides what actually runs.
+        required: false
+        type: choice
+        default: harn-cli-fast
+        options:
+          - harn-cli-fast
+          - harn-vm
       runner:
         description: Runner tier to measure this dispatch on.
         required: false
@@ -148,6 +161,7 @@ jobs:
           # interpolated into the script body, so a dispatch input cannot inject
           # shell.
           NEXTEST_FILTER: ${{ inputs.filter }}
+          NEXTEST_SCOPE: ${{ inputs.scope }}
           NEXTEST_SUCCESS_OUTPUT: ${{ inputs.success_output }}
           # Same deterministic secret store, offline posture, sandbox tracing,
           # and 16 MiB runtime stack the gating Windows job uses. The stack size
@@ -164,8 +178,11 @@ jobs:
           log="${RUNNER_TEMP}/targeted-nextest.log"
           started="$(date +%s)"
           set +e
-          cargo nextest run --locked -p harn-cli --test harn_cli_fast \
-            --features internal-freshness-checker \
+          case "${NEXTEST_SCOPE}" in
+            harn-vm) scope_args=(-p harn-vm --lib --tests) ;;
+            *) scope_args=(-p harn-cli --test harn_cli_fast --features internal-freshness-checker) ;;
+          esac
+          cargo nextest run --locked "${scope_args[@]}" \
             --profile ci \
             --success-output "${NEXTEST_SUCCESS_OUTPUT}" \
             -E "${NEXTEST_FILTER}" --no-tests=fail 2>&1 | tee "${log}"
@@ -184,6 +201,7 @@ jobs:
           TESTED_REF: ${{ inputs.ref }}
           TESTED_RUNNER: ${{ inputs.runner }}
           NEXTEST_FILTER: ${{ inputs.filter }}
+          NEXTEST_SCOPE: ${{ inputs.scope }}
           LOG_PATH: ${{ steps.targeted-nextest.outputs.log_path }}
           NEXTEST_SECONDS: ${{ steps.targeted-nextest.outputs.nextest_seconds }}
           NEXTEST_OUTCOME: ${{ steps.targeted-nextest.outcome }}
@@ -196,6 +214,7 @@ jobs:
             echo "| --- | --- |"
             echo "| ref | \`${TESTED_REF}\` |"
             echo "| filter | \`${NEXTEST_FILTER}\` |"
+            echo "| scope | \`${NEXTEST_SCOPE}\` |"
             echo "| runner | \`${TESTED_RUNNER}\` |"
             echo "| warm artifact | ${WARM_OUTCOME:-skipped} |"
             echo "| nextest outcome | ${NEXTEST_OUTCOME:-not reached} |"
