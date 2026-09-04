@@ -13,6 +13,8 @@ use super::{
     vm_to_json, ToolResultMessageInput,
 };
 
+#[path = "agent_session_host_message_projection_tests.rs"]
+mod message_projection;
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
 mod mock_dispatch;
 #[path = "agent_session_host_record_tool_data_tests.rs"]

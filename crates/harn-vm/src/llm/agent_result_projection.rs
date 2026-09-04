@@ -81,6 +81,29 @@ fn visible_text_in_content(content: &VmValue) -> String {
     }
 }
 
+/// The sanitized user-facing prose carried by one assistant message.
+///
+/// Live transports and terminal result projection must agree on this seam:
+/// reasoning blocks, tool calls, and control-only sentinels stay durable but
+/// do not become visible assistant output.
+pub(crate) fn visible_assistant_text(message: &VmValue) -> Option<String> {
+    let role = dict_get(message, "role")
+        .map(VmValue::display)
+        .unwrap_or_default();
+    if role != "assistant" {
+        return None;
+    }
+    let visible = dict_get(message, "content")
+        .map(|content| {
+            crate::visible_text::sanitize_visible_assistant_text(
+                &visible_text_in_content(content),
+                false,
+            )
+        })
+        .unwrap_or_default();
+    (!visible.trim().is_empty()).then_some(visible)
+}
+
 /// The prose in one content block, or `None` when the block is not prose.
 fn text_in_block(block: &VmValue) -> Option<&str> {
     let block_type = dict_get(block, "type").and_then(string_value);
@@ -97,21 +120,8 @@ pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
     let messages_value = dict_get(snapshot, "messages")?;
     let messages = list_items(messages_value);
     for msg in messages.iter().rev() {
-        let role = dict_get(msg, "role")
-            .map(|v| v.display())
-            .unwrap_or_default();
-        if role == "assistant" {
-            let visible = dict_get(msg, "content")
-                .map(|v| {
-                    crate::visible_text::sanitize_visible_assistant_text(
-                        &visible_text_in_content(v),
-                        false,
-                    )
-                })
-                .unwrap_or_default();
-            if !visible.trim().is_empty() {
-                return Some(visible);
-            }
+        if let Some(visible) = visible_assistant_text(msg) {
+            return Some(visible);
         }
     }
     None
