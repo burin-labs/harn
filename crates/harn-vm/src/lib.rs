@@ -873,6 +873,15 @@ impl TypeSchemaResolver {
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
         }
+        // The declared parameter list is the complete caller-owned API, so the
+        // advertised object is closed. Without this, an unknown named key
+        // validates against the advertised schema and is then silently dropped
+        // while binding arguments, which is a call the catalog said it would
+        // not accept being reported as a success.
+        schema.insert(
+            "additionalProperties".to_string(),
+            serde_json::Value::Bool(false),
+        );
         serde_json::Value::Object(schema)
     }
 }
