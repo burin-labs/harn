@@ -210,6 +210,31 @@ pub const ENV_ALLOWLIST: &[&str] = &const_concat();
 const ALLOWLIST_LEN: usize =
     BASE_ENV_ALLOWLIST.len() + TOOLCHAIN_ENV_ALLOWLIST.len() + WINDOWS_ENV_ALLOWLIST.len();
 
+/// Whether `name` is admitted by [`ENV_ALLOWLIST`], matched the way the host
+/// platform matches environment names.
+///
+/// Windows environment names are case-insensitive, and the case a parent
+/// reports is not the case the allowlist is written in: the variable this
+/// codebase calls `PATH` arrives from a Windows parent spelled `Path`. An
+/// exact-match `contains` therefore misses it on Windows while every name in
+/// the allowlist still looks admitted, so any admission check driven by a
+/// launcher-reported name must go through this function rather than
+/// `ENV_ALLOWLIST.contains` directly. POSIX names are case-sensitive, so the
+/// exact match stays exact there. `SessionEnvironment::launch_from_snapshot`
+/// uses this to decide whether a launcher-reported name survives into the
+/// snapshot; `SessionEnvironment::launcher_value` folds case again on the
+/// snapshot itself so a later exact-cased lookup (e.g. `"PATH"`) still finds
+/// a value stored under the launcher's own casing (e.g. `"Path"`).
+pub(crate) fn allowlist_admits(name: &str) -> bool {
+    if ENV_ALLOWLIST.contains(&name) {
+        return true;
+    }
+    cfg!(windows)
+        && ENV_ALLOWLIST
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+}
+
 /// Concatenate the base, toolchain, and Windows lists at compile time so
 /// [`ENV_ALLOWLIST`] stays one flat, single-owned array without a runtime
 /// allocation.

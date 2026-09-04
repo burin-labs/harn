@@ -1333,13 +1333,11 @@ pub fn push_process_sandbox_scope(
     Ok(ProcessSandboxScopeGuard { pushed: true })
 }
 
-/// Close a freshly built command's environment under an active session policy.
-///
-/// This is the choke point that makes the environment contract structural: every
+/// Close a freshly built command's environment under an active session policy:
+/// the choke point that makes the environment contract structural, since every
 /// spawn seam in the VM and `harn-hostlib` reaches a child through the three
-/// funnel fns below, so a new seam cannot silently opt out. Callers still layer
-/// their own `env` / `env_remove` on top afterward. Sandbox confinement sets no
-/// env vars (wrapper-exec / seccomp / AppContainer), so clearing cannot weaken it.
+/// funnel fns below. Callers still layer `env`/`env_remove` on top afterward;
+/// sandbox confinement sets no env vars, so clearing cannot weaken it.
 macro_rules! close_env_for_session {
     ($command:expr, $program:expr) => {
         if let Some(env) =
@@ -1354,13 +1352,14 @@ macro_rules! close_env_for_session {
 }
 
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
+    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
         Some((policy, profile)) => {
-            build_std_command::<ActiveBackend>(program, args, policy, *profile)?
+            build_std_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
         }
         None => {
-            let mut command = Command::new(program);
+            let mut command = Command::new(&resolved_program);
             command.args(args);
             command
         }
@@ -1376,13 +1375,14 @@ pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
+    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
         Some((policy, profile)) => {
-            build_tokio_command::<ActiveBackend>(program, args, policy, *profile)?
+            build_tokio_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
         }
         None => {
-            let mut command = tokio::process::Command::new(program);
+            let mut command = tokio::process::Command::new(&resolved_program);
             command.args(args);
             command
         }

@@ -80,6 +80,7 @@ pub import {
   agent_stance_prepare,
 } from "std/agent/stance"
 pub import {
+  AgentSessionFinalization,
   agent_emit_event,
   agent_record_native_tool_fallback,
   agent_reminder_providers_fire,
@@ -405,7 +406,7 @@ pub fn __agent_loop_boundary_terminal_record(
   category: string,
   iteration: int,
   error: unknown,
-) -> dict {
+) -> AgentSessionFinalization {
   if category == "cancelled" {
     return {final_status: "cancelled", stop_reason: "cancelled", iterations: iteration}
   }
