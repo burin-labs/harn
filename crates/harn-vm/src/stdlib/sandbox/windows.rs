@@ -45,15 +45,24 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write,
-    process_sandbox_developer_toolchain_read_roots,
-    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
-    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
-    SandboxBackend,
+    policy_allows_network, process_sandbox_developer_toolchain_read_roots,
+    process_sandbox_package_manager_config_read_roots, process_spawn_error, sandbox_rejection,
+    unavailable, PrepareOutcome, ProcessCommandConfig, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
+
+// Declared here rather than in the sandbox module index: this backend is its
+// only consumer, and the index is a platform-neutral surface.
+#[path = "windows_system_roots.rs"]
+mod system_roots;
+
+// The ACL grant machinery answers a different question from process launch, and
+// carries the measurements that justify each rule.
+#[path = "windows_acl_grants.rs"]
+mod acl_grants;
+
+use acl_grants::WorkspaceAclGrants;
 
 pub(super) struct Backend;
 
@@ -469,89 +478,6 @@ impl Drop for AppContainerProfile {
                 LocalFree(self.sid.cast());
             }
             DeleteAppContainerProfile(self.name.as_ptr());
-        }
-    }
-}
-
-struct WorkspaceAclGrants {
-    label: String,
-    sid: String,
-    paths: Vec<PathBuf>,
-}
-
-impl WorkspaceAclGrants {
-    fn grant(label: &str, sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
-        // Read-execute for the entire profile when writes are denied;
-        // otherwise Modify on the writable roots. Read-only roots always
-        // get read-execute regardless of the workspace-write capability.
-        let workspace_permission = if policy_allows_workspace_write(policy) {
-            "(OI)(CI)M"
-        } else {
-            "(OI)(CI)RX"
-        };
-        let mut paths = Vec::new();
-        let writable = process_sandbox_roots(policy)
-            .into_iter()
-            .map(|root| (root, workspace_permission, false));
-        let read_only = process_sandbox_readonly_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
-        let process_read = process_sandbox_policy_read_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
-        let preset_roots = process_sandbox_preset_acl_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", true));
-        let process_write = if policy_allows_workspace_write(policy) {
-            process_sandbox_policy_write_roots(policy)
-                .into_iter()
-                .map(|root| (root, workspace_permission, false))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        for (root, permission, optional) in writable
-            .chain(read_only)
-            .chain(process_read)
-            .chain(preset_roots)
-            .chain(process_write)
-        {
-            if !root.exists() {
-                if optional {
-                    continue;
-                }
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("sandbox workspace root '{}' does not exist", root.display()),
-                ));
-            }
-            sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
-            run_icacls(
-                &root,
-                ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
-            )?;
-            sandbox_trace(label, "icacls grant ok");
-            paths.push(root);
-        }
-        Ok(Self {
-            label: label.to_string(),
-            sid: sid.to_string(),
-            paths,
-        })
-    }
-}
-
-impl Drop for WorkspaceAclGrants {
-    fn drop(&mut self) {
-        for path in &self.paths {
-            sandbox_trace(
-                &self.label,
-                format!("icacls remove begin path={}", path.display()),
-            );
-            match run_icacls(path, ["/remove:g", &format!("*{}", self.sid), "/T", "/C"]) {
-                Ok(()) => sandbox_trace(&self.label, "icacls remove ok"),
-                Err(error) => sandbox_trace(&self.label, format!("icacls remove failed: {error}")),
-            }
         }
     }
 }
