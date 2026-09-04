@@ -8291,7 +8291,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "generativelanguage.googleapis.com returns HTTP 404 model_unavailable for this id: \"no longer available to new users\", naming models/gemini-3.6-flash as the replacement. Observed 2026-09-03. The OpenRouter mirror google/gemini-2.5-flash still serves.",
+        "superseded_by": "gemini-3.5-flash-lite"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -28726,32 +28728,6 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "gemini",
-      "model": "gemini-2.5-flash",
-      "base_url": "https://generativelanguage.googleapis.com",
-      "secret_env": "GEMINI_API_KEY",
-      "label": "Gemini 2.5 Flash",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "batch",
-        "extended_thinking",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prefers_xml_scaffolding",
-        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
