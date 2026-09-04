@@ -94,7 +94,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     // Observed before the spawn, so a rebuild that lands mid-run is visible
     // when the worker is reaped without a terminal state of its own.
     let binary = BinaryWitness::observe(PathBuf::from(&executable));
-    let worker = match harn_hostlib::process::spawn_process(harn_hostlib::process::SpawnSpec {
+    let spec = harn_hostlib::process::SpawnSpec {
         builtin: "harn_host_lease_run_cargo",
         program: executable,
         args: worker_args,
@@ -106,24 +106,155 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
         configure_process_group: true,
         owner_death: harn_hostlib::process::OwnerDeathPolicy::None,
         output_capture: harn_hostlib::process::OutputCapture::Inherit,
-    }) {
-        Ok(worker) => worker,
-        Err(error) => {
+    };
+    let supervised = match supervise_worker(store, &run.run_id, spec).await {
+        Ok(supervised) => supervised,
+        Err(SuperviseError::Spawn(error)) => {
             return fail_run_start(
                 store,
                 &run.run_id,
                 harn_hostlib::HostLeaseRunStartFailure::WorkerSpawn,
-                &error.to_string(),
+                &error,
             );
         }
+        Err(SuperviseError::Wait(error)) => {
+            return print_error("host_lease_run_cargo", &error, false)
+        }
     };
-    let completion = match wait_for_worker(worker).await {
-        Ok(completion) => completion,
-        Err(error) => return print_error("host_lease_run_cargo", &error, false),
-    };
-    match finalize_run(store, &run.run_id, completion, &binary) {
+    // Say how many workers this run consumed. A run that needed replacements
+    // and one that needed none otherwise produce the same terminal receipt,
+    // which would hide the very failure the supervisor exists to absorb.
+    if supervised.restarts > 0 {
+        eprintln!(
+            "note: host lease run {} replaced {} worker(s) that exited before acquiring",
+            run.run_id, supervised.restarts,
+        );
+    }
+    match finalize_run(store, &run.run_id, supervised.completion, &binary) {
         Ok(exit) => exit,
         Err(error) => print_error("host_lease_run_cargo_receipt", &error, false),
+    }
+}
+
+/// How many times the supervisor will replace a worker that died before it
+/// acquired.
+///
+/// The bound exists so a worker that cannot start at all fails the run instead
+/// of respawning until the wait limit expires. It is not the real stop
+/// condition: the wait limit is, and a run whose limit has passed does not get
+/// another worker regardless of this number.
+const MAX_PRE_ACQUIRE_WORKER_RESTARTS: u32 = 8;
+
+/// Why the supervisor could not carry a run to a terminal worker state.
+enum SuperviseError {
+    /// The worker process could not be created.
+    Spawn(String),
+    /// Waiting on the worker itself failed, which is a supervisor defect
+    /// rather than anything the run did.
+    Wait(String),
+}
+
+/// A worker seen through to a terminal state, and what it took to get there.
+struct SupervisedWorker {
+    completion: WorkerCompletion,
+    /// Replacement workers spawned for this run. Reported so a run that needed
+    /// several attempts does not read as a run that needed none.
+    restarts: u32,
+}
+
+/// What the supervisor should do about a worker that exited before acquiring.
+enum RestartDecision {
+    /// Spawn a replacement. The run is still queued and still inside its wait.
+    Restart { elapsed_ms: u64, remaining_ms: u64 },
+    /// Stop, for the stated reason.
+    Stop,
+}
+
+/// Own one run's worker until it acquires, is cancelled, or runs out of wait.
+///
+/// A worker that dies before acquiring used to end the run, even with hours of
+/// configured wait left, because nothing was responsible for the waiter after
+/// the process it happened to be running in went away. The wait limit is a
+/// property of the run, so the supervisor is the thing that has to outlive any
+/// one worker.
+///
+/// Queue position survives a replacement without any work here: the waiter is
+/// keyed by `run_id` and ranked by the run's own `requested_at_ms`, so a
+/// replacement re-enters the queue at the rank the run has always had rather
+/// than at the back. Only one worker exists at a time, because the supervisor
+/// waits for the previous one to be reaped before spawning the next, so a
+/// replacement cannot admit a second owner for the same waiter.
+async fn supervise_worker(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    spec: harn_hostlib::process::SpawnSpec,
+) -> Result<SupervisedWorker, SuperviseError> {
+    let mut restarts = 0u32;
+    loop {
+        let worker = harn_hostlib::process::spawn_process(spec.clone())
+            .map_err(|error| SuperviseError::Spawn(error.to_string()))?;
+        let completion = wait_for_worker(worker)
+            .await
+            .map_err(SuperviseError::Wait)?;
+        // An accepted cancellation is a decision, not a casualty. Replacing a
+        // cancelled worker would make stop mean nothing.
+        if matches!(completion, WorkerCompletion::Cancelled) {
+            return Ok(SupervisedWorker {
+                completion,
+                restarts,
+            });
+        }
+        match restart_decision(store, run_id, restarts) {
+            RestartDecision::Restart {
+                elapsed_ms,
+                remaining_ms,
+            } => {
+                restarts += 1;
+                eprintln!(
+                    "warning: host lease worker for run {run_id} exited before acquiring; \
+                     replacing it (attempt {restarts} of {MAX_PRE_ACQUIRE_WORKER_RESTARTS}, \
+                     waited {}, {} of the configured wait remains)",
+                    format_duration_ms(elapsed_ms),
+                    format_duration_ms(remaining_ms),
+                );
+            }
+            RestartDecision::Stop => {
+                return Ok(SupervisedWorker {
+                    completion,
+                    restarts,
+                })
+            }
+        }
+    }
+}
+
+/// Whether a run whose worker just died still deserves another one.
+///
+/// Reads the durable receipt rather than anything the dead worker reported: a
+/// worker that acquired and then died is no longer pending, and replacing it
+/// would hand a second owner a lease the first one still holds.
+fn restart_decision(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    restarts: u32,
+) -> RestartDecision {
+    if restarts >= MAX_PRE_ACQUIRE_WORKER_RESTARTS {
+        return RestartDecision::Stop;
+    }
+    let Ok(run) = store.load_run(run_id) else {
+        return RestartDecision::Stop;
+    };
+    let harn_hostlib::HostLeaseRunState::Pending { requested_at_ms } = run.status else {
+        return RestartDecision::Stop;
+    };
+    let elapsed_ms = elapsed_since_ms(requested_at_ms);
+    let remaining_ms = run.wait_limit_ms.saturating_sub(elapsed_ms);
+    if remaining_ms == 0 {
+        return RestartDecision::Stop;
+    }
+    RestartDecision::Restart {
+        elapsed_ms,
+        remaining_ms,
     }
 }
 
