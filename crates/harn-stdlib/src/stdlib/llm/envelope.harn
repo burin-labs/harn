@@ -83,8 +83,10 @@ pub type LlmUsage = {
   /* Tokens the unpriced attempts did report, which is what bounds them. */
   unpriced_tokens: int,
   /*
-   * One of pricing_unknown, usage_unreported, no_response, or mixed. The
-   * same field name and vocabulary std/llm/economics uses.
+   * One of pricing_unknown, usage_unreported, no_response, stream_aborted, or
+   * mixed. The same field name and vocabulary std/llm/economics uses.
+   * stream_aborted means the connection was severed mid-stream, so the
+   * provider billed partial output whose usage frame never arrived.
    */
   unpriced_reason?: string,
   usage_unknown_calls: int,
