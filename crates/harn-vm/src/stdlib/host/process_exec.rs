@@ -536,7 +536,7 @@ impl ProcessExecLaunch {
         Ok(Self {
             program,
             args,
-            cwd: Some(cwd),
+            cwd: Some(crate::stdlib::process::child_process_cwd(cwd)),
             env,
             env_remove,
             closed_env,

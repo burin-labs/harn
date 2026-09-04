@@ -115,6 +115,31 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "CCACHE_TEMPDIR",
 ];
 
+/// Windows shell and system essentials.
+///
+/// A child on Windows needs these the way a POSIX child needs `PATH` and
+/// `HOME`. `cmd.exe` resolves its own intrinsics through `SystemRoot` and
+/// decides what counts as an executable from `PATHEXT`; without them it
+/// starts and then cannot find any program, which reads as a missing tool
+/// rather than a missing environment. They name install and profile
+/// directories, never credentials.
+const WINDOWS_ENV_ALLOWLIST: &[&str] = &[
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "COMSPEC",
+    "PATHEXT",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramW6432",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "OS",
+];
+
 /// The filesystem-path-valued subset of [`TOOLCHAIN_ENV_ALLOWLIST`]: toolchain
 /// install roots, module paths, and cache dirs (never the flag/program-name
 /// vars like `RUST_BACKTRACE`, `CC`, or `LD`). Consumers that need to reason
@@ -182,21 +207,62 @@ pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
 /// policy-governed child process. The single owner; see the module docs.
 pub const ENV_ALLOWLIST: &[&str] = &const_concat();
 
-/// Concatenate the base and toolchain lists at compile time so [`ENV_ALLOWLIST`]
-/// stays one flat, single-owned array without a runtime allocation.
-const fn const_concat() -> [&'static str; BASE_ENV_ALLOWLIST.len() + TOOLCHAIN_ENV_ALLOWLIST.len()]
-{
-    let mut out: [&'static str; BASE_ENV_ALLOWLIST.len() + TOOLCHAIN_ENV_ALLOWLIST.len()] =
-        [""; BASE_ENV_ALLOWLIST.len() + TOOLCHAIN_ENV_ALLOWLIST.len()];
+const ALLOWLIST_LEN: usize =
+    BASE_ENV_ALLOWLIST.len() + TOOLCHAIN_ENV_ALLOWLIST.len() + WINDOWS_ENV_ALLOWLIST.len();
+
+/// Whether `name` is admitted by [`ENV_ALLOWLIST`], matched the way the host
+/// platform matches environment names.
+///
+/// Windows environment names are case-insensitive, and the case a parent
+/// reports is not the case the allowlist is written in: the variable this
+/// codebase calls `PATH` arrives from a Windows parent spelled `Path`. An
+/// exact-match `contains` therefore misses it on Windows while every name in
+/// the allowlist still looks admitted, so any admission check driven by a
+/// launcher-reported name must go through this function rather than
+/// `ENV_ALLOWLIST.contains` directly. POSIX names are case-sensitive, so the
+/// exact match stays exact there. `SessionEnvironment::launch_from_snapshot`
+/// uses this to decide whether a launcher-reported name survives into the
+/// snapshot; `SessionEnvironment::launcher_value` folds case again on the
+/// snapshot itself so a later exact-cased lookup (e.g. `"PATH"`) still finds
+/// a value stored under the launcher's own casing (e.g. `"Path"`).
+pub(crate) fn allowlist_admits(name: &str) -> bool {
+    if ENV_ALLOWLIST.contains(&name) {
+        return true;
+    }
+    cfg!(windows)
+        && ENV_ALLOWLIST
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+}
+
+/// Concatenate the base, toolchain, and Windows lists at compile time so
+/// [`ENV_ALLOWLIST`] stays one flat, single-owned array without a runtime
+/// allocation.
+///
+/// The Windows names are admitted on every platform rather than behind a
+/// `cfg`. Admitting a name only says "pass this through if the parent has
+/// it", and no POSIX parent has these, so a `cfg` would buy nothing and
+/// would leave the list reading differently depending on who compiled it.
+const fn const_concat() -> [&'static str; ALLOWLIST_LEN] {
+    let mut out: [&'static str; ALLOWLIST_LEN] = [""; ALLOWLIST_LEN];
+    let mut n = 0;
     let mut i = 0;
     while i < BASE_ENV_ALLOWLIST.len() {
-        out[i] = BASE_ENV_ALLOWLIST[i];
+        out[n] = BASE_ENV_ALLOWLIST[i];
+        n += 1;
         i += 1;
     }
     let mut j = 0;
     while j < TOOLCHAIN_ENV_ALLOWLIST.len() {
-        out[BASE_ENV_ALLOWLIST.len() + j] = TOOLCHAIN_ENV_ALLOWLIST[j];
+        out[n] = TOOLCHAIN_ENV_ALLOWLIST[j];
+        n += 1;
         j += 1;
+    }
+    let mut k = 0;
+    while k < WINDOWS_ENV_ALLOWLIST.len() {
+        out[n] = WINDOWS_ENV_ALLOWLIST[k];
+        n += 1;
+        k += 1;
     }
     out
 }
@@ -295,6 +361,71 @@ pub fn lookup_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allowlist_admits_the_windows_names_a_child_cannot_start_a_program_without() {
+        // A Windows child with no `Path` finds no program at all, and one with
+        // no `SystemRoot` or `PATHEXT` cannot resolve even the shell's own
+        // notion of an executable. The allowlist was POSIX-only, so every
+        // policy-governed Windows child ran with none of them.
+        for required in [
+            "SystemRoot",
+            "SystemDrive",
+            "COMSPEC",
+            "PATHEXT",
+            "USERPROFILE",
+            "LOCALAPPDATA",
+        ] {
+            assert!(
+                ENV_ALLOWLIST.contains(&required),
+                "{required} is a Windows start-up essential and must be admitted",
+            );
+        }
+    }
+
+    #[test]
+    fn allowlist_admits_no_windows_name_that_carries_a_credential() {
+        // The control on the test above: growing the list must not become a
+        // way to widen what a child can read. These are the names a Windows
+        // parent commonly holds secrets under, and none may be admitted.
+        for forbidden in [
+            "GITHUB_TOKEN",
+            "AZURE_CLIENT_SECRET",
+            "USERDOMAIN_ROAMINGPROFILE",
+        ] {
+            assert!(
+                !ENV_ALLOWLIST.contains(&forbidden),
+                "{forbidden} must never be admitted by the allowlist",
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_launcher_value_folds_case_so_the_parents_path_is_found() {
+        // Windows reports the search path as `Path`. Matched exactly against
+        // the allowlist's `PATH`, it missed, and the child inherited no search
+        // path while the allowlist still read as though it admitted one. This
+        // half of the fix is provable only on a Windows host.
+        let parent = env_from(&[]);
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Isolated,
+            Vec::new(),
+            BTreeMap::from([("Path".to_string(), "C:\\Windows\\System32".to_string())]),
+            &parent,
+        )
+        .unwrap();
+        let never_secret = |_: &str, _: &str| None;
+        let env = resolve_env(&environment, &parent, &never_secret).unwrap();
+        assert_eq!(
+            env.get("PATH").map(String::as_str),
+            Some("C:\\Windows\\System32")
+        );
+        // The control: folding case must not invent a value for a name the
+        // parent never set.
+        assert_eq!(environment.launcher_value("ABSENT_NAME"), None);
+    }
+
     use crate::security::session_environment::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
 
     #[test]

@@ -849,18 +849,38 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // offer an explicit, dispatch-local ACP approval. The grant below
             // is exact (tool + active ceiling + required effect), non-stored,
             // and immediately rechecked before the call can proceed.
-            match request_side_effect_permission(
-                bridge.as_ref(),
-                &session_id,
-                &tool_id,
+            // Offer the ceiling refusal to the reviewer before the host, the
+            // same order the approval-policy path uses. Without this a run
+            // carrying both a capability policy and a reviewer refuses the
+            // call and never asks (harn#7982), which is every product loop.
+            let reviewer_decision = crate::orchestration::maybe_grant_side_effect_by_auto_review(
+                Some(&ctx),
                 &tool_name,
                 &tool_args,
-                violation,
-                policy_denial.reason.clone(),
-                permission_context_for(tools, &tool_name),
+                &session_id,
+                violation.ceiling.as_str(),
+                violation.required_level.as_str(),
+                &policy_denial.reason,
             )
-            .await
-            {
+            .await;
+            let reviewer_granted = reviewer_decision.is_some();
+            let ceiling_outcome = match reviewer_decision {
+                Some(policy_decision) => SideEffectPermissionOutcome::Allowed { policy_decision },
+                None => {
+                    request_side_effect_permission(
+                        bridge.as_ref(),
+                        &session_id,
+                        &tool_id,
+                        &tool_name,
+                        &tool_args,
+                        violation,
+                        policy_denial.reason.clone(),
+                        permission_context_for(tools, &tool_name),
+                    )
+                    .await
+                }
+            };
+            match ceiling_outcome {
                 SideEffectPermissionOutcome::Allowed { policy_decision } => {
                     let Some(grant) = policy_denial.side_effect_grant_for(&tool_name) else {
                         return Err(VmError::Runtime(
@@ -883,13 +903,21 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         )
                         .await);
                     }
-                    approval_status = Some("host_granted");
+                    approval_status = Some(if reviewer_granted {
+                        "auto_review_granted"
+                    } else {
+                        "host_granted"
+                    });
                     emit_permission_event_with_policy(
                         &session_id,
                         "PermissionGrant",
                         &tool_name,
                         &tool_args,
-                        "host approved one-time side-effect ceiling exception",
+                        if reviewer_granted {
+                            "reviewer approved one-time side-effect ceiling exception"
+                        } else {
+                            "host approved one-time side-effect ceiling exception"
+                        },
                         true,
                         Some(policy_decision),
                     );

@@ -20,35 +20,40 @@ use harn_vm::bridge::HostBridge;
 use harn_vm::value::VmError;
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
-    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
-    let chunk = harn_vm::compile_source(&source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
-            .await
+    // The VM must not run on the libtest thread's stack: it is large
+    // enough only because the CI lanes export RUST_MIN_STACK, and an
+    // overflow aborts the whole binary instead of failing this case.
+    harn_vm::on_vm_stack(|| {
+        harn_vm::reset_thread_local_state();
+        let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
+        let chunk = harn_vm::compile_source(&source)?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let bridge = Arc::new(HostBridge::from_parts(
+                        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                        Arc::new(AtomicBool::new(false)),
+                        Arc::new(Mutex::new(())),
+                        1,
+                    ));
+                    harn_vm::llm::install_current_host_bridge(bridge.clone());
+                    let mut vm = harn_vm::Vm::new();
+                    harn_vm::register_vm_stdlib(&mut vm);
+                    let result = vm
+                        .execute(&chunk)
+                        .await
+                        .map_err(|e: VmError| format!("{e:?}"));
+                    harn_vm::llm::clear_current_host_bridge();
+                    result?;
+                    Ok(vm.output().to_string())
+                })
+                .await
+        })
     })
 }
 

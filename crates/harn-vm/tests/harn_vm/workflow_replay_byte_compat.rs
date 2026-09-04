@@ -37,24 +37,29 @@ const GRAPH: &str = r#"workflow_graph(
   )"#;
 
 fn run(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"))?;
-                Ok(vm.output().to_string())
-            })
-            .await
+    // The VM must not run on the libtest thread's stack: it is large
+    // enough only because the CI lanes export RUST_MIN_STACK, and an
+    // overflow aborts the whole binary instead of failing this case.
+    harn_vm::on_vm_stack(|| {
+        harn_vm::reset_thread_local_state();
+        let chunk = harn_vm::compile_source(source)?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut vm = harn_vm::Vm::new();
+                    harn_vm::register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk)
+                        .await
+                        .map_err(|e: VmError| format!("{e:?}"))?;
+                    Ok(vm.output().to_string())
+                })
+                .await
+        })
     })
 }
 

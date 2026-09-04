@@ -307,6 +307,60 @@ pub fn decision_records_a_grant(decision: &crate::orchestration::PolicyEvaluatio
     decision.has_audit_signal() || granted_by_auto_review(decision)
 }
 
+/// Offer one side-effect-ceiling refusal to the reviewer.
+///
+/// Returns the policy decision to record on a grant, or `None` when there is
+/// no reviewer, the reviewer declined, or it could not answer.
+///
+/// A ceiling refusal is a static policy refusal that the dispatch site may
+/// already offer to a person, so it is exactly the kind of refusal this seam
+/// exists for. It was not offered here, which meant a run carrying both a
+/// capability policy and a reviewer refused the call and never asked
+/// (harn#7982). That is the shape every product loop sends, so the reviewer
+/// looked installed everywhere and answered nowhere.
+///
+/// Lives beside `maybe_grant_by_auto_review` because when a refusal may be
+/// reconsidered is this modules decision, not the dispatch sites.
+pub async fn maybe_grant_side_effect_by_auto_review(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    session_id: &str,
+    ceiling: &str,
+    required_level: &str,
+    reason: &str,
+) -> Option<serde_json::Value> {
+    if !approval_reviewer_active() {
+        return None;
+    }
+    let policy_decision = serde_json::json!({
+        "action": "ask",
+        "source": "side_effect_ceiling",
+        "scope": "once",
+        "ceiling": ceiling,
+        "required_level": required_level,
+        "tool": tool_name,
+    });
+    let request = serde_json::json!({
+        "tool": tool_name,
+        "arguments": tool_args,
+        "session_id": session_id,
+        "action": "ask",
+        "reason": reason,
+        "risk_labels": ["side_effect_ceiling"],
+        "policy_decision": policy_decision,
+    });
+    let outcome = run_approval_review(ctx, request, session_id).await;
+    if !outcome.approved {
+        return None;
+    }
+    let mut granted = policy_decision;
+    granted["action"] = serde_json::Value::String("allow".to_string());
+    granted["granted_by"] = serde_json::Value::String("approval_reviewer".to_string());
+    granted["rationale"] = serde_json::Value::String(outcome.rationale);
+    Some(granted)
+}
+
 /// Offer one refused decision to the reviewer, rewriting it in place on a grant.
 ///
 /// Returns whether the decision was granted, so the caller can record the

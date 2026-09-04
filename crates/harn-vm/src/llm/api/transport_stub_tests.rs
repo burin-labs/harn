@@ -1181,7 +1181,7 @@ fn observed_qwen_dispatch_receipt_matches_captured_egress_system() {
     runtime.block_on(async {
         let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
         let server = spawn_ollama_stub_with_body_capture(captured.clone());
-        let _ollama_host = ScopedEnvVar::set("OLLAMA_HOST", &format!("http://{}", server.addr()));
+        let _ollama_host = ScopedEnvVar::set("OLLAMA_HOST", format!("http://{}", server.addr()));
         let _verbose = ScopedEnvVar::remove("HARN_LLM_TRANSCRIPT_VERBOSE");
         let transcript_dir = std::env::temp_dir().join(format!(
             "harn-observed-qwen-egress-{}",

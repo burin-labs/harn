@@ -35,6 +35,37 @@
 /// have been denied. A bound the stack cannot reach is not a bound.
 pub const RUNTIME_STACK_SIZE: usize = 32 * 1024 * 1024;
 
+/// Run `body` on a thread that holds the [`RUNTIME_STACK_SIZE`] contract.
+///
+/// A caller that drives the VM from a thread it did not create borrows
+/// whatever stack that thread was given. The test harness is where this keeps
+/// happening: a case that builds a Tokio runtime on the libtest thread creates
+/// no thread of its own, so it runs the VM on libtest's stack. That stack is
+/// large enough only because every CI lane exports `RUST_MIN_STACK`, and a
+/// developer machine without it aborts the whole test binary on one ordinary
+/// agent loop (harn#7962). An abort is not a failed case: every later case in
+/// the binary silently never runs.
+///
+/// Naming the thread the contract binds is the fix. A host that already spawns
+/// its own VM thread with [`RUNTIME_STACK_SIZE`] does not need this; it exists
+/// so a caller running on a borrowed stack can state the size once, at the
+/// entry point, instead of depending on an environment variable no shipped
+/// binary sets.
+///
+/// Panics propagate to the caller unchanged, so a failing assertion inside
+/// `body` still fails its own test.
+pub fn on_vm_stack<R: Send>(body: impl FnOnce() -> R + Send) -> R {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("harn-vm-contract-stack".to_owned())
+            .stack_size(RUNTIME_STACK_SIZE)
+            .spawn_scoped(scope, body)
+            .expect("spawn a thread holding the VM stack contract")
+            .join()
+            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     /// How much source to read past a spawn before deciding what it does.
@@ -246,6 +277,141 @@ mod tests {
              enough frame aborts the process. Add \
              `.thread_stack_size(harn_vm::RUNTIME_STACK_SIZE)`:\n  {}",
             offenders.join("\n  ")
+        );
+    }
+
+    /// Building a Tokio runtime is how a test says "this thread is about to
+    /// drive the VM"; executing a compiled chunk is it doing so.
+    const TEST_BUILDS_RUNTIME: &str = "tokio::runtime::Builder::new_";
+    /// The VM entry point these tests reach.
+    const TEST_DRIVES_VM: &str = "execute(&chunk";
+    /// Entering through the contract helper is what makes the case stack-size
+    /// independent, and it is the only accepted answer here: an inline
+    /// `stack_size` on a thread the test spawns itself is the shape the first
+    /// scan already judges.
+    const ENTERS_CONTRACT: &str = "on_vm_stack(";
+
+    /// Integration-test files that still drive the VM on whatever stack the
+    /// libtest harness handed them.
+    ///
+    /// This is a shrinking ratchet, not a permission list. A row here is a
+    /// file whose cases pass today only because every CI lane exports
+    /// `RUST_MIN_STACK`; each one is a `super::on_vm_stack` wrap away from
+    /// leaving. Rows may be removed, never added, and a row that is no longer
+    /// an offender must be removed — a stale allowance is how a ratchet stops
+    /// measuring anything.
+    const HARNESS_STACK_BASELINE: [&str; 27] = [
+        "harn-vm/tests/agent_inbox_e2e.rs",
+        "harn-vm/tests/agent_terminal_ledger.rs",
+        "harn-vm/tests/call_frame_allocations.rs",
+        "harn-vm/tests/command_ledger_hold_paused_clock.rs",
+        "harn-vm/tests/harn_vm/agent_fanout.rs",
+        "harn-vm/tests/harn_vm/agent_loop_output_schema.rs",
+        "harn-vm/tests/harn_vm/agent_loop_steering_seams.rs",
+        "harn-vm/tests/harn_vm/agent_mcp_mid_conversation.rs",
+        "harn-vm/tests/harn_vm/agent_mcp_tool_ceiling.rs",
+        "harn-vm/tests/harn_vm/agent_prompt_prefix_stability.rs",
+        "harn-vm/tests/harn_vm/agent_sessions.rs",
+        "harn-vm/tests/harn_vm/builtin_call_dispatch.rs",
+        "harn-vm/tests/harn_vm/compaction_policy_primitive.rs",
+        "harn-vm/tests/harn_vm/external_agent_errors.rs",
+        "harn-vm/tests/harn_vm/github_stdlib_connectors.rs",
+        "harn-vm/tests/harn_vm/host_tool_batch_overlap.rs",
+        "harn-vm/tests/harn_vm/pool_multithread.rs",
+        "harn-vm/tests/harn_vm/runtime_introspection.rs",
+        "harn-vm/tests/harn_vm/skill_activation_evidence_conformance.rs",
+        "harn-vm/tests/harn_vm/stdlib_event_registration.rs",
+        "harn-vm/tests/harn_vm/tool_call_cancellation.rs",
+        "harn-vm/tests/harn_vm/tool_calling_bootcamp.rs",
+        "harn-vm/tests/harn_vm/tool_input_schema_spelling.rs",
+        "harn-vm/tests/harn_vm/tool_ref.rs",
+        "harn-vm/tests/harn_vm/worker_overlap.rs",
+        "harn-vm/tests/portable_kernel_parity.rs",
+        "harn-vm/tests/support/mod.rs",
+    ];
+
+    /// A test that drives the VM on the harness thread escapes both scans
+    /// above, and the contract with it.
+    ///
+    /// [`vm_driving_threads_ask_for_the_runtime_stack`] judges spawn sites and
+    /// [`multi_thread_runtimes_size_their_worker_threads`] judges the workers
+    /// Tokio makes. A case that builds a current-thread runtime on the libtest
+    /// thread has neither: it spawns nothing, and Tokio spawns nothing for it.
+    /// It runs the VM on libtest's stack, which is large enough only because
+    /// the lanes export `RUST_MIN_STACK=16777216`.
+    ///
+    /// That is not a test-only concern. It makes the suite's green a statement
+    /// about the lane's environment rather than about the code, and when it
+    /// does break it breaks as `SIGABRT`, which kills the whole binary so every
+    /// later case silently never runs (harn#7962). Two cases in
+    /// `agent_loop_final_wrapup` and both cases in `workflow_replay_byte_compat`
+    /// abort this way once the ambient stack drops.
+    #[test]
+    fn vm_driving_tests_enter_through_the_contract_stack() {
+        let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("harn-vm lives below crates");
+        let tests_dir = crates_dir.join("harn-vm").join("tests");
+
+        let mut offenders = Vec::new();
+        let mut scanned = 0usize;
+        for entry in walkdir::WalkDir::new(&tests_dir)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && entry.path().extension().and_then(std::ffi::OsStr::to_str) == Some("rs")
+            })
+        {
+            scanned += 1;
+            let source = std::fs::read_to_string(entry.path()).expect("read Rust source");
+            if !source.contains(TEST_BUILDS_RUNTIME) || !source.contains(TEST_DRIVES_VM) {
+                continue;
+            }
+            if source.contains(ENTERS_CONTRACT) {
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(crates_dir)
+                .expect("scan stays under crates")
+                .to_string_lossy()
+                .replace('\\', "/");
+            offenders.push(relative);
+        }
+
+        assert!(
+            scanned > 20,
+            "scan found only {scanned} test sources to check"
+        );
+
+        let unlisted: Vec<&String> = offenders
+            .iter()
+            .filter(|path| !HARNESS_STACK_BASELINE.contains(&path.as_str()))
+            .collect();
+        assert!(
+            unlisted.is_empty(),
+            "these tests build a Tokio runtime and execute a chunk on the libtest \
+             harness thread, so they drive the VM on a stack nobody sized and abort \
+             the whole test binary once the ambient stack drops. Wrap the entry \
+             point in `harn_vm::on_vm_stack(|| {{ .. }})`:\n  {}",
+            unlisted
+                .iter()
+                .map(|path| path.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+
+        let stale: Vec<&str> = HARNESS_STACK_BASELINE
+            .into_iter()
+            .filter(|path| !offenders.iter().any(|found| found == path))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "these files are no longer offenders, so their rows in \
+             HARNESS_STACK_BASELINE allow something that no longer exists. Remove \
+             them; the ratchet only shrinks:\n  {}",
+            stale.join("\n  ")
         );
     }
 }

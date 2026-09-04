@@ -160,6 +160,75 @@ pub fn execution_root_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// The form of `path` a child process can actually be started in.
+///
+/// Canonicalizing a path on Windows yields the extended-length `\\?\C:\...`
+/// form. That form is correct for the Win32 file APIs and unusable as a
+/// working directory for a shell: `cmd.exe` refuses it as a UNC path, prints
+/// "UNC paths are not supported", and then starts anyway in the Windows
+/// directory. The child is left running somewhere it was never asked to run,
+/// so every workspace-relative path it is given is missing, and the failure
+/// names the missing file rather than the wrong directory.
+///
+/// Stripping the prefix is a no-op on POSIX, where no path begins with it, so
+/// this is applied on every platform rather than behind a `cfg` and the same
+/// seam is exercised wherever the tests run. A true UNC path
+/// (`\\?\UNC\server\share`) is left alone: there is no drive-letter form of
+/// it to fall back to, and rewriting it would name a different location.
+pub(crate) fn child_process_cwd(path: std::path::PathBuf) -> std::path::PathBuf {
+    match path.to_str().and_then(strip_windows_verbatim_prefix) {
+        Some(stripped) => std::path::PathBuf::from(stripped),
+        None => path,
+    }
+}
+
+/// Strip a `\\?\` verbatim-disk-path prefix from `path`, or return `None`
+/// when `path` is not one. Split out from [`child_process_cwd`] so the rule
+/// is testable as a pure string transformation on any platform.
+///
+/// Every `std/path` helper normalizes its output to forward slashes
+/// (`stdlib/path.rs`'s `to_posix`, documented there as deliberate: Harn
+/// scripts see one separator regardless of host OS). A `cwd` that reaches
+/// here after passing through a Harn script — as `workspace_root(fs)` does
+/// in `experiments/burin-mini` — therefore carries this same prefix spelled
+/// `//?/C:/...`, not `\\?\C:\...`. Windows itself treats `/` and `\` as
+/// interchangeable path separators, so both spellings name the same prefix
+/// and both must be recognized here, or exactly the script-originated `cwd`
+/// this function exists to fix keeps its un-stripped prefix and reproduces
+/// the "UNC paths are not supported" failure one level removed.
+#[expect(
+    clippy::string_slice,
+    reason = "the 4-byte prefix just matched is pure ASCII, so byte offset 4 is a guaranteed char boundary"
+)]
+fn strip_windows_verbatim_prefix(path: &str) -> Option<&str> {
+    let bytes = path.as_bytes();
+    let is_slash = |byte: u8| byte == b'\\' || byte == b'/';
+    if bytes.len() < 4
+        || !is_slash(bytes[0])
+        || !is_slash(bytes[1])
+        || bytes[2] != b'?'
+        || !is_slash(bytes[3])
+    {
+        return None;
+    }
+    // The first four bytes matched are single-byte ASCII, so byte offset 4
+    // is a valid char boundary to slice at.
+    let rest = &path[4..];
+    let mut chars = rest.chars();
+    // A drive-letter path, and nothing else. `\\?\UNC\...` (and its
+    // `//?/UNC/...` spelling) fails this and is deliberately left as it is.
+    if !chars.next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    if chars.next()? != ':' {
+        return None;
+    }
+    match chars.next() {
+        Some('\\') | Some('/') | None => Some(rest),
+        Some(_) => None,
+    }
+}
+
 /// Resolve the directory an omitted process `cwd` inherits on the active path.
 ///
 /// Sandboxed execution may deliberately choose the first launchable workspace
@@ -688,6 +757,10 @@ struct CapturedRun {
     duration_ms: i64,
 }
 
+#[path = "process_program_resolution.rs"]
+mod program_resolution;
+pub(crate) use program_resolution::{resolve_program_path, resolve_program_path_for_spawn};
+
 /// Shared synchronous spawn-and-capture core used by `harness.process.run` and
 /// the `exec_opts`/`exec_at_opts` internal builtins. Honors cwd, an env
 /// overlay (merge or replace via `env_clear`), the live session environment's
@@ -701,11 +774,6 @@ struct CapturedRun {
 /// `crate::op_interrupt` for the mechanism.
 fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let label = spec.label;
-    let mut command = std::process::Command::new(spec.cmd);
-    command.args(spec.args);
-    if let Some(cwd) = spec.cwd {
-        command.current_dir(cwd);
-    }
     // A `replace` request (`env_clear`) is already closed — only the caller's
     // keys survive — so it needs no further narrowing. A `merge` request would
     // otherwise inherit the parent environment wholesale, which under a session
@@ -716,6 +784,15 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     } else {
         session_closed_env_for_command(spec.cmd, spec.env.iter().cloned())?
     };
+    // Resolve a bare program name to an absolute path using the EXACT `PATH`
+    // the child is about to receive, searched here in the parent (harn#7993).
+    let resolved_cmd =
+        resolve_program_path(spec.cmd, &resolved_environment, spec.env_clear, spec.env);
+    let mut command = std::process::Command::new(&resolved_cmd);
+    command.args(spec.args);
+    if let Some(cwd) = spec.cwd {
+        command.current_dir(cwd);
+    }
     if spec.env_clear || resolved_environment.is_some() {
         command.env_clear();
     }
@@ -1090,9 +1167,9 @@ fn process_command_config(
     if let Some(dir) = dir {
         let resolved = resolve_command_dir(dir);
         crate::stdlib::sandbox::enforce_process_cwd(&resolved)?;
-        config.cwd = Some(resolved);
+        config.cwd = Some(child_process_cwd(resolved));
     } else {
-        config.cwd = Some(inherited_process_cwd()?);
+        config.cwd = Some(child_process_cwd(inherited_process_cwd()?));
         if let Some(context) = current_execution_context() {
             if !context.env.is_empty() {
                 config.env.extend(context.env);
