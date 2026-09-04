@@ -11,9 +11,19 @@
 //!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
-//! * **Windows** ([`windows::Backend`]): low-integrity AppContainer +
-//!   restricted token + Job Object launched directly through
-//!   `CreateProcessW`.
+//! * **Windows** ([`windows::Backend`]): an AppContainer plus a Job
+//!   Object, launched directly through `CreateProcessW` with a
+//!   `SECURITY_CAPABILITIES` attribute. There is no restricted token
+//!   and no explicit integrity label: the AppContainer's own access
+//!   check is what confines the child. A read or a write succeeds only
+//!   where the object's DACL grants it to the container's package SID,
+//!   one of its capability SIDs, or `ALL APPLICATION PACKAGES` — a user
+//!   or group SID in the token never helps. That makes this the one
+//!   backend that is read-*closed* by construction, so the read roots
+//!   the other backends get for free have to be granted here with an
+//!   explicit `icacls` ACE. Writes are confined by the same implicit
+//!   deny rather than by a token restriction: every root this backend
+//!   grants outside the workspace is granted read and execute only.
 //! * **OpenBSD** ([`openbsd::Backend`]): pledge/unveil applied via
 //!   `pre_exec` on top of the standard `Command` plumbing.
 //!
@@ -1689,6 +1699,10 @@ fn coverage_jail_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     roots.extend(process_sandbox_package_manager_config_read_roots(policy));
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     roots.extend(process_sandbox_developer_toolchain_cache_roots(policy));
+    // The Windows backend grants an ACE on every `PATH` directory, so a path
+    // under one of them is inside the jail and must not be refused here.
+    #[cfg(target_os = "windows")]
+    roots.extend(process_sandbox_path_read_roots(policy));
     roots
 }
 
@@ -1957,6 +1971,45 @@ pub(crate) fn process_sandbox_package_manager_config_read_roots(
         return Vec::new();
     };
     package_manager_config_read_roots_for_home(&home)
+}
+
+/// Windows-only: every directory on this process's own `PATH`, gated on the
+/// same `DeveloperToolchains` preset as the home-relative roots above.
+///
+/// This backend's AppContainer is read-closed by construction, so nothing
+/// outside an explicit `icacls` grant is visible to the child, and
+/// [`developer_toolchain_read_roots_for_home`] covers only *home-relative*
+/// installs (`~/.cargo`, `~/.nvm`, …). A global install on `PATH` — the
+/// official Node.js installer's `C:\Program Files\nodejs` is the case that
+/// exposed this — stays invisible, and `cmd.exe` reports the unreadable
+/// executable as "not recognized" rather than as a permission error. A `PATH`
+/// entry is, definitionally, a toolchain location.
+///
+/// This lives here rather than in the backend because two consumers need the
+/// same answer. The backend renders an `icacls` ACE per root, and
+/// [`coverage_jail_roots`] answers whether a path is inside the jail when a
+/// denial is being classified. While only the backend knew about these roots,
+/// the two views disagreed: a path under a `PATH` directory was granted by the
+/// backend and simultaneously reported as outside the jail, which is exactly
+/// the drift the read-root helpers say cannot happen because "backends render
+/// from it". Note what this does *not* reach: `check_fs_path_scope`, the check
+/// that actually refuses a builtin's path access, consults only the workspace
+/// and read-only roots and has never consulted any preset read root on any
+/// platform. Widening that is a cross-platform decision, not a Windows one.
+///
+/// Existence filtering stays with the backend's grant loop, which already
+/// skips a root that is not on disk, so a stray `PATH` entry costs nothing
+/// here either.
+#[cfg(target_os = "windows")]
+pub(crate) fn process_sandbox_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
+        return Vec::new();
+    }
+    std::env::var_os("PATH")
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|dir| normalize_for_policy(&dir))
+        .collect()
 }
 
 /// Per-user toolchain *cache* roots that JVM/iOS build tools read **and write**
