@@ -672,6 +672,23 @@ impl WorkspaceAclGrants {
                 Grantee::ThisContainer => sid,
                 Grantee::EveryAppContainer => ALL_APPLICATION_PACKAGES_SID,
             };
+            // A durable grant another process made since this spawn priced
+            // its roots makes this rewrite pure duplicated work. Test runners
+            // start many processes at once, and they price the same closed
+            // roots in the same instant, so without this re-read every one of
+            // them repeats every rewrite. The read costs milliseconds against
+            // the second it saves, and it deliberately bypasses the cache,
+            // whose whole job is to remember the answer from before.
+            if grantee == Grantee::EveryAppContainer && recheck_reads_open(&root) {
+                sandbox_trace(
+                    label,
+                    format!(
+                        "icacls grant skipped path={} reason=granted-concurrently-by-another-process",
+                        root.display()
+                    ),
+                );
+                continue;
+            }
             sandbox_trace(
                 label,
                 format!(
@@ -753,10 +770,18 @@ impl Drop for WorkspaceAclGrants {
 /// A count of directories is the wrong unit, because directories differ by
 /// orders of magnitude: a Node install is ~2,400 entries and a cargo target
 /// directory is tens of thousands. Measured on a Windows 11 host the rewrite
-/// runs at roughly 2,500 entries per second, so this budget bounds the work
-/// to a few seconds — paid once on a host, because the grants persist and
-/// every later spawn's probe skips them.
-const SYSTEM_READ_GRANT_ENTRY_BUDGET: usize = 32768;
+/// runs at roughly 2,500 entries per second, so this bounds one process's
+/// cold start to a few seconds.
+///
+/// It is deliberately small enough to exclude a build tree. Every small
+/// toolchain directory on a build runner's `PATH` is 2 to 129 entries and a
+/// Node install is ~2,450, so this covers all of them together and still
+/// refuses the 9,307-entry `target\debug`, whose executables are test
+/// binaries no agent command names. A larger budget bought nothing and cost
+/// real time: on a runner starting a dozen test processes at once, each
+/// spending it independently before any of them had finished granting, the
+/// first wave took two minutes.
+const SYSTEM_READ_GRANT_ENTRY_BUDGET: usize = 8192;
 
 /// Every read-only root this spawn should NOT grant, decided once for all
 /// four read sources under one budget.
@@ -914,10 +939,40 @@ fn read_root_decision(root: &Path, outcome: &str) {
 /// A DACL that cannot be read counts as already-open. That is the cheap
 /// direction and it matches what this backend did before the probe existed:
 /// an unreadable DACL never adds a recursive ACL rewrite.
-fn app_container_can_already_read(path: &Path) -> bool {
+/// Re-read `path`'s permissions, ignoring and then refreshing the cache.
+///
+/// [`app_container_can_already_read`] answers from a cache on purpose: within
+/// one spawn the answer cannot change under it. Across spawns it can, because
+/// a durable grant is exactly the kind of change another process makes, and
+/// that is the one case worth paying a fresh read for.
+fn recheck_reads_open(path: &Path) -> bool {
+    let Ok(dacl) = read_icacls(path) else {
+        return false;
+    };
+    let dacl = dacl.to_ascii_uppercase();
+    let readable = dacl.contains("ALL APPLICATION PACKAGES") || dacl.contains("S-1-15-2-1:");
+    if readable {
+        remember_reads_open(path);
+    }
+    readable
+}
+
+/// Answers remembered by [`app_container_can_already_read`], shared with
+/// [`recheck_reads_open`] so a fresh read can correct a stale "closed".
+fn reads_open_cache() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, bool>> {
     static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, bool>>> =
         std::sync::OnceLock::new();
-    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn remember_reads_open(path: &Path) {
+    if let Ok(mut map) = reads_open_cache().lock() {
+        map.insert(path.to_path_buf(), true);
+    }
+}
+
+fn app_container_can_already_read(path: &Path) -> bool {
+    let cache = reads_open_cache();
     if let Ok(map) = cache.lock() {
         if let Some(known) = map.get(path) {
             return *known;
