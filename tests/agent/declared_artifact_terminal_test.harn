@@ -20,9 +20,12 @@ import {
 } from "std/agent/required_artifacts"
 import { assert_nil, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
-// A tool that reports success and writes exactly the path it was given. The
-// handler is honest: a run that writes the declared path really does satisfy
-// the contract, so the passing arms are not passing by a stubbed lie.
+/**
+ * A tool that reports success and writes exactly the path it was given.
+ *
+ * The handler is honest: a run that writes the declared path really does
+ * satisfy the contract, so the passing arms are not passing by a stubbed lie.
+ */
 fn writing_tools(fs: HarnessFs) {
   let tools = tool_registry()
   tools = tool_define(
