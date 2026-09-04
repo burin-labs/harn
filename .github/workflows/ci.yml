@@ -597,9 +597,10 @@ jobs:
     name: Rust workspace tests
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    # Paid capacity covers the merge queue and trusted same-repository PRs; fork
-    # PRs and pushes retain the free hosted fallback. At $0.016/min every paid
-    # run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves a cache.
+    # Public-repository CI defaults to GitHub-hosted capacity, which is free.
+    # Paid capacity requires the explicit repository opt-in below. At $0.016/min
+    # every paid run has a hard 20-minute/$0.32 fuse, and Blacksmith never saves
+    # a cache.
     #
     # The hosted ceiling is owned by the workload rather than chosen as a round
     # number: it is the sum of the three step budgets below (9 + 12 + 26), plus
@@ -612,8 +613,8 @@ jobs:
     # spending the save's reserve. The machine-readable performance budget
     # remains ten minutes, so this recovery margin does not weaken the latency
     # SLO. scripts/ci_cache_policy/linux_checks.harn owns the arithmetic.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
-    timeout-minutes: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 65 }}
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 20 || 65 }}
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
     permissions:
@@ -627,7 +628,7 @@ jobs:
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
       SCCACHE_CACHE_SIZE: 15G
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted') }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1673,7 +1674,7 @@ jobs:
 
   windows:
     name: Rust on Windows (build + smoke test)
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025' }}
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest' }}
     permissions:
       contents: read
       actions: read
@@ -1685,7 +1686,7 @@ jobs:
     # its independent full Windows surface.
     if: needs.windows-plan.outputs.run_windows == 'true'
     env:
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith' }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
       # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
       # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
       # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.

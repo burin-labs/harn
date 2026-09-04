@@ -284,23 +284,23 @@ pub fn macos_warm_errors(
 
 fn windows_blacksmith_runner_expression() -> string {
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' || '${HOSTED_WINDOWS_RUNNER}' }}"
 }
 
 /**
  * The nightly producer rides the same Blacksmith ladder as its pull-request
  * consumer, one size up. Both fall back to the hosted runner through the single
- * ${WINDOWS_BLACKSMITH_DISABLE_VAR} variable, so one flip moves the whole
- * native-Windows surface back to GitHub-hosted capacity together.
+ * ${WINDOWS_BLACKSMITH_ENABLE_VAR} opt-in, so the default stays on free
+ * GitHub-hosted capacity.
  */
 fn windows_nightly_blacksmith_runner_expression() -> string {
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || '${BLACKSMITH_16CPU_WINDOWS_RUNNER}' }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && '${BLACKSMITH_16CPU_WINDOWS_RUNNER}' || '${HOSTED_WINDOWS_RUNNER}' }}"
 }
 
 fn windows_blacksmith_tier_expression() -> string {
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || '${BLACKSMITH_RUNNER_TIER}' }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}' }}"
 }
 
 /**
@@ -331,7 +331,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) ->
   if trim(job["runs-on"] ?? "") != windows_blacksmith_runner_expression() {
     errors = errors
       + [
-        "ci.yml:windows must use ${BLACKSMITH_8CPU_WINDOWS_RUNNER} for candidate and main fallback proof, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true falling back to ${HOSTED_WINDOWS_RUNNER}",
+        "ci.yml:windows must default to ${HOSTED_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_ENABLE_VAR}=true opting into ${BLACKSMITH_8CPU_WINDOWS_RUNNER}",
       ]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
@@ -340,7 +340,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) ->
   if trim(producer["runs-on"] ?? "") != windows_nightly_blacksmith_runner_expression() {
     errors = errors
       + [
-        "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must use ${BLACKSMITH_16CPU_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true falling back to ${HOSTED_WINDOWS_RUNNER}",
+        "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must default to ${HOSTED_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_ENABLE_VAR}=true opting into ${BLACKSMITH_16CPU_WINDOWS_RUNNER}",
       ]
   }
   if trim(producer?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {

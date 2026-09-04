@@ -458,7 +458,7 @@ pub pipeline test_windows_native_feedback_rejects_a_hosted_only_producer(
   const errors = windows_pr_native_feedback_errors(policy(), workflows()["ci.yml"], invalid)
   assert(
     errors.contains(
-      "windows-nightly.yml:nextest must use blacksmith-16vcpu-windows-2025, with HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true falling back to windows-latest",
+      "windows-nightly.yml:nextest must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
     ),
   )
 }

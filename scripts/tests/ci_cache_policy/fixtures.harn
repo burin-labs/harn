@@ -11,19 +11,19 @@ pub fn gha_expression(body: string) -> string {
 
 pub fn windows_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest'",
   )
 }
 
 pub fn windows_nightly_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-16vcpu-windows-2025'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest'",
   )
 }
 
 pub fn windows_tier_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted'",
   )
 }
 
@@ -229,7 +229,7 @@ pub fn release_binary_workflow() {
       },
       prepare_cli_aot: {
         "runs-on": gha_expression(
-          "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
+          "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
         ),
       },
       build: {
