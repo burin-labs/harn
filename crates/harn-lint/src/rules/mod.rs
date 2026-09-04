@@ -15,6 +15,7 @@ pub(crate) mod parallel_capture;
 pub(crate) mod reminder_lifecycle;
 pub(crate) mod reminder_provider_count;
 pub(crate) mod removed_llm_options;
+pub(crate) mod schema_shaped_parameters;
 pub(crate) mod template_provider_identity;
 pub(crate) mod template_unknown_filter;
 pub(crate) mod template_variant_explosion;

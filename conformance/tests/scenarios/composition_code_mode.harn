@@ -3,7 +3,7 @@ pipeline main(harness: Harness) {
     {
       name: "read_file",
       description: "Read a file",
-      parameters: {type: "object", required: ["path"]},
+      inputSchema: {type: "object", required: ["path"]},
       annotations: {
         kind: "read",
         side_effect_level: "read_only",
@@ -30,7 +30,7 @@ pipeline main(harness: Harness) {
     [
       {
         name: "write_file",
-        parameters: {type: "object"},
+        inputSchema: {type: "object"},
         annotations: {kind: "edit", side_effect_level: "workspace_write"},
       },
     ],

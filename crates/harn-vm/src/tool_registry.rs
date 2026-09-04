@@ -827,6 +827,37 @@ fn optional_schema(
     }
 }
 
+/// Top-level keys that only ever appear together in a JSON Schema document.
+///
+/// A caller who hands a complete schema to a per-parameter map declares
+/// parameters literally named `type`, `properties`, and `required`. The
+/// list-valued `required` throws, but `{type: "object", properties: {}}` is a
+/// silently wrong no-parameter tool that declares two parameters, which is how
+/// a consumer once shipped one. Refuse the shape by name instead.
+const JSON_SCHEMA_DOCUMENT_KEYS: [&str; 3] = ["type", "properties", "required"];
+
+/// Refuse a per-parameter map that is really a JSON Schema document.
+fn reject_schema_shaped_parameter_map(params: &crate::value::DictMap) -> Result<(), VmError> {
+    if params.is_empty() {
+        return Ok(());
+    }
+    if !params
+        .iter()
+        .all(|(name, _)| JSON_SCHEMA_DOCUMENT_KEYS.contains(&name.as_str()))
+    {
+        return Ok(());
+    }
+    let keys = params
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(VmError::Runtime(format!(
+        "tool parameters {{{keys}}} are a JSON Schema document, not a per-parameter map; \
+         pass a complete schema as input_schema and keep parameters for named parameters"
+    )))
+}
+
 /// Convert Harn parameter definitions into the canonical JSON object schema.
 pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmError> {
     let params = match params {
@@ -841,6 +872,7 @@ pub fn params_to_json_schema(params: Option<&VmValue>) -> Result<JsonValue, VmEr
             ));
         }
     };
+    reject_schema_shaped_parameter_map(params)?;
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for (name, definition) in params.iter() {
@@ -1182,6 +1214,34 @@ mod tests {
                 ToolAudience::Agent,
             ]
         );
+    }
+
+    #[test]
+    fn a_json_schema_handed_to_the_parameter_map_is_refused_by_name() {
+        for shape in [
+            vec![("type", VmValue::String("object".into()))],
+            vec![
+                ("type", VmValue::String("object".into())),
+                ("properties", VmValue::dict(DictMap::new())),
+            ],
+        ] {
+            let mut params = DictMap::new();
+            for (key, value) in shape {
+                params.insert(key.into(), value);
+            }
+            let error = params_to_json_schema(Some(&VmValue::dict(params)))
+                .expect_err("a JSON Schema document is not a per-parameter map");
+            assert!(
+                error.to_string().contains("input_schema"),
+                "{error} must name the key that owns a complete schema"
+            );
+        }
+
+        let mut named = DictMap::new();
+        named.insert("path".into(), VmValue::String("string".into()));
+        let schema = params_to_json_schema(Some(&VmValue::dict(named)))
+            .expect("a per-parameter map still converts");
+        assert_eq!(schema["properties"]["path"]["type"], "string");
     }
 
     #[test]

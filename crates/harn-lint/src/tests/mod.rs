@@ -182,6 +182,7 @@ mod non_source_callable_builtins;
 mod optional_shorthand;
 mod persona_steps;
 mod redundant_nil_ternary;
+mod schema_shaped_parameters;
 mod secret_scan_rules;
 mod shadowing;
 mod stdlib_metadata;

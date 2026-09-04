@@ -101,6 +101,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
         Box::new(UntypedToolHandlerResult),
+        Box::new(SchemaShapedToolParameters),
         Box::new(ApiDesign),
     ];
     // Ids address rules for per-rule config and `disable_rules`, so they
@@ -277,6 +278,12 @@ program_rule!(
     "untyped-tool-handler-result",
     ast,
     crate::rules::tool_handler_result::check_untyped_tool_handler_result
+);
+program_rule!(
+    SchemaShapedToolParameters,
+    "schema-shaped-tool-parameters",
+    ast,
+    crate::rules::schema_shaped_parameters::check_schema_shaped_tool_parameters
 );
 /// Attenuation needs more than the AST.
 ///

@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 74 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 75 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -325,6 +325,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-073`](#harn-lnt-073) | parameter carrying a narrow capability handle is not named for that capability | `bindings/name-capability-parameter` | `surface-changing` |
 | [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused test pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
 | [`HARN-LNT-075`](#harn-lnt-075) | tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type | — | — |
+| [`HARN-LNT-076`](#harn-lnt-076) | tool descriptor spells its per-parameter map as a JSON Schema document | — | — |
 
 ## FMT — Formatter
 
@@ -4075,6 +4076,57 @@ fn search_handler(args: dict) -> dict {
 This reports as a warning while in-tree handlers migrate. It becomes an error
 once no untyped handler result remains, at which point outcome classification
 stops being a heuristic over key names.
+
+### `HARN-LNT-076`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+tool descriptor spells its per-parameter map as a JSON Schema document
+
+One key named `parameters` means two different things depending on which
+function receives the descriptor. The tool registry reads every key of
+`parameters` as a parameter name. The composition and agent-loop descriptor
+paths read the same key as a complete JSON Schema.
+
+A descriptor written for one and handed to the other is wrong in both
+directions, and the silent direction is the dangerous one. Under the registry's
+rule, `{type: "object", properties: {}}` is not a tool without parameters. It is
+a tool with two parameters, named `type` and `properties`, and nothing reports
+it: a consumer shipped exactly that. The other direction at least throws,
+because a list-valued `required` is not a parameter definition.
+
+This rule reports a `parameters` map whose top-level keys are drawn only from
+`type`, `properties` and `required`, because a map like that is describing a
+schema rather than naming parameters.
+
+#### How to fix
+
+Spell a complete schema as `inputSchema`, which every descriptor reader already
+accepts:
+
+```harn
+const tools = [
+  {
+    name: "read_file",
+    inputSchema: {type: "object", required: ["path"]},
+  },
+]
+```
+
+Keep `parameters` for the per-parameter map, where each key is a parameter name:
+
+```harn
+tools = tool_define(tools, "read_file", "Read one file", {
+  parameters: {path: {type: "string", required: true}},
+  handler: read_file_handler,
+})
+```
+
+#### Severity
+
+This reports as an error. The runtime refuses the same shape when a registry is
+built, so a descriptor this rule accepts and a registry the runtime accepts
+agree by construction.
 
 ### `HARN-FMT-001`
 

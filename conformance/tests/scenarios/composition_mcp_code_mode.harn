@@ -29,7 +29,7 @@ pipeline main(harness: Harness) {
       {
         name: "local_echo",
         description: "Not an MCP tool",
-        parameters: {type: "object"},
+        inputSchema: {type: "object"},
         handler: { args -> return args },
       },
     ],
