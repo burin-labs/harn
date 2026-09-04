@@ -96,6 +96,10 @@ pub fn pl_normalized_domain_words(value: any) -> list {
  * unchanged from before this field existed: any nonzero lexical overlap
  * counts. This narrows only on positive host signal; it never turns a match
  * back on that today's overlap check would have rejected.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
  */
 pub fn pl_score_skill(skill_entry: dict, query_words: list, task_domain_words: list = []) -> dict {
   if len(query_words) == 0 {
