@@ -1,0 +1,230 @@
+name: Windows targeted nextest
+
+# A dispatch-only diagnostic lane for Windows-specific defects.
+#
+# The full per-PR `windows` job in `ci.yml` compiles the affected-crate closure
+# and then runs three separate native test commands; the nightly runs the whole
+# workspace. Both are the right shape for gating, and both are far more work
+# than a person needs when they are iterating on ONE Windows behaviour and want
+# a verdict. This workflow builds only what the requested nextest filter needs,
+# runs it once, and writes the runner's own output into the job summary so the
+# failure text is readable from the run page without downloading a log archive.
+#
+# Deliberately `workflow_dispatch` only. It has no `pull_request` or
+# `merge_group` trigger, so it can never become a required check and can never
+# be confused with the gating Windows evidence. `ci.yml:windows` and
+# `windows-nightly.yml` remain the only Windows proofs that mean anything for
+# admission.
+#
+# CACHE CONTRACT. This job is a restore-only CONSUMER of the same two warm
+# paths `ci.yml:windows` uses, and a writer of neither:
+#   * the short-retention `workspace-windows-warm` artifact that
+#     `windows-nightly.yml:nextest` publishes from main, restored first because
+#     it is provider-neutral, and
+#   * the shared `workspace-windows` rust-cache namespace as the fallback.
+# The `rust-cache` composite action only saves when its `save` input is true
+# AND the ref is `refs/heads/main`; `save` is left at its default of false here,
+# so no dispatch of this workflow can mint a cache generation in the contended
+# 10 GiB namespace. `RUSTFLAGS` is kept byte-identical to the `ci.yml:windows`
+# consumer and the `windows-nightly.yml:nextest` producer (both toggled together
+# by the single `HARN_WINDOWS_LLD` repo variable) because RUSTFLAGS is part of
+# rust-cache's environment hash: a different value here would silently miss the
+# shared cache rather than fail, and every dispatch would compile cold.
+#
+# No Dev Drive step. `ci.yml:windows` creates one only on the GitHub-hosted
+# fallback, because the Blacksmith Windows image does not expose the Hyper-V
+# `New-VHD` command the action needs. A diagnostic lane is not worth paying the
+# VHDX creation time on either tier, so it uses the native filesystem.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit SHA to test.
+        required: true
+        type: string
+      filter:
+        description: cargo-nextest filterset for the tests to run.
+        required: false
+        type: string
+        default: test(burin_mini_playground)
+      runner:
+        description: Runner tier to measure this dispatch on.
+        required: false
+        type: choice
+        default: blacksmith-8vcpu-windows-2025
+        options:
+          - blacksmith-8vcpu-windows-2025
+          - windows-latest
+      success_output:
+        description: >-
+          Show stdout for tests that PASS. A read-only diagnostic test that
+          prints what the sandbox observed is useless when it passes silently,
+          so this defaults on.
+        required: false
+        type: choice
+        default: immediate-final
+        options:
+          - immediate-final
+          - never
+
+permissions:
+  contents: read
+  # Discovery and download of the main-produced warm workspace artifact.
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.ref }}-${{ inputs.runner }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  targeted:
+    name: Targeted nextest (${{ inputs.runner }})
+    runs-on: ${{ inputs.runner }}
+    if: github.repository == 'burin-labs/harn'
+    timeout-minutes: 60
+    env:
+      # Mirror the `runs-on` ladder exactly, per the runner-tier contract in
+      # `scripts/check_runner_tier.harn`: Blacksmith runners report
+      # `self-hosted` in `runner.environment`, so no step may branch on that
+      # context.
+      HARN_RUNNER_TIER: ${{ inputs.runner == 'windows-latest' && 'github-hosted' || 'blacksmith' }}
+      # Byte-identical to the `ci.yml:windows` consumer and the
+      # `windows-nightly.yml:nextest` producer. A job-level RUSTFLAGS fully
+      # replaces the workflow-level value rather than merging with it, so
+      # `-D warnings` is restated here.
+      RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: ./.github/actions/rust-toolchain
+      - name: Restore Windows workspace warm artifact
+        id: windows-warm-restore
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+            --repo "${{ github.repository }}" \
+            --target-dir "${CARGO_TARGET_DIR:-target}"
+      - uses: ./.github/actions/rust-cache
+        if: steps.windows-warm-restore.outcome != 'success'
+        continue-on-error: true
+        with:
+          # Restore only. `save` is left at its default of false, so this
+          # workflow never writes a generation into the shared namespace that
+          # `windows-nightly.yml:nextest` owns.
+          shared-key: workspace-windows
+          cache-bin: false
+      - name: Report warm path
+        shell: bash
+        env:
+          WARM_OUTCOME: ${{ steps.windows-warm-restore.outcome }}
+        run: |
+          echo "windows_warm_restore_outcome=${WARM_OUTCOME}"
+          if [[ "${WARM_OUTCOME}" == "success" ]]; then
+            echo "Restored the main-produced warm workspace artifact."
+          else
+            echo "Warm artifact unavailable; continuing through rust-cache or cold."
+          fi
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        with:
+          # Pinned by .github/cache-policy.json; scripts/check_ci_cache_policy.harn
+          # rejects any workflow that installs a different version.
+          tool: nextest@0.9.132
+      - name: Run targeted nextest
+        id: targeted-nextest
+        shell: bash
+        env:
+          # Filter and output mode reach the shell as environment values, never
+          # interpolated into the script body, so a dispatch input cannot inject
+          # shell.
+          NEXTEST_FILTER: ${{ inputs.filter }}
+          NEXTEST_SUCCESS_OUTPUT: ${{ inputs.success_output }}
+          # Same deterministic secret store, offline posture, sandbox tracing,
+          # and 16 MiB runtime stack the gating Windows job uses. The stack size
+          # is required by scripts/check_rust_test_lane_policy.harn: Rust's
+          # default 2 MiB spawned-thread stack overflows on tests that drive the
+          # Harn VM, and the abort is indistinguishable from the defect under
+          # investigation.
+          HARN_SECRET_STORE_BACKEND: file
+          HARN_LLM_CALLS_DISABLED: "1"
+          HARN_WINDOWS_SANDBOX_TRACE: "1"
+          RUST_MIN_STACK: "16777216"
+        run: |
+          set -o pipefail
+          log="${RUNNER_TEMP}/targeted-nextest.log"
+          started="$(date +%s)"
+          set +e
+          cargo nextest run --locked -p harn-cli --test harn_cli_fast \
+            --features internal-freshness-checker \
+            --profile ci \
+            --success-output "${NEXTEST_SUCCESS_OUTPUT}" \
+            -E "${NEXTEST_FILTER}" --no-tests=fail 2>&1 | tee "${log}"
+          status="${PIPESTATUS[0]}"
+          set -e
+          printf 'nextest_seconds=%s\n' "$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          printf 'log_path=%s\n' "${log}" >> "$GITHUB_OUTPUT"
+          exit "${status}"
+      # The whole point of this lane is that the dump is readable from the run
+      # page. `always()`, because a failing run is exactly the one whose output
+      # somebody needs.
+      - name: Publish nextest output to the job summary
+        if: always()
+        shell: bash
+        env:
+          TESTED_REF: ${{ inputs.ref }}
+          TESTED_RUNNER: ${{ inputs.runner }}
+          NEXTEST_FILTER: ${{ inputs.filter }}
+          LOG_PATH: ${{ steps.targeted-nextest.outputs.log_path }}
+          NEXTEST_SECONDS: ${{ steps.targeted-nextest.outputs.nextest_seconds }}
+          NEXTEST_OUTCOME: ${{ steps.targeted-nextest.outcome }}
+          WARM_OUTCOME: ${{ steps.windows-warm-restore.outcome }}
+        run: |
+          {
+            echo "## Targeted Windows nextest"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| ref | \`${TESTED_REF}\` |"
+            echo "| filter | \`${NEXTEST_FILTER}\` |"
+            echo "| runner | \`${TESTED_RUNNER}\` |"
+            echo "| warm artifact | ${WARM_OUTCOME:-skipped} |"
+            echo "| nextest outcome | ${NEXTEST_OUTCOME:-not reached} |"
+            echo "| nextest seconds | ${NEXTEST_SECONDS:-unmeasured} |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "${LOG_PATH}" || ! -s "${LOG_PATH}" ]]; then
+            # An empty log is a real outcome, not a pass: say so rather than
+            # letting an absent dump read as a clean run.
+            echo "No nextest output was captured; the run failed before the test step." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '<details open><summary>nextest output</summary>'
+            echo
+            echo '```text'
+            # GitHub caps a step summary at 1 MiB. Keep the tail, which is where
+            # nextest's immediate-final failure block and the summary line are.
+            tail -c 900000 "${LOG_PATH}"
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload nextest log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: targeted-nextest-log
+          path: ${{ runner.temp }}/targeted-nextest.log
+          if-no-files-found: warn
+          retention-days: 3
