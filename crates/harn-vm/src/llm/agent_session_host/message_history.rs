@@ -161,11 +161,17 @@ pub(super) fn host_agent_session_record_assistant_builtin(
         .iter()
         .map(vm_to_json)
         .collect::<Vec<_>>();
-    crate::agent_sessions::inject_message(
-        &session_id,
-        assistant_message_from_llm_result(&llm_result),
-    )
-    .map_err(VmError::Runtime)?;
+    let assistant_message = assistant_message_from_llm_result(&llm_result);
+    let visible_text =
+        crate::llm::agent_result_projection::visible_assistant_text(&assistant_message);
+    crate::agent_sessions::inject_message(&session_id, assistant_message)
+        .map_err(VmError::Runtime)?;
+    if let Some(content) = visible_text {
+        emit_event(&AgentEvent::AgentMessageChunk {
+            session_id: session_id.clone(),
+            content,
+        });
+    }
     assistant_messages::record_dispatch_receipt(
         &session_id,
         calls_json,
