@@ -342,7 +342,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) ->
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
     errors = errors + ["ci.yml:windows must mirror its Blacksmith/hosted runner tier"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != windows_pr_timeout_expression() {
+  if trim(to_string(job["timeout-minutes"] ?? "")) != windows_pr_timeout_expression() {
     errors = errors
       + [
         "ci.yml:windows must cap paid Windows runs at 60 minutes and allow the hosted fallback 90 minutes",
