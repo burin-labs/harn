@@ -197,7 +197,7 @@ fn windows_env_probe_dump() -> String {
         &script,
         r#"
 fn dump(harness: Harness, label: string, command: string) {
-  let result = harness.process.exec("cmd.exe", "/D", "/C", command)
+  let result = harness.process.shell(command)
   harness.stdio.println("${label}_STATUS=${result.status}")
   harness.stdio.println("${label}_SUCCESS=${result.success}")
   harness.stdio.println("${label}_STDOUT_START")
