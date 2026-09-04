@@ -23,7 +23,7 @@ const WORKFLOW_LEARNING_EXCLUDED: &str = "excluded";
 
 #[derive(Clone)]
 struct JournalConfig {
-    store: session_store::CanonicalStore,
+    store: crate::stdlib::canonical_store::CanonicalStore,
     run_id: String,
     turn_id: String,
     workflow_learning_eligibility: String,
@@ -66,7 +66,7 @@ impl JournalState {
         &self.config.run_id
     }
 
-    pub(crate) fn store(&self) -> session_store::CanonicalStore {
+    pub(crate) fn store(&self) -> crate::stdlib::canonical_store::CanonicalStore {
         self.config.store.clone()
     }
 
@@ -120,7 +120,8 @@ impl JournalState {
 
     pub(crate) fn next_event(
         &self,
-    ) -> Result<Option<(session_store::CanonicalStore, AppendEvent)>, VmError> {
+    ) -> Result<Option<(crate::stdlib::canonical_store::CanonicalStore, AppendEvent)>, VmError>
+    {
         self.pending
             .front()
             .cloned()
@@ -687,7 +688,8 @@ mod tests {
 
     fn mapping_config() -> JournalConfig {
         JournalConfig {
-            store: session_store::CanonicalStore::in_memory().expect("in-memory store"),
+            store: crate::stdlib::canonical_store::CanonicalStore::in_memory()
+                .expect("in-memory store"),
             run_id: "run-tool".to_string(),
             turn_id: "turn-tool".to_string(),
             workflow_learning_eligibility: WORKFLOW_LEARNING_EXCLUDED.to_string(),
