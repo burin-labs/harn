@@ -352,13 +352,12 @@ fn prepared_clap_command(
             command = command.about(description.clone());
         }
     }
-    add_prepared_subcommands(command, prepared.cli_tree().commands(), prepared)
+    add_prepared_subcommands(command, prepared.cli_tree().commands())
 }
 
 fn add_prepared_subcommands(
     mut command: Command,
     children: &[harn_vm::tool_registry::PreparedCliCommand],
-    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Command, String> {
     for child in children {
         let mut subcommand = Command::new(child.name().to_string())
@@ -380,13 +379,13 @@ fn add_prepared_subcommands(
             (None, None) => {}
         }
         if child.tool_name().is_some() {
-            subcommand = add_prepared_leaf_arguments(subcommand, child, prepared)?;
+            subcommand = add_prepared_leaf_arguments(subcommand, child)?;
         } else {
             subcommand = subcommand
                 .subcommand_required(true)
                 .arg_required_else_help(true);
         }
-        subcommand = add_prepared_subcommands(subcommand, child.children(), prepared)?;
+        subcommand = add_prepared_subcommands(subcommand, child.children())?;
         command = command.subcommand(subcommand);
     }
     Ok(command)
@@ -395,7 +394,6 @@ fn add_prepared_subcommands(
 fn add_prepared_leaf_arguments(
     mut command: Command,
     leaf: &harn_vm::tool_registry::PreparedCliCommand,
-    prepared: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Command, String> {
     let tool_name = leaf.tool_name().expect("prepared CLI leaf names one tool");
     let has_json_input = leaf.arguments().iter().any(|argument| {
