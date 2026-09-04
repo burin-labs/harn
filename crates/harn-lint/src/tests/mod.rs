@@ -203,6 +203,7 @@ mod optional_shorthand;
 mod persona_steps;
 mod prefer_pick;
 mod redundant_nil_ternary;
+mod schema_shaped_parameters;
 mod secret_scan_rules;
 mod shadowing;
 mod stdlib_metadata;

@@ -11,7 +11,7 @@ pipeline test_transaction_receipt_overrides_stale_text_grammar(harness: Harness,
       {
         name: "look",
         description: "Read one workspace file.",
-        parameters: {type: "object", properties: {file: {type: "string"}}, required: ["file"]},
+        inputSchema: {type: "object", properties: {file: {type: "string"}}, required: ["file"]},
       },
     ],
   }
