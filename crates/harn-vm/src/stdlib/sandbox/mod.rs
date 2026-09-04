@@ -12,8 +12,9 @@
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
 //! * **Windows** ([`windows::Backend`]): low-integrity AppContainer +
-//!   restricted token + Job Object launched directly through
-//!   `CreateProcessW`.
+//!   Job Object launched directly through `CreateProcessW`. Writes are
+//!   confined by the Low integrity level; reads follow the machine's
+//!   ordinary ACLs.
 //! * **OpenBSD** ([`openbsd::Backend`]): pledge/unveil applied via
 //!   `pre_exec` on top of the standard `Command` plumbing.
 //!

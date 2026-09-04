@@ -17,8 +17,10 @@ use windows_sys::Win32::Security::Isolation::{
     DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{
-    CreateWellKnownSid, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
-    PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES,
+    CopySid, CreateWellKnownSid, GetTokenInformation, TokenUser, WinBuiltinAnyPackageSid,
+    WinBuiltinUsersSid, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
+    WinWorldSid, PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SECURITY_MAX_SID_SIZE,
+    SID_AND_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, WELL_KNOWN_SID_TYPE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -37,11 +39,12 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
+    InitializeProcThreadAttributeList, OpenProcessToken, ResumeThread, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
+    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
 use super::{
@@ -325,8 +328,8 @@ impl AppContainerProfile {
                 wide_name.as_ptr(),
                 display.as_ptr(),
                 description.as_ptr(),
-                process_capabilities.attributes_mut_ptr(),
-                process_capabilities.count(),
+                process_capabilities.profile_attributes_mut_ptr(),
+                process_capabilities.profile_count(),
                 &mut sid,
             )
         };
@@ -354,8 +357,8 @@ impl AppContainerProfile {
     ) -> SECURITY_CAPABILITIES {
         SECURITY_CAPABILITIES {
             AppContainerSid: self.sid,
-            Capabilities: process_capabilities.attributes_mut_ptr(),
-            CapabilityCount: process_capabilities.count(),
+            Capabilities: process_capabilities.token_attributes_mut_ptr(),
+            CapabilityCount: process_capabilities.token_count(),
             Reserved: 0,
         }
     }
@@ -401,64 +404,189 @@ impl AppContainerProfile {
     }
 }
 
+type SidBuffer = Box<[u8; SECURITY_MAX_SID_SIZE as usize]>;
+
+/// Copy a well-known SID into a stable, owned buffer.
+fn well_known_sid(sid_type: WELL_KNOWN_SID_TYPE) -> io::Result<SidBuffer> {
+    let mut sid: SidBuffer = Box::new([0u8; SECURITY_MAX_SID_SIZE as usize]);
+    let mut sid_size = SECURITY_MAX_SID_SIZE;
+    if unsafe {
+        CreateWellKnownSid(
+            sid_type,
+            std::ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut sid_size,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(sid)
+}
+
+/// The SID of the account this process runs as, copied into a stable buffer.
+/// A user SID is far smaller than `SECURITY_MAX_SID_SIZE`, so the fixed
+/// buffer is always large enough.
+fn launching_user_sid() -> io::Result<SidBuffer> {
+    let mut token: HANDLE = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let token = OwnedHandle::new(token);
+    let mut needed = 0u32;
+    // The first call is expected to fail with ERROR_INSUFFICIENT_BUFFER and
+    // report the required size; only the size is read here.
+    unsafe {
+        GetTokenInformation(token.raw(), TokenUser, std::ptr::null_mut(), 0, &mut needed);
+    }
+    if needed == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // `TOKEN_USER` is 8-byte aligned and a `Vec<u8>` is not, so the buffer is
+    // allocated as `u64` words and rounded up to cover `needed` bytes.
+    let words = (needed as usize)
+        .div_ceil(std::mem::size_of::<u64>())
+        .max(1);
+    let mut buffer = vec![0u64; words];
+    let mut capacity =
+        u32::try_from(words * std::mem::size_of::<u64>()).expect("token buffer fits in u32");
+    if unsafe {
+        GetTokenInformation(
+            token.raw(),
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            capacity,
+            &mut capacity,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let token_user = unsafe { *buffer.as_ptr().cast::<TOKEN_USER>() };
+    let mut sid: SidBuffer = Box::new([0u8; SECURITY_MAX_SID_SIZE as usize]);
+    if unsafe {
+        CopySid(
+            SECURITY_MAX_SID_SIZE,
+            sid.as_mut_ptr().cast(),
+            token_user.User.Sid,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(sid)
+}
+
+/// The capability SIDs the child's AppContainer token carries.
+///
+/// Two lists, because the two consumers want different things:
+///
+/// * `profile_attributes` are the real capability SIDs
+///   (`S-1-15-3-*`) handed to `CreateAppContainerProfile`, which
+///   validates them and rejects anything else.
+/// * `token_attributes` are the SIDs placed in the child token's
+///   `SECURITY_CAPABILITIES`. They include the profile capabilities plus
+///   the group SIDs that carry the system's *default* read grants.
+///
+/// The second list is what makes the sandbox read-open. An AppContainer
+/// (LowBox) token is access-checked twice: once normally against the
+/// token's user and groups, and once again against the AppContainer SID
+/// and the token's capability SIDs. An ACE that grants only
+/// `BUILTIN\Users` or `Everyone` passes the first check and fails the
+/// second, so a directory whose ACL carries no `ALL APPLICATION PACKAGES`
+/// entry is unreadable no matter that the launching user can read it —
+/// which is why a system toolchain such as a Node install under
+/// `Program Files` disappeared from the child's view and `cmd` reported
+/// its interpreter as "not recognized".
+///
+/// Naming `Everyone`, `BUILTIN\Users`, `ALL APPLICATION PACKAGES` and the
+/// launching user's own SID in the second list makes the second check
+/// succeed wherever the first one already did, so reads resolve through
+/// the ordinary ACLs the machine already has.
+///
+/// This relaxes only a DACL check. Writes outside the workspace stay
+/// blocked by the mandatory integrity check, which runs before the DACL
+/// checks and does not consider capability SIDs at all: an AppContainer
+/// process is Low integrity, and a Low integrity subject cannot write to
+/// an object at Medium integrity or above under the default
+/// `NO_WRITE_UP` policy. Reads are unaffected by that policy, which is
+/// exactly the asymmetry the product contract wants.
 struct ProcessCapabilities {
     // The attribute records point into these allocations. Boxes keep the SID
     // addresses stable if the owning vector or this struct moves.
-    _sid_storage: Vec<Box<[u8; SECURITY_MAX_SID_SIZE as usize]>>,
-    attributes: Vec<SID_AND_ATTRIBUTES>,
+    _sid_storage: Vec<SidBuffer>,
+    profile_attributes: Vec<SID_AND_ATTRIBUTES>,
+    token_attributes: Vec<SID_AND_ATTRIBUTES>,
 }
 
 impl ProcessCapabilities {
     fn for_policy(policy: &CapabilityPolicy) -> io::Result<Self> {
-        if !policy_allows_network(policy) {
-            return Ok(Self {
-                _sid_storage: Vec::new(),
-                attributes: Vec::new(),
-            });
+        let mut sid_storage: Vec<SidBuffer> = Vec::with_capacity(6);
+        let mut profile_attributes = Vec::with_capacity(2);
+        let mut token_attributes = Vec::with_capacity(6);
+
+        if policy_allows_network(policy) {
+            for sid_type in [
+                WinCapabilityInternetClientSid,
+                WinCapabilityPrivateNetworkClientServerSid,
+            ] {
+                let mut sid = well_known_sid(sid_type)?;
+                let attribute = SID_AND_ATTRIBUTES {
+                    Sid: sid.as_mut_ptr().cast(),
+                    Attributes: SE_GROUP_ENABLED as u32,
+                };
+                profile_attributes.push(attribute);
+                token_attributes.push(attribute);
+                sid_storage.push(sid);
+            }
         }
 
-        let mut sid_storage = Vec::with_capacity(2);
-        let mut attributes = Vec::with_capacity(2);
-        for sid_type in [
-            WinCapabilityInternetClientSid,
-            WinCapabilityPrivateNetworkClientServerSid,
-        ] {
-            let mut sid = Box::new([0u8; SECURITY_MAX_SID_SIZE as usize]);
-            let mut sid_size = SECURITY_MAX_SID_SIZE;
-            if unsafe {
-                CreateWellKnownSid(
-                    sid_type,
-                    std::ptr::null_mut(),
-                    sid.as_mut_ptr().cast(),
-                    &mut sid_size,
-                )
-            } == 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            attributes.push(SID_AND_ATTRIBUTES {
+        // Read-grant SIDs. See the type's documentation: these carry the
+        // machine's default read ACEs into the AppContainer access check.
+        for sid_type in [WinWorldSid, WinBuiltinUsersSid, WinBuiltinAnyPackageSid] {
+            let mut sid = well_known_sid(sid_type)?;
+            token_attributes.push(SID_AND_ATTRIBUTES {
                 Sid: sid.as_mut_ptr().cast(),
                 Attributes: SE_GROUP_ENABLED as u32,
             });
             sid_storage.push(sid);
         }
+        let mut user_sid = launching_user_sid()?;
+        token_attributes.push(SID_AND_ATTRIBUTES {
+            Sid: user_sid.as_mut_ptr().cast(),
+            Attributes: SE_GROUP_ENABLED as u32,
+        });
+        sid_storage.push(user_sid);
 
         Ok(Self {
             _sid_storage: sid_storage,
-            attributes,
+            profile_attributes,
+            token_attributes,
         })
     }
 
-    fn attributes_mut_ptr(&mut self) -> *mut SID_AND_ATTRIBUTES {
-        if self.attributes.is_empty() {
+    fn profile_attributes_mut_ptr(&mut self) -> *mut SID_AND_ATTRIBUTES {
+        if self.profile_attributes.is_empty() {
             std::ptr::null_mut()
         } else {
-            self.attributes.as_mut_ptr()
+            self.profile_attributes.as_mut_ptr()
         }
     }
 
-    fn count(&self) -> u32 {
-        u32::try_from(self.attributes.len()).expect("process capability count fits in u32")
+    fn profile_count(&self) -> u32 {
+        u32::try_from(self.profile_attributes.len()).expect("profile capability count fits in u32")
+    }
+
+    fn token_attributes_mut_ptr(&mut self) -> *mut SID_AND_ATTRIBUTES {
+        if self.token_attributes.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            self.token_attributes.as_mut_ptr()
+        }
+    }
+
+    fn token_count(&self) -> u32 {
+        u32::try_from(self.token_attributes.len()).expect("token capability count fits in u32")
     }
 }
 
@@ -556,11 +684,16 @@ impl Drop for WorkspaceAclGrants {
     }
 }
 
+/// The preset read roots this backend grants the container SID.
+///
+/// `presets: None` means "use the runtime defaults", not "no presets", and
+/// both helpers below already resolve that through
+/// `ProcessSandboxPolicy::effective_presets`. An earlier `presets.is_none()`
+/// guard here read `None` the other way and returned nothing, so under the
+/// default policy — the one an embedder that never sets `process_sandbox`
+/// gets — this backend alone silently dropped the developer-toolchain and
+/// package-manager read grants that Linux and macOS install.
 fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    if policy.process_sandbox.presets.is_none() {
-        return Vec::new();
-    }
-
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
