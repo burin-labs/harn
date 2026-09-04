@@ -55,6 +55,13 @@ use super::{
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
 
+// Declared here rather than in the sandbox module index: this backend is its
+// only consumer, and the index is a platform-neutral surface.
+#[path = "windows_system_roots.rs"]
+mod system_roots;
+
+use system_roots::{broad_system_root, system_read_roots};
+
 pub(super) struct Backend;
 
 impl SandboxBackend for Backend {
@@ -479,6 +486,24 @@ struct WorkspaceAclGrants {
     paths: Vec<PathBuf>,
 }
 
+/// Whether a root has to be on disk for the spawn to be well-formed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MustExist {
+    Yes,
+    No,
+}
+
+/// What a failed grant costs, which is what decides whether the spawn can
+/// continue without it. This is the one place the distinction lives, so a new
+/// root source has to answer the question rather than inherit an answer.
+#[derive(Clone, Copy)]
+enum GrantIs {
+    /// The child cannot do its job without this grant.
+    LoadBearing,
+    /// The grant only widens what the child can read.
+    BestEffort,
+}
+
 impl WorkspaceAclGrants {
     fn grant(label: &str, sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
         // Read-execute for the entire profile when writes are denied;
@@ -490,34 +515,56 @@ impl WorkspaceAclGrants {
             "(OI)(CI)RX"
         };
         let mut paths = Vec::new();
-        let writable = process_sandbox_roots(policy)
-            .into_iter()
-            .map(|root| (root, workspace_permission, false));
+        let writable = process_sandbox_roots(policy).into_iter().map(|root| {
+            (
+                root,
+                workspace_permission,
+                MustExist::Yes,
+                GrantIs::LoadBearing,
+            )
+        });
         let read_only = process_sandbox_readonly_roots(policy)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
+            .map(|root| (root, "(OI)(CI)RX", MustExist::Yes, GrantIs::BestEffort));
         let process_read = process_sandbox_policy_read_roots(policy)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
+            .map(|root| (root, "(OI)(CI)RX", MustExist::Yes, GrantIs::BestEffort));
         let preset_roots = process_sandbox_preset_acl_roots(policy)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", true));
+            .map(|root| (root, "(OI)(CI)RX", MustExist::No, GrantIs::BestEffort));
+        // Host toolchains on PATH that the container cannot already read.
+        // Unlike every other entry here this set is not preset-gated: the
+        // product contract is reads-open on every profile, and a child that
+        // cannot read the interpreter its command names fails with a message
+        // that blames PATH rather than the sandbox.
+        let system_read = closed_system_read_roots()
+            .iter()
+            .cloned()
+            .map(|root| (root, "(OI)(CI)RX", MustExist::No, GrantIs::BestEffort));
         let process_write = if policy_allows_workspace_write(policy) {
             process_sandbox_policy_write_roots(policy)
                 .into_iter()
-                .map(|root| (root, workspace_permission, false))
+                .map(|root| {
+                    (
+                        root,
+                        workspace_permission,
+                        MustExist::Yes,
+                        GrantIs::LoadBearing,
+                    )
+                })
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
-        for (root, permission, optional) in writable
+        for (root, permission, must_exist, grant_is) in writable
             .chain(read_only)
             .chain(process_read)
             .chain(preset_roots)
+            .chain(system_read)
             .chain(process_write)
         {
             if !root.exists() {
-                if optional {
+                if must_exist == MustExist::No {
                     continue;
                 }
                 return Err(io::Error::new(
@@ -526,12 +573,33 @@ impl WorkspaceAclGrants {
                 ));
             }
             sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
-            run_icacls(
+            let granted = run_icacls(
                 &root,
                 ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
-            )?;
-            sandbox_trace(label, "icacls grant ok");
-            paths.push(root);
+            );
+            match (granted, grant_is) {
+                (Ok(()), _) => {
+                    sandbox_trace(label, "icacls grant ok");
+                    paths.push(root);
+                }
+                // A write grant the child depends on. Without it the child
+                // cannot write its own workspace, which is not a usable
+                // sandbox, so the spawn fails rather than running crippled.
+                (Err(error), GrantIs::LoadBearing) => return Err(error),
+                // A read grant. Failing it leaves the child seeing that
+                // directory as read-closed, which is exactly the behavior
+                // before this root was ever attempted — a narrower sandbox,
+                // not a broken one. An unelevated caller cannot rewrite a
+                // system directory's ACL, and that must not take every
+                // command on the machine down with it.
+                (Err(error), GrantIs::BestEffort) => sandbox_trace(
+                    label,
+                    format!(
+                        "icacls grant failed, continuing read-closed for this root: path={} error={error}",
+                        root.display()
+                    ),
+                ),
+            }
         }
         Ok(Self {
             label: label.to_string(),
@@ -556,6 +624,98 @@ impl Drop for WorkspaceAclGrants {
     }
 }
 
+/// Ceiling on how many closed system read roots one spawn grants. Each grant
+/// is a recursive ACL rewrite, so the set has to stay small even on a host
+/// whose PATH is mostly closed; a host that needs more than this many is
+/// telling us per-directory grants are the wrong mechanism, not that the
+/// limit should rise.
+const SYSTEM_READ_GRANT_LIMIT: usize = 24;
+
+/// The subset of [`system_read_roots`] an AppContainer child cannot already
+/// read: not a broad system prefix, and carrying no `ALL APPLICATION
+/// PACKAGES` entry.
+///
+/// This is the whole reason the set is affordable. Granting read means a
+/// recursive ACL rewrite, because Windows inheritance is not dynamic: an
+/// inheritable entry placed on a directory does not reach the files already
+/// inside it. Rewriting every PATH directory unconditionally puts a recursive
+/// rewrite of the Windows directory and both Program Files prefixes on the
+/// critical path of every single command, which measured as a two-minute
+/// timeout on every sandboxed test rather than a slow one (harn#7993). So the
+/// common case has to cost nothing, and it does: on a stock install every
+/// candidate already admits sandboxed programs and this returns empty.
+///
+/// Cached for the life of the process. The answer depends on host ACLs, not
+/// on the per-spawn container SID.
+fn closed_system_read_roots() -> &'static [PathBuf] {
+    static CLOSED: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    CLOSED.get_or_init(|| {
+        let mut closed = Vec::new();
+        for root in system_read_roots() {
+            if closed.len() == SYSTEM_READ_GRANT_LIMIT {
+                sandbox_trace(
+                    "system-read-roots",
+                    format!(
+                        "grant limit {SYSTEM_READ_GRANT_LIMIT} reached; remaining roots unprobed"
+                    ),
+                );
+                break;
+            }
+            if broad_system_root(&root) {
+                sandbox_trace(
+                    "system-read-roots",
+                    format!("broad root never granted path={}", root.display()),
+                );
+                continue;
+            }
+            if app_container_can_already_read(&root) {
+                continue;
+            }
+            sandbox_trace(
+                "system-read-roots",
+                format!("closed root will be granted path={}", root.display()),
+            );
+            closed.push(root);
+        }
+        closed
+    })
+}
+
+/// Whether `path`'s DACL already admits every AppContainer, i.e. carries an
+/// `ALL APPLICATION PACKAGES` (`S-1-15-2-1`) entry. Read through `icacls`
+/// rather than `GetNamedSecurityInfoW` so the check uses the same mechanism
+/// the grants do and stays free of hand-rolled ACL walking. This read is
+/// non-recursive and costs milliseconds, unlike the `/T` grant it avoids.
+///
+/// A DACL that cannot be read counts as already-open. That is the cheap
+/// direction and it matches what this backend did before the probe existed:
+/// an unreadable DACL never adds a recursive ACL rewrite.
+fn app_container_can_already_read(path: &Path) -> bool {
+    let Ok(dacl) = read_icacls(path) else {
+        sandbox_trace(
+            "system-read-roots",
+            format!("DACL unreadable, treated as open path={}", path.display()),
+        );
+        return true;
+    };
+    let dacl = dacl.to_ascii_uppercase();
+    // The friendly name is localized, so match the raw SID too. `icacls`
+    // renders an unresolved SID as `*S-1-15-2-1:(...)`; the trailing colon
+    // keeps `S-1-15-2-1` from matching a longer sibling SID.
+    dacl.contains("ALL APPLICATION PACKAGES") || dacl.contains("S-1-15-2-1:")
+}
+
+fn read_icacls(path: &Path) -> io::Result<String> {
+    let output = std::process::Command::new("icacls").arg(path).output()?;
+    if !output.status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("icacls read failed for '{}'", path.display()),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     // `presets: None` means "use the runtime defaults" per
     // `ProcessSandboxPolicy`'s own documented contract (types.rs), and those
@@ -572,35 +732,6 @@ fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
-        .chain(windows_path_read_roots(policy))
-        .collect()
-}
-
-/// Every directory on this process's own `PATH`, gated on the same
-/// `DeveloperToolchains` preset as the home-relative roots above.
-///
-/// Unlike macOS (seatbelt) and Linux (Landlock), which are read-open by
-/// default and confine only writes, this backend's AppContainer is
-/// read-closed by construction: nothing outside an explicit icacls grant is
-/// visible to the child. `developer_toolchain_read_roots_for_home` only
-/// covers *home-relative* installs (`~/.cargo`, `~/.nvm`, ...), so a global,
-/// non-home-relative install on PATH — e.g. the official Node.js installer's
-/// `C:\Program Files\nodejs` — stays invisible, and `cmd.exe` reports the
-/// unreadable executable as "not recognized" rather than a permission error
-/// (harn#7993). A PATH entry is, definitionally, a developer toolchain
-/// location. `optional: true` in the icacls grant loop above already skips
-/// any entry that does not exist, so a stray or unusual PATH entry costs
-/// nothing.
-fn windows_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    use crate::orchestration::ProcessSandboxPreset;
-    if !super::process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains)
-    {
-        return Vec::new();
-    }
-    std::env::var_os("PATH")
-        .iter()
-        .flat_map(std::env::split_paths)
-        .map(|dir| super::paths::normalize_for_policy(&dir))
         .collect()
 }
 
@@ -1112,13 +1243,24 @@ mod tests {
             .collect()
     }
 
+    /// The inverse of what this asserted before harn#7993. `presets: None`
+    /// means "use the runtime defaults", and those defaults include
+    /// `DeveloperToolchains`, so a policy that never customized presets must
+    /// get the home-relative toolchain roots. The old assertion encoded the
+    /// bug: it passed only because the function short-circuited on the raw
+    /// `None` field and disagreed with `effective_presets()`.
     #[test]
-    fn implicit_default_presets_do_not_materialize_home_acl_roots() {
+    fn implicit_default_presets_materialize_home_acl_roots() {
+        if crate::user_dirs::home_dir().is_none() {
+            return;
+        }
         let policy = CapabilityPolicy::default();
 
+        let roots = process_sandbox_preset_acl_roots(&policy);
         assert!(
-            process_sandbox_preset_acl_roots(&policy).is_empty(),
-            "Windows should not recursively ACL home-scoped toolchain/cache roots unless presets were explicit"
+            roots.iter().any(|path| path.ends_with(".cargo")),
+            "a default policy resolves to the default presets, so its home-relative \
+             toolchain roots must be granted: {roots:?}"
         );
     }
 

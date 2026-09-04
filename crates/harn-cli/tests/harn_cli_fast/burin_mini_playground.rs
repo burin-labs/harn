@@ -1022,3 +1022,120 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
         failures.join("\n")
     );
 }
+
+/// Every `tool_call_update` transcript event for the `run` tool, across every
+/// stage and regardless of status: the command asked for, what the tool
+/// returned, and the error when the call failed outright. The diagnostic
+/// below deliberately runs commands whose interesting content is what they
+/// printed rather than whether they "failed", so a summary that only reads
+/// failed stages would drop exactly the part worth reading.
+#[cfg(windows)]
+fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let Some(stages) = report["stages"].as_array() else {
+        return "  (no execution.run.stages in this report)\n".to_string();
+    };
+    for stage in stages {
+        let Some(events) = stage["transcript"]["events"].as_array() else {
+            continue;
+        };
+        for event in events {
+            if event["kind"] != "tool_call_update" {
+                continue;
+            }
+            let metadata = &event["metadata"];
+            if metadata["tool_name"] != "run" {
+                continue;
+            }
+            out.push_str(&format!(
+                "  tool_call_update status={} raw_input={} raw_output={} error={}\n",
+                metadata["status"].as_str().unwrap_or("<none>"),
+                metadata["raw_input"],
+                metadata["raw_output"],
+                metadata["error"].as_str().unwrap_or("<none>"),
+            ));
+        }
+    }
+    if out.is_empty() {
+        out.push_str("  (no run tool_call_update events found in any stage's transcript)\n");
+    }
+    out
+}
+
+/// Standing Windows diagnostic for the read-open contract (harn#7993). The
+/// five playground fixtures above fail the moment a confined child cannot
+/// read the interpreter its command names, and `cmd.exe` reports that as
+/// "'node' is not recognized as an internal or external command" — a message
+/// that blames the search path for a file-permission problem and has twice
+/// sent a diagnosis down the wrong road.
+///
+/// Five commands through the exact seam the fixtures use, with all five
+/// outputs printed on failure, so one red round answers every question at
+/// once instead of costing a round each:
+///
+/// 1. `whoami /groups /fo list` — which SIDs the child token carries,
+///    including whether `ALL APPLICATION PACKAGES` is among them. Everything
+///    about read access follows from this.
+/// 2. `icacls` on the Node install directory — whether its permissions admit
+///    the container at all. Permissions that already name
+///    `ALL APPLICATION PACKAGES` while the read still fails would falsify the
+///    file-permission premise this whole area rests on.
+/// 3. `type` on a plain file inside it — a read with no path search, no
+///    extension resolution and no executable launch in the way, separating
+///    "cannot read" from "cannot resolve".
+/// 4. `dotnet --version` — the positive control. It is another global install
+///    under the same Program Files prefix, so if it runs while Node does not,
+///    the difference is that one directory's permissions rather than anything
+///    about the prefix, the sandbox, or the search path.
+/// 5. `node --version` — the product claim itself, in the fixtures' shape.
+///
+/// The assertion is on (5). The other four mutate nothing, which is why this
+/// is safe to keep permanently, and that is the point: the next read
+/// regression prints its own cause instead of needing a probe invented for it
+/// again.
+#[cfg(windows)]
+#[test]
+fn windows_sandboxed_run_child_can_read_the_host_node_toolchain() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_system_read_diagnostic.jsonl",
+    );
+    let stdout = match &outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let transcript_dump = if report_path.exists() {
+        let report = read_json(&report_path);
+        dump_run_tool_transcript(&report)
+    } else {
+        format!(
+            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
+            report_path.display()
+        )
+    };
+    let full_dump = format!(
+        "=== windows_sandboxed_run_child_can_read_the_host_node_toolchain ===\n\
+         playground stdout/error:\n{stdout}\n\
+         run tool transcript (5 commands, in order: whoami /groups /fo list; \
+         icacls on the Node install directory; type on a plain file inside \
+         it; dotnet --version as the positive control; node --version):\n\
+         {transcript_dump}\n\
+         === end diagnostic ==="
+    );
+    // `cmd` expands `%ERRORLEVEL%` when it parses the line, so a same-line
+    // status read reports the status of the line BEFORE it. The marker is
+    // chained with `&&` instead, which only runs when the tool itself
+    // exited 0.
+    assert!(
+        full_dump.contains("DIAGNOSTIC_NODE_VERSION=ok"),
+        "the sandboxed run tool's child could not run the host's `node`. The \
+         four diagnostic commands above it say why: whether the child token \
+         carries ALL APPLICATION PACKAGES, whether the Node install \
+         directory's permissions admit it, whether a plain file read inside \
+         that directory succeeds, and whether the neighbouring dotnet install \
+         under the same prefix runs\n{full_dump}"
+    );
+}
