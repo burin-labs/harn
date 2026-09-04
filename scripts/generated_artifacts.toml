@@ -48,6 +48,7 @@ exempt_checks = [
   "check-source-file-lengths",      # merge-base repo source LOC ratchet, not a generated mirror
   "check-stack-frames",             # re-entrant stack-frame budget ratchet, not a generated mirror
   "check-test-target-coverage",     # census that hand-listed test files are run by a CI target, not a generated mirror
+  "check-gate-path-visibility",     # ratchet on the negated fs.exists guard in gate scripts, not a sync guard
   "check-python-boundary",          # repo-language boundary ratchet, not a sync guard
   "check-harn-syntax-sensitive-scans", # source-pattern guard, not a generated artifact mirror
   "check-agent-guidance",             # canonical agent-guidance topology and principle links
@@ -611,6 +612,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 # previous threshold rather than this tree.
 "check-stack-frames" = "excluded"
 "check-test-target-coverage" = "source"
+"check-gate-path-visibility" = "source"
 "check-python-boundary" = "source"
 "check-harn-syntax-sensitive-scans" = "source"
 "check-agent-guidance" = "source"
