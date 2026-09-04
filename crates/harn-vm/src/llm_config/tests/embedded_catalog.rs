@@ -345,3 +345,52 @@ fn setup_guide_lists_every_featured_credential_variable() {
         );
     }
 }
+
+/// A `[model_ladders.*]` step is a model reference the runtime dispatches
+/// without asking anyone: `std/agent/judge` resolves its default judge from
+/// the `judge` ladder, and `std/agent/sitrep` its summarizer from `sitrep`.
+/// A step naming a retired model therefore fails at the provider, mid-run,
+/// on a call nobody chose — and a completion judge that cannot reach a model
+/// terminates the run `completion_unverified`, which reads like an honest
+/// refusal rather than a dead route.
+///
+/// The tier aliases already carry this rule
+/// (`embedded_catalog_tier_aliases_resolve_to_active_models`). Ladder steps
+/// are the same kind of reference and did not, which is how the `judge`
+/// ladder shipped pointing at `gemini-2.5-flash` after Google stopped
+/// serving that id.
+///
+/// `mock` is exempt: it is Harn's in-process test transport, and its ids are
+/// deliberately not catalog routes.
+#[test]
+fn embedded_catalog_model_ladder_steps_resolve_to_active_models() {
+    let config = default_config();
+    let mut offenders: Vec<String> = Vec::new();
+    for (ladder_name, ladder) in &config.model_ladders {
+        for step in &ladder.steps {
+            if step.provider.as_deref() == Some("mock") {
+                continue;
+            }
+            let id = match config.aliases.get(&step.model) {
+                Some(alias) => alias.id.clone(),
+                None => step.model.clone(),
+            };
+            match config.models.get(&id) {
+                None => offenders.push(format!(
+                    "{ladder_name} -> `{}` has no catalog row",
+                    step.model
+                )),
+                Some(entry) if entry.deprecated => offenders.push(format!(
+                    "{ladder_name} -> `{}` is deprecated ({})",
+                    step.model,
+                    entry.deprecation_note.as_deref().unwrap_or("no note")
+                )),
+                Some(_) => {}
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "model ladder steps must name active catalog models: {offenders:?}"
+    );
+}
