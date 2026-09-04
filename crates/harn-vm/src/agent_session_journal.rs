@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use harn_session_store::{
     AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore, SessionType,
-    SqliteSessionStore,
 };
 
 use crate::stdlib::session_store;
@@ -24,7 +23,7 @@ const WORKFLOW_LEARNING_EXCLUDED: &str = "excluded";
 
 #[derive(Clone)]
 struct JournalConfig {
-    store: SqliteSessionStore,
+    store: session_store::CanonicalStore,
     run_id: String,
     turn_id: String,
     workflow_learning_eligibility: String,
@@ -67,7 +66,7 @@ impl JournalState {
         &self.config.run_id
     }
 
-    pub(crate) fn store(&self) -> SqliteSessionStore {
+    pub(crate) fn store(&self) -> session_store::CanonicalStore {
         self.config.store.clone()
     }
 
@@ -119,7 +118,9 @@ impl JournalState {
         self.lifecycle_reservation.is_some()
     }
 
-    pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
+    pub(crate) fn next_event(
+        &self,
+    ) -> Result<Option<(session_store::CanonicalStore, AppendEvent)>, VmError> {
         self.pending
             .front()
             .cloned()
@@ -686,7 +687,7 @@ mod tests {
 
     fn mapping_config() -> JournalConfig {
         JournalConfig {
-            store: SqliteSessionStore::open_in_memory().expect("in-memory store"),
+            store: session_store::CanonicalStore::in_memory().expect("in-memory store"),
             run_id: "run-tool".to_string(),
             turn_id: "turn-tool".to_string(),
             workflow_learning_eligibility: WORKFLOW_LEARNING_EXCLUDED.to_string(),

@@ -34,6 +34,17 @@ every other binary in the crate — under nextest they do not need to. A module
 mutex only serializes tests that take that same mutex; it is not a substitute
 for process isolation.
 
+The environment is the most familiar piece of shared process state, not the
+only one. A metrics registry, a dispatch or spawn counter, a warm cache, an
+event-sink list and the panic hook are all one-per-process too, and a case that
+snapshots one of them and asserts it did not move is asserting about the whole
+binary rather than about itself. Under the threaded runner such a case fails
+whenever a sibling happens to touch the same singleton, and the failure names
+the reader's case rather than the writer's. That is why a red from
+`make test-cargo` on `harn-vm` is not attributable on its own: reproduce it
+under `make test` before treating it as a defect in the code under test
+(#7960).
+
 Do not treat `make test-cargo` (`cargo test --workspace`) as an equivalent
 fallback:
 

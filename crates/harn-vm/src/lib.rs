@@ -249,6 +249,8 @@ pub mod clock_mock {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_panic_silence;
 pub(crate) mod text_index;
 pub mod typecheck;
 pub mod value;

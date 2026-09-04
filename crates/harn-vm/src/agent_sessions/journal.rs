@@ -25,7 +25,7 @@ pub(crate) fn next_journal_event(
     id: &str,
 ) -> Result<
     Option<(
-        harn_session_store::SqliteSessionStore,
+        crate::stdlib::session_store::CanonicalStore,
         harn_session_store::AppendEvent,
     )>,
     VmError,
@@ -155,7 +155,7 @@ pub(crate) fn journal_first_event_id(id: &str) -> Option<u64> {
 ///
 /// The clone is another handle to the same SQLite store, not a second source of
 /// truth. Callers use it only after flushing queued mutations.
-pub(crate) fn journal_store(id: &str) -> Option<harn_session_store::SqliteSessionStore> {
+pub(crate) fn journal_store(id: &str) -> Option<crate::stdlib::session_store::CanonicalStore> {
     super::SESSIONS.with(|sessions| {
         sessions
             .try_borrow()

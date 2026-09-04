@@ -117,16 +117,13 @@ fn report_puts_a_typed_failure_on_the_bus_with_a_derived_owner() {
 #[test]
 fn a_failure_dropped_without_report_still_reaches_the_bus() {
     let captured = CapturedEvents::install();
-    let previous_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let outcome = crate::test_panic_silence::catch_unwind_silently(|| {
         let _forgotten = BoundaryFailure::new(
             BoundaryId::VisibleTextSanitize,
             BoundaryFailureKind::Truncated,
             "stripped narration",
         );
-    }));
-    std::panic::set_hook(previous_hook);
+    });
 
     assert_eq!(
         outcome.is_err(),
@@ -176,16 +173,13 @@ fn a_batch_of_failures_reports_in_discovery_order() {
 #[test]
 fn an_abandoned_batch_still_emits_through_the_per_failure_backstop() {
     let captured = CapturedEvents::install();
-    let previous_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let _ = crate::test_panic_silence::catch_unwind_silently(|| {
         let _abandoned = [BoundaryFailure::new(
             BoundaryId::HostEventIngest,
             BoundaryFailureKind::Unrecognized,
             "abandoned",
         )];
-    }));
-    std::panic::set_hook(previous_hook);
+    });
 
     let events = captured.boundary_failures();
     assert_eq!(events.len(), 1, "got: {events:?}");

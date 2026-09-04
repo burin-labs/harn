@@ -80,12 +80,18 @@ pub fn subscribe(observer: SharedSessionChangeObserver) -> SessionChangeSubscrip
     SessionChangeSubscription { id }
 }
 
-/// Remember a canonical store file so a live subscription can watch it.
-pub(crate) fn watch_store(path: &Path) {
-    session_wal_watch::register_store_path(path);
+/// Claim a canonical store file so a live subscription can watch it.
+///
+/// The returned registration belongs to the store handle that opened the file.
+/// While it lives the path is watchable; when the last handle for that path
+/// drops, so does the watcher.
+#[must_use = "dropping the registration stops the path being watched"]
+pub(crate) fn watch_store(path: &Path) -> session_wal_watch::StoreWatchRegistration {
+    let registration = session_wal_watch::register_store_path(path);
     if subscriber_count() > 0 {
         session_wal_watch::sync_watchers(true);
     }
+    registration
 }
 
 fn subscriber_count() -> usize {
@@ -150,4 +156,31 @@ pub(crate) fn current_observer() -> Option<SharedSessionChangeObserver> {
         return None;
     }
     Some(Arc::new(SessionChangeFanout))
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::OnceLock;
+
+    use tokio::sync::{Mutex, MutexGuard};
+
+    /// Exclusive access to the process-wide change bus for one test.
+    ///
+    /// The observer list, the remembered titles and the running watchers are
+    /// one process singleton, the way the process environment is. Two cases
+    /// that subscribe at the same time each receive the other's committed
+    /// titles, because a subscriber is registered against the process and not
+    /// against a store: the double-publish case then read a sibling's rename
+    /// as its own republish (harn#7960). One lock, held for the life of the
+    /// subscription, is what makes each case see only its own traffic.
+    ///
+    /// An async mutex rather than a `std` one because every case that needs it
+    /// holds it across an await, which is exactly what a blocking guard must
+    /// not do. It also has no poisoning to recover: the lock guards no
+    /// invariant of its own, so a panicking holder leaves nothing behind.
+    #[must_use = "the bus is shared for as long as the guard lives"]
+    pub(crate) async fn exclusive_bus() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().await
+    }
 }
