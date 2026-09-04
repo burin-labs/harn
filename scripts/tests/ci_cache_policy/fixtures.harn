@@ -27,6 +27,10 @@ pub fn windows_tier_expression() -> string {
   )
 }
 
+pub fn windows_timeout_expression() -> string {
+  return gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90")
+}
+
 pub fn windows_warm_restore_step() {
   return {
     name: "Restore Windows workspace warm artifact",
@@ -438,6 +442,7 @@ pub fn workflows() {
         },
         windows: {
           "runs-on": windows_runner_expression(),
+          "timeout-minutes": windows_timeout_expression(),
           permissions: {contents: "read", actions: "read"},
           env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
