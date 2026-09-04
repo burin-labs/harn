@@ -593,6 +593,13 @@ audit-fmt-harn-tokens:
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
+# The denial arm of path_visibility cannot live in the suite above: `harn test`
+# runs without the worktree filesystem sandbox, so nothing is refusable in-process
+# and the arm would pass by measuring nothing. It runs here rather than in
+# test-pr-gate-scripts because it needs a real harn binary, and that target is
+# held to a pre-warm boundary that forbids building Rust.
+	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
+		HARN_BIN="$$harn_bin" ./scripts/tests/path_visibility_denial_test.sh
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_live_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_runtime_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/changelog_test.harn
@@ -672,7 +679,6 @@ test-pr-gate-scripts:
 	./scripts/tests/rust_artifact_test.sh
 	HARN_WARM_TEST_PLATFORM=windows ./scripts/tests/workspace_warm_artifact_test.sh
 	HARN_WARM_TEST_PLATFORM=macos ./scripts/tests/workspace_warm_artifact_test.sh
-	./scripts/tests/path_visibility_denial_test.sh
 	./scripts/tests/windows_storage_budget_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
