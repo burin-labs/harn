@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$repo_root/.github/workflows/development-cutover-monitor.yml"
+workflow="$repo_root/.github/workflows/repository-state-reconciliation.yml"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/repo"
@@ -120,5 +120,8 @@ grep -Fq 'could not measure pull requests' "$query_log"
 grep -Fq 'cron: "*/5 * * * *"' "$workflow"
 grep -Fq 'run: ./scripts/check_development_cutover.sh' "$workflow"
 grep -Fq 'context="development cutover"' "$workflow"
+grep -Fq 'name: Cancel obsolete speculative workflows' "$workflow"
+grep -Fq "if: github.event_name == 'merge_group'" "$workflow"
+grep -Fq 'run: ./scripts/cancel_superseded_merge_groups.sh --repo "$TARGET_REPO" --apply' "$workflow"
 
 echo "development_cutover_monitor_test: ok"
