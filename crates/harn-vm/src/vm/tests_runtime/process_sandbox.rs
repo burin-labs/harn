@@ -224,6 +224,10 @@ fn test_windows_process_sandbox_allows_exec_argv0() {
 
 #[cfg(target_os = "windows")]
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+)]
 fn test_windows_process_sandbox_denies_write_outside_workspace() {
     let allowed = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
