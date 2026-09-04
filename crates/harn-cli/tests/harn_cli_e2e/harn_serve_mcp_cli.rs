@@ -729,7 +729,12 @@ fn main(harness: Harness) {
     {
       name: "lookup_widget",
       description: "Look up one widget.",
-      input_schema: {"$ref": "#/components/schemas/WidgetLookup"},
+      input_schema: {
+        type: "object",
+        properties: {widget_id: {"$ref": "#/components/schemas/WidgetId"}},
+        required: ["widget_id"],
+        additionalProperties: false,
+      },
       returns: {"$ref": "#/components/schemas/Widget"},
       cli: {
         command: ["widgets", "get"],
@@ -740,7 +745,12 @@ fn main(harness: Harness) {
     {
       name: "broken_widget",
       description: "Return one widget outside its declared shape.",
-      input_schema: {"$ref": "#/components/schemas/WidgetLookup"},
+      input_schema: {
+        type: "object",
+        properties: {widget_id: {"$ref": "#/components/schemas/WidgetId"}},
+        required: ["widget_id"],
+        additionalProperties: false,
+      },
       returns: {"$ref": "#/components/schemas/Widget"},
       cli: {
         command: ["widgets", "broken"],
@@ -752,12 +762,7 @@ fn main(harness: Harness) {
     info: {name: "widgets", version: "1.0.0"},
     components: {
       schemas: {
-        WidgetLookup: {
-          type: "object",
-          properties: {widget_id: {type: "integer", minimum: 1}},
-          required: ["widget_id"],
-          additionalProperties: false,
-        },
+        WidgetId: {type: "integer", minimum: 1},
         Widget: {
           type: "object",
           properties: {id: {type: "integer"}},
@@ -830,10 +835,14 @@ fn component_backed_registry_enforces_the_same_contract_on_cli_and_mcp() {
         .find(|tool| tool["name"] == "lookup_widget")
         .expect("lookup_widget is advertised")
         .clone();
-    assert_eq!(
-        advertised["inputSchema"]["properties"]["widget_id"]["minimum"],
-        json!(1),
-        "MCP discovery must resolve the shared component reference"
+    let input_schema = serde_json::to_string(&advertised["inputSchema"]).expect("input schema");
+    assert!(
+        input_schema.contains("\"minimum\":1"),
+        "MCP discovery must carry the shared component's constraint: {input_schema}"
+    );
+    assert!(
+        !input_schema.contains("#/components/schemas/"),
+        "MCP discovery must publish a self-contained schema: {input_schema}"
     );
 
     let called = client.request(stable_request(

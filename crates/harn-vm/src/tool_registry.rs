@@ -935,9 +935,33 @@ fn portable_json(value: &VmValue, owner: &str) -> Result<JsonValue, VmError> {
 }
 
 fn validate_json_schema(schema: &JsonValue, owner: &str) -> Result<(), VmError> {
+    // A registry-level component reference is not resolvable from one entry.
+    // The catalog owns `components.schemas`, validates every reference against
+    // it, and the prepared catalog compiles the resolved document; compiling
+    // the entry standalone here would refuse a component-backed tool that
+    // executes correctly. Shape errors inside such a schema still surface
+    // there, so nothing is merely skipped.
+    if references_registry_components(schema) {
+        return Ok(());
+    }
     jsonschema::draft202012::new(schema)
         .map(|_| ())
         .map_err(|error| VmError::Runtime(format!("{owner} is invalid: {error}")))
+}
+
+/// Whether any node in `schema` references the registry's shared components.
+fn references_registry_components(schema: &JsonValue) -> bool {
+    match schema {
+        JsonValue::Object(fields) => fields.iter().any(|(key, value)| {
+            (matches!(key.as_str(), "$ref" | "$dynamicRef")
+                && value
+                    .as_str()
+                    .is_some_and(|target| target.starts_with("#/components/schemas/")))
+                || references_registry_components(value)
+        }),
+        JsonValue::Array(items) => items.iter().any(references_registry_components),
+        _ => false,
+    }
 }
 
 fn json_schema_type(kind: &str) -> Result<Option<&str>, &str> {

@@ -288,17 +288,11 @@ fn parse_registry_invocation(
     let object = input
         .as_object_mut()
         .ok_or_else(|| "--harn-input must resolve to a JSON object".to_string())?;
-    let properties = tool
-        .input_schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .cloned()
-        .unwrap_or_default();
     for argument in leaf_command.arguments() {
         let name = argument.property();
-        let schema = properties.get(name).ok_or_else(|| {
-            format!("prepared CLI argument {name:?} is absent from the input schema")
-        })?;
+        // The prepared tree owns the resolved property schema, so a shared
+        // component reference reads here exactly like a literal type.
+        let schema = argument.schema();
         if argument.boolean_style() != ToolCliBooleanStyle::Value {
             if leaf.value_source(name) == Some(clap::parser::ValueSource::CommandLine) {
                 let value = leaf
@@ -404,15 +398,6 @@ fn add_prepared_leaf_arguments(
     prepared: &harn_vm::tool_registry::PreparedToolCatalog,
 ) -> Result<Command, String> {
     let tool_name = leaf.tool_name().expect("prepared CLI leaf names one tool");
-    let tool = prepared
-        .entry(tool_name)
-        .expect("prepared CLI leaf resolves to its catalog entry");
-    let properties = tool
-        .input_schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .cloned()
-        .unwrap_or_default();
     let has_json_input = leaf.arguments().iter().any(|argument| {
         argument.long() == Some("json") || argument.aliases().iter().any(|alias| alias == "json")
     });
@@ -442,12 +427,7 @@ fn add_prepared_leaf_arguments(
         );
     }
     for projection in leaf.arguments() {
-        let schema = properties.get(projection.property()).ok_or_else(|| {
-            format!(
-                "tool {tool_name:?} prepared CLI argument {:?} is absent from its input schema",
-                projection.property()
-            )
-        })?;
+        let schema = projection.schema();
         let value_schema = if projection.repeatable() {
             schema
                 .get("items")

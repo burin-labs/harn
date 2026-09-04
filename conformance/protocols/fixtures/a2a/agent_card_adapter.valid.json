@@ -52,7 +52,8 @@
             },
             "required": [
               "task"
-            ]
+            ],
+            "additionalProperties": false
           }
         }
       ]
