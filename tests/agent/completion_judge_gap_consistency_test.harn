@@ -10,6 +10,22 @@ import { llm_done, with_llm_script } from "std/testing"
  * unresolved gap. The loop took the verdict and dropped the gap class, so a
  * host reading the typed result saw `done`, `natural`, no stop reason, for a
  * run that had been blocked from doing its work.
+ *
+ * harn#7965 refused that pair, but only for the four named gap classes.
+ * `other` was left standing as the reading for a `done` with no gap, because
+ * it is also what the schema tells the model to send on a genuine `done` and
+ * what an absent field decodes to. That is the escape a live judge used: a
+ * fresh maturity-gate smoke on d1f5d748 (claude-haiku-4-5-20251001) reproduced
+ * three judge calls on the identical blocked-write task, the first two
+ * `gap_class: "unresolved_authorization"` (correctly refused), the third
+ * describing the same fact in different words with `gap_class: "other"`
+ * (wrongly accepted, `status: "done"`, `terminal_kind: "natural"`, workspace
+ * never written). `test_done_with_a_bare_other_gap_is_not_an_acceptance`
+ * below replays that third call verbatim. The fix stops keying on the four
+ * names and keys on whether `gap_class` was populated at all: the prompt now
+ * tells a genuinely gapless `done` to leave the field unset, so any populated
+ * value on `done` — one of the four names, `other`, or anything else — is the
+ * self-contradiction, not just four of the five things the field can hold.
  */
 fn judge_opts(session: string) -> AgentSpec {
   return {
@@ -23,16 +39,12 @@ fn judge_opts(session: string) -> AgentSpec {
   }
 }
 
-fn judge_reply(verdict: string, gap_class: string) -> dict {
-  return {
-    text: json_stringify(
-      {
-        verdict: verdict,
-        detail: "The workspace is read-only and the file write operation failed.",
-        gap_class: gap_class,
-      },
-    ),
-  }
+fn judge_reply(
+  verdict: string,
+  gap_class: string,
+  detail: string = "The workspace is read-only and the file write operation failed.",
+) -> dict {
+  return {text: json_stringify({verdict: verdict, detail: detail, gap_class: gap_class})}
 }
 
 fn run_with_judge_replies(harness: Harness, label: string, replies: list) -> dict {
@@ -79,15 +91,41 @@ pipeline test_done_beside_a_named_gap_is_not_an_acceptance(harness: Harness, tas
 }
 
 /**
- * The control that keeps the rule from swallowing every acceptance. `other` is
- * what the schema documents for `done`, and what an absent or unrecognized gap
- * class decodes to, so it must stay an acceptance.
+ * The escape this fix closes, replayed verbatim from the maturity-gate smoke
+ * on harn main d1f5d748 (session agent_session_01a067ec-63a2-70d1-b66d-
+ * 96f10abb6009, typed_checkpoint event for `agent.completion_judge`). Same
+ * blocked-write fact as the named-gap case above, same verdict, the only
+ * difference is the judge chose `other` instead of `unresolved_authorization`
+ * for it — a difference in the judge's labeling, not in whether the work got
+ * done. Before this fix, `other` was exempt and this run read `done`.
  */
-pipeline test_done_with_the_neutral_gap_class_still_accepts(harness: Harness, task: unknown) {
-  const neutral = run_with_judge_replies(harness, "judge-neutral", [judge_reply("done", "other")])
-  assert_eq(neutral.status, "done")
-  // And a reply that carries no gap class at all, which is every cached and
-  // older-pin judge response.
+pipeline test_done_with_a_bare_other_gap_is_not_an_acceptance(harness: Harness, task: unknown) {
+  const laundered = run_with_judge_replies(
+    harness,
+    "judge-other-gap",
+    [
+      judge_reply(
+        "done",
+        "other",
+        "The workspace is read-only and write_file failed; the file cannot be edited without user enabling write access. The task cannot be completed in the current state.",
+      ),
+    ],
+  )
+  assert(
+    laundered.status != "done",
+    "a judge that populated gap_class with \"other\" beside `done` still produced a finished run: "
+      + to_string(laundered.status),
+  )
+}
+
+/**
+ * The control that keeps the rule from swallowing every acceptance: a reply
+ * that carries no `gap_class` field at all, which is every cached and
+ * older-pin judge response and — after this fix — every compliant `done` from
+ * a live judge following the current prompt. This is the only shape a
+ * genuine, uncontested `done` should take, and it must still accept.
+ */
+pipeline test_done_with_no_gap_field_at_all_still_accepts(harness: Harness, task: unknown) {
   const absent = with_llm_script(
     harness.llm,
     [
