@@ -1112,13 +1112,29 @@ mod tests {
             .collect()
     }
 
+    /// `presets: None` means "use the runtime defaults", so an untouched policy
+    /// must resolve to exactly what naming those defaults resolves to. Before
+    /// harn#7993 this function short-circuited on the raw `None` field and
+    /// returned nothing, so every policy that never customized
+    /// `process_sandbox.presets` -- the common case -- silently lost both
+    /// presets' read roots on Windows. Comparing the two policies rather than
+    /// asserting a concrete path keeps the case meaningful on a host with no
+    /// home directory, where both sides are legitimately empty.
     #[test]
-    fn implicit_default_presets_do_not_materialize_home_acl_roots() {
-        let policy = CapabilityPolicy::default();
+    fn implicit_default_presets_match_explicitly_named_defaults() {
+        let implicit = CapabilityPolicy::default();
+        let explicit = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(ProcessSandboxPreset::default_presets().to_vec()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        assert!(
-            process_sandbox_preset_acl_roots(&policy).is_empty(),
-            "Windows should not recursively ACL home-scoped toolchain/cache roots unless presets were explicit"
+        assert_eq!(
+            process_sandbox_preset_acl_roots(&implicit),
+            process_sandbox_preset_acl_roots(&explicit),
+            "an untouched policy must resolve the same Windows ACL roots as one naming the default presets"
         );
     }
 

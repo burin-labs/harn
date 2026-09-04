@@ -2,7 +2,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-script="$repo_root/scripts/ci/windows_workspace_warm_artifact.sh"
+script="$repo_root/scripts/ci/workspace_warm_artifact.sh"
+# One script now serves both platforms, so every invocation names the platform
+# it is exercising. Run the suite once per platform: HARN_WARM_TEST_PLATFORM
+# selects which policy block and which output-key prefix are under test.
+platform="${HARN_WARM_TEST_PLATFORM:-windows}"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -18,6 +22,15 @@ cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
 # hardcoded in the assertion surface.
 cp "$repo_root/.github/cache-policy.json" "$tmpdir/cache-policy.json"
 export HARN_CACHE_POLICY_PATH="$tmpdir/cache-policy.json"
+
+# Every platform-specific literal below is read back out of the policy document,
+# so the assertions stay config-driven and a second platform cannot pass by
+# matching the other platform's spelling.
+warm_schema="$(jq -r ".${platform}_workspace_warm.manifest_schema" "$HARN_CACHE_POLICY_PATH")"
+warm_artifact_name="$(jq -r ".${platform}_workspace_warm.artifact_name" "$HARN_CACHE_POLICY_PATH")"
+warm_workflow="$(jq -r ".${platform}_workspace_warm.workflow" "$HARN_CACHE_POLICY_PATH")"
+export FAKE_WARM_WORKFLOW="$warm_workflow"
+export FAKE_WARM_ARTIFACT_NAME="$warm_artifact_name"
 
 # Seed third-party and workspace-shaped outputs.
 printf 'dep\n' > "$tmpdir/target/debug/deps/libserde-abc123.rlib"
@@ -68,7 +81,7 @@ cat > "$tmpdir/bin/gh" <<'SH'
 set -euo pipefail
 if [[ "$1" == "api" ]]; then
   path="$2"
-  if [[ "$path" == *"/actions/workflows/windows-nightly.yml/runs"* ]]; then
+  if [[ "$path" == *"/actions/workflows/${FAKE_WARM_WORKFLOW}/runs"* ]]; then
     printf '%s\n' "${FAKE_RUNS_JSON:?}"
     exit 0
   fi
@@ -92,7 +105,7 @@ if [[ "$1" == "run" && "$2" == "download" ]]; then
       *) run_id="$1"; shift ;;
     esac
   done
-  [[ "$run_id" == "42" && "$name" == "workspace-windows-warm" && -n "$dest" ]] || exit 2
+  [[ "$run_id" == "42" && "$name" == "${FAKE_WARM_ARTIFACT_NAME:?}" && -n "$dest" ]] || exit 2
   mkdir -p "$dest"
   cp -R "${FAKE_ARTIFACT_DIR:?}/." "$dest/"
   exit 0
@@ -115,7 +128,7 @@ run_pack() {
       CARGO_TARGET_DIR="$tmpdir/target" \
       CARGO_INCREMENTAL=0 \
       RUSTFLAGS="-D warnings" \
-      "$script" pack "$tmpdir/out/staging"
+      "$script" "$platform" pack "$tmpdir/out/staging"
   )
 }
 
@@ -128,7 +141,7 @@ run_restore() {
       FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
       CARGO_INCREMENTAL=0 \
       RUSTFLAGS="-D warnings" \
-      "$script" restore "$1" "$2"
+      "$script" "$platform" restore "$1" "$2"
   )
 }
 
@@ -157,10 +170,10 @@ printf 'inc\n' > "$tmpdir/target/debug/incremental/foo/x"
     CARGO_TARGET_DIR="$tmpdir/target" \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-D warnings" \
-    "$script" pack "$drive_staging"
+    "$script" "$platform" pack "$drive_staging"
 )
 test -f "$drive_staging/target.tar.gz"
-grep -qx "schema=harn.windows_workspace_warm.v2" "$tmpdir/out/staging/manifest"
+grep -qx "schema=${warm_schema}" "$tmpdir/out/staging/manifest"
 grep -qx "producer_commit=${commit}" "$tmpdir/out/staging/manifest"
 grep -Eq '^target_bytes=[1-9][0-9]*$' "$tmpdir/out/staging/manifest"
 if [[ -e "$tmpdir/target/debug/deps/libharn_vm-def456.rlib" ]]; then
@@ -187,17 +200,17 @@ echo "restore rejects insufficient build headroom before replacing a target"
 rm -rf "$tmpdir/restored-tight"
 mkdir -p "$tmpdir/restored-tight"
 printf 'preserve\n' > "$tmpdir/restored-tight/sentinel"
-if HARN_WINDOWS_WARM_BUILD_HEADROOM_BYTES=9000000000000000000 \
+if HARN_WARM_BUILD_HEADROOM_BYTES=9000000000000000000 \
   run_restore "$tmpdir/out/staging" "$tmpdir/restored-tight" \
   >"$tmpdir/tight.out" 2>"$tmpdir/tight.err"; then
   echo "expected insufficient-space admission to fail" >&2
   exit 1
 fi
-grep -Fxq 'windows_warm_restore_reason=insufficient_space' "$tmpdir/tight.out"
-grep -q '^windows_warm_restore_existing_target_bytes=' "$tmpdir/tight.out"
-grep -q '^windows_warm_restore_available_after_replace_bytes=' "$tmpdir/tight.out"
-grep -Eq '^windows_warm_restore_target_bytes=[1-9][0-9]*$' "$tmpdir/tight.out"
-grep -Eq '^windows_warm_restore_headroom_bytes=[1-9][0-9]*$' "$tmpdir/tight.out"
+grep -Fxq "${platform}_warm_restore_reason=insufficient_space" "$tmpdir/tight.out"
+grep -q "^${platform}_warm_restore_existing_target_bytes=" "$tmpdir/tight.out"
+grep -q "^${platform}_warm_restore_available_after_replace_bytes=" "$tmpdir/tight.out"
+grep -Eq "^${platform}_warm_restore_target_bytes=[1-9][0-9]*$" "$tmpdir/tight.out"
+grep -Eq "^${platform}_warm_restore_headroom_bytes=[1-9][0-9]*$" "$tmpdir/tight.out"
 grep -Fq 'warm artifact needs' "$tmpdir/tight.err"
 test -f "$tmpdir/restored-tight/sentinel"
 
@@ -224,7 +237,7 @@ rm -rf "$tmpdir/work/relative-target"
     FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-D warnings" \
-    "$script" restore "$tmpdir/out/staging" relative-target
+    "$script" "$platform" restore "$tmpdir/out/staging" relative-target
 )
 test -f "$tmpdir/work/relative-target/debug/deps/libserde-abc123.rlib"
 
@@ -237,7 +250,7 @@ if (
     FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-D warnings -Clinker=rust-lld.exe" \
-    "$script" restore "$tmpdir/out/staging" "$tmpdir/restored-bad"
+    "$script" "$platform" restore "$tmpdir/out/staging" "$tmpdir/restored-bad"
 ); then
   echo "expected rustflags mismatch to fail" >&2
   exit 1
@@ -245,10 +258,10 @@ fi
 
 echo "discover selects the newest successful main warm artifact run"
 export FAKE_RUNS_JSON='{"workflow_runs":[{"id":41,"conclusion":"failure"},{"id":42,"conclusion":"success"},{"id":43,"conclusion":"success"}]}'
-export FAKE_ARTIFACTS_JSON='{"artifacts":[{"name":"workspace-windows-warm","expired":false,"size_in_bytes":1234}]}'
+export FAKE_ARTIFACTS_JSON="{\"artifacts\":[{\"name\":\"${warm_artifact_name}\",\"expired\":false,\"size_in_bytes\":1234}]}"
 discovered="$(
   env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
-    "$script" discover --repo burin-labs/harn
+    "$script" "$platform" discover --repo burin-labs/harn
 )"
 [[ "$discovered" == "42" ]]
 
@@ -268,8 +281,8 @@ export FAKE_ARTIFACT_DIR="$tmpdir/fake-artifact"
     FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-D warnings" \
-    "$script" download-and-restore --repo burin-labs/harn --target-dir "$tmpdir/downloaded"
+    "$script" "$platform" download-and-restore --repo burin-labs/harn --target-dir "$tmpdir/downloaded"
 )
 test -f "$tmpdir/downloaded/debug/deps/libserde-abc123.rlib"
 
-echo "windows_workspace_warm_artifact_test: ok"
+echo "workspace_warm_artifact_test: ok"

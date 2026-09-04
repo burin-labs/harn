@@ -81,6 +81,11 @@ pub enum UnpricedReason {
     /// The attempt produced no response at all, so neither a token count nor
     /// a price table bounds it.
     NoResponse,
+    /// Mid-stream schema validation severed the connection, so the provider's
+    /// end-of-stream usage frame never arrived. Partial output was generated
+    /// and billed by the provider, but nothing local bounds how much, which is
+    /// why this is distinct from `NoResponse`: the call did consume supply.
+    StreamAborted,
     /// Unpriced attempts in this ledger disagree, or the ledger predates this
     /// field. Either way the projection refuses.
     Mixed,
@@ -92,6 +97,7 @@ impl UnpricedReason {
             Self::PricingUnknown => "pricing_unknown",
             Self::UsageUnreported => "usage_unreported",
             Self::NoResponse => "no_response",
+            Self::StreamAborted => "stream_aborted",
             Self::Mixed => "mixed",
         }
     }
@@ -474,6 +480,27 @@ impl LlmUsage {
                 reason: UnpricedReason::NoResponse,
                 projection_usd: None,
             })),
+        }
+    }
+
+    /// One provider request whose stream was severed mid-flight by schema
+    /// validation.
+    ///
+    /// The provider generated and billed partial output, then never sent the
+    /// end-of-stream usage frame, so this attempt has real spend and no
+    /// measurement of it. Recording it as an unknown attempt keeps the request
+    /// in `provider_call_count`, keeps the ledger's `cost_usd` refusing, and
+    /// keeps `projected_cost_usd` unbounded so a ceiling consumer fails closed.
+    /// Dropping the attempt instead would let a severed call read as a clean
+    /// zero, which is the accounting hole this exists to close.
+    pub(crate) fn stream_aborted_attempt() -> Self {
+        Self {
+            unpriced: Some(Box::new(UnpricedFacts {
+                tokens: 0,
+                reason: UnpricedReason::StreamAborted,
+                projection_usd: None,
+            })),
+            ..Self::unknown_attempt()
         }
     }
 

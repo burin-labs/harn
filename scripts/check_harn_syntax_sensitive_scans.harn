@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { find_files } from "std/fs"
 import { rules_search } from "std/rules"
+import { path_visibility } from "./path_visibility.harn"
 
 const LLM_POLICY_FILES = [
   "crates/harn-stdlib/src/stdlib/agent/presets.harn",
@@ -269,13 +270,23 @@ pub fn check_harn_syntax_sensitive_scans(
  * false positives. Capability, catalog, and provider adapter paths remain the
  * explicit ownership boundary and are not scanned.
  */
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "check-harn-syntax-sensitive-scans"
+
 pub fn llm_policy_identity_findings(fs: HarnessFs, rules: HarnessRules, root: string) -> list {
   const rule_path = path_join(root, "scripts/rules/llm_policy_model_identity.toml")
   const rule = fs.read_text(rule_path)
   let findings = []
   for rel in LLM_POLICY_FILES {
     const path = path_join(root, rel)
-    if !fs.exists(path) {
+    // Skipping a policy file leaves its model-identity ownership unproven, and
+    // the pass is decided by a violation count that a skipped file never
+    // contributes to.
+    const seen = path_visibility(fs, CHECK_NAME, path)
+    if seen.denial != "" {
+      throw seen.denial
+    }
+    if !seen.exists {
       continue
     }
     const result = rules_search(rules, {rule: rule, source: fs.read_text(path), language: "harn"})

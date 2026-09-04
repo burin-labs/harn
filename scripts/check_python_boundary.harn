@@ -1,5 +1,9 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { find_files } from "std/fs"
+import { path_visibility } from "./path_visibility.harn"
+
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "check-python-boundary"
 
 const SKIP_SEGMENTS = [
   "/.burin/",
@@ -126,11 +130,23 @@ fn git_python_files(fs: HarnessFs, process: HarnessProcess, root: string) -> lis
   if listed.exit_code != 0 {
     return nil
   }
+  // Filtering the git-tracked list through a call that cannot report a denial
+  // shrinks the census silently, which is the same failure the reconciliation
+  // in the source-length ratchet was built to catch.
   return listed.stdout.lines().map({ path -> path.trim() }).filter(
-    { path -> path != "" && fs.exists(path_join(root, path)) },
+    { path -> path != "" && __visible_and_present(fs, path_join(root, path)) },
   )
     .to_list()
     .sort()
+}
+
+/** True only when the path was actually inspected and is there; a denial throws. */
+fn __visible_and_present(fs: HarnessFs, path: string) -> bool {
+  const seen = path_visibility(fs, CHECK_NAME, path)
+  if seen.denial != "" {
+    throw seen.denial
+  }
+  return seen.exists
 }
 
 pub fn python_files(fs: HarnessFs, process: HarnessProcess, root: string = "") -> list<string> {
@@ -206,7 +222,7 @@ fn git_embedded_text_files(fs: HarnessFs, process: HarnessProcess, root: string)
     { path ->
       path != ""
         && is_embedded_text_path(path)
-        && fs.exists(path_join(root, path))
+        && __visible_and_present(fs, path_join(root, path))
     },
   )
     .to_list()
@@ -240,16 +256,20 @@ pub fn embedded_python_text_files(
     }
   }
   const workflow_root = path_join(root, ".github/workflows")
-  if fs.exists(workflow_root) {
+  const workflows = path_visibility(fs, CHECK_NAME, workflow_root)
+  if workflows.denial != "" {
+    throw workflows.denial
+  }
+  if workflows.exists {
     for name in fs.list_dir(workflow_root) {
       const path = path_join(workflow_root, name)
-      if fs.exists(path) && (name.ends_with(".yml") || name.ends_with(".yaml")) {
+      if __visible_and_present(fs, path) && (name.ends_with(".yml") || name.ends_with(".yaml")) {
         files = files + [rel_path(path, root)]
       }
     }
   }
   const root_makefile = path_join(root, "Makefile")
-  if fs.exists(root_makefile) {
+  if __visible_and_present(fs, root_makefile) {
     files = files + ["Makefile"]
   }
   return files.unique().sort()

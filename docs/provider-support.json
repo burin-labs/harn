@@ -1216,14 +1216,14 @@
         "GOOGLE_API_KEY"
       ],
       "recommended": {
-        "selector": "gemini:gemini-2.5-flash",
+        "selector": "gemini:gemini-3.5-flash-lite",
         "provider": "gemini",
-        "model": "gemini-2.5-flash",
-        "display_name": "Gemini 2.5 Flash",
+        "model": "gemini-3.5-flash-lite",
+        "display_name": "Gemini 3.5 Flash-Lite",
         "tool_format": "native",
         "harn_options": [
           "provider = \"gemini\"",
-          "model = \"gemini-2.5-flash\"",
+          "model = \"gemini-3.5-flash-lite\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]

@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# Main-produced Windows workspace warm target outside the Actions cache
-# namespace. Release-certify consumers restore it read-only and fall back cold
-# when no compatible generation exists (harn#6485).
+# Main-produced workspace warm target held outside the Actions cache namespace.
+# Consumers restore it read-only and fall back cold when no compatible
+# generation exists (harn#6485).
+#
+# The Actions cache namespace is capacity-bound at 10 GiB and turns over in
+# under a day, so a workspace target cache saved into it is evicted before any
+# consumer reads it (harn#8016). Artifact storage is not capacity-bound the
+# same way, which is why the warm target lives here rather than in a cache.
+#
+# One script serves every platform. The platform selects which
+# .github/cache-policy.json block owns the knobs and which prefix the machine
+# readable output keys carry, so a caller cannot silently read Windows numbers
+# on a macOS run.
 #
 # Knobs live in .github/cache-policy.json; this script and
 # scripts/check_ci_cache_policy.harn both read that document through
@@ -12,12 +22,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
 
+# Set by select_platform before any policy read. Unset is a bug, not a default:
+# a missing platform must refuse rather than pick one.
+POLICY_KEY=""
+KEY_PREFIX=""
+PLATFORM_LABEL=""
+
+select_platform() {
+  case "${1:-}" in
+    windows)
+      POLICY_KEY="windows_workspace_warm"
+      KEY_PREFIX="windows"
+      PLATFORM_LABEL="Windows"
+      ;;
+    macos)
+      POLICY_KEY="macos_workspace_warm"
+      KEY_PREFIX="macos"
+      PLATFORM_LABEL="macOS"
+      ;;
+    *)
+      echo "error: expected platform 'windows' or 'macos', got '${1:-<missing>}'" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
 load_warm_policy() {
-  ARTIFACT_NAME="$(harn_cache_policy_jq '.windows_workspace_warm.artifact_name')"
-  SCHEMA="$(harn_cache_policy_jq '.windows_workspace_warm.manifest_schema')"
-  WORKFLOW_FILE="$(harn_cache_policy_jq '.windows_workspace_warm.workflow')"
-  DEFAULT_MAX_BYTES="$(harn_cache_policy_jq '.windows_workspace_warm.max_bytes')"
-  DEFAULT_BUILD_HEADROOM_BYTES="$(harn_cache_policy_jq '.windows_workspace_warm.build_headroom_bytes')"
+  ARTIFACT_NAME="$(harn_cache_policy_jq ".${POLICY_KEY}.artifact_name")"
+  SCHEMA="$(harn_cache_policy_jq ".${POLICY_KEY}.manifest_schema")"
+  WORKFLOW_FILE="$(harn_cache_policy_jq ".${POLICY_KEY}.workflow")"
+  DEFAULT_MAX_BYTES="$(harn_cache_policy_jq ".${POLICY_KEY}.max_bytes")"
+  DEFAULT_BUILD_HEADROOM_BYTES="$(harn_cache_policy_jq ".${POLICY_KEY}.build_headroom_bytes")"
   NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
   PRODUCER_REF="$(harn_cache_policy_jq '.persistent_ref')"
   PRODUCER_BRANCH="${PRODUCER_REF#refs/heads/}"
@@ -30,20 +66,25 @@ load_warm_policy() {
 usage() {
   cat <<'EOF'
 usage:
-  scripts/ci/windows_workspace_warm_artifact.sh pack <staging-dir>
-  scripts/ci/windows_workspace_warm_artifact.sh restore <staging-dir> <target-dir>
-  scripts/ci/windows_workspace_warm_artifact.sh discover --repo OWNER/REPO
-  scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo OWNER/REPO [--target-dir DIR]
+  scripts/ci/workspace_warm_artifact.sh <platform> pack <staging-dir>
+  scripts/ci/workspace_warm_artifact.sh <platform> restore <staging-dir> <target-dir>
+  scripts/ci/workspace_warm_artifact.sh <platform> discover --repo OWNER/REPO
+  scripts/ci/workspace_warm_artifact.sh <platform> download-and-restore --repo OWNER/REPO [--target-dir DIR]
+
+<platform> is windows or macos. It selects the owning cache-policy block and
+the prefix on every machine readable output key, so a caller can never read one
+platform's numbers on another platform's run.
 
 pack strips workspace-member and incremental outputs from CARGO_TARGET_DIR, then
 writes a typed warm bundle under <staging-dir> for actions/upload-artifact.
 
-download-and-restore finds the newest successful main windows-nightly warm
-artifact, restores it into the target dir, and exits 0 only on a compatible hit.
-Missing or incompatible generations exit non-zero so the caller can fall cold.
+download-and-restore finds the newest successful main nightly warm artifact for
+that platform, restores it into the target dir, and exits 0 only on a compatible
+hit. Missing or incompatible generations exit non-zero so the caller can fall
+cold.
 
-Configuration is owned by .github/cache-policy.json (nextest_version and
-windows_workspace_warm).
+Configuration is owned by .github/cache-policy.json (nextest_version and the
+per-platform <platform>_workspace_warm block).
 EOF
 }
 
@@ -92,18 +133,18 @@ require_repo() {
 }
 
 max_bundle_bytes() {
-  local value="${HARN_WINDOWS_WARM_ARTIFACT_MAX_BYTES:-$DEFAULT_MAX_BYTES}"
+  local value="${HARN_WARM_ARTIFACT_MAX_BYTES:-$DEFAULT_MAX_BYTES}"
   if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
-    echo "error: HARN_WINDOWS_WARM_ARTIFACT_MAX_BYTES must be a positive integer" >&2
+    echo "error: HARN_WARM_ARTIFACT_MAX_BYTES must be a positive integer" >&2
     exit 2
   fi
   printf '%s\n' "$value"
 }
 
 build_headroom_bytes() {
-  local value="${HARN_WINDOWS_WARM_BUILD_HEADROOM_BYTES:-$DEFAULT_BUILD_HEADROOM_BYTES}"
+  local value="${HARN_WARM_BUILD_HEADROOM_BYTES:-$DEFAULT_BUILD_HEADROOM_BYTES}"
   if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
-    echo "error: HARN_WINDOWS_WARM_BUILD_HEADROOM_BYTES must be a positive integer" >&2
+    echo "error: HARN_WARM_BUILD_HEADROOM_BYTES must be a positive integer" >&2
     exit 2
   fi
   printf '%s\n' "$value"
@@ -184,10 +225,19 @@ strip_workspace_member_artifacts() {
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
     underscored="${name//-/_}"
+    # The bare and .dSYM forms are the Unix half. Windows ships harn.exe and
+    # harn.pdb, which the hashed patterns above never match either; macOS and
+    # Linux ship a bare `harn` plus a `harn.dSYM` bundle. Without these a
+    # restored bundle carries a stale workspace binary that Cargo can read as
+    # fresh, which is the failure this strip exists to prevent.
     find "$target_dir" -mindepth 2 -maxdepth 3 \( \
       -name "${name}-*" -o \
       -name "${underscored}-*" -o \
       -name "lib${underscored}-*" -o \
+      -name "${name}" -o \
+      -name "${underscored}" -o \
+      -name "${name}.dSYM" -o \
+      -name "${underscored}.dSYM" -o \
       -name "${name}.exe" -o \
       -name "${name}.pdb" -o \
       -name "${underscored}.exe" -o \
@@ -230,15 +280,15 @@ pack() {
   bytes="$(wc -c < "$archive" | tr -d ' ')"
   limit="$(max_bundle_bytes)"
   if (( bytes > limit )); then
-    echo "error: Windows warm artifact is ${bytes} bytes; limit is ${limit} bytes" >&2
+    echo "error: ${PLATFORM_LABEL} warm artifact is ${bytes} bytes; limit is ${limit} bytes" >&2
     exit 1
   fi
-  printf 'windows_warm_artifact_bytes=%s\n' "$bytes"
-  printf 'windows_warm_artifact_target_bytes=%s\n' "$target_bytes"
-  printf 'windows_warm_artifact_producer_commit=%s\n' "$producer_commit"
+  printf "${KEY_PREFIX}_warm_artifact_bytes=%s\n" "$bytes"
+  printf "${KEY_PREFIX}_warm_artifact_target_bytes=%s\n" "$target_bytes"
+  printf "${KEY_PREFIX}_warm_artifact_producer_commit=%s\n" "$producer_commit"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
-      echo "### Windows workspace warm artifact"
+      echo "### ${PLATFORM_LABEL} workspace warm artifact"
       echo
       echo "- Producer commit: \`${producer_commit}\`"
       echo "- Compressed bytes: ${bytes}"
@@ -276,12 +326,12 @@ restore() {
   available_after_replace_bytes="$((free_bytes + current_target_bytes))"
   required_bytes="$((target_bytes + headroom_bytes))"
   if (( available_after_replace_bytes < required_bytes )); then
-    printf 'windows_warm_restore_reason=insufficient_space\n'
-    printf 'windows_warm_restore_target_bytes=%s\n' "$target_bytes"
-    printf 'windows_warm_restore_headroom_bytes=%s\n' "$headroom_bytes"
-    printf 'windows_warm_restore_free_bytes=%s\n' "$free_bytes"
-    printf 'windows_warm_restore_existing_target_bytes=%s\n' "$current_target_bytes"
-    printf 'windows_warm_restore_available_after_replace_bytes=%s\n' "$available_after_replace_bytes"
+    printf "${KEY_PREFIX}_warm_restore_reason=insufficient_space\n"
+    printf "${KEY_PREFIX}_warm_restore_target_bytes=%s\n" "$target_bytes"
+    printf "${KEY_PREFIX}_warm_restore_headroom_bytes=%s\n" "$headroom_bytes"
+    printf "${KEY_PREFIX}_warm_restore_free_bytes=%s\n" "$free_bytes"
+    printf "${KEY_PREFIX}_warm_restore_existing_target_bytes=%s\n" "$current_target_bytes"
+    printf "${KEY_PREFIX}_warm_restore_available_after_replace_bytes=%s\n" "$available_after_replace_bytes"
     echo "error: warm artifact needs ${target_bytes} target bytes plus ${headroom_bytes} build-headroom bytes, but replacing the existing target would make only ${available_after_replace_bytes} bytes available" >&2
     exit 1
   fi
@@ -291,17 +341,17 @@ restore() {
     cd "$(dirname "$archive")"
     tar -xzf "$(basename "$archive")" -C "$target_dir"
   )
-  printf 'windows_warm_restore=hit\n'
-  printf 'windows_warm_restore_target_bytes=%s\n' "$target_bytes"
-  printf 'windows_warm_restore_headroom_bytes=%s\n' "$headroom_bytes"
-  printf 'windows_warm_restore_free_bytes_before=%s\n' "$free_bytes"
-  printf 'windows_warm_restore_existing_target_bytes=%s\n' "$current_target_bytes"
-  printf 'windows_warm_restore_available_after_replace_bytes=%s\n' "$available_after_replace_bytes"
-  printf 'windows_warm_restore_producer_commit=%s\n' \
+  printf "${KEY_PREFIX}_warm_restore=hit\n"
+  printf "${KEY_PREFIX}_warm_restore_target_bytes=%s\n" "$target_bytes"
+  printf "${KEY_PREFIX}_warm_restore_headroom_bytes=%s\n" "$headroom_bytes"
+  printf "${KEY_PREFIX}_warm_restore_free_bytes_before=%s\n" "$free_bytes"
+  printf "${KEY_PREFIX}_warm_restore_existing_target_bytes=%s\n" "$current_target_bytes"
+  printf "${KEY_PREFIX}_warm_restore_available_after_replace_bytes=%s\n" "$available_after_replace_bytes"
+  printf "${KEY_PREFIX}_warm_restore_producer_commit=%s\n" \
     "$(sed -n 's/^producer_commit=//p' "$manifest")"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
-      echo "### Windows workspace warm restore"
+      echo "### ${PLATFORM_LABEL} workspace warm restore"
       echo
       echo "- Outcome: hit"
       echo "- Producer commit: \`$(sed -n 's/^producer_commit=//p' "$manifest")\`"
@@ -378,11 +428,16 @@ download_and_restore() {
   if [[ ! -f "$staging/manifest" && -f "$staging/$ARTIFACT_NAME/manifest" ]]; then
     staging="$staging/$ARTIFACT_NAME"
   fi
-  printf 'windows_warm_restore_run_id=%s\n' "$run_id"
+  printf "${KEY_PREFIX}_warm_restore_run_id=%s\n" "$run_id"
   restore "$staging" "$target_dir"
 }
 
 main() {
+  case "${1:-}" in
+    -h|--help) usage; return 0 ;;
+  esac
+  select_platform "${1:-}"
+  shift
   local command=${1:-}
   if [[ -z "$command" ]]; then
     usage >&2

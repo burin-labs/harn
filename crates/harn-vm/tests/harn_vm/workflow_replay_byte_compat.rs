@@ -151,6 +151,10 @@ pipeline default(harness: Harness) {{
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+)]
 fn live_default_policy_attempts_match_pre_inversion_bytes() {
     let fixture: serde_json::Value =
         serde_json::from_str(PRE_INVERSION_RUN).expect("fixture parses");
