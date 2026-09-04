@@ -1,3 +1,5 @@
+import { AgentDeclaredArtifactAudit } from "std/agent/required_artifacts"
+
 /** Producer-owned classification of an agent-loop terminal. */
 pub type AgentTerminalKind = "natural" \
   | "user_cancelled" \
@@ -217,9 +219,13 @@ pub type AgentRecapAvailability = {state: "available", snapshot: AgentRecapSnaps
  * place that holds the evidence. A result obtained from
  * `HarnessAgent.session_finalize` directly therefore never carries this field,
  * because no loop ran to decide it — not because the run was judged complete.
+ *
+ * `AgentResult.declared_artifacts` is the sibling field and is NOT a verdict:
+ * the declared-artifact audit is published on satisfied runs too, so a caller
+ * can tell a contract that passed from one that was never checked.
  */
 pub type AgentAbandonment = {
-  cause: "no_tool_call_succeeded" | "required_tool_missing",
+  cause: "no_tool_call_succeeded" | "required_tool_missing" | "declared_artifact_missing",
   natural_stop_reason: string,
   attempted_tool_calls: int,
   succeeded_tool_calls: int,
@@ -242,6 +248,7 @@ pub type AgentResult = {
   terminal_class: string?,
   terminal: AgentTerminalOutcome,
   abandonment?: AgentAbandonment,
+  declared_artifacts?: AgentDeclaredArtifactAudit,
   error: any,
   text: string,
   visible_text: string,

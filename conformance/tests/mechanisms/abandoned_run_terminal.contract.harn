@@ -3,12 +3,14 @@
 //
 // Contract = {trigger, effect, negative}:
 //   trigger  — a run reaches its own end having attempted tool calls without a
-//              single one succeeding;
+//              single one succeeding, OR having succeeded at every tool call
+//              while an artifact the caller declared does not exist;
 //   effect   — the terminal kind is `completion_unverified` and the evidence
 //              that convicted it rides beside the run's own stop reason,
 //              which is kept verbatim;
-//   negative — a run whose tool succeeded, and a run that used no tools at
-//              all, both still seal a natural terminal and carry no record.
+//   negative — a run whose tool succeeded, a run that used no tools at all,
+//              and a run that wrote the artifact it declared all still seal a
+//              natural terminal.
 //
 // Why this contract exists. The vocabulary for an unverified completion
 // already existed on both sides of the bridge and already projected to a
@@ -17,6 +19,11 @@
 // byte-identical to a run that did the work (harn#7915). The negatives carry
 // most of the weight here: a rule that convicted a quiet run would be a worse
 // defect than the one it fixes.
+//
+// The declared-artifact clauses cover the issue's third cause, where the tool
+// tally is silent by construction because every call succeeded. The pair of
+// runs differs only in WHICH path the model wrote, so a contract that passed
+// both would prove the mechanism reads the declaration rather than the tally.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
@@ -179,8 +186,109 @@ fn no_tools_case(harness: Harness) {
   )
 }
 
+fn writing_toolset(fs: HarnessFs) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a UTF-8 file.",
+    {
+      handler: { args ->
+        fs.write_text(to_string(args.path), "hello")
+        return "wrote 1 file"
+      },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  return tools
+}
+
+fn declared_artifact_missing_case(harness: Harness) {
+  const dir = harness.fs.mkdtemp_in_workspace("contract-7915-missing")
+  const declared = path_join(dir, "report.md")
+  const written = path_join(dir, "scratch.md")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: written}, "write-1"),
+      llm_text("I wrote the report. ##DONE##"),
+    ],
+    { ->
+      const session = "contract-declared-missing-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Write the report to " + declared + ". Then stop.",
+          nil,
+          base_opts(session, writing_toolset(harness.fs))
+            + {require_artifacts: [declared]},
+        ) },
+      )
+      // Every tool call succeeded, so the tally cannot reach this verdict. The
+      // declaration is the only evidence, and the audit names the path.
+      contract_effect(
+        harness.stdio,
+        "effect_a_missing_declared_artifact_is_not_a_natural_terminal",
+        captured.result.terminal.kind == "completion_unverified"
+          && captured.result.terminal.lifecycle_state == "failed"
+          && captured.result.abandonment?.cause == "declared_artifact_missing"
+          && captured.result.abandonment?.succeeded_tool_calls == 1
+          && captured.result.declared_artifacts?.missing == [declared]
+          && abandon_count(captured.events) == 1,
+      )
+    },
+  )
+}
+
+fn declared_artifact_present_case(harness: Harness) {
+  const dir = harness.fs.mkdtemp_in_workspace("contract-7915-present")
+  const declared = path_join(dir, "report.md")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: declared}, "write-1"),
+      llm_text("I wrote the report. ##DONE##"),
+    ],
+    { ->
+      const session = "contract-declared-present-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Write the report to " + declared + ". Then stop.",
+          nil,
+          base_opts(session, writing_toolset(harness.fs))
+            + {require_artifacts: [declared]},
+        ) },
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_a_satisfied_declaration_is_not_abandonment",
+        captured.result.terminal.kind != "natural"
+          || captured.result.abandonment != nil
+          || abandon_count(captured.events) > 0,
+      )
+      // And the audit is published on the satisfied run, so a declaration that
+      // was CHECKED and passed can never be confused with one never checked.
+      contract_effect(
+        harness.stdio,
+        "effect_a_satisfied_declaration_still_reports_its_audit",
+        captured.result.declared_artifacts?.declared == [declared]
+          && captured.result.declared_artifacts?.missing == [],
+      )
+    },
+  )
+}
+
 pipeline default(harness: Harness) {
   abandoned_case(harness)
   successful_tool_case(harness)
   no_tools_case(harness)
+  declared_artifact_missing_case(harness)
+  declared_artifact_present_case(harness)
 }
