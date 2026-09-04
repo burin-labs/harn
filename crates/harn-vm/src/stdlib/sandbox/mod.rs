@@ -1689,6 +1689,11 @@ fn coverage_jail_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     roots.extend(process_sandbox_package_manager_config_read_roots(policy));
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     roots.extend(process_sandbox_developer_toolchain_cache_roots(policy));
+    // The Windows backend grants these regardless of the preset, so the
+    // coverage check has to see them or it will call a path outside the jail
+    // that the child can in fact read.
+    #[cfg(target_os = "windows")]
+    roots.extend(windows_read_open_acl_roots(policy));
     roots
 }
 
@@ -1944,6 +1949,65 @@ pub(crate) fn process_sandbox_developer_toolchain_read_roots(
         return Vec::new();
     };
     developer_toolchain_read_roots_for_home(&home)
+}
+
+/// Windows-only: the read surface the AppContainer backend must grant with an
+/// explicit ACE, expressed independently of the `DeveloperToolchains` preset.
+///
+/// An AppContainer token is a LowBox token, so every access check runs twice:
+/// once against the token's ordinary groups and once against the container's
+/// own package SID, its capability SIDs, and `ALL APPLICATION PACKAGES`. A path
+/// whose DACL names none of those is unreadable no matter what the launching
+/// user could read, which is why the product's "reads are open" contract needs
+/// the grants below rather than falling out of the OS defaults.
+///
+/// Two things go in beyond [`developer_toolchain_read_roots_for_home`]:
+///
+/// - the toolchain roots stop being gated on the preset. They are read-only
+///   grants for well-known toolchain directories, and a policy that forgot the
+///   preset should still get a child that can run the toolchains its parent
+///   can run.
+/// - every directory on the *parent's* `PATH` that lives under the user's
+///   home. `ALL APPLICATION PACKAGES` carries a read+execute grant on the
+///   machine-wide system directories by default, but nothing grants it inside a
+///   user profile, so a per-user shim directory on `PATH` is invisible to the
+///   child until it is named here.
+///
+/// Package-manager config roots are deliberately NOT folded in. That set
+/// includes credential-bearing files (`.netrc`, `.npmrc`, `.pypirc`), the
+/// AppContainer's deny-by-default posture is the only thing keeping them out of
+/// reach on this backend, and the typed secrets denylist has no ACL expression
+/// here. They stay behind `PackageManagerConfig`.
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_read_open_acl_roots(_policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let Some(home) = sandbox_user_home_dir() else {
+        return Vec::new();
+    };
+    let mut roots = developer_toolchain_read_roots_for_home(&home);
+    roots.extend(executable_search_roots_under_home(&home));
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
+/// Directories on the parent's `PATH` that live strictly under `home`.
+///
+/// Machine-wide entries are left out on purpose: they already carry the default
+/// `ALL APPLICATION PACKAGES` read+execute grant, and running `icacls /T` over
+/// something like `C:\Program Files` on every spawn would cost far more than
+/// the grant is worth. `home` itself is excluded so a bare `PATH` entry of the
+/// profile root cannot turn into a recursive grant over the whole profile.
+#[cfg(target_os = "windows")]
+fn executable_search_roots_under_home(home: &Path) -> Vec<PathBuf> {
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Vec::new();
+    };
+    let home = normalize_for_policy(home);
+    std::env::split_paths(&path_var)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| normalize_for_policy(&dir))
+        .filter(|dir| dir != &home && dir.starts_with(&home))
+        .collect()
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

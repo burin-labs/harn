@@ -556,15 +556,33 @@ impl Drop for WorkspaceAclGrants {
     }
 }
 
+/// The read surface this backend installs an ACE for on every spawn.
+///
+/// The unconditional half ([`super::windows_read_open_acl_roots`]) is the
+/// toolchain and per-user `PATH` read grants the "reads are open" contract
+/// needs whether or not the policy names a preset.
+///
+/// The `presets.is_some()` guard on the other half used to wrap this whole
+/// function, and that was a defect in its own right: `presets: None` means "use
+/// the runtime defaults", and `effective_presets()` resolves it to all four
+/// presets including `DeveloperToolchains`. Reading the raw field instead threw
+/// every default-policy grant away, so the most common policy on this backend
+/// got no toolchain read access at all. It survives only on the
+/// package-manager half, deliberately: that set names credential files
+/// (`.netrc`, `.npmrc`, `.pypirc`), the typed secrets denylist has no ACL
+/// expression here, and an AppContainer's deny-by-default posture is the only
+/// thing keeping them out of the child's reach. Granting them needs the
+/// embedder to have said so, which is a real divergence from the macOS and
+/// Linux backends and is tracked as such.
 fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    if policy.process_sandbox.presets.is_none() {
-        return Vec::new();
+    let mut roots = super::windows_read_open_acl_roots(policy);
+    roots.extend(process_sandbox_developer_toolchain_read_roots(policy));
+    if policy.process_sandbox.presets.is_some() {
+        roots.extend(process_sandbox_package_manager_config_read_roots(policy));
     }
-
-    process_sandbox_developer_toolchain_read_roots(policy)
-        .into_iter()
-        .chain(process_sandbox_package_manager_config_read_roots(policy))
-        .collect()
+    roots.sort_unstable();
+    roots.dedup();
+    roots
 }
 
 struct JobObject {
