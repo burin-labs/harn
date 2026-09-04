@@ -913,11 +913,41 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
 ///
 /// Any escape file found is deleted before the panic, so a broken backend does
 /// not leave stray files behind for the next run to trip over.
+/// Whether this host actually confines a child process's filesystem access.
+///
+/// This is not a restatement of the code under test, it is the host fact the
+/// backend itself branches on. macOS always has its sandbox. Linux needs
+/// Landlock, and on a kernel without it the `Worktree` profile is documented
+/// best-effort: it warns and runs the child unconfined. Continuous
+/// integration runs on exactly such a host, which is worth stating plainly —
+/// no Linux job here can prove write confinement, so the confinement claim
+/// rests on macOS and Windows.
+///
+/// The point of returning a fact rather than skipping is that the assertion
+/// above keeps binding either way: where isolation is active the escapes must
+/// be denied, and where it is absent they must succeed.
+#[cfg(unix)]
+fn process_filesystem_isolation_is_active() -> bool {
+    if cfg!(target_os = "macos") {
+        return true;
+    }
+    fs::read_to_string("/sys/kernel/security/lsm")
+        .map(|active| active.split(',').any(|lsm| lsm.trim() == "landlock"))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn process_filesystem_isolation_is_active() -> bool {
+    // The AppContainer this backend launches is always available.
+    true
+}
+
 fn assert_writes_stay_confined(
     experiment_root: &Path,
     outcome: &Result<String, String>,
     escape_targets: &[(&str, Option<PathBuf>)],
 ) {
+    let isolation_active = process_filesystem_isolation_is_active();
     let stdout = match outcome {
         Ok(stdout) => stdout.clone(),
         Err(error) => error.clone(),
@@ -935,14 +965,32 @@ fn assert_writes_stay_confined(
             ));
             continue;
         };
-        if escape_path.exists() {
+        let escaped = escape_path.exists();
+        let contents = if escaped {
             let contents = fs::read_to_string(escape_path).unwrap_or_default();
-            failures.push(format!(
+            let _ = fs::remove_file(escape_path);
+            contents
+        } else {
+            String::new()
+        };
+        match (isolation_active, escaped) {
+            (true, true) => failures.push(format!(
                 "  WRITE ESCAPED CONFINEMENT: {label} target {} exists (contents: {contents:?}) \
                  -- the sandboxed run tool wrote outside the workspace",
                 escape_path.display()
-            ));
-            let _ = fs::remove_file(escape_path);
+            )),
+            (true, false) => {}
+            // No isolation on this host, so the write MUST have landed. This
+            // arm is why the check cannot pass by measuring nothing: on a host
+            // that confines nothing, a missing file means the command never
+            // ran, and that would otherwise read exactly like confinement.
+            (false, false) => failures.push(format!(
+                "  NOTHING WAS WRITTEN AND NOTHING WAS CONFINING IT: {label} target {} is \
+                 absent on a host that reports no process filesystem isolation, so the \
+                 command that should have created it never ran",
+                escape_path.display()
+            )),
+            (false, true) => {}
         }
     }
     match fs::read_to_string(&inside_write) {
