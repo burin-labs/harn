@@ -216,12 +216,18 @@ fn tool_registry_cli_allows_only_cli_governed_tools() {
 fn tool_registry_cli_rejects_schema_violations_before_dispatch() {
     let (_temp, path) = fixture();
     let output = harn_e2e_command()
-        .args(["tool", "run", &path, "widgets", "get", "--widget-id", "0"])
+        // `widget_id` is projected positionally by the fixture, so the
+        // out-of-range value has to arrive as a positional token; passing it as
+        // a flag failed in clap and never reached the schema this asserts on.
+        .args(["tool", "run", &path, "widgets", "get", "0"])
         .output()
         .expect("invalid run command");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("do not match its schema"), "{stderr}");
+    assert!(
+        stderr.contains("input violates its declared schema"),
+        "{stderr}"
+    );
     assert!(stderr.contains("minimum"), "{stderr}");
 }
 
