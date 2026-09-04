@@ -626,9 +626,18 @@ pub fn nextest_version_errors(policy: CiCachePolicy, workflows: dict) -> list<st
 
 pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
   const warm = policy.windows_workspace_warm
+  const macos_warm = policy.macos_workspace_warm
   if warm.max_bytes >= policy.storage_limit_bytes {
     return [
       "cache-policy.json windows_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
+    ]
+  }
+  // Every warm block is governed, not just the first one written. A ceiling
+  // check that names one platform stops being a ceiling the moment a second
+  // platform is added.
+  if macos_warm.max_bytes >= policy.storage_limit_bytes {
+    return [
+      "cache-policy.json macos_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
     ]
   }
   if warm.dev_drive_size_full_workspace == warm.dev_drive_size_default
