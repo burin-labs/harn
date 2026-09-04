@@ -1,0 +1,51 @@
+import { read_json_result } from "std/fs"
+import {
+  ReleaseContract,
+  release_contract,
+  release_contract_parse,
+  release_contract_source_errors,
+} from "../release_contract"
+
+pipeline test_generated_release_contract_is_typed(harness: Harness, task: unknown) {
+  const loaded = read_json_result(harness.fs, "../../scripts/release_contract.json")
+  assert(is_ok(loaded))
+  const parsed = release_contract_parse(unwrap(loaded))
+  assert(parsed != nil)
+  assert_eq(parsed.versions.development_prerelease, "dev")
+  assert_eq(parsed.tag.anchor, "merged_main_commit")
+  assert_eq(parsed.workflows.binaries.jobs.contains("build"), true)
+}
+
+pipeline test_release_contract_rejects_a_wrong_schema_version(task: unknown) {
+  const value = json_parse(json_stringify(release_contract()))
+  const invalid = value + {schema_version: "harn.release_contract.v0"}
+  assert_eq(release_contract_parse(invalid), nil)
+}
+
+pipeline test_release_contract_rejects_unknown_fields(task: unknown) {
+  const value = json_parse(json_stringify(release_contract()))
+  assert_eq(release_contract_parse(value + {retired_owner: true}), nil)
+}
+
+pipeline test_release_contract_matches_owning_sources(harness: Harness, task: unknown) {
+  assert_eq(release_contract_source_errors(harness.fs, "../..", release_contract()), [])
+}
+
+pipeline test_release_contract_catches_an_observed_step_rename(harness: Harness, task: unknown) {
+  const contract = release_contract()
+  const drifted: ReleaseContract = contract
+    + {
+      workflows: contract.workflows
+        + {
+          binaries: contract.workflows.binaries
+            + {observed_steps: ["Retired binary-size step"]},
+        },
+    }
+  const errors = release_contract_source_errors(harness.fs, "../..", drifted)
+  assert_eq(
+    errors,
+    [
+      ".github/workflows/build-release-binaries.yml is missing observed step `Retired binary-size step`",
+    ],
+  )
+}

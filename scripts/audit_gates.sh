@@ -140,6 +140,7 @@ GATES=(
   check-rust-test-lane-policy
   check-crate-sibling-versions
   check-dependabot-groups
+  check-release-contract
   check-release-audit-contract
   check-vm-rss-soak
 )
