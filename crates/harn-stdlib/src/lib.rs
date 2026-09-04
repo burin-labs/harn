@@ -342,6 +342,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/pattern_knowledge_values" => "stdlib/agent/pattern_knowledge_values.harn",
     "agent/pattern_knowledge_curated" => "stdlib/agent/pattern_knowledge_curated.harn",
     "agent/pattern_knowledge_persistence" => "stdlib/agent/pattern_knowledge_persistence.harn",
+    "agent/pattern_knowledge_matching" => "stdlib/agent/pattern_knowledge_matching.harn",
     "agent/pattern_knowledge" => "stdlib/agent/pattern_knowledge.harn",
     "agent/crystallization_curator" => "stdlib/agent/crystallization_curator.harn",
     "agent/probe" => "stdlib/agent/probe.harn",
