@@ -840,33 +840,130 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
     );
 }
 
-/// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993 swarm brief,
-/// coordination/windows-sandbox-swarm-2026-09-04.md). Every candidate fix
-/// for the Windows read-closed defect widens READS; none of them may widen
+/// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993). Every candidate fix for
+/// the Windows read-closed defect widens READS; none of them may widen
 /// WRITES. This drives the same seam the failing fixtures use
 /// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
 /// `run_captured_spawn` -> the Windows sandbox backend) and checks the real
-/// filesystem afterward, not `cmd.exe`'s own stdout wording — candidates
-/// A/B/C may implement confinement through different mechanisms with
+/// filesystem afterward, not `cmd.exe`'s own stdout wording — different
+/// candidates may implement confinement through different mechanisms with
 /// different denial text/exit codes, but the file either exists on disk or
 /// it does not, and that check is mechanism-agnostic.
 ///
-/// Two writes target locations a normal, unsandboxed user process can
-/// always write to (`%USERPROFILE%`, `%TEMP%`) — both OUTSIDE the
-/// workspace — so a failure there can only be the sandbox's own write
-/// confinement, never an ambient OS permission the account never had. A
-/// third write lands inside the workspace (the run tool's cwd is
+/// Both write targets sit under `%USERPROFILE%`, OUTSIDE the workspace: one
+/// directly in the profile root (a path that exists on every machine), and
+/// one inside a fresh subdirectory this test creates itself (proving, on
+/// the host side and before the sandboxed run, that the subdirectory exists
+/// and is writable) — so a candidate cannot pass by only closing off a
+/// well-known top-level path while leaving a freshly created one open. A
+/// failure to deny either write can only be the sandbox's own write
+/// confinement, never an ambient OS permission the account never had.
+///
+/// This deliberately does NOT target the system temp directory the way an
+/// earlier version of this test did. The temp directory is a legitimately
+/// granted write root under this backend's own `UserTemp` preset whenever
+/// workspace writes are allowed, so a successful write there is the policy
+/// working correctly, not an escape — using it as a denial arm produced a
+/// false violation. (An even earlier version used `%TEMP%` directly inside
+/// the sandboxed command, which was vacuous for a different reason: the
+/// Windows backend overrides the child's own `TEMP`/`TMP` to an
+/// AppContainer-local path — see `environment_overrides` in `windows.rs` —
+/// so `%TEMP%` expanded inside the child never resolved to the host path
+/// this test was checking.)
+///
+/// A third write lands inside the workspace (the run tool's cwd is
 /// `workspace_root(fs)`, see `experiments/burin-mini/lib/workspace.harn`)
 /// and MUST succeed: a candidate that closes reads by also closing writes
 /// it used to allow is a regression, not a fix, even if the 5 real
 /// fixtures happen to pass.
 ///
+/// Before trusting an absent escape file as a genuine denial, a negative
+/// control writes to the exact same two `%USERPROFILE%`-rooted paths
+/// through an *unsandboxed* spawn (no harn sandbox in the path at all) and
+/// asserts both files appear, then removes them. Skipping this would make
+/// the whole test vacuous in exactly the way the earlier `%TEMP%` checks
+/// were: an absent file proves nothing unless something first proves the
+/// file would have been there to find.
+///
 /// Any escape file this test finds is deleted before the assertion panics,
-/// so a broken candidate does not leave stray files on the runner.
+/// and the subdirectory it creates is always removed on the way out, so a
+/// broken candidate does not leave stray files or directories on the
+/// runner.
 #[cfg(windows)]
 #[test]
 fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     let (_temp, experiment_root) = setup_experiment_copy();
+
+    let userprofile_dir = std::env::var("USERPROFILE").expect(
+        "USERPROFILE must be set to run the write-confinement check or its negative control",
+    );
+    let userprofile_dir = PathBuf::from(userprofile_dir);
+    let userprofile_escape = userprofile_dir.join("harn-escape-7993-userprofile.txt");
+    let subdir = userprofile_dir.join("harn-escape-7993-subdir");
+    let subdir_escape = subdir.join("harn-escape-7993-nested.txt");
+
+    // Create the subdirectory on the host side and prove, before the
+    // sandboxed run, that this (unsandboxed) test process can actually
+    // write inside it. If this fails, the real check below would not be
+    // measuring the sandbox at all.
+    fs::create_dir_all(&subdir).unwrap_or_else(|error| {
+        panic!(
+            "could not create the write-confinement subdirectory {} on the host: {error}",
+            subdir.display()
+        )
+    });
+    let subdir_sentinel = subdir.join("harn-subdir-host-writable-sentinel-7993.txt");
+    fs::write(&subdir_sentinel, "host-writable").unwrap_or_else(|error| {
+        panic!(
+            "the write-confinement subdirectory {} is not host-writable, so it cannot be used \
+             as a denial target: {error}",
+            subdir.display()
+        )
+    });
+    fs::remove_file(&subdir_sentinel).unwrap_or_else(|error| {
+        panic!(
+            "could not clean up the host-writable sentinel at {}: {error}",
+            subdir_sentinel.display()
+        )
+    });
+
+    // Negative control: prove the detector can see a write at these exact
+    // paths before trusting that an absent file means the sandbox denied
+    // it. Same target paths, no sandbox anywhere in the call path.
+    let control_status = std::process::Command::new("cmd.exe")
+        .args([
+            "/D",
+            "/C",
+            &format!(
+                "echo control > \"{}\" & echo control > \"{}\"",
+                userprofile_escape.display(),
+                subdir_escape.display()
+            ),
+        ])
+        .status()
+        .expect("spawn the unsandboxed write-confinement negative control");
+    assert!(
+        control_status.success(),
+        "unsandboxed negative control command itself failed to run"
+    );
+    for control_path in [&userprofile_escape, &subdir_escape] {
+        assert!(
+            control_path.exists(),
+            "negative control: an unsandboxed write to {} did not appear; the detector \
+             cannot tell a real denial from a broken probe, so the real check below would \
+             prove nothing",
+            control_path.display()
+        );
+    }
+    for control_path in [&userprofile_escape, &subdir_escape] {
+        fs::remove_file(control_path).unwrap_or_else(|error| {
+            panic!(
+                "negative control: could not clean up {} before the real run: {error}",
+                control_path.display()
+            )
+        });
+    }
+
     let outcome = run_playground_case(
         experiment_root.clone(),
         "Comment what this file does".to_string(),
@@ -877,25 +974,15 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
         Err(error) => error.clone(),
     };
 
-    let userprofile_escape = std::env::var("USERPROFILE")
-        .map(|dir| Path::new(&dir).join("harn-escape-7993-userprofile.txt"));
-    let temp_escape =
-        std::env::var("TEMP").map(|dir| Path::new(&dir).join("harn-escape-7993-temp.txt"));
     let inside_write = experiment_root
         .join("workspace")
         .join("harn-write-confinement-7993-inside.txt");
 
     let mut failures = Vec::new();
     for (label, escape_path) in [
-        ("USERPROFILE", userprofile_escape.as_ref().ok()),
-        ("TEMP", temp_escape.as_ref().ok()),
+        ("USERPROFILE", &userprofile_escape),
+        ("USERPROFILE subdirectory", &subdir_escape),
     ] {
-        let Some(escape_path) = escape_path else {
-            failures.push(format!(
-                "  {label}: environment variable not set, could not check for an escape file"
-            ));
-            continue;
-        };
         if escape_path.exists() {
             let contents = fs::read_to_string(escape_path).unwrap_or_default();
             failures.push(format!(
@@ -918,6 +1005,8 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
             inside_write.display()
         )),
     }
+
+    let _ = fs::remove_dir_all(&subdir);
 
     if failures.is_empty() {
         return;
