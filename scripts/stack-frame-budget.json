@@ -32,12 +32,6 @@
   "exceptions": [
     {
       "expires": "2026-12-01",
-      "max_bytes": 504584,
-      "path": "crates/harn-cli/src/commands/supervisor.rs",
-      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
-    },
-    {
-      "expires": "2026-12-01",
       "max_bytes": 490471,
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs",
       "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
