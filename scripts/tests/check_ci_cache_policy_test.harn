@@ -1170,12 +1170,20 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
 ) {
   assert_eq(actions_cache_capacity_errors(policy()), [])
   const base = policy()
-  // Spread the base rather than re-listing every field: enumerating them meant
-  // that adding one policy block broke these two literals with a type error far
-  // from the change that caused it.
+  // Every field is re-listed on purpose. A named type annotation does not
+  // accept a top-level `...base` spread, so these literals have to enumerate,
+  // and adding a policy block is expected to touch each of them.
   const oversized_warm: CiCachePolicy = {
-    ...base,
+    schema_version: base.schema_version,
+    rust_cache_action: base.rust_cache_action,
+    node_cache_action: base.node_cache_action,
+    persistent_ref: base.persistent_ref,
+    storage_limit_bytes: base.storage_limit_bytes,
+    remote_sccache: base.remote_sccache,
+    nextest_version: base.nextest_version,
     windows_workspace_warm: {...base.windows_workspace_warm, max_bytes: base.storage_limit_bytes},
+    macos_workspace_warm: base.macos_workspace_warm,
+    writers: base.writers,
   }
   assert(
     actions_cache_capacity_errors(oversized_warm).contains(
@@ -1183,11 +1191,19 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     ),
   )
   const flat_drive: CiCachePolicy = {
-    ...base,
+    schema_version: base.schema_version,
+    rust_cache_action: base.rust_cache_action,
+    node_cache_action: base.node_cache_action,
+    persistent_ref: base.persistent_ref,
+    storage_limit_bytes: base.storage_limit_bytes,
+    remote_sccache: base.remote_sccache,
+    nextest_version: base.nextest_version,
     windows_workspace_warm: {
       ...base.windows_workspace_warm,
       dev_drive_size_release_certify: base.windows_workspace_warm.dev_drive_size_default,
     },
+    macos_workspace_warm: base.macos_workspace_warm,
+    writers: base.writers,
   }
   assert(
     actions_cache_capacity_errors(flat_drive).contains(
@@ -1197,8 +1213,16 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
   // The macOS ceiling is governed too. Without this the new block could declare
   // an artifact larger than the whole cache pool and no check would say so.
   const oversized_macos_warm: CiCachePolicy = {
-    ...base,
+    schema_version: base.schema_version,
+    rust_cache_action: base.rust_cache_action,
+    node_cache_action: base.node_cache_action,
+    persistent_ref: base.persistent_ref,
+    storage_limit_bytes: base.storage_limit_bytes,
+    remote_sccache: base.remote_sccache,
+    nextest_version: base.nextest_version,
+    windows_workspace_warm: base.windows_workspace_warm,
     macos_workspace_warm: {...base.macos_workspace_warm, max_bytes: base.storage_limit_bytes},
+    writers: base.writers,
   }
   assert(
     actions_cache_capacity_errors(oversized_macos_warm).contains(
