@@ -39,20 +39,17 @@ fn refresh_order_errors(
   refresh_sentinel: string,
 ) -> list<string> {
   let errors: list<string> = []
+  if command.index_of(caller_refresh) >= command.index_of(implicit_any) {
+    errors = errors + ["caller refresh must produce the target-version tree before migrations"]
+  }
   if command.index_of(implicit_any) >= command.index_of(migration) {
     errors = errors + ["implicit-any compatibility must precede target capability migrations"]
-  }
-  if command.index_of(migration) >= command.index_of(caller_refresh) {
-    errors = errors + ["target capability migrations must precede the caller refresh"]
   }
   if command.index_of(migration) >= command.index_of(safe_repairs) {
     errors = errors + ["behavior-preserving repairs must run after target capability migrations"]
   }
-  if command.index_of(safe_repairs) >= command.index_of(caller_refresh) {
-    errors = errors + ["behavior-preserving repairs must precede the caller refresh"]
-  }
-  if command.index_of(caller_refresh) >= command.index_of(format_migration) {
-    errors = errors + ["caller refresh must settle before the unconditional format migration"]
+  if command.index_of(safe_repairs) >= command.index_of(format_migration) {
+    errors = errors + ["behavior-preserving repairs must precede the format migration"]
   }
   if command.index_of(format_migration) >= command.index_of(refresh_sentinel) {
     errors = errors + ["format migration must finish before refresh success is recorded"]
@@ -169,13 +166,13 @@ fn bump_workflow_errors(workflow: dict, text: string) -> list<string> {
   const format_migration = "eval \"$HARN_BUMP_FORMAT_COMMAND\""
   const refresh_sentinel = "> \"$HARN_BUMP_REFRESH_SENTINEL\""
   const refresh_pipeline = "$"
+    + "{refresh_caller}"
+    + "$"
     + "{refresh_implicit_any}"
     + "$"
     + "{refresh_migrations}"
     + "$"
     + "{refresh_behavior_preserving}"
-    + "$"
-    + "{refresh_caller}"
     + "$"
     + "{refresh_format}"
     + "$"
