@@ -65,6 +65,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let last_tool_rejection_category = nil
     let suspend_result = nil
     let abandonment = nil
+    let declared_artifacts = nil
     let stall_state = agent_stall_initial_state()
     let stall_enabled_seen = false
     let stall_prev_dispatch = nil
@@ -1265,6 +1266,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       budget_decisions = terminal_boundary.budget_decisions
       terminal_error = terminal_boundary.terminal_error
       abandonment = terminal_boundary.abandonment
+      declared_artifacts = terminal_boundary.declared_artifacts
       feedback_history = terminal_boundary.feedback_history ?? feedback_history
       if terminal_boundary.action == "continue" {
         continue
@@ -1300,6 +1302,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         budget_decisions: finalized.budget_decisions,
         output_contract: finalized.output_contract,
         abandonment: abandonment,
+        declared_artifacts: declared_artifacts,
       }
     const final_result = __agent_loop_project_terminal_result(
       harness,

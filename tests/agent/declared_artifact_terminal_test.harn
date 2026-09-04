@@ -1,0 +1,330 @@
+// Run: harn test tests/agent/declared_artifact_terminal_test.harn
+//
+// harn#7915 cause 3: a model that calls tools successfully and then does the
+// wrong thing produced a natural terminal, because a tool tally is silent by
+// construction when every call succeeded.
+//
+// Every arm below is that shape. The tool ALWAYS SUCCEEDS; the only variable is
+// whether the artifact the caller declared actually exists afterwards. That is
+// what makes this file a test of the declared-artifact contract rather than a
+// second test of the tool tally: if the tally could decide these runs, all six
+// arms would agree, and they do not.
+//
+// The mock LLM drives every arm, so the proof needs no provider, no sleeps, and
+// no wall clock.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import {
+  agent_declared_artifact_verdict,
+  agent_declared_artifacts_audit,
+} from "std/agent/required_artifacts"
+import { assert_nil, llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+// A tool that reports success and writes exactly the path it was given. The
+// handler is honest: a run that writes the declared path really does satisfy
+// the contract, so the passing arms are not passing by a stubbed lie.
+fn writing_tools(fs: HarnessFs) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a UTF-8 file.",
+    {
+      handler: { args ->
+        fs.write_text(to_string(args.path), "hello")
+        return "wrote 1 file"
+      },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  return tools
+}
+
+fn spec(session: string, tools: unknown, declared: list<string>) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tools: tools,
+    loop_until_done: true,
+    iteration_budget: {mode: "fixed", initial: 6, max: 6, extend_by: 0},
+    require_artifacts: declared,
+  }
+}
+
+/**
+ * The issue's third cause, reproduced at its narrowest.
+ *
+ * The model writes a file. The write succeeds. It is the WRONG FILE, so the
+ * artifact the caller declared does not exist. Before this contract the run
+ * sealed `natural` / `completed`, byte-identical to the run in the arm below
+ * that wrote the right one.
+ */
+pipeline test_a_successful_write_to_the_wrong_path_does_not_finish_naturally(
+  harness: Harness,
+  task: unknown,
+) {
+  const dir = harness.fs.mkdtemp_in_workspace("declared-wrong")
+  const declared = path_join(dir, "report.md")
+  const written = path_join(dir, "scratch.md")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: written}, "write-1"),
+      llm_text("I wrote the report. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write the report to " + declared + ". Then stop.",
+        nil,
+        spec("declared-wrong-" + harness.random.uuid(), writing_tools(harness.fs), [declared]),
+      )
+      // The three fields a host branches on. Note the tool tally cannot reach
+      // this verdict: one call was attempted and one succeeded.
+      assert_eq(
+        result.terminal.kind,
+        "completion_unverified",
+        "a run whose declared artifact does not exist must not report a natural terminal",
+      )
+      assert_eq(result.terminal.lifecycle_state, "failed")
+      assert_eq(result.terminal.run_record_status, "failed")
+      assert_eq(result.abandonment.cause, "declared_artifact_missing")
+      assert_eq(result.abandonment.attempted_tool_calls, 1)
+      assert_eq(result.abandonment.succeeded_tool_calls, 1)
+      // The run's own reason for stopping is composed beside the verdict, not
+      // written over it.
+      assert_eq(result.abandonment.natural_stop_reason, result.stop_reason)
+      // And the audit names the path, so a person reading the record does not
+      // have to re-derive which declaration failed.
+      assert_eq(result.declared_artifacts.missing, [declared])
+      assert_eq(result.declared_artifacts.unverifiable, [])
+    },
+  )
+}
+
+/**
+ * The positive control, and the arm that would catch this rule firing on every
+ * run. Same prompt, same tool, same script shape. The only difference is that
+ * the model writes the path it was asked for.
+ */
+pipeline test_a_successful_write_to_the_declared_path_finishes_naturally(
+  harness: Harness,
+  task: unknown,
+) {
+  const dir = harness.fs.mkdtemp_in_workspace("declared-right")
+  const declared = path_join(dir, "report.md")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: declared}, "write-1"),
+      llm_text("I wrote the report. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write the report to " + declared + ". Then stop.",
+        nil,
+        spec("declared-right-" + harness.random.uuid(), writing_tools(harness.fs), [declared]),
+      )
+      assert_eq(result.terminal.kind, "natural")
+      assert_eq(result.terminal.lifecycle_state, "completed")
+      assert_nil(result?.abandonment)
+      // The audit is published on the SATISFIED run too. Without this
+      // assertion the arm above could pass while the contract was never
+      // checked on a passing run, and a skipped check would be
+      // indistinguishable from a satisfied one.
+      assert_eq(result.declared_artifacts.declared, [declared])
+      assert_eq(result.declared_artifacts.missing, [])
+    },
+  )
+}
+
+/**
+ * The rule must not convict a caller who declared nothing, which is every run
+ * in the product today. A run with no contract carries no audit at all, so the
+ * field's absence means "not asked", never "asked and failed".
+ */
+pipeline test_a_run_that_declared_no_artifacts_finishes_naturally(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("declared-none")
+  const written = path_join(dir, "scratch.md")
+  with_llm_script(
+    harness.llm,
+    [llm_tool_call("write_file", {path: written}, "write-1"), llm_text("Done. ##DONE##")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write something. Then stop.",
+        nil,
+        spec("declared-none-" + harness.random.uuid(), writing_tools(harness.fs), []),
+      )
+      assert_eq(result.terminal.kind, "natural")
+      assert_nil(result?.abandonment)
+      assert_nil(result?.declared_artifacts)
+    },
+  )
+}
+
+/**
+ * Partial satisfaction is failure, and the record says WHICH path failed rather
+ * than only that something did. A contract that reported a bare boolean would
+ * pass this arm and still leave a person guessing.
+ */
+pipeline test_one_missing_artifact_among_several_names_itself(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("declared-partial")
+  const written = path_join(dir, "report.md")
+  const absent = path_join(dir, "summary.md")
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: written}, "write-1"),
+      llm_text("I wrote both files. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write the report and the summary. Then stop.",
+        nil,
+        spec(
+          "declared-partial-" + harness.random.uuid(),
+          writing_tools(harness.fs),
+          [written, absent],
+        ),
+      )
+      assert_eq(result.terminal.kind, "completion_unverified")
+      assert_eq(result.abandonment.cause, "declared_artifact_missing")
+      assert_eq(result.declared_artifacts.missing, [absent])
+      assert_eq(result.declared_artifacts.declared, [written, absent])
+    },
+  )
+}
+
+/**
+ * Ordering between the two rules, pinned rather than left to reading order.
+ *
+ * When nothing worked AND the artifact is missing, both rules have evidence.
+ * The tool tally is the more proximate cause: a person debugging this needs to
+ * know the tool refused, not that a file it would have written is absent. The
+ * audit still rides on the result, because the missing artifact is a true fact
+ * about the run whichever rule convicted it.
+ */
+pipeline test_a_failed_tool_is_reported_before_a_missing_artifact(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("declared-order")
+  const declared = path_join(dir, "report.md")
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a UTF-8 file.",
+    {
+      handler: { _args ->
+        throw "write_file: this workspace is read-only"
+      },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("write_file", {path: declared}, "write-1"),
+      llm_text("I could not write it. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write the report to " + declared + ". Then stop.",
+        nil,
+        spec("declared-order-" + harness.random.uuid(), tools, [declared]),
+      )
+      assert_eq(result.terminal.kind, "completion_unverified")
+      assert_eq(result.abandonment.cause, "no_tool_call_succeeded")
+      assert_eq(result.declared_artifacts.missing, [declared])
+    },
+  )
+}
+
+/**
+ * A declaration made of blanks is a caller typo, not a contract. It normalizes
+ * away, so the run is neither convicted nor reported as having been checked.
+ * Probing an empty path would convict a run for a mistake it did not make.
+ */
+pipeline test_a_blank_declaration_is_not_a_contract(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("declared-blank")
+  const written = path_join(dir, "scratch.md")
+  with_llm_script(
+    harness.llm,
+    [llm_tool_call("write_file", {path: written}, "write-1"), llm_text("Done. ##DONE##")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write something. Then stop.",
+        nil,
+        spec("declared-blank-" + harness.random.uuid(), writing_tools(harness.fs), ["", "   "]),
+      )
+      assert_eq(result.terminal.kind, "natural")
+      assert_nil(result?.abandonment)
+      assert_nil(result?.declared_artifacts)
+    },
+  )
+}
+
+/**
+ * The classification rule itself, over every status `harness.fs.status`
+ * documents plus one it does not.
+ *
+ * This arm exists because the conviction hinges on one distinction the
+ * filesystem probe can make and the obvious probe cannot: `harness.fs.exists`
+ * returns FALSE for a path outside the capability policy, collapsing "denied"
+ * into "absent" by design. An audit built on `exists` would convict a run for
+ * a path it was never permitted to look at. Only `missing` may convict; every
+ * undecidable status must acquit.
+ */
+pipeline test_only_a_missing_status_convicts(harness: Harness, task: unknown) {
+  assert_eq(agent_declared_artifact_verdict("present_file"), "present")
+  assert_eq(agent_declared_artifact_verdict("present_dir"), "present")
+  assert_eq(agent_declared_artifact_verdict("present_other"), "present")
+  assert_eq(agent_declared_artifact_verdict("missing"), "missing")
+  // The three the runtime returns instead of throwing, and the reason this
+  // audit probes with `status` rather than `exists`.
+  assert_eq(agent_declared_artifact_verdict("scope_denied"), "unverifiable")
+  assert_eq(agent_declared_artifact_verdict("read_only_denied"), "unverifiable")
+  assert_eq(agent_declared_artifact_verdict("stat_error"), "unverifiable")
+  // A status this stdlib has never heard of must not read as present. A future
+  // runtime status has to be classified deliberately, not absorbed by a
+  // default that happens to acquit or happens to convict.
+  assert_eq(agent_declared_artifact_verdict("some_future_status"), "unverifiable")
+}
+
+/**
+ * The denial case, against a real capability policy rather than a string.
+ *
+ * A path that exists on disk but sits outside the run's workspace roots must
+ * come back `unverifiable`, never `missing`. This is the arm that would fail if
+ * the audit ever went back to `harness.fs.exists`, because that builtin returns
+ * false here and the file would be convicted as absent while it is sitting
+ * right there.
+ */
+pipeline test_a_path_outside_the_policy_roots_is_unverifiable_not_missing(
+  harness: Harness,
+  task: unknown,
+) {
+  const outside = harness.fs.mkdtemp_in_workspace("declared-outside")
+  const inside = harness.fs.mkdtemp_in_workspace("declared-inside")
+  const present_but_denied = path_join(outside, "report.md")
+  harness.fs.write_text(present_but_denied, "hello")
+  const truly_absent = path_join(inside, "summary.md")
+  const audit = harness.runtime.with_execution_policy(
+    {workspace_roots: [inside]},
+    fn() { return agent_declared_artifacts_audit(
+      harness.fs,
+      {require_artifacts: [present_but_denied, truly_absent]},
+    ) },
+  )
+  // The file that exists but is out of scope: undecidable, and NOT a conviction.
+  assert_eq(audit.unverifiable, [present_but_denied])
+  // The in-scope file that genuinely is not there: this one convicts.
+  assert_eq(audit.missing, [truly_absent])
+}
