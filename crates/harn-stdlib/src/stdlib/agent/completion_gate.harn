@@ -57,14 +57,17 @@ pub type CompletionGateContext = {
    * session start, so a host reading it keeps today's behavior; a host that
    * wants the amended target reads this instead of re-deriving it.
    *
-   * Derived here rather than by each host on purpose. The context already
-   * carries `messages`, so every host COULD call
+   * Carried through from the loop rather than derived by each host on purpose.
+   * The context already carries `messages`, so every host COULD call
    * `completion_obligations_from_messages` itself, but that would put the
    * supersession rule in each host and let them drift from the judge's
    * reading of the same run. One derivation, one owner.
    *
-   * An unsteered run renders an empty steer list, so this is a no-op for
-   * every gate that exists today.
+   * That owner reads the session's typed control record (harn#7875), so this
+   * also carries an accepted stop, which no reading of `messages` can see.
+   *
+   * An untouched run renders an empty steer list and no stop, so this is a
+   * no-op for every gate that exists today.
    */
   obligations?: CompletionObligations,
 }
@@ -320,7 +323,12 @@ fn __completion_gate_evaluate(
     stop_reason: to_string(payload?.stop_reason ?? ""),
     text: to_string(payload?.text ?? ""),
     messages: messages,
-    obligations: completion_obligations_from_messages(messages, task),
+    // The loop already derived this from the session's typed control record,
+    // which is the only reading that can see an accepted stop. Re-deriving it
+    // from `messages` here would silently downgrade to the transcript reading
+    // and lose the stop. The fallback covers a host that calls the gate with a
+    // bare payload rather than the loop's evidence snapshot.
+    obligations: payload?.obligations ?? completion_obligations_from_messages(messages, task),
   }
   const raw = if facts != nil {
     facts(ctx) ?? {}

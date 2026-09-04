@@ -56,8 +56,8 @@ pub import {
   __judge_completion_verdict_schema,
 } from "std/agent/judge_verdict"
 import {
+  agent_completion_obligations,
   completion_obligations_digest,
-  completion_obligations_from_messages,
   completion_obligations_prompt,
 } from "std/agent/obligations"
 import { __normalize_judge_config } from "std/agent/options_formats"
@@ -639,7 +639,9 @@ fn __judge_payload(
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
-  const obligations = completion_obligations_from_messages(messages, session?.task ?? "")
+  // Read from the session's control records, not from `messages`: an accepted
+  // stop delivers no user message, so the transcript in hand cannot show one.
+  const obligations = agent_completion_obligations(agent, session.session_id, session?.task ?? "")
   const evidence_id = completion_evidence_id(
     session?.task ?? "",
     stop_reason,

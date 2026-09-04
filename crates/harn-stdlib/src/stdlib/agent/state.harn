@@ -93,6 +93,45 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
   return agent.session_messages(session_id)
 }
 
+pub type AgentSessionControlEvent = {
+  schema: string,
+  kind: "control",
+  action: "stop" | "steer" | "interrupt" | "queue",
+  method: string,
+  control_id: string,
+  status: string,
+  requested_mode?: string,
+  delivery_mode?: string,
+  message_id?: string,
+  text?: string,
+  actor?: unknown,
+  provenance: "recorded" | "heuristic",
+}
+
+/**
+ * The accepted control words this session recorded.
+ *
+ * The read half of the seam `record_control_event` writes at acceptance, so an
+ * exit authority derives what a run is held to from the control record rather
+ * than from a mode stamped on a delivered message (harn#7875). An accepted stop
+ * has no delivered message at all, so a message-derived reading cannot
+ * represent one.
+ *
+ * An empty list means this session recorded no control OR that it is not open
+ * on this VM thread. A caller must not read that absence as proof no control
+ * happened.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_control_events(
+  agent: HarnessAgent,
+  session_id: any,
+) -> list<AgentSessionControlEvent> {
+  return agent.session_control_events(session_id)
+}
+
 /**
  * Project the session through the provider-visible directive slot.
  *

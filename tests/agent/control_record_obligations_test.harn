@@ -1,0 +1,165 @@
+// Run: harn test tests/agent/control_record_obligations_test.harn
+//
+// Contract coverage for the control-record reading of `std/agent/obligations`.
+//
+// The defect this closes: an accepted stop delivers no user message, so the
+// transcript-only derivation cannot see one. An exit authority reading only the
+// transcript therefore holds a stopped run to the whole original task and
+// orders work the person running it just withdrew.
+//
+// The two claims that must not collapse into each other are (1) "no stop was
+// recorded" and (2) "no stop happened". Every arm below pins which one a given
+// reading is entitled to make.
+import {
+  completion_obligations_digest,
+  completion_obligations_from_control_events,
+  completion_obligations_from_messages,
+  completion_obligations_prompt,
+} from "std/agent/obligations"
+import { assert_contains, assert_not_nil } from "std/testing"
+
+const TASK = "Add the retry, then run the suite and report the failing names."
+
+const STEER = "Skip the suite. Just show me the retry diff and stop."
+
+/** One accepted steer, as the session writes it at acceptance. */
+fn steer_row() -> dict {
+  return {
+    schema: "harn.session.control.v1",
+    kind: "control",
+    action: "steer",
+    method: "session/inject",
+    control_id: "ctl-steer-1",
+    status: "accepted",
+    requested_mode: "steer",
+    delivery_mode: "finish_step",
+    message_id: "msg_inj_1",
+    text: STEER,
+    provenance: "recorded",
+  }
+}
+
+/** One accepted stop, which carries no delivery mode and no text. */
+fn stop_row(provenance: string) -> dict {
+  return {
+    schema: "harn.session.control.v1",
+    kind: "control",
+    action: "stop",
+    method: "session/cancel",
+    control_id: "ctl-stop-1",
+    status: "cancelled",
+    provenance: provenance,
+  }
+}
+
+pipeline test_a_recorded_stop_is_visible_only_in_the_control_reading(
+  harness: Harness,
+  task: unknown,
+) {
+  // The falsifier for the whole change. A stopped run leaves the transcript
+  // below unchanged, so if the control reading did not exist, both readings
+  // would report the same unstopped obligations.
+  const transcript = [
+    {role: "user", content: TASK},
+    {role: "assistant", content: "Added the retry. Running the suite now."},
+  ]
+  const from_messages = completion_obligations_from_messages(transcript, TASK)
+  assert_eq(from_messages.accepted_stop, nil)
+  assert_eq(from_messages.source, "delivered_messages")
+  const from_records = completion_obligations_from_control_events([stop_row("recorded")], TASK)
+  assert_eq(from_records.source, "control_record")
+  assert_eq(from_records.accepted_stop.control_id, "ctl-stop-1")
+  assert_eq(from_records.accepted_stop.method, "session/cancel")
+  assert_eq(from_records.accepted_stop.status, "cancelled")
+}
+
+pipeline test_a_stopped_run_is_told_to_the_exit_authority(harness: Harness, task: unknown) {
+  const stopped = completion_obligations_from_control_events([stop_row("recorded")], TASK)
+  const prompt = completion_obligations_prompt(stopped)
+  assert_contains(prompt, "STOPPED this run before it finished")
+  assert_contains(prompt, "Remaining work is no longer owed")
+  // Negative control: the same reading with no stop row renders nothing, so an
+  // uninterrupted run's judge prefix is byte-identical to the pre-record prompt.
+  const uninterrupted = completion_obligations_from_control_events([], TASK)
+  assert_eq(completion_obligations_prompt(uninterrupted), "")
+}
+
+pipeline test_a_guessed_stop_never_withdraws_work(harness: Harness, task: unknown) {
+  // A `heuristic` row was reconstructed from prose by some later consumer. It
+  // may name a stop that never happened, and a wrongly withdrawn obligation is
+  // silent: the run simply stops being asked for work it still owes.
+  const guessed = completion_obligations_from_control_events([stop_row("heuristic")], TASK)
+  assert_eq(guessed.accepted_stop, nil)
+  assert_eq(completion_obligations_prompt(guessed), "")
+  // Same row, recorded provenance, does withdraw. The two differ in one field.
+  const recorded = completion_obligations_from_control_events([stop_row("recorded")], TASK)
+  assert_not_nil(recorded.accepted_stop)
+}
+
+pipeline test_steers_read_from_records_match_the_transcript_reading(
+  harness: Harness,
+  task: unknown,
+) {
+  const from_records = completion_obligations_from_control_events([steer_row()], TASK)
+  assert_eq(len(from_records.steers), 1)
+  assert_eq(from_records.steers[0].content, STEER)
+  assert_eq(from_records.steers[0].mode, "finish_step")
+  assert_eq(from_records.steers[0].message_id, "msg_inj_1")
+  const from_messages = completion_obligations_from_messages(
+    [
+      {role: "user", content: TASK},
+      {role: "user", content: STEER, messageId: "msg_inj_1", injectedMode: "finish_step"},
+    ],
+    TASK,
+  )
+  assert_eq(from_records.steers, from_messages.steers)
+}
+
+pipeline test_a_queued_note_is_not_a_steer_in_either_reading(harness: Harness, task: unknown) {
+  // A queued note drains after the last model call, so it cannot have changed
+  // what the model was asked to do. The record carries the action word, so this
+  // no longer depends on reading a delivery mode off a message.
+  const queued = steer_row() + {action: "queue", delivery_mode: "audit_only", control_id: "ctl-q"}
+  const obligations = completion_obligations_from_control_events([queued], TASK)
+  assert_eq(len(obligations.steers), 0)
+  assert_eq(obligations.accepted_stop, nil)
+}
+
+pipeline test_an_interrupt_is_a_steer(harness: Harness, task: unknown) {
+  const interrupted = steer_row()
+    + {action: "interrupt", delivery_mode: "interrupt_immediate", requested_mode: "interrupt"}
+  const obligations = completion_obligations_from_control_events([interrupted], TASK)
+  assert_eq(len(obligations.steers), 1)
+  assert_eq(obligations.steers[0].mode, "interrupt_immediate")
+}
+
+pipeline test_a_stop_changes_the_evidence_identity(harness: Harness, task: unknown) {
+  // A terminal decision is bound to the obligations it was decided under. Two
+  // runs that differ only in whether the user stopped them must not share one.
+  const steered = completion_obligations_from_control_events([steer_row()], TASK)
+  const steered_then_stopped = completion_obligations_from_control_events(
+    [steer_row(), stop_row("recorded")],
+    TASK,
+  )
+  assert_ne(completion_obligations_digest(steered), "")
+  assert_ne(
+    completion_obligations_digest(steered),
+    completion_obligations_digest(steered_then_stopped),
+  )
+  // A run with neither steer nor stop still has no obligation identity, so an
+  // untouched run's evidence id is unchanged by this seam.
+  assert_eq(completion_obligations_digest(completion_obligations_from_control_events([], TASK)), "")
+}
+
+pipeline test_an_empty_control_list_does_not_claim_the_run_was_not_stopped(
+  harness: Harness,
+  task: unknown,
+) {
+  // A store written before the control schema existed has no rows either. From
+  // here that is the same observation as a run nobody touched, so the reading
+  // reports the weaker claim and says which one it made.
+  const obligations = completion_obligations_from_control_events([], TASK)
+  assert_eq(obligations.accepted_stop, nil)
+  assert_eq(obligations.original_task, TASK)
+  assert_eq(obligations.source, "control_record")
+}
