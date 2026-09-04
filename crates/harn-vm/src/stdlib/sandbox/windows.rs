@@ -62,7 +62,7 @@ use crate::value::VmError;
 mod system_roots;
 
 use system_roots::{
-    broad_system_root, hosts_an_executable, system_read_roots, tree_entry_count_within,
+    broad_system_root, cached_tree_entry_count, hosts_an_executable, system_read_roots,
 };
 
 pub(super) struct Backend;
@@ -747,17 +747,6 @@ impl Drop for WorkspaceAclGrants {
     }
 }
 
-/// Ceiling on how many read roots one spawn grants. Each grant
-/// is a recursive ACL rewrite, so the set has to stay small even on a host
-/// whose PATH is mostly closed; a host that needs more than this many is
-/// telling us per-directory grants are the wrong mechanism, not that the
-/// limit should rise.
-///
-/// The ceiling binds only on a host's first spawn. The grants name
-/// [`Grantee::EveryAppContainer`] and are not removed, so every later spawn's
-/// probe finds the entry already there and skips the rewrite.
-const SYSTEM_READ_GRANT_LIMIT: usize = 24;
-
 /// Ceiling on the total number of filesystem entries one spawn will rewrite
 /// permissions on, across every read root it grants.
 ///
@@ -804,16 +793,12 @@ fn unaffordable_read_roots(
     write_roots: &[PathBuf],
 ) -> BTreeSet<PathBuf> {
     let mut skip = BTreeSet::new();
-    let mut remaining_entry_budget = SYSTEM_READ_GRANT_ENTRY_BUDGET;
-    let mut granted = 0usize;
-    // What a `PATH` root can be covered by, grown as roots are accepted. A
-    // proposed root is not a granted one: `~/.cargo` is a read root on every
-    // developer machine and is far too large to grant, so treating it as
-    // covering `~/.cargo\bin` would leave the child unable to read either.
+    // What a `PATH` root can be covered by. A proposed root is not a granted
+    // one: `~/.cargo` is a read root on every developer machine and is far too
+    // large to grant, so treating it as covering `~/.cargo\bin` would leave
+    // the child unable to read either.
     let mut covered_by: Vec<PathBuf> = write_roots.to_vec();
 
-    // Same order as the grant loop: the policy's own read roots first, then
-    // the roots discovered from `PATH`.
     let candidates = process_sandbox_readonly_roots(policy)
         .into_iter()
         .chain(process_sandbox_policy_read_roots(policy))
@@ -821,91 +806,95 @@ fn unaffordable_read_roots(
         .map(|root| (root, false))
         .chain(system_read_roots().into_iter().map(|root| (root, true)));
 
+    // First pass: rule out everything that is wrong in shape or already open,
+    // and price what remains. Nothing is granted here, so the order of this
+    // pass does not decide anything.
+    let mut priced: Vec<(usize, PathBuf)> = Vec::new();
     for (root, from_path) in candidates {
-        if skip.contains(&root) || !root.exists() {
+        if skip.contains(&root) || priced.iter().any(|(_, seen)| *seen == root) || !root.exists() {
             continue;
         }
-        if granted == SYSTEM_READ_GRANT_LIMIT {
-            read_root_decision(
-                &root,
-                &format!(
-                    "probe=unprobed action=skipped reason=grant-limit-{SYSTEM_READ_GRANT_LIMIT}-reached elapsed_ms=0"
-                ),
-            );
-            skip.insert(root);
-            continue;
-        }
-        // The next three rules apply only to roots discovered from `PATH`. A
-        // root the policy names is there because an embedder asked for it, so
-        // it is not ours to second-guess on shape — only on cost.
+        // These three rules apply only to roots discovered from `PATH`. A root
+        // the policy names is there because an embedder asked for it, so it is
+        // not ours to second-guess on shape — only on cost.
         if from_path {
             if broad_system_root(&root) {
-                read_root_decision(
-                    &root,
-                    "probe=skipped action=skipped reason=broad-system-prefix elapsed_ms=0",
-                );
-                skip.insert(root);
-                continue;
-            }
-            if covered_by.iter().any(|already| root.starts_with(already)) {
-                read_root_decision(
-                    &root,
-                    "probe=skipped action=skipped reason=already-granted-by-another-root elapsed_ms=0",
-                );
+                read_root_decision(&root, "action=skipped reason=broad-system-prefix");
                 skip.insert(root);
                 continue;
             }
             if !hosts_an_executable(&root) {
-                read_root_decision(
-                    &root,
-                    "probe=skipped action=skipped reason=no-executable-in-directory elapsed_ms=0",
-                );
+                read_root_decision(&root, "action=skipped reason=no-executable-in-directory");
                 skip.insert(root);
                 continue;
             }
         }
-        let started = std::time::Instant::now();
-        let readable = app_container_can_already_read(&root);
-        let elapsed_ms = started.elapsed().as_millis();
-        if readable {
+        if app_container_can_already_read(&root) {
             read_root_decision(
                 &root,
-                &format!(
-                    "probe=already-open action=skipped reason=admits-all-application-packages elapsed_ms={elapsed_ms}"
-                ),
+                "probe=already-open action=skipped reason=admits-all-application-packages",
             );
             skip.insert(root);
             continue;
         }
-        // The rewrite costs one unit per entry, so the remaining budget is
-        // what decides whether this root is affordable. Asking is bounded by
-        // the budget, so the question stays cheap even when the tree is vast.
-        let Some(entries) = tree_entry_count_within(&root, remaining_entry_budget) else {
+        let Some(entries) = cached_tree_entry_count(&root, SYSTEM_READ_GRANT_ENTRY_BUDGET) else {
             read_root_decision(
                 &root,
                 &format!(
-                    "probe=closed action=skipped reason=tree-exceeds-remaining-entry-budget-{remaining_entry_budget} elapsed_ms={elapsed_ms}"
+                    "probe=closed action=skipped reason=tree-exceeds-entry-budget-{SYSTEM_READ_GRANT_ENTRY_BUDGET}"
                 ),
             );
             skip.insert(root);
             continue;
         };
-        remaining_entry_budget -= entries;
-        granted += 1;
+        priced.push((entries, root));
+    }
+
+    // Second pass: spend the budget cheapest first.
+    //
+    // Position on `PATH` is not a measure of worth, and spending in that order
+    // is what kept the Node install unreadable. On a Windows build runner the
+    // roots ahead of it are a dozen small toolchain directories of 2 to 129
+    // entries each and a 9,307-entry build tree; taken in order the build tree
+    // took the budget, and Node, at 2,448, never got any. Cheapest first opens
+    // the most toolchains per unit of work, and leaves an expensive root to
+    // take only what is genuinely spare.
+    priced.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    let mut remaining = SYSTEM_READ_GRANT_ENTRY_BUDGET;
+    for (entries, root) in priced {
+        if covered_by.iter().any(|already| root.starts_with(already)) {
+            read_root_decision(
+                &root,
+                "action=skipped reason=already-granted-by-another-root",
+            );
+            skip.insert(root);
+            continue;
+        }
+        if entries > remaining {
+            read_root_decision(
+                &root,
+                &format!(
+                    "probe=closed action=skipped reason=entries-{entries}-exceed-remaining-budget-{remaining}"
+                ),
+            );
+            skip.insert(root);
+            continue;
+        }
+        remaining -= entries;
         covered_by.push(root.clone());
         read_root_decision(
             &root,
             &format!(
-                "probe=closed action=will-grant reason=no-all-application-packages-entry entries={entries} remaining_budget={remaining_entry_budget} elapsed_ms={elapsed_ms}"
+                "probe=closed action=will-grant entries={entries} remaining_budget={remaining}"
             ),
         );
     }
     skip
 }
 
-/// One line per read root, naming what was decided and why. A spawn that
-/// takes too long or a toolchain the child cannot see is unreadable without
-/// it, and both were diagnosed from exactly these lines.
+/// One line per read root, naming what was decided and why. A spawn that takes
+/// too long, or a toolchain the child cannot see, is unreadable without it,
+/// and both were diagnosed from exactly these lines.
 fn read_root_decision(root: &Path, outcome: &str) {
     sandbox_trace(
         "read-roots",

@@ -210,6 +210,29 @@ fn parse_executable_extensions(raw: &str) -> Vec<String> {
 /// of files, and rewriting it takes minutes: on a Windows 11 host every
 /// sandboxed command timed out at two minutes with `target\debug` and
 /// `target\debug\deps` selected for granting (harn#8004).
+/// [`tree_entry_count_within`] against a fixed ceiling, cached per directory.
+///
+/// The ceiling is fixed so the answer is a property of the directory rather
+/// than of how much budget happened to be left when it was first asked, which
+/// is what makes caching sound. Every root is then walked at most once per
+/// process, however many times it is reconsidered.
+pub(crate) fn cached_tree_entry_count(dir: &Path, ceiling: usize) -> Option<usize> {
+    type Cache = std::sync::Mutex<std::collections::HashMap<(PathBuf, usize), Option<usize>>>;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (dir.to_path_buf(), ceiling);
+    if let Ok(map) = cache.lock() {
+        if let Some(known) = map.get(&key) {
+            return *known;
+        }
+    }
+    let answer = tree_entry_count_within(dir, ceiling);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, answer);
+    }
+    answer
+}
+
 pub(crate) fn tree_entry_count_within(dir: &Path, ceiling: usize) -> Option<usize> {
     let mut count = 0usize;
     let mut pending = vec![dir.to_path_buf()];
