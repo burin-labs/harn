@@ -210,6 +210,78 @@ pub fn windows_release_certify_warm_errors(
   return errors + windows_nightly_storage_budget_errors(job)
 }
 
+/**
+ * The macOS warm artifact must be produced on main and read on pull requests.
+ *
+ * Without this check the whole macOS warm path can be deleted and the cache
+ * policy gate stays green, because every other check here is about the Actions
+ * cache rather than the artifact that replaced it. A structural check that
+ * cannot report the absence of the thing it governs is not a check.
+ */
+pub fn macos_warm_errors(
+  policy: CiCachePolicy,
+  nightly_workflow: dict,
+  ci_workflow: dict,
+) -> list<string> {
+  const warm = policy.macos_workspace_warm
+  const job = nightly_workflow?.jobs?.[warm.job]
+  if job == nil {
+    return ["${warm.workflow}:${warm.job} must own the macOS workspace warm artifact path"]
+  }
+  let errors: list<string> = []
+  if warm.workflow != "macos-nightly.yml" || warm.job != "nextest" {
+    errors = errors
+      + ["cache-policy.json macos_workspace_warm must stay owned by macos-nightly.yml:nextest"]
+  }
+  const permissions = nightly_workflow?.permissions ?? {}
+  if trim(to_string(permissions?.actions ?? "")) != "write" {
+    errors = errors
+      + ["${warm.workflow} must grant actions: write for warm artifact upload/download"]
+  }
+  const pack_steps = matching_run_steps(job, MACOS_WARM_PACK_MARKER)
+  if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD {
+    errors = errors
+      + ["${warm.workflow}:${warm.job} must pack the macOS warm artifact only on main"]
+  }
+  const upload_steps = matching_upload_steps(job, warm.artifact_name)
+  if len(upload_steps) != 1
+    || trim(upload_steps[0]?.if ?? "") != MACOS_WARM_MAIN_GUARD
+    || upload_steps[0]?.with?.["retention-days"]
+      != warm.retention_days
+    || trim(to_string(upload_steps[0]?.with?.["if-no-files-found"] ?? ""))
+      != "error" {
+    errors = errors
+      + [
+        "${warm.workflow}:${warm.job} must upload ${warm.artifact_name} from main with ${warm.retention_days}-day retention",
+      ]
+  }
+  const nightly_restores = matching_run_steps(job, MACOS_WARM_RESTORE_MARKER)
+  if len(nightly_restores) != 1
+    || trim(nightly_restores[0]?.if ?? "")
+      != MACOS_WARM_PULL_REQUEST_GUARD
+    || nightly_restores[0]?.["continue-on-error"]
+      != true {
+    errors = errors
+      + [
+        "${warm.workflow}:${warm.job} must restore the main warm artifact on pull requests with cold fallback",
+      ]
+  }
+  // The blocking pull-request lane is the one this exists to speed up, so its
+  // consumer is part of the contract rather than an optional extra.
+  const ci_job = ci_workflow?.jobs?.macos
+  const ci_restores = matching_run_steps(ci_job, MACOS_WARM_RESTORE_MARKER)
+  if len(ci_restores) != 1
+    || trim(ci_restores[0]?.id ?? "") != MACOS_WARM_RESTORE_STEP_ID
+    || ci_restores[0]?.["continue-on-error"]
+      != true {
+    errors = errors
+      + [
+        "ci.yml:macos must restore ${warm.artifact_name} through one ${MACOS_WARM_RESTORE_STEP_ID} step with cold fallback",
+      ]
+  }
+  return errors
+}
+
 fn windows_blacksmith_runner_expression() -> string {
   return "$"
     + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' }}"
@@ -578,6 +650,7 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
     "macos",
     MACOS_CACHE_KEY,
     source_key,
+    [MACOS_WARM_RESTORE_STEP_ID],
   )
   const lint_steps = (ci_workflow?.jobs?.macos?.steps ?? []).filter(
     { step -> trim(step?.run ?? "") == "./scripts/ci/run_rust_lint_lane.sh" },
@@ -589,3 +662,6 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
   }
   return errors
 }
+// The warm-artifact restore is a consumer-only step and is not a cache-key
+// input. Exempting it by id keeps the parity check meaningful instead of
+// reporting drift for a step the producer is not supposed to have.

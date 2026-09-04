@@ -10,6 +10,7 @@ pub import {
 pub import {
   actions_cache_capacity_errors,
   macos_shared_cache_errors,
+  macos_warm_errors,
   nextest_version_errors,
   windows_pr_native_feedback_errors,
   windows_release_certify_warm_errors,
@@ -18,6 +19,7 @@ pub import {
 pub import {
   CiCachePolicy,
   CiCacheWriter,
+  MacosWorkspaceWarmPolicy,
   NATIVE_CACHE_INPUTS,
   PULL_REQUEST_RESTORE_ONLY_SAVE,
   RELEASE_PATH_FILTER_ACTION,

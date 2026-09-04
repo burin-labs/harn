@@ -7,6 +7,7 @@ import {
   ci_cache_policy_errors,
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
+  macos_warm_errors,
   nextest_version_errors,
   release_aot_runner_errors,
   release_warm_cache_concurrency_errors,
@@ -975,6 +976,92 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(
   )
 }
 
+/**
+ * The macOS warm path must be provable by its absence, not only its presence.
+ *
+ * Every other check in this suite governs the Actions cache. The warm artifact
+ * replaced that cache on macOS because the namespace evicts it the same day, so
+ * without this test the entire producer and consumer could be deleted and the
+ * gate would stay green.
+ */
+pipeline test_macos_warm_requires_a_main_producer_and_a_pull_request_consumer(
+  harness: Harness,
+  task: unknown,
+) {
+  const declared = workflows()
+  const producer = declared["macos-nightly.yml"]
+  const ci = declared["ci.yml"]
+  const declared_policy = policy()
+  assert_eq(macos_warm_errors(declared_policy, producer, ci), [])
+  const without_pack = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.filter(
+          { step ->
+            return !contains(trim(step?.run ?? ""), "workspace_warm_artifact.sh macos pack")
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, without_pack, ci).contains(
+      "macos-nightly.yml:nextest must pack the macOS warm artifact only on main",
+    ),
+  )
+  const without_upload = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.filter(
+          { step ->
+            return trim(to_string(step?.uses ?? "")) != "actions/upload-artifact@exact-pin"
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, without_upload, ci).contains(
+      "macos-nightly.yml:nextest must upload workspace-macos-warm from main with 3-day retention",
+    ),
+  )
+  const without_actions_write = {...producer, permissions: {contents: "read"}}
+  assert(
+    macos_warm_errors(declared_policy, without_actions_write, ci).contains(
+      "macos-nightly.yml must grant actions: write for warm artifact upload/download",
+    ),
+  )
+  const ci_without_consumer = {
+    ...ci,
+    jobs: {
+      ...ci.jobs,
+      macos: {
+        ...ci.jobs.macos,
+        steps: ci.jobs.macos.steps.filter(
+          { step ->
+            return !contains(
+              trim(step?.run ?? ""),
+              "workspace_warm_artifact.sh macos download-and-restore",
+            )
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    macos_warm_errors(declared_policy, producer, ci_without_consumer).contains(
+      "ci.yml:macos must restore workspace-macos-warm through one macos-warm-restore step with cold fallback",
+    ),
+  )
+}
+
 pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_drive(
   harness: Harness,
   task: unknown,
@@ -992,7 +1079,7 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
           { step ->
             return !contains(
               trim(step?.run ?? ""),
-              "windows_workspace_warm_artifact.sh download-and-restore",
+              "workspace_warm_artifact.sh windows download-and-restore",
             )
           },
         )

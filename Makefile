@@ -670,7 +670,8 @@ test-pr-gate-scripts:
 	./scripts/tests/source_gate_receipt_test.sh
 	./scripts/tests/conformance_worker_budget_test.sh
 	./scripts/tests/rust_artifact_test.sh
-	./scripts/tests/windows_workspace_warm_artifact_test.sh
+	HARN_WARM_TEST_PLATFORM=windows ./scripts/tests/workspace_warm_artifact_test.sh
+	HARN_WARM_TEST_PLATFORM=macos ./scripts/tests/workspace_warm_artifact_test.sh
 	./scripts/tests/windows_storage_budget_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh

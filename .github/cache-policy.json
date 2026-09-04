@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "rust_cache_action": "./.github/actions/rust-cache",
   "node_cache_action": "./.github/actions/node-cache",
   "persistent_ref": "refs/heads/main",
@@ -17,6 +17,15 @@
     "dev_drive_size_default": "25GB",
     "dev_drive_size_full_workspace": "50GB",
     "dev_drive_size_release_certify": "50GB"
+  },
+  "macos_workspace_warm": {
+    "artifact_name": "workspace-macos-warm",
+    "manifest_schema": "harn.macos_workspace_warm.v1",
+    "workflow": "macos-nightly.yml",
+    "job": "nextest",
+    "retention_days": 3,
+    "max_bytes": 8589934592,
+    "build_headroom_bytes": 17179869184
   },
   "writers": [
     {

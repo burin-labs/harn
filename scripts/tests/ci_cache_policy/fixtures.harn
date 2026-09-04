@@ -1,5 +1,6 @@
 import {
   CiCachePolicy,
+  MacosWorkspaceWarmPolicy,
   RELEASE_PATH_FILTER_ACTION,
   ReleaseWarmCachePathPolicy,
 } from "../../check_ci_cache_policy.harn"
@@ -33,7 +34,7 @@ pub fn windows_warm_restore_step() {
     "continue-on-error": true,
     env: {GH_TOKEN: gha_expression("github.token")},
     run:
-      "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
+      "./scripts/ci/workspace_warm_artifact.sh windows download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
   }
 }
 
@@ -109,9 +110,21 @@ pub fn windows_warm_policy() {
   }
 }
 
+pub fn macos_warm_policy() -> MacosWorkspaceWarmPolicy {
+  return {
+    artifact_name: "workspace-macos-warm",
+    manifest_schema: "harn.macos_workspace_warm.v1",
+    workflow: "macos-nightly.yml",
+    job: "nextest",
+    retention_days: 3,
+    max_bytes: 8589934592,
+    build_headroom_bytes: 17179869184,
+  }
+}
+
 pub fn policy() -> CiCachePolicy {
   return {
-    schema_version: 5,
+    schema_version: 6,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -119,6 +132,7 @@ pub fn policy() -> CiCachePolicy {
     remote_sccache: false,
     nextest_version: "0.9.132",
     windows_workspace_warm: windows_warm_policy(),
+    macos_workspace_warm: macos_warm_policy(),
     writers: [
       {
         workflow: "build-release-binaries.yml",
@@ -409,6 +423,13 @@ pub fn workflows() {
             {uses: "actions/checkout@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
             {
+              name: "Restore macOS workspace warm artifact",
+              id: "macos-warm-restore",
+              "continue-on-error": true,
+              run:
+                "./scripts/ci/workspace_warm_artifact.sh macos download-and-restore --repo owner/repo",
+            },
+            {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
@@ -526,12 +547,12 @@ pub fn workflows() {
               if: gha_expression("startsWith(github.ref_name, 'release-certify/')"),
               "continue-on-error": true,
               run:
-                "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo",
+                "./scripts/ci/workspace_warm_artifact.sh windows download-and-restore --repo owner/repo",
             },
             {
               name: "Stage Windows workspace warm artifact",
               if: gha_expression("github.ref == 'refs/heads/main'"),
-              run: "./scripts/ci/windows_workspace_warm_artifact.sh pack staging",
+              run: "./scripts/ci/workspace_warm_artifact.sh windows pack staging",
             },
             {
               name: "Upload Windows workspace warm artifact",
@@ -565,6 +586,7 @@ pub fn workflows() {
     },
     "macos-nightly.yml": {
       env: {RUSTFLAGS: "-D warnings"},
+      permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {
           steps: [
@@ -576,6 +598,29 @@ pub fn workflows() {
                 "shared-key": "workspace-macos",
                 "source-key": native_source_key(),
                 save: true,
+              },
+            },
+            {
+              name: "Restore macOS workspace warm artifact",
+              id: "macos-warm-restore",
+              if: gha_expression("github.event_name == 'pull_request'"),
+              "continue-on-error": true,
+              run:
+                "./scripts/ci/workspace_warm_artifact.sh macos download-and-restore --repo owner/repo",
+            },
+            {
+              name: "Stage macOS workspace warm artifact",
+              if: gha_expression("github.ref == 'refs/heads/main'"),
+              run: "./scripts/ci/workspace_warm_artifact.sh macos pack staging",
+            },
+            {
+              name: "Upload macOS workspace warm artifact",
+              if: gha_expression("github.ref == 'refs/heads/main'"),
+              uses: "actions/upload-artifact@exact-pin",
+              with: {
+                name: "workspace-macos-warm",
+                "if-no-files-found": "error",
+                "retention-days": 3,
               },
             },
           ],

@@ -124,7 +124,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+          ./scripts/ci/workspace_warm_artifact.sh windows download-and-restore \
             --repo "${{ github.repository }}" \
             --target-dir "${CARGO_TARGET_DIR:-target}"
       - uses: ./.github/actions/rust-cache

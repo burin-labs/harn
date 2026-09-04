@@ -95,6 +95,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     nextest_version_errors(policy, workflows),
     actions_cache_capacity_errors(policy),
     macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),
+    macos_warm_errors(policy, workflows["macos-nightly.yml"], workflows["ci.yml"]),
   ]
   const errors = error_groups.flat_map({ group -> group }).to_list()
   if len(errors) > 0 {
