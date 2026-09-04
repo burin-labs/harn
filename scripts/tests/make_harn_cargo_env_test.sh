@@ -682,6 +682,71 @@ if grep -Fq 'nextest run --workspace -p harn-vm' "$make_focused_test"; then
   exit 1
 fi
 
+make_focused_e2e="$tmp_root/make-focused-e2e.txt"
+make -C "$repo_root" -n test-e2e ARGS='-p harn-cli --test harn_cli_e2e one_case' \
+  > "$make_focused_e2e"
+if ! grep -Fq \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-cli --test harn_cli_e2e one_case --profile e2e --run-ignored all' \
+  "$make_focused_e2e"; then
+  echo "Makefile test-e2e target did not forward focused ARGS" >&2
+  cat "$make_focused_e2e" >&2
+  exit 1
+fi
+if grep -Fq 'nextest run --workspace -p harn-cli' "$make_focused_e2e"; then
+  echo "focused Makefile test-e2e retained --workspace and would compile every package" >&2
+  cat "$make_focused_e2e" >&2
+  exit 1
+fi
+
+cat > "$fake_bin/cargo-nextest" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$fake_bin/cargo-nextest"
+cat > "$fake_bin/toolchain-refusal" <<'SH'
+#!/usr/bin/env bash
+echo "error: rust-toolchain.toml pins rustc 1.95.0 but rustc resolves to 1.98.0" >&2
+exit 91
+SH
+chmod +x "$fake_bin/toolchain-refusal"
+nextest_probe_stdout="$tmp_root/nextest-probe-stdout.txt"
+nextest_probe_stderr="$tmp_root/nextest-probe-stderr.txt"
+if PATH="$fake_bin:/usr/bin:/bin" make -C "$repo_root" test \
+    HARN_CARGO_CMD="$fake_bin/toolchain-refusal" \
+    > "$nextest_probe_stdout" 2> "$nextest_probe_stderr"; then
+  echo "Makefile test target ignored a failing toolchain probe" >&2
+  exit 1
+fi
+if ! grep -Fq 'rust-toolchain.toml pins rustc 1.95.0 but rustc resolves to 1.98.0' \
+    "$nextest_probe_stderr"; then
+  echo "Makefile test target hid the toolchain probe diagnostic" >&2
+  cat "$nextest_probe_stderr" >&2
+  exit 1
+fi
+if grep -Fq 'cargo-nextest is required' "$nextest_probe_stderr"; then
+  echo "Makefile test target mislabeled a toolchain refusal as missing cargo-nextest" >&2
+  cat "$nextest_probe_stderr" >&2
+  exit 1
+fi
+
+missing_nextest_stderr="$tmp_root/missing-nextest-stderr.txt"
+if PATH="/usr/bin:/bin" /usr/bin/make -C "$repo_root" test \
+    HARN_CARGO_CMD="$fake_bin/toolchain-refusal" \
+    > /dev/null 2> "$missing_nextest_stderr"; then
+  echo "Makefile test target accepted a missing cargo-nextest executable" >&2
+  exit 1
+fi
+if ! grep -Fq 'cargo-nextest is required' "$missing_nextest_stderr"; then
+  echo "Makefile test target did not diagnose a missing cargo-nextest executable" >&2
+  cat "$missing_nextest_stderr" >&2
+  exit 1
+fi
+if grep -Fq 'rust-toolchain.toml pins rustc' "$missing_nextest_stderr"; then
+  echo "Makefile test target ran the toolchain probe after cargo-nextest was absent" >&2
+  cat "$missing_nextest_stderr" >&2
+  exit 1
+fi
+
 for variable in \
   HARN_EGRESS_ALLOW \
   HARN_EGRESS_DENY \
