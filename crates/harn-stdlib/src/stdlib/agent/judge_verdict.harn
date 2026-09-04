@@ -20,6 +20,12 @@ pub type CompletionJudgeVerdict = {
   verdict: string,
   detail: string,
   gap_class: CompletionJudgeGapClass,
+  // Whether the RAW reply carried a non-blank `gap_class` field at all, before
+  // `__completion_judge_gap_class` folds absent, blank, unrecognized, and an
+  // explicit `other` into the same normalized value. The normalized value
+  // cannot tell those apart; this can, and it is what the contradiction check
+  // below keys on.
+  gap_declared: bool,
   requirement_report?: CompletionRequirementReport?,
 }
 
@@ -45,18 +51,27 @@ pub const COMPLETION_JUDGE_NAMED_GAP_CLASSES = [
  * __judge_completion_verdict_contradicts_itself.
  *
  * Whether a decoded verdict accepts and refuses in the same object: `done`
- * beside a gap class that names an obligation the judge itself says is unmet.
- * The pair is checkable without a model, and a judge that produces it has not
- * decided the run is finished, it has decided the run is blocked.
+ * beside ANY declared gap. The pair is checkable without a model, and a judge
+ * that produces it has not decided the run is finished, it has decided the
+ * run is blocked.
+ *
+ * This keys on `gap_declared`, not on membership in the four named gap
+ * classes. A judge free to launder an unmet obligation into `gap_class:
+ * "other"` — the same value a genuinely gapless `done` is told to leave
+ * absent — used exactly that escape: the same blocked-write fact that got
+ * `unresolved_authorization` (refused) on one call got `other` (accepted) on
+ * the next, no schema violation either time. Keying on the four names cannot
+ * close that, because `other` is never one of the four names; keying on
+ * whether the field was populated at all can, because a compliant `done`
+ * never populates it. See harn#7910.
  *
  * @effects: []
  * @errors: []
  * @api_stability: internal
- * @example: __judge_completion_verdict_contradicts_itself({verdict: "done", detail: "", gap_class: "failed_verification"})
+ * @example: __judge_completion_verdict_contradicts_itself({verdict: "done", detail: "", gap_class: "other", gap_declared: true})
  */
 pub fn __judge_completion_verdict_contradicts_itself(decoded: CompletionJudgeVerdict) -> bool {
-  return decoded.verdict == "done"
-    && contains(COMPLETION_JUDGE_NAMED_GAP_CLASSES, decoded.gap_class)
+  return decoded.verdict == "done" && decoded.gap_declared
 }
 
 /**
@@ -70,7 +85,9 @@ pub fn __judge_completion_verdict_contradicts_itself(decoded: CompletionJudgeVer
  * required: the checkpoint validates this schema strictly, and cached, replayed,
  * and older-pin judge responses carry no such field. An absent value decodes to
  * `other`, which is the reading that grants no authority — so the compatible
- * direction and the safe direction are the same direction.
+ * direction and the safe direction are the same direction. A `done` verdict
+ * that populates the field at all, `other` included, is refused; see
+ * `__judge_completion_verdict_contradicts_itself`.
  *
  * @effects: []
  * @errors: []
@@ -89,7 +106,8 @@ pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil
     gap_class: {
       type: "string",
       enum: COMPLETION_JUDGE_GAP_CLASSES,
-      description: "On `continue`, the kind of gap being named. On `done`, use `other`.",
+      description:
+        "On `continue`, the kind of gap being named. Leave unset on `done`; setting it, including to `other`, is read as an unresolved gap and refused.",
     },
   }
   const assessments = completion_requirement_assessments_schema(contract)
@@ -142,10 +160,17 @@ pub fn __judge_completion_verdict_read(
   } else {
     detail
   }
+  // Raw presence, read before normalization. `__completion_judge_gap_class`
+  // folds a missing field, a blank string, an unrecognized string, and an
+  // explicit `"other"` into the same `"other"` value, which is right for
+  // display and for the arbitration ladder but wrong for this one question:
+  // did the reply say anything here at all?
+  const gap_declared = trim(to_string(result?.gap_class ?? "")) != ""
   return {
     verdict: verdict,
     detail: clamped,
     gap_class: __completion_judge_gap_class(result?.gap_class),
+    gap_declared: gap_declared,
     requirement_report: completion_requirement_report(
       completion_requirement_contract(raw_requirement_contract),
       result?.requirement_report,

@@ -928,11 +928,15 @@ fn __judge_invoke_structured(
   const requirements_pending = requirement_report != nil
     && !requirement_report.complete
     && !declined_unassessed
-  // A judge that accepts while naming an unmet obligation has contradicted
-  // itself inside one object, and the contradiction is readable without a
-  // model. Taking the verdict and dropping the gap class is how a run that was
-  // blocked from doing its work reaches a host as `done`, `natural`, with no
-  // stop reason. The gap class is the half backed by evidence, so it wins.
+  // A judge that accepts while naming ANY gap — one of the four named classes
+  // or a bare `other` — has contradicted itself inside one object, and the
+  // contradiction is readable without a model. Taking the verdict and
+  // dropping the gap is how a run that was blocked from doing its work
+  // reaches a host as `done`, `natural`, with no stop reason. `other` is not
+  // exempted: it is the value a compliant `done` reply leaves the field unset
+  // for, so a `done` that populates it anyway — even with `other` — is the
+  // same self-contradiction wearing the one label this check used to let
+  // through (harn#7910). The gap is the half backed by evidence, so it wins.
   const gap_contradicts_done = __judge_completion_verdict_contradicts_itself(decoded)
   const verdict = requirements_pending || gap_contradicts_done ? "continue" : decoded.verdict
   const detail = if unassessed {
