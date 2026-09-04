@@ -378,7 +378,7 @@ jobs:
   open-development-bump:
     name: Open post-release development bump
     needs: detect-drift
-    if: needs.detect-drift.outputs.development_bump == 'true'
+    if: github.event_name != 'workflow_dispatch' && needs.detect-drift.outputs.development_bump == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Mint GitHub App installation token
