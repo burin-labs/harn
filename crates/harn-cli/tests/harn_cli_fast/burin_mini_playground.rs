@@ -237,10 +237,15 @@ fn main(harness: Harness) {
         .await
     });
 
+    // `result.status` is a word, not an exit code: the probe prints
+    // `WHERE_STATUS=completed`. Looking for `WHERE_STATUS=0` therefore never
+    // matched, so this read reported failure whether or not the child could
+    // resolve `node`, and the assertion built on it could not pass on any
+    // host. `success` is the field that actually carries the outcome.
     let where_status_ok = outcome
         .stdout
         .lines()
-        .any(|line| line.trim() == "WHERE_STATUS=0");
+        .any(|line| line.trim() == "WHERE_SUCCESS=true");
     format!(
         "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; WHOAMI = the token's groups and integrity level; ICACLS = the nodejs install dir's ACL; TYPE = a plain read of a file inside it; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
         outcome.exit_code, outcome.stdout, outcome.stderr
