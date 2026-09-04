@@ -151,6 +151,18 @@ impl GeminiInteractions {
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))
             .json(&body);
         let http = crate::llm::api::apply_auth_headers(http, &request.api_key, pdef.as_ref());
+        // Same hook the shared OpenAI-compat transport funnel uses; see the
+        // comment on the sibling GenerateContent call in `../gemini.rs`.
+        let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
+        let attempt = request.stream.then_some(0);
+        crate::llm::agent_observe::persist_raw_provider_request(
+            raw_capture_context.as_ref(),
+            "gemini",
+            &request.model,
+            dialect.wire().as_str(),
+            attempt,
+            &body,
+        );
         let response = http.send().await.map_err(|error| {
             vm_err(format!(
                 "gemini API error: {}",
@@ -158,20 +170,70 @@ impl GeminiInteractions {
             ))
         })?;
         if !response.status().is_success() {
-            return Err(crate::llm::api::err_for_non_success_with_dialect(
-                dialect, "gemini", response,
-            )
-            .await);
+            let status = response.status();
+            let headers = response.headers().clone();
+            let content_type = response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let body_text = response.text().await.unwrap_or_default();
+            crate::llm::agent_observe::persist_raw_provider_response(
+                raw_capture_context.as_ref(),
+                "gemini",
+                &request.model,
+                if request.stream {
+                    "stream-error"
+                } else {
+                    "json"
+                },
+                attempt,
+                status.as_u16(),
+                content_type.as_deref(),
+                &body_text,
+            );
+            return Err(crate::llm::api::provider_http_error(
+                Some(dialect),
+                "gemini",
+                status,
+                &headers,
+                &body_text,
+            ));
         }
 
         if request.stream {
             let envelope = read_interaction_stream(response, delta_tx, dialect).await?;
+            // The wire text itself is not retained past per-line SSE parsing
+            // in this reader, so this captures the assembled interaction
+            // envelope Harn actually parsed rather than raw per-chunk bytes.
+            crate::llm::agent_observe::persist_raw_provider_response(
+                raw_capture_context.as_ref(),
+                "gemini",
+                &request.model,
+                "stream-assembled",
+                attempt,
+                200,
+                Some("application/json"),
+                &envelope.to_string(),
+            );
             return dialect.parse_response(&envelope, request, false);
         }
 
-        let json: Value = response
-            .json()
+        let body_text = response
+            .text()
             .await
+            .map_err(|error| vm_err(format!("gemini response read error: {error}")))?;
+        crate::llm::agent_observe::persist_raw_provider_response(
+            raw_capture_context.as_ref(),
+            "gemini",
+            &request.model,
+            "json",
+            attempt,
+            200,
+            Some("application/json"),
+            &body_text,
+        );
+        let json: Value = serde_json::from_str(&body_text)
             .map_err(|error| vm_err(format!("gemini response parse error: {error}")))?;
         let result = dialect.parse_response(&json, request, false)?;
         maybe_emit_delta(delta_tx, &result.text);
