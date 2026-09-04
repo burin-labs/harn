@@ -1769,7 +1769,7 @@ jobs:
         run: |
           receipt="${RUNNER_TEMP}/windows-warm-restore.txt"
           set +e
-          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+          ./scripts/ci/workspace_warm_artifact.sh windows download-and-restore \
             --repo "${{ github.repository }}" \
             --target-dir "${CARGO_TARGET_DIR:-target}" >"${receipt}" 2>&1
           status=$?
@@ -2127,7 +2127,38 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
+      # A short-retention artifact produced by the main macOS nightly is the
+      # warm path that actually survives. The Actions cache namespace is
+      # capacity-bound at 10 GiB and turns over in under a day, so the nightly's
+      # workspace-macos cache is evicted before any pull request reads it: this
+      # lane measured a cold compile on every run (harn#8016). Artifact storage
+      # is not contended the same way. rust-cache below stays as the fallback
+      # for the day a compatible artifact does not exist.
+      - name: Restore macOS workspace warm artifact
+        id: macos-warm-restore
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          receipt="${RUNNER_TEMP}/macos-warm-restore.txt"
+          set +e
+          ./scripts/ci/workspace_warm_artifact.sh macos download-and-restore \
+            --repo "${{ github.repository }}" \
+            --target-dir "${CARGO_TARGET_DIR:-target}" >"${receipt}" 2>&1
+          status=$?
+          set -e
+          cat "${receipt}"
+          grep -E '^macos_warm_restore_(run_id|producer_commit|reason|target_bytes|headroom_bytes|free_bytes|existing_target_bytes|available_after_replace_bytes)=' "${receipt}" >> "$GITHUB_OUTPUT" || true
+          if [[ "${status}" -eq 0 ]]; then
+            grep -E '^macos_warm_restore=hit$' "${receipt}" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos_warm_restore=miss" >> "$GITHUB_OUTPUT"
+            echo "macos_warm_restore_status=${status}" >> "$GITHUB_OUTPUT"
+          fi
+          exit "${status}"
       - uses: ./.github/actions/rust-cache
+        if: steps.macos-warm-restore.outputs.macos_warm_restore != 'hit' && steps.macos-warm-restore.outputs.macos_warm_restore_reason != 'insufficient_space'
         continue-on-error: true
         with:
           # Restore the cache written by macos-nightly.yml. PR and merge-group
@@ -2138,6 +2169,19 @@ jobs:
           source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
+      - name: Report macOS warm restore outcome
+        if: always()
+        shell: bash
+        run: |
+          outcome="${{ steps.macos-warm-restore.outputs.macos_warm_restore }}"
+          echo "macos_warm_restore=${outcome:-unreported}"
+          if [[ "${outcome}" == "hit" ]]; then
+            echo "Restored a compatible main-produced macOS warm target from run ${{ steps.macos-warm-restore.outputs.macos_warm_restore_run_id }}."
+          else
+            # An unreported outcome is not a hit. Saying so keeps a step that
+            # never ran from reading like one that found nothing.
+            echo "No compatible macOS warm target; this lane builds cold (reason: ${{ steps.macos-warm-restore.outputs.macos_warm_restore_reason || 'none-reported' }})."
+          fi
       - name: Clippy all targets (deny warnings)
         shell: bash
         # `--all-targets` so the cfg-gated *test* targets compile (that's
