@@ -461,7 +461,7 @@ jobs:
   # well as `pull_request`, because a candidate superseded by a fragment that
   # landed after the release branch was cut is a merge-queue-time fact.
   release-contract:
-    name: Release contract holds
+    name: Harn and release orchestrator agree
     needs: [changes]
     # Skipped when nothing that can move release semantics was touched.
     # ci-status below treats that skip as PASS only when this filter agrees it
@@ -474,7 +474,7 @@ jobs:
       # deliberate change to which release semantics this repository is
       # checked against.
       ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 9104df5de42586e34b7214bc96ed1d028b0de79c
+      ORCHESTRATOR_REF: 8376de252dbe0d422caf12e9fdca904bb552a577
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -498,9 +498,9 @@ jobs:
           version-file: .release-orchestrator/.harn-version
           token: ${{ github.token }}
 
-      # The check reads `origin/<base>:Cargo.toml` and
-      # `origin/<base>:CHANGELOG.md`. A PR checkout does not necessarily carry
-      # the base branch as a local ref.
+      # The check reads the prior-fold evidence from `origin/<base>` and the
+      # contract from the exact integrated checkout at HEAD. A PR checkout does
+      # not necessarily carry the base branch as a local ref.
       - name: Fetch the base branch and release tags
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
@@ -513,7 +513,7 @@ jobs:
         run: |
           harn run --no-sandbox \
             .release-orchestrator/check_release_contract.harn \
-            -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}"
+            -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}" --contract-ref HEAD
 
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the

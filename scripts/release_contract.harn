@@ -1,0 +1,286 @@
+import { read_json_result, read_yaml } from "std/fs"
+import "std/schema"
+import { path_visibility } from "./path_visibility.harn"
+
+const DEVELOPMENT_PRERELEASE = "dev"
+
+pub type ReleaseVersionContract = {
+  development_prerelease: "dev",
+  workspace_after_release: "next_patch_development",
+  prior_fold_workspace_shapes: list<"released_version" | "next_patch_development">,
+}
+
+pub type ReleaseTagContract = {
+  anchor: "merged_main_commit",
+  release_subject_template: "Release v{version}",
+  candidate_trailer: "Harn-Release-Candidate",
+}
+
+pub type ReleaseWorkflowContract = {
+  path: string,
+  name: string,
+  dispatch_inputs: list<string>,
+  jobs: list<string>,
+  observed_steps: list<string>,
+}
+
+pub type ReleaseContract = {
+  schema_version: "harn.release_contract.v1",
+  versions: ReleaseVersionContract,
+  changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
+  tag: ReleaseTagContract,
+  workflows: {publish: ReleaseWorkflowContract, binaries: ReleaseWorkflowContract},
+}
+
+/** Harn's release semantics, projected for orchestrators and recovery tools. */
+pub fn release_contract() -> ReleaseContract {
+  return {
+    schema_version: "harn.release_contract.v1",
+    versions: {
+      development_prerelease: DEVELOPMENT_PRERELEASE,
+      workspace_after_release: "next_patch_development",
+      prior_fold_workspace_shapes: ["released_version", "next_patch_development"],
+    },
+    changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
+    tag: {
+      anchor: "merged_main_commit",
+      release_subject_template: "Release v{version}",
+      candidate_trailer: "Harn-Release-Candidate",
+    },
+    workflows: {
+      publish: {
+        path: ".github/workflows/publish-release.yml",
+        name: "Publish release",
+        dispatch_inputs: [
+          "bootstrap_new_crates",
+          "skip_dry_run",
+          "reaudit",
+          "allow_unfolded_fragments",
+        ],
+        jobs: ["detect-drift", "open-development-bump", "publish"],
+        observed_steps: [
+          "Compare Cargo.toml workspace version to latest vX.Y.Z tag",
+          "Publish release",
+        ],
+      },
+      binaries: {
+        path: ".github/workflows/build-release-binaries.yml",
+        name: "Build release binaries",
+        dispatch_inputs: [
+          "tag",
+          "warm_cache_only",
+          "force_rebuild",
+          "targets",
+          "legacy_provenance_override",
+          "benchmark_only",
+          "benchmark_source_ref",
+          "benchmark_source_sha",
+          "benchmark_cargo_bloat",
+          "candidate_only",
+          "candidate_source_ref",
+          "candidate_source_sha",
+          "runner_profile",
+        ],
+        jobs: [
+          "setup",
+          "prepare_release",
+          "prepare_cli_aot",
+          "build",
+          "collect_candidate_manifest",
+          "cache_budget",
+          "container",
+          "release",
+        ],
+        observed_steps: [
+          "Verify benchmark source revision",
+          "Verify candidate source revision",
+          "Check the distribution fuse",
+          "Evaluate the binary-size growth signal",
+        ],
+      },
+    },
+  }
+}
+
+/** The suffix used by Harn's release metadata implementation. */
+pub fn release_development_prerelease() -> string {
+  return DEVELOPMENT_PRERELEASE
+}
+
+pub fn release_contract_schema() {
+  const workflow = schema_closed_object(
+    {
+      path: schema_string() + {min_len: 1},
+      name: schema_string() + {min_len: 1},
+      dispatch_inputs: schema_list(schema_string() + {min_len: 1}),
+      jobs: schema_list(schema_string() + {min_len: 1}),
+      observed_steps: schema_list(schema_string() + {min_len: 1}),
+    },
+  )
+  return schema_closed_object(
+    {
+      schema_version: schema_literal("harn.release_contract.v1"),
+      versions: schema_closed_object(
+        {
+          development_prerelease: schema_literal("dev"),
+          workspace_after_release: schema_literal("next_patch_development"),
+          prior_fold_workspace_shapes: schema_list(
+            schema_enum(["released_version", "next_patch_development"]),
+          ),
+        },
+      ),
+      changelog: schema_closed_object(
+        {
+          published_heading: schema_literal("top_version_heading"),
+          candidate_fragments: schema_literal("must_be_folded"),
+        },
+      ),
+      tag: schema_closed_object(
+        {
+          anchor: schema_literal("merged_main_commit"),
+          release_subject_template: schema_literal("Release v{version}"),
+          candidate_trailer: schema_literal("Harn-Release-Candidate"),
+        },
+      ),
+      workflows: schema_closed_object({publish: workflow, binaries: workflow}),
+    },
+  )
+}
+
+pub fn release_contract_parse(value: unknown) -> ReleaseContract? {
+  const report = schema_validator(release_contract_schema()).report(value)
+  if !report.ok {
+    return nil
+  }
+  return report.value
+}
+
+fn keys(value: any) -> list<string> {
+  if type_of(value) != "dict" {
+    return []
+  }
+  return value.keys().map({ key -> to_string(key) }).to_list()
+}
+
+fn workflow_step_names(document: any) -> list<string> {
+  let names: list<string> = []
+  for job_name in keys(document?.jobs) {
+    for step in document?.jobs?.get(job_name)?.steps ?? [] {
+      if type_of(step?.name) == "string" {
+        names = names + [step.name]
+      }
+    }
+  }
+  return names
+}
+
+/** Structural names consumed across repository boundaries that no rename may silently strand. */
+pub fn release_contract_source_errors(
+  fs: HarnessFs,
+  root: string,
+  contract: ReleaseContract,
+) -> list<string> {
+  let errors: list<string> = []
+  for workflow in [contract.workflows.publish, contract.workflows.binaries] {
+    const path = path_join(root, workflow.path)
+    const seen = path_visibility(fs, "release-contract", path)
+    if seen.denial != "" {
+      errors = errors + [seen.denial]
+      continue
+    }
+    if !seen.exists {
+      errors = errors + ["missing workflow " + workflow.path]
+      continue
+    }
+    const document = read_yaml(fs, path, nil)
+    if document?.name != workflow.name {
+      errors = errors + [workflow.path + " does not declare workflow name `" + workflow.name + "`"]
+    }
+    const inputs = keys(document?.on?.workflow_dispatch?.inputs)
+    for input in workflow.dispatch_inputs {
+      if !inputs.contains(input) {
+        errors = errors + [workflow.path + " is missing dispatch input `" + input + "`"]
+      }
+    }
+    const jobs = keys(document?.jobs)
+    for job in workflow.jobs {
+      if !jobs.contains(job) {
+        errors = errors + [workflow.path + " is missing job `" + job + "`"]
+      }
+    }
+    const steps = workflow_step_names(document)
+    for step in workflow.observed_steps {
+      if !steps.contains(step) {
+        errors = errors + [workflow.path + " is missing observed step `" + step + "`"]
+      }
+    }
+  }
+  const version_source = fs.read_text(path_join(root, "scripts/release_metadata.harn"))
+  if !version_source.contains("release_development_prerelease()") {
+    errors = errors + ["release_metadata.harn bypasses the typed development-prerelease owner"]
+  }
+  const version_source_shell = fs.read_text(path_join(root, "scripts/lib/release_version.sh"))
+  if !version_source_shell.contains("release_contract.env") {
+    errors = errors + ["release_version.sh bypasses the generated shell projection"]
+  }
+  if !version_source_shell.contains("^Release\\ v\"$version\"") {
+    errors = errors + ["release_version.sh no longer enforces the declared release commit subject"]
+  }
+  return errors
+}
+
+fn flag_value(args: list<string>, name: string, fallback: string) -> string {
+  let index = 0
+  for arg in args {
+    if arg == name && index + 1 < len(args) {
+      return args[index + 1] ?? fallback
+    }
+    index = index + 1
+  }
+  return fallback
+}
+
+fn main(harness: Harness) {
+  const root = flag_value(argv, "--root", ".")
+  const output = flag_value(argv, "--output", "scripts/release_contract.json")
+  const shell_output = flag_value(argv, "--shell-output", "scripts/release_contract.env")
+  const check = argv.contains("--check")
+  const contract = release_contract()
+  const rendered = json_stringify(contract) + "\n"
+  const errors = release_contract_source_errors(harness.fs, root, contract)
+  if len(errors) > 0 {
+    for error in errors {
+      harness.stdio.eprintln("release contract: " + error)
+    }
+    harness.runtime.exit(1)
+  }
+  const path = path_join(root, output)
+  const shell_path = path_join(root, shell_output)
+  const shell_rendered = "HARN_RELEASE_DEVELOPMENT_PRERELEASE="
+    + contract.versions.development_prerelease
+    + "\n"
+  if check {
+    const loaded = read_json_result(harness.fs, path)
+    if is_err(loaded) || release_contract_parse(unwrap(loaded)) == nil
+      || harness.fs.read_text(path) != rendered {
+      harness.stdio.eprintln("release contract projection is stale; run make gen-release-contract")
+      harness.runtime.exit(1)
+    }
+    const shell_seen = path_visibility(harness.fs, "release-contract", shell_path)
+    if shell_seen.denial != "" {
+      harness.stdio.eprintln(shell_seen.denial)
+      harness.runtime.exit(1)
+    }
+    if !shell_seen.exists || harness.fs.read_text(shell_path) != shell_rendered {
+      harness.stdio.eprintln(
+        "release contract shell projection is stale; run make gen-release-contract",
+      )
+      harness.runtime.exit(1)
+    }
+    harness.stdio.println("release contract projection and owning sources agree")
+    return
+  }
+  harness.fs.write_text(path, rendered)
+  harness.fs.write_text(shell_path, shell_rendered)
+  harness.stdio.println("wrote " + path + " and " + shell_path)
+}

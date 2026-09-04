@@ -4,6 +4,11 @@
 # GitHub Actions code that cannot execute Harn yet. Keep the fixture matrix in
 # scripts/tests/release_version_test.sh aligned with std/semver conformance.
 
+RELEASE_VERSION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Generated from scripts/release_contract.harn. This bootstrap shell cannot
+# execute Harn, so it consumes the mechanically checked projection.
+source "$RELEASE_VERSION_LIB_DIR/../release_contract.env"
+
 release_version_is_canonical() {
   local version="${1:-}"
   if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z.-]+))?$ ]]; then
@@ -35,10 +40,11 @@ release_next_patch_development() {
   if [[ ! "$stable" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
     return 1
   fi
-  printf '%s.%s.%s-dev\n' \
+  printf '%s.%s.%s-%s\n' \
     "${BASH_REMATCH[1]}" \
     "${BASH_REMATCH[2]}" \
-    "$(( 10#${BASH_REMATCH[3]} + 1 ))"
+    "$(( 10#${BASH_REMATCH[3]} + 1 ))" \
+    "$HARN_RELEASE_DEVELOPMENT_PRERELEASE"
 }
 
 release_development_target_matches_stable() {
@@ -55,7 +61,7 @@ release_published_version_for_workspace() {
     printf '%s\n' "$workspace"
     return 0
   fi
-  if [[ "$workspace" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-dev$ ]] \
+  if [[ "$workspace" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}$ ]] \
     && (( 10#${BASH_REMATCH[3]} > 0 )); then
     printf '%s.%s.%s\n' \
       "${BASH_REMATCH[1]}" \
