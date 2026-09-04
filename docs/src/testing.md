@@ -425,6 +425,21 @@ enumerating every optional classifier or judge:
 {"id":"aux","scope":"shared","consume":"sticky","match":"*","text":"AUX"}
 ```
 
+Both schema versions are closed: an entry carrying a field the parser does not
+read is rejected, naming the key and the field you probably meant. Before this,
+an unknown key was accepted and silently dropped, which made a fixture that was
+never applied indistinguishable from one that was.
+
+Two consequences worth knowing before you write a fixture. A key beginning with
+an underscore is an author annotation, permitted at every version and every
+depth, so a note explaining why a fixture exists can live in the fixture rather
+than in a second file nothing keeps in sync. And `id`, `scope` and `consume`
+mean nothing without a `schemaVersion` header: a headerless document pins every
+entry to the default scope, so those three are rejected with the missing header
+named rather than a spelling guessed. A headerless document spells reuse with
+`consume_match`, which makes a glob one-shot; a glob is otherwise reusable and a
+FIFO entry is always consumed.
+
 Consumption receipts record `requested_scope`, `resolved_scope`, and
 `fell_through`, so a test can distinguish an exact match from either fallback.
 Application-owned roles should use a dotted namespace such as

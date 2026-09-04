@@ -344,6 +344,77 @@ fn v0_rejects_an_unknown_key_and_names_the_field_meant() {
     );
 }
 
+/// Underscore-prefixed keys are the author-annotation namespace, at every
+/// schema version and every depth. Closing the schema without it would push
+/// human notes out of the fixture and into a second file nothing keeps in
+/// sync; four bundled demo tapes already carry `_note` to explain why a
+/// near-empty tape exists at all.
+#[test]
+fn an_underscore_prefixed_key_is_an_annotation_not_an_unknown_field() {
+    let v0 = parse_llm_mock_value(&serde_json::json!({
+        "text": "done",
+        "_note": "why this fixture exists",
+    }))
+    .expect("v0 accepts an annotation");
+    assert_eq!(v0.text, "done");
+
+    let v1 = parse_llm_mock_value_versioned(
+        &serde_json::json!({
+            "id": "main-1",
+            "scope": "main",
+            "consume": "once",
+            "text": "done",
+            "_note": "one namespace, both versions",
+            "tool_calls": [{"name": "look", "arguments": {}, "_why": "nested too"}],
+        }),
+        1,
+        0,
+    )
+    .expect("v1 accepts an annotation, nested included");
+    assert_eq!(v1.text, "done");
+}
+
+/// The control that keeps the namespace from swallowing the check it lives
+/// beside. A misspelling never grows a leading underscore, so the annotation
+/// rule must not rescue one that is merely adjacent to a real field.
+#[test]
+fn the_annotation_namespace_does_not_excuse_a_bare_misspelling() {
+    let error = parse_llm_mock_value(&serde_json::json!({
+        "text": "done",
+        "note": "no underscore, so this is a claim about a field",
+    }))
+    .expect_err("an unprefixed unknown key is still unknown");
+    assert!(error.contains("`note`"), "{error}");
+}
+
+/// A v0 document cannot express `scope`, `id` or `consume`: the parser returns
+/// before reading them. Writing them anyway produced a document that could not
+/// be read back, which is this issue's silent drop occurring in the writer.
+#[test]
+fn v0_serialization_round_trips_through_its_own_parser() {
+    let sticky_glob = parse_llm_mock_value(&serde_json::json!({"match": "*hi*", "text": "A"}))
+        .expect("sticky glob");
+    assert!(sticky_glob.sticky);
+    let line = serialize_llm_mock(sticky_glob).expect("serialize sticky glob");
+    let reparsed = parse_llm_mock_value(&serde_json::from_str(&line).expect("json"))
+        .expect("a v0 document must survive its own parser");
+    assert!(reparsed.sticky, "stickiness survives the round trip");
+
+    let once_glob = parse_llm_mock_value(
+        &serde_json::json!({"match": "*hi*", "text": "A", "consume_match": true}),
+    )
+    .expect("one-shot glob");
+    assert!(!once_glob.sticky);
+    let line = serialize_llm_mock(once_glob).expect("serialize one-shot glob");
+    assert!(
+        !line.contains("\"consume\""),
+        "v0 spells reuse with consume_match, never the v1 `consume`: {line}"
+    );
+    let reparsed =
+        parse_llm_mock_value(&serde_json::from_str(&line).expect("json")).expect("reparse");
+    assert!(!reparsed.sticky, "one-shot survives the round trip");
+}
+
 /// A v1 field in a v0 document is not a misspelling, so a nearest-spelling
 /// guess would be noise. Name the missing header instead.
 #[test]

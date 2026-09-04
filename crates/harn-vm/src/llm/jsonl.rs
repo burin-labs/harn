@@ -271,15 +271,31 @@ fn serialize_llm_mock_value(
             serde_json::Value::String(if mock.sticky { "sticky" } else { "once" }.to_string()),
         );
     } else {
-        // Preserve byte-compatible v0 serialization for direct legacy callers.
+        // A v0 document has no `scope`, `id` or `consume`: the parser returns
+        // before reading them and pins every entry to the default scope. Writing
+        // them anyway produced a document that could not be read back, which is
+        // the same silent drop this schema check exists to stop, in the writer
+        // rather than the reader. v0 spells reuse with `consume_match`, and only
+        // for a glob — a FIFO entry is always consumed.
         if mock.scope != DEFAULT_MOCK_SCOPE {
-            object.insert("scope".to_string(), serde_json::Value::String(mock.scope));
+            return Err(format!(
+                "v0 fixture serialization cannot express scope {:?}; \
+                 serialize a versioned fixture instead",
+                mock.scope
+            ));
         }
-        if mock.sticky {
-            object.insert(
-                "consume".to_string(),
-                serde_json::Value::String("sticky".to_string()),
-            );
+        match (object.contains_key("match"), mock.sticky) {
+            (true, false) => {
+                object.insert("consume_match".to_string(), serde_json::Value::Bool(true));
+            }
+            (false, true) => {
+                return Err(
+                    "v0 fixture serialization cannot express a reusable FIFO entry; \
+                     serialize a versioned fixture instead"
+                        .to_string(),
+                );
+            }
+            _ => {}
         }
     }
     if !mock.text.is_empty() {
@@ -567,6 +583,20 @@ const V0_ENTRY_FIELDS: &[&str] = &[
 /// misspell anything, they wrote a v1 entry into a v0 document.
 const V1_ONLY_ENTRY_FIELDS: &[&str] = &["id", "scope", "consume"];
 
+/// A leading underscore marks an author's annotation rather than a field the
+/// parser is expected to read, at every schema version and at every nesting
+/// depth.
+///
+/// The namespace exists because closing the schema would otherwise force human
+/// notes out of the fixture and into a second file that nothing keeps in sync.
+/// It is safe to leave open precisely because it cannot be reached by accident:
+/// a misspelling of a real field never grows a leading underscore, so an
+/// annotation is always a deliberate act. Bundled demo tapes already rely on
+/// this to explain why a near-empty tape exists at all.
+fn is_annotation_key(key: &str) -> bool {
+    key.starts_with('_')
+}
+
 /// Close the v0 authoring surface at the top level.
 ///
 /// Nested shapes stay open at v0 on purpose: legacy tool calls accept `args`
@@ -576,7 +606,7 @@ const V1_ONLY_ENTRY_FIELDS: &[&str] = &["id", "scope", "consume"];
 /// indistinguishable from one that was.
 fn validate_v0_entry(object: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
     for key in object.keys() {
-        if V0_ENTRY_FIELDS.contains(&key.as_str()) {
+        if V0_ENTRY_FIELDS.contains(&key.as_str()) || is_annotation_key(key) {
             continue;
         }
         if V1_ONLY_ENTRY_FIELDS.contains(&key.as_str()) {
@@ -692,7 +722,7 @@ fn validate_v1_object_fields(
     allowed_fields: &[&str],
 ) -> Result<(), String> {
     for key in object.keys() {
-        if !allowed_fields.contains(&key.as_str()) {
+        if !allowed_fields.contains(&key.as_str()) && !is_annotation_key(key) {
             return Err(unknown_field_message(label, key, allowed_fields));
         }
     }
