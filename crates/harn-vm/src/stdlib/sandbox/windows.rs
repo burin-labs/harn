@@ -47,10 +47,10 @@ use windows_sys::Win32::System::Threading::{
 use super::{
     policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
-    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
-    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
-    SandboxBackend,
+    process_sandbox_package_manager_config_read_roots, process_sandbox_path_read_roots,
+    process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
+    process_sandbox_readonly_roots, process_sandbox_roots, process_spawn_error, sandbox_rejection,
+    unavailable, PrepareOutcome, ProcessCommandConfig, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -572,35 +572,11 @@ fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
-        .chain(windows_path_read_roots(policy))
-        .collect()
-}
-
-/// Every directory on this process's own `PATH`, gated on the same
-/// `DeveloperToolchains` preset as the home-relative roots above.
-///
-/// Unlike macOS (seatbelt) and Linux (Landlock), which are read-open by
-/// default and confine only writes, this backend's AppContainer is
-/// read-closed by construction: nothing outside an explicit icacls grant is
-/// visible to the child. `developer_toolchain_read_roots_for_home` only
-/// covers *home-relative* installs (`~/.cargo`, `~/.nvm`, ...), so a global,
-/// non-home-relative install on PATH — e.g. the official Node.js installer's
-/// `C:\Program Files\nodejs` — stays invisible, and `cmd.exe` reports the
-/// unreadable executable as "not recognized" rather than a permission error
-/// (harn#7993). A PATH entry is, definitionally, a developer toolchain
-/// location. `optional: true` in the icacls grant loop above already skips
-/// any entry that does not exist, so a stray or unusual PATH entry costs
-/// nothing.
-fn windows_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    use crate::orchestration::ProcessSandboxPreset;
-    if !super::process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains)
-    {
-        return Vec::new();
-    }
-    std::env::var_os("PATH")
-        .iter()
-        .flat_map(std::env::split_paths)
-        .map(|dir| super::paths::normalize_for_policy(&dir))
+        // Owned by `mod.rs` so the pre-launch coverage check reads the same
+        // set this loop grants an ACE for; see
+        // `process_sandbox_path_read_roots`. `optional: true` in the grant
+        // loop above already skips an entry that is not on disk.
+        .chain(process_sandbox_path_read_roots(policy))
         .collect()
 }
 

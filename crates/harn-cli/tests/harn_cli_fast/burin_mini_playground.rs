@@ -210,8 +210,11 @@ fn dump(harness: Harness, label: string, command: string) {
 
 fn main(harness: Harness) {
   dump(harness, "WHERE", "where node")
+  dump(harness, "NODE", "node --version")
+  dump(harness, "DOTNET", "dotnet --version")
   dump(harness, "WHOAMI", "whoami /groups /fo list")
   dump(harness, "ICACLS", "icacls \"C:\\Program Files\\nodejs\"")
+  dump(harness, "ICACLS_DOTNET", "icacls \"C:\\Program Files\\dotnet\"")
   dump(harness, "TYPE", "type \"C:\\Program Files\\nodejs\\package.json\"")
   dump(harness, "ENV", "echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
 }
@@ -237,14 +240,29 @@ fn main(harness: Harness) {
         .await
     });
 
-    let where_status_ok = outcome
-        .stdout
-        .lines()
-        .any(|line| line.trim() == "WHERE_STATUS=0");
+    let status_ok = |label: &str| {
+        let marker = format!("{label}_STATUS=0");
+        outcome.stdout.lines().any(|line| line.trim() == marker)
+    };
+    let where_status_ok = status_ok("WHERE");
+    let node_ok = status_ok("NODE");
+    let dotnet_ok = status_ok("DOTNET");
     format!(
-        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; WHOAMI = the token's groups and integrity level; ICACLS = the nodejs install dir's ACL; TYPE = a plain read of a file inside it; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
+        "where_node_ok={where_status_ok} node_ok={node_ok} dotnet_ok={dotnet_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; NODE and DOTNET = two system-installed toolchains run as a discriminating pair; WHOAMI = the token's groups and integrity level; ICACLS and ICACLS_DOTNET = each install dir's ACL; TYPE = a plain read of a file inside the nodejs one; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
         outcome.exit_code, outcome.stdout, outcome.stderr
     )
+}
+
+/// Read one `label=value` flag back out of a [`windows_env_probe_dump`]
+/// summary line. Returns `false` when the flag is absent, which is the safe
+/// direction: a dump that never got far enough to print the flag has not
+/// demonstrated anything.
+#[cfg(windows)]
+fn probe_flag(dump: &str, label: &str) -> bool {
+    let needle = format!("{label}=true");
+    dump.lines()
+        .next()
+        .is_some_and(|line| line.split_whitespace().any(|field| field == needle))
 }
 
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
@@ -808,7 +826,8 @@ mod stage_summary_tests {
     }
 }
 
-/// DIAGNOSTIC PROBE (harn#7993). Asserts that `where node` resolves inside an
+/// DIAGNOSTIC PROBE (harn#7993). Asserts that two system-installed
+/// toolchains, `node` and `dotnet`, actually run inside an
 /// `Inherited`-policy sandboxed `run`-tool child — the exact seam
 /// `burin_mini_comment_file_fixture_run_updates_workspace_copy`'s failing
 /// `node scripts/verify-comment.js` call goes through —
@@ -832,11 +851,39 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
     eprintln!(
         "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n{dump}\n=== end probe ==="
     );
+    let where_node_ok = probe_flag(&dump, "where_node_ok");
+    let node_ok = probe_flag(&dump, "node_ok");
+    let dotnet_ok = probe_flag(&dump, "dotnet_ok");
+    // `dotnet` is the positive control. Both toolchains install under
+    // `C:\Program Files`, but only the Node installer replaces that
+    // directory's whole DACL and strips the inherited `ALL APPLICATION
+    // PACKAGES` grant, so the two failing together and only one failing mean
+    // different things. Reading them as a pair is what turns a red here into
+    // a diagnosis instead of a rerun.
+    let reading = match (node_ok, dotnet_ok) {
+        (true, true) => "both toolchains ran",
+        (false, false) => {
+            "NEITHER toolchain ran, so this is the sandbox mechanism itself — \
+             the token, the grant loop, or the spawn — and not one directory's ACL"
+        }
+        (false, true) => {
+            "only `node` failed while `dotnet` ran, so the token and the grant \
+             loop are working and the nodejs install directory is missing its \
+             `ALL APPLICATION PACKAGES` grant; compare the ICACLS and \
+             ICACLS_DOTNET sections"
+        }
+        (true, false) => {
+            "`node` ran but `dotnet` did not, which is the reverse of the \
+             expected shape and means the positive control is measuring \
+             something other than what it was chosen for"
+        }
+    };
     assert!(
-        dump.starts_with("where_node_ok=true"),
-        "the sandboxed run tool's child could not resolve 'node' via \
-         `where node`, under the SAME Inherited environment policy the \
-         burin-mini playground test uses\n{dump}"
+        node_ok && dotnet_ok,
+        "the sandboxed run tool's child could not run a system-installed \
+         toolchain, under the SAME Inherited environment policy the \
+         burin-mini playground test uses. Reading: {reading}.\n\
+         where_node_ok={where_node_ok} node_ok={node_ok} dotnet_ok={dotnet_ok}\n{dump}"
     );
 }
 
