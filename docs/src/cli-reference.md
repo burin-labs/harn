@@ -4099,10 +4099,32 @@ the package into a temporary consumer and checks each export; validates
 documentation and generated API docs; and dry-runs package packing. Connector
 packages also run their connector metadata and deterministic fixture contract.
 Each receipt check records whether the gate was applicable and reached, plus
-its command, result, timing, and diagnostics.
+its command, result, timing, and diagnostics. Schema-v3 receipts also include
+`test_discovery`: the selected file count, discovered test-pipeline count,
+per-file names and SHA-256 digests, and the exact files that contained no
+discoverable test pipeline. Empty suites fail unless `harn.toml` declares both
+`[tests].allow_empty = true` and a non-empty `[tests].reason`.
+
+## harn package test-inventory
+
+Inspect package test discovery without executing tests or changing package
+files. Release compatibility scans use this command with the candidate Harn
+runtime so a new discovery rule fails before publication reaches downstream
+bump pull requests.
+
+```bash
+harn package test-inventory .
+harn package test-inventory . --json
+harn package test-inventory . --json \
+  --receipt-out .harn/receipts/package-test-inventory.json
+```
+
+The command exits nonzero for an unreasoned empty suite, a parse or discovery
+error, or any selected file with no discoverable test pipeline. Its schema-v1
+receipt includes the exact per-file identities used by the verdict.
 
 `--strict` makes both check and lint warnings fatal and enables strict boundary
-type checking. Schema-v2 receipts expose `strict_requested` and record the
+type checking. Schema-v3 receipts expose `strict_requested` and record the
 exact strict command for each source gate; manifest-level `[check]` policy is
 still applied monotonically by those commands.
 
