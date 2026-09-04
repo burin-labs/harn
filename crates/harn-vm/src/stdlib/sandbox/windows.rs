@@ -654,12 +654,32 @@ impl WorkspaceAclGrants {
                 ));
             }
             sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
-            run_icacls(
+            let granted = run_icacls(
                 &root,
                 ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
-            )?;
-            sandbox_trace(label, "icacls grant ok");
-            paths.push(root);
+            );
+            match granted {
+                Ok(()) => {
+                    sandbox_trace(label, "icacls grant ok");
+                    paths.push(root);
+                }
+                // An optional root is a preset that WIDENS what the child can
+                // read. Failing to widen must not kill the spawn: the child
+                // simply sees less, which is the behavior before the preset
+                // existed. A required root is the opposite — it is what
+                // CONFINES the child, so a failure there must abort rather
+                // than silently launch an unconfined process.
+                Err(error) if optional => {
+                    sandbox_trace(
+                        label,
+                        format!(
+                            "icacls grant skipped for optional root {}: {error}",
+                            root.display()
+                        ),
+                    );
+                }
+                Err(error) => return Err(error),
+            }
         }
         Ok(Self {
             label: label.to_string(),
