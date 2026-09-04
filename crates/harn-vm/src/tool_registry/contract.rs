@@ -676,6 +676,39 @@ fn validate_refs(
         .map_err(|error| format!("{field} contains an unresolved schema reference: {error}"))
 }
 
+/// Top-level keys that only ever appear together in a JSON Schema document.
+///
+/// A caller who hands a complete schema to a per-parameter map declares
+/// parameters literally named `type`, `properties`, and `required`. The
+/// list-valued `required` throws, but `{type: "object", properties: {}}` is a
+/// silently wrong no-parameter tool that declares two parameters, which is how
+/// a consumer once shipped one. Refuse the shape by name instead.
+pub(crate) const JSON_SCHEMA_DOCUMENT_KEYS: [&str; 3] = ["type", "properties", "required"];
+
+/// Refuse a per-parameter map that is really a JSON Schema document.
+pub(crate) fn reject_schema_shaped_parameter_map(
+    params: &crate::value::DictMap,
+) -> Result<(), crate::value::VmError> {
+    if params.is_empty() {
+        return Ok(());
+    }
+    if !params
+        .iter()
+        .all(|(name, _)| JSON_SCHEMA_DOCUMENT_KEYS.contains(&name.as_str()))
+    {
+        return Ok(());
+    }
+    let keys = params
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(crate::value::VmError::Runtime(format!(
+        "tool parameters {{{keys}}} are a JSON Schema document, not a per-parameter map; \
+         pass a complete schema as input_schema and keep parameters for named parameters"
+    )))
+}
+
 fn validate_defs_do_not_shadow_components(
     schema: &JsonValue,
     components: Option<&BTreeMap<String, JsonValue>>,
