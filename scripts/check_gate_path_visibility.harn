@@ -1,0 +1,268 @@
+/**
+ * Keep the skip-shaped `fs.exists` guard from coming back.
+ *
+ * `harness.fs.exists` answers one boolean, and a capability-policy scope denial
+ * is reported through it as `false`. The dangerous use is the negated guard
+ * that skips work:
+ *
+ *     if !fs.exists(path) { continue }
+ *
+ * A denial there makes the check silently not run and the gate still exits 0.
+ * `scripts/path_visibility.harn` is the typed replacement, and seven gates were
+ * converted to it. Nothing stopped an eighth from being written the old way, so
+ * an invariant that held only in review is now a ratchet.
+ *
+ * This is deliberately a ratchet and not a ban. The remaining negated sites are
+ * the convict-shaped ones: a denial there produces a loud false failure naming
+ * a missing file. That is a mislabel worth fixing, but it does not report
+ * success, so it is not this gate's business. What the ratchet forbids is the
+ * count going up, and it forbids any of the converted gates going above zero.
+ */
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { find_files } from "std/fs"
+import { zero_scan_failure } from "./path_visibility.harn"
+
+const CHECK_NAME = "check-gate-path-visibility"
+
+/**
+ * Files that still carry the negated guard, with the count each may carry.
+ *
+ * A row may only ever shrink. When a file's count drops below its row the gate
+ * fails and asks for the row to be tightened, so the baseline cannot drift out
+ * of date and quietly re-open headroom.
+ */
+const NEGATED_EXISTS_BASELINE = [
+  {path: "scripts/bench_cli_cold_start.harn", count: 1},
+  {path: "scripts/build_release_assets_manifest.harn", count: 1},
+  {path: "scripts/check_binary_size.harn", count: 2},
+  {path: "scripts/check_docs_cli_flags.harn", count: 1},
+  {path: "scripts/check_docs_snippets.harn", count: 1},
+  {path: "scripts/check_docs_workflow_quickstart.harn", count: 1},
+  {path: "scripts/check_downstream_protocol_bindings.harn", count: 2},
+  {path: "scripts/check_generated_registry.harn", count: 1},
+  {path: "scripts/check_grammar_keywords.harn", count: 2},
+  {path: "scripts/check_loud_boundaries.harn", count: 2},
+  {path: "scripts/check_openapi_snapshot.harn", count: 1},
+  {path: "scripts/check_ported_handler_loc.harn", count: 2},
+  {path: "scripts/check_rust_prompt_prose.harn", count: 1},
+  {path: "scripts/check_site_snippets.harn", count: 1},
+  {path: "scripts/check_source_file_lengths.harn", count: 1},
+  {path: "scripts/check_test_case_performance.harn", count: 1},
+  {path: "scripts/check_test_target_coverage.harn", count: 2},
+  {path: "scripts/check_turn_end_boundary.harn", count: 1},
+  {path: "scripts/check_vm_rss_soak.harn", count: 1},
+  {path: "scripts/check_xfail_count.harn", count: 1},
+  {path: "scripts/hook_timing_summary.harn", count: 1},
+  {path: "scripts/pr_binary_size_signal.harn", count: 3},
+  {path: "scripts/provider_catalog_notice.harn", count: 2},
+  {path: "scripts/provider_tool_probe_campaign/catalog.harn", count: 1},
+  {path: "scripts/provider_tool_probe_campaign/env.harn", count: 2},
+  {path: "scripts/provider_tool_probe_campaign/execute.harn", count: 1},
+  {path: "scripts/release_metadata.harn", count: 3},
+  {path: "scripts/release_withdrawals.harn", count: 1},
+  {path: "scripts/render_release_notes.harn", count: 1},
+  {path: "scripts/sync_protocol_fixture_runtime_versions.harn", count: 1},
+  {path: "scripts/sync_tree_sitter_keywords.harn", count: 2},
+  {path: "scripts/update_provider_catalog.harn", count: 1},
+  {path: "scripts/verify_crate_package_includes.harn", count: 1},
+  {path: "scripts/verify_language_spec.harn", count: 1},
+  {path: "scripts/verify_tree_sitter_parse.harn", count: 3},
+  {path: "scripts/warn_generated_artifact_drift.harn", count: 2},
+]
+
+/**
+ * The three sites that are still skip-shaped after the conversion, kept visible
+ * on every passing run rather than only in the pull request that found them.
+ *
+ * Each was left alone deliberately. The two in `check_test_target_coverage` ask
+ * "is this Makefile token a path at all", where most tokens are legitimately
+ * not paths, and converting them would push a denial through a function that
+ * returns a bare list. The one in `verify_tree_sitter_parse` folds a denied
+ * path out of an mtime maximum, which can make a stale parser look fresh. Both
+ * shapes need a signature change to carry a denial, which is a larger edit than
+ * the class fix warranted.
+ */
+const SKIP_SHAPED_RESIDUALS = [
+  "scripts/check_test_target_coverage.harn: walked-root token filter (2 sites)",
+  "scripts/verify_tree_sitter_parse.harn: max_mtime folds a denied path out of the maximum",
+]
+
+// Trees under scripts/ that are not hand-written gates: the test suites assert
+// on the shape deliberately, and the bump-driver generations are vendored
+// package output.
+const EXCLUDED_PREFIXES = ["scripts/bump-driver/", "scripts/tests/"]
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+fn rel_path(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+fn is_excluded(rel: string) -> bool {
+  for prefix in EXCLUDED_PREFIXES {
+    if rel.starts_with(prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * True for a line that guards on a negated `fs.exists`.
+ *
+ * Comment lines are skipped so that prose describing the shape — including this
+ * file's own module doc and `path_visibility.harn`'s — is not counted as a use.
+ */
+pub fn is_negated_exists_line(line: string) -> bool {
+  const trimmed = line.trim()
+  if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("/*") {
+    return false
+  }
+  // A line that mentions the call inside a string literal is describing the
+  // shape, not using it. This file and its test both do that.
+  if trimmed.contains("\"fs.exists(") {
+    return false
+  }
+  if !trimmed.contains("fs.exists(") {
+    return false
+  }
+  return (trimmed.contains("!") && trimmed.starts_with("if "))
+    || (trimmed.contains("!") && trimmed.contains("if "))
+}
+
+/** Count the negated guards in one file's text. */
+pub fn negated_exists_count(text: string) -> int {
+  let hits = 0
+  for line in text.split("\n") {
+    if is_negated_exists_line(line) {
+      hits = hits + 1
+    }
+  }
+  return hits
+}
+
+fn baseline_for(rel: string) -> int {
+  for row in NEGATED_EXISTS_BASELINE {
+    if to_string(row.path) == rel {
+      return to_int(row.count)
+    }
+  }
+  return 0
+}
+
+/** Census every hand-written gate under `scripts/`. */
+pub fn census(fs: HarnessFs, root: string = "") -> dict {
+  const resolved_root = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  let scanned = 0
+  let rows: list<dict> = []
+  for path in find_files(fs, path_join(resolved_root, "scripts"), "**/*.harn") {
+    const rel = rel_path(path, resolved_root)
+    if is_excluded(rel) {
+      continue
+    }
+    scanned = scanned + 1
+    const hits = negated_exists_count(fs.read_text(path))
+    if hits > 0 || baseline_for(rel) > 0 {
+      rows = rows + [{path: rel, count: hits, allowed: baseline_for(rel)}]
+    }
+  }
+  return {root: resolved_root, scanned_count: scanned, rows: rows}
+}
+
+/** Every way the census can violate the ratchet, as operator-readable lines. */
+pub fn census_violations(rows: list<dict>) -> list<string> {
+  let out: list<string> = []
+  for row in rows {
+    const rel = to_string(row.path)
+    const hits = to_int(row.count)
+    const allowed = to_int(row.allowed)
+    if hits > allowed {
+      out = out
+        + [
+          rel + " has " + to_string(hits) + " negated fs.exists guard(s), baseline allows "
+            + to_string(allowed)
+            + ". A denial reads as a missing file here; use path_visibility() instead"
+            + " of adding another.",
+        ]
+      continue
+    }
+    if hits < allowed {
+      out = out
+        + [
+          rel + " now has " + to_string(hits) + " negated fs.exists guard(s) but its"
+            + " baseline row still allows "
+            + to_string(allowed)
+            + ". Tighten the row in NEGATED_EXISTS_BASELINE so the headroom does not"
+            + " stay open.",
+        ]
+    }
+  }
+  return out
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_gate_path_visibility",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_gate_path_visibility.harn -- [--json] [--root PATH]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const report = census(harness.fs, to_string(parsed?.root ?? ""))
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+    return nil
+  }
+  const empty_scan = zero_scan_failure(CHECK_NAME, "gate script(s)", to_int(report.scanned_count))
+  if empty_scan != "" {
+    harness.stdio.eprintln(empty_scan)
+    harness.runtime.exit(1)
+  }
+  const violations = census_violations(report.rows)
+  if len(violations) == 0 {
+    harness.stdio.println(
+      "gate path visibility passed: " + to_string(report.scanned_count)
+        + " gate script(s) scanned; no file carries more negated fs.exists"
+        + " guards than its baseline row allows.",
+    )
+    // Standing residual, printed on every pass so it cannot be forgotten.
+    for line in SKIP_SHAPED_RESIDUALS {
+      harness.stdio.println("  still skip-shaped: " + line)
+    }
+    return nil
+  }
+  harness.stdio.eprintln("gate path visibility failed:")
+  for line in violations {
+    harness.stdio.eprintln("  - " + line)
+  }
+  harness.runtime.exit(1)
+}

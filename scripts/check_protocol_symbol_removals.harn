@@ -31,7 +31,7 @@ import {
   resolve_commit,
   trailer_values,
 } from "./git_base.harn"
-import { path_visibility, visibility_failure } from "./path_visibility.harn"
+import { path_visibility, visibility_failure, zero_scan_failure } from "./path_visibility.harn"
 
 const REMOVAL_TRAILER = "Allow-Protocol-Removal:"
 
@@ -292,6 +292,14 @@ pipeline main(harness: Harness, task: unknown) {
   const denial_failure = visibility_failure(CHECK_NAME, denied)
   if denial_failure != "" {
     harness.stdio.eprintln(denial_failure)
+    return 1
+  }
+  // WATCHED is a fixed list of files that are always present, so inspecting
+  // none of them means every one was missing or denied. The scope line above
+  // would still read as a clean run.
+  const empty_scan = zero_scan_failure(CHECK_NAME, "watched protocol file(s)", inspected)
+  if empty_scan != "" {
+    harness.stdio.eprintln(empty_scan)
     return 1
   }
   if findings.count > 0 {

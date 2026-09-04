@@ -1,5 +1,5 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
-import { path_visibility, visibility_failure } from "./path_visibility.harn"
+import { path_visibility, visibility_failure, zero_scan_failure } from "./path_visibility.harn"
 
 /** This gate's own name, quoted back into any denial it reports. */
 const CHECK_NAME = "check-source-file-lengths"
@@ -1013,6 +1013,13 @@ fn main(harness: Harness) {
     } else {
       harness.stdio.eprintln(rendered)
     }
+  }
+  // The ratchet prints its source count. Refuse at zero: a denied or mis-rooted
+  // walk yields an empty source list, no findings, and this same pass line.
+  const empty_scan = zero_scan_failure(CHECK_NAME, "source file(s)", to_int(report.source_count))
+  if empty_scan != "" {
+    harness.stdio.eprintln(empty_scan)
+    harness.runtime.exit(1)
   }
   if report.findings.count > 0 {
     harness.runtime.exit(1)

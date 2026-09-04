@@ -21,7 +21,6 @@
  * This module reads the typed shape once, at the boundary that owns it, so no
  * gate has to remember that rule.
  */
-
 /**
  * What a gate is allowed to conclude about one path.
  *
@@ -31,12 +30,7 @@
  * the word "denied" so an operator scanning output can find it, and names the
  * path and the roots the policy did allow so the fix is actionable.
  */
-pub type PathVisibility = {
-  visible: bool,
-  exists: bool,
-  status: string,
-  denial: string,
-}
+pub type PathVisibility = {visible: bool, exists: bool, status: string, denial: string}
 
 /**
  * Classify one path for a gate, for read access.
@@ -68,7 +62,8 @@ pub fn path_visibility(fs: HarnessFs, check: string, path: string) -> PathVisibi
       status: status,
       denial: check + ": read denied for `" + path + "` (fs.status=" + status
         + "). This path was not inspected, so treat it as unproven rather than"
-        + " absent. Allowed roots: " + __visibility_roots(info),
+        + " absent. Allowed roots: "
+        + __visibility_roots(info),
     }
   }
   return {visible: true, exists: info?.exists ?? false, status: status, denial: ""}
@@ -95,5 +90,26 @@ pub fn visibility_failure(check: string, denials: list<string>) -> string {
   return check + " could not inspect " + to_string(len(denials))
     + " path(s) because access was denied. A denied path is not a clean one:"
     + " every claim this gate makes about it would be vacuous, so this is a"
-    + " failure rather than a skip.\n  " + denials.join("\n  ")
+    + " failure rather than a skip.\n  "
+    + denials.join("\n  ")
+}
+
+/**
+ * The failure a gate prints when it inspected nothing.
+ *
+ * Several gates already print what they scanned on the pass line, which is the
+ * right instinct, but a count is only evidence when something refuses at zero.
+ * Until then "0 file(s) scanned; every one is clean" and "3469 file(s) scanned;
+ * every one is clean" are the same passing verdict, and a denied or mis-rooted
+ * walk produces the first one. Returns empty above zero so a caller can guard
+ * on the string the same way it guards on [[visibility_failure]].
+ */
+pub fn zero_scan_failure(check: string, unit: string, scanned: int) -> string {
+  if scanned > 0 {
+    return ""
+  }
+  return check + " inspected 0 " + unit + " and cannot report success. A walk"
+    + " that resolved to the wrong root, or to one this run was not permitted"
+    + " to read, produces exactly this count, so a clean verdict here would be"
+    + " vacuous."
 }

@@ -1,6 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { relative_path } from "std/fs"
-import { path_visibility } from "./path_visibility.harn"
+import { path_visibility, zero_scan_failure } from "./path_visibility.harn"
 
 // Test roots whose files are enumerated one by one inside a Makefile recipe
 // rather than discovered by walking the directory. A file added to one of
@@ -622,6 +622,27 @@ fn main(harness: Harness) {
         harness.stdio.eprintln(to_string(pair.text))
       }
     }
+  }
+  // Both censuses print what they scanned. Until now neither refused at zero,
+  // so a walk that resolved to the wrong root produced the same clean verdict
+  // as one that read every file.
+  const empty_scans = [
+    zero_scan_failure(CHECK_NAME, "hand-listed test file(s)", to_int(report.scanned_count)),
+    zero_scan_failure(
+      CHECK_NAME,
+      "Harn file(s) under the lint roots",
+      to_int(lint_roots.scanned_count),
+    ),
+  ]
+  let scanned_nothing = false
+  for line in empty_scans {
+    if line != "" {
+      harness.stdio.eprintln(line)
+      scanned_nothing = true
+    }
+  }
+  if scanned_nothing {
+    harness.runtime.exit(1)
   }
   if report.violation_count > 0 || lint_roots.violation_count > 0 {
     harness.runtime.exit(1)
