@@ -394,7 +394,7 @@ impl SessionEnvironment {
         let mut launcher_snapshot = capture_process_environment();
         for name in super::environment_policy::ENV_ALLOWLIST {
             if let Some(value) = env_lookup(name) {
-                launcher_snapshot.insert((*name).to_string(), value);
+                insert_env_value(&mut launcher_snapshot, name, value);
             }
         }
         Self::launch_from_snapshot(kind, specs, launcher_snapshot, env_lookup)
@@ -427,9 +427,7 @@ impl SessionEnvironment {
         } else {
             launcher_snapshot
                 .into_iter()
-                .filter(|(name, _)| {
-                    super::environment_policy::ENV_ALLOWLIST.contains(&name.as_str())
-                })
+                .filter(|(name, _)| super::environment_policy::allowlist_admits(name))
                 .collect()
         };
         Ok(SessionEnvironment {
@@ -656,6 +654,33 @@ fn capture_process_environment() -> BTreeMap<String, String> {
     std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect()
+}
+
+/// Insert `name=value` the way Windows would: a name that exists under
+/// different casing (`capture_process_environment` seeds OS casing `Path`;
+/// `ENV_ALLOWLIST`'s re-assert loop right after it uses POSIX casing
+/// `PATH`) is updated in place, not duplicated. `Inherited` hands this map
+/// to a child verbatim, so an un-deduped snapshot leaks the duplicate.
+fn insert_env_value_case_insensitive(
+    map: &mut BTreeMap<String, String>,
+    name: &str,
+    value: String,
+) {
+    let existing_key = map
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(name))
+        .cloned();
+    map.insert(existing_key.unwrap_or_else(|| name.to_string()), value);
+}
+
+/// Case-insensitive on Windows, plain elsewhere: POSIX treats `PATH` and
+/// `Path` as unrelated variables, so folding them there is the bug.
+fn insert_env_value(map: &mut BTreeMap<String, String>, name: &str, value: String) {
+    if cfg!(windows) {
+        insert_env_value_case_insensitive(map, name, value);
+    } else {
+        map.insert(name.to_string(), value);
+    }
 }
 
 fn validate_unique_specs(specs: &[GrantSpec]) -> Result<(), EnvironmentPolicyError> {
@@ -1380,5 +1405,93 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code(), "environment_policy.invalid_for_command");
+    }
+
+    /// Exercised directly, not through `launch` (which reads this process's
+    /// real `std::env::vars_os`), so it holds on every host.
+    #[test]
+    fn a_case_insensitive_insert_updates_the_existing_key_not_a_second_one() {
+        let mut map = BTreeMap::new();
+        map.insert(
+            "Path".to_string(),
+            "C:\\nodejs;C:\\Windows\\System32".to_string(),
+        );
+        insert_env_value_case_insensitive(
+            &mut map,
+            "PATH",
+            "C:\\nodejs;C:\\Windows\\System32;C:\\extra".to_string(),
+        );
+        assert_eq!(
+            map.len(),
+            1,
+            "must update the existing 'Path' key, not add a second 'PATH' key: {map:?}"
+        );
+        assert_eq!(
+            map.get("Path").map(String::as_str),
+            Some("C:\\nodejs;C:\\Windows\\System32;C:\\extra"),
+            "the original casing is preserved, only the value is refreshed: {map:?}"
+        );
+        assert!(
+            !map.contains_key("PATH"),
+            "no second key should exist under the allowlist's own casing: {map:?}"
+        );
+    }
+
+    #[test]
+    fn a_case_insensitive_insert_adds_a_new_key_when_none_matches() {
+        let mut map = BTreeMap::new();
+        insert_env_value_case_insensitive(&mut map, "HOME", "/root".to_string());
+        assert_eq!(map.get("HOME").map(String::as_str), Some("/root"));
+    }
+
+    /// End-to-end: `launch` -> `resolve_env` -> a real spawned child
+    /// resolves `node` whenever the parent does (harn#7993). `#[cfg(windows)]`:
+    /// nothing to prove where OS and allowlist casing cannot diverge.
+    #[cfg(windows)]
+    #[test]
+    fn an_inherited_child_resolves_node_whenever_the_parent_does() {
+        let parent_has_node = std::process::Command::new("cmd")
+            .args(["/D", "/C", "where node"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if !parent_has_node {
+            return; // nothing to prove without node on this machine's PATH
+        }
+        let environment =
+            SessionEnvironment::launch(EnvironmentPolicyKind::Inherited, vec![], &no_env)
+                .expect("inherited launch never fails");
+        let resolve_secret = |_: &str, _: &str| -> Option<String> { None };
+        let env = crate::security::resolve_env(&environment, &no_env, &resolve_secret)
+            .expect("inherited resolve_env never fails");
+        let path_entries: Vec<(&String, &String)> = env
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            .collect();
+        assert_eq!(
+            path_entries.len(),
+            1,
+            "exactly one PATH-shaped key must reach the child: {:?}",
+            env.keys().collect::<Vec<_>>()
+        );
+        // Byte-for-byte, not just present: Inherited must not rebuild PATH.
+        let parent_path = std::env::var("PATH").expect("this process has a PATH to compare");
+        assert_eq!(
+            path_entries[0].1, &parent_path,
+            "an Inherited child's PATH must equal the parent's PATH exactly"
+        );
+        let output = std::process::Command::new("cmd")
+            .args(["/D", "/C", "where node"])
+            .env_clear()
+            .envs(&env)
+            .output()
+            .expect("spawn cmd for the child-side probe");
+        assert!(
+            output.status.success(),
+            "parent resolved node on PATH but an Inherited-policy child did not: \
+             stdout={:?} stderr={:?}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

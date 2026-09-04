@@ -14,6 +14,12 @@ pub fn windows_runner_expression() -> string {
   )
 }
 
+pub fn windows_nightly_runner_expression() -> string {
+  return gha_expression(
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-16vcpu-windows-2025'",
+  )
+}
+
 pub fn windows_tier_expression() -> string {
   return gha_expression(
     "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith'",
@@ -493,12 +499,15 @@ pub fn workflows() {
       permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {
-          "runs-on": "windows-latest",
+          "runs-on": windows_nightly_runner_expression(),
+          env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {
               name: "Set up Dev Drive",
-              if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'"),
+              if: gha_expression(
+                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
+              ),
               uses: "samypr100/setup-dev-drive@exact-pin",
               with: {
                 "drive-size": gha_expression(
