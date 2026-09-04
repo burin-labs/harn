@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -60,7 +61,9 @@ use crate::value::VmError;
 #[path = "windows_system_roots.rs"]
 mod system_roots;
 
-use system_roots::{broad_system_root, hosts_an_executable, system_read_roots};
+use system_roots::{
+    broad_system_root, hosts_an_executable, system_read_roots, tree_entry_count_within,
+};
 
 pub(super) struct Backend;
 
@@ -516,6 +519,16 @@ enum Grantee {
     /// non-recursive probe then sees the entry and skips the rewrite
     /// entirely, which on the same host is a 5ms read in place of a 1s
     /// rewrite.
+    ///
+    /// Two consequences worth stating plainly, because both outlive the
+    /// spawn. The entry is readable by every sandboxed program on the
+    /// machine, not only by ours; it is read-execute, and it is the
+    /// permission the installer's own prefix already grants, but it is a
+    /// widening. And `icacls /grant` clears the directory's protected-DACL
+    /// flag, so a directory whose installer had detached it from
+    /// `C:\Program Files` starts inheriting from that prefix again. Measured,
+    /// not assumed: the Node installer detaches exactly this way, and
+    /// granting reattached it.
     EveryAppContainer,
 }
 
@@ -594,27 +607,29 @@ impl WorkspaceAclGrants {
         // Unlike every other entry here this set is not preset-gated: the
         // product contract is reads-open on every profile, and a child that
         // cannot read the interpreter its command names fails with a message
-        // that blames PATH rather than the sandbox. It is selected last, and
-        // told what the other sources already cover, so it never spends a
-        // recursive rewrite re-granting the workspace it is standing in.
-        let already_granted: Vec<PathBuf> = process_sandbox_roots(policy)
+        // that blames PATH rather than the sandbox.
+        //
+        // The write roots are what a PATH root can already be covered by
+        // without being granted itself. The read roots are deliberately NOT
+        // listed here: whether each of those is really granted is decided
+        // under the cost budget, so the selection tracks them as it accepts
+        // them rather than assuming them.
+        let write_roots: Vec<PathBuf> = process_sandbox_roots(policy)
             .into_iter()
-            .chain(process_sandbox_readonly_roots(policy))
-            .chain(process_sandbox_policy_read_roots(policy))
             .chain(process_sandbox_policy_write_roots(policy))
-            .chain(process_sandbox_preset_acl_roots(policy))
             .collect();
-        let system_read = closed_system_read_roots(&already_granted)
-            .into_iter()
-            .map(|root| {
-                (
-                    root,
-                    "(OI)(CI)RX",
-                    MustExist::No,
-                    GrantIs::BestEffort,
-                    Grantee::EveryAppContainer,
-                )
-            });
+        // One cost discipline for every read-only grant this spawn would make,
+        // computed in the same order the loop below grants them.
+        let unaffordable = unaffordable_read_roots(policy, &write_roots);
+        let system_read = system_read_roots().into_iter().map(|root| {
+            (
+                root,
+                "(OI)(CI)RX",
+                MustExist::No,
+                GrantIs::BestEffort,
+                Grantee::EveryAppContainer,
+            )
+        });
         let process_write = if policy_allows_workspace_write(policy) {
             process_sandbox_policy_write_roots(policy)
                 .into_iter()
@@ -646,6 +661,12 @@ impl WorkspaceAclGrants {
                     io::ErrorKind::NotFound,
                     format!("sandbox workspace root '{}' does not exist", root.display()),
                 ));
+            }
+            // Read grants the cost discipline ruled out. Checked after the
+            // existence handling above so a missing load-bearing root still
+            // fails the spawn rather than being quietly skipped.
+            if unaffordable.contains(&root) {
+                continue;
             }
             let grantee_sid = match grantee {
                 Grantee::ThisContainer => sid,
@@ -726,7 +747,7 @@ impl Drop for WorkspaceAclGrants {
     }
 }
 
-/// Ceiling on how many closed system read roots one spawn grants. Each grant
+/// Ceiling on how many read roots one spawn grants. Each grant
 /// is a recursive ACL rewrite, so the set has to stay small even on a host
 /// whose PATH is mostly closed; a host that needs more than this many is
 /// telling us per-directory grants are the wrong mechanism, not that the
@@ -737,96 +758,159 @@ impl Drop for WorkspaceAclGrants {
 /// probe finds the entry already there and skips the rewrite.
 const SYSTEM_READ_GRANT_LIMIT: usize = 24;
 
-/// The system read roots this spawn should grant: on `PATH`, not a broad
-/// system prefix, not already covered by a root another source grants, and
-/// carrying no `ALL APPLICATION PACKAGES` entry.
+/// Ceiling on the total number of filesystem entries one spawn will rewrite
+/// permissions on, across every read root it grants.
 ///
-/// Selection order matters because the budget is finite, and getting it wrong
-/// is what kept this mechanism from ever reaching the directory it exists to
-/// open. On a Windows build host the child's `PATH` carried 125 entries whose
-/// first 39 were cargo build output directories, with the Node install at
-/// position 109. Taken in `PATH` order they filled the budget, the loop
-/// stopped, and Node was never probed (harn#7993, harn#8004).
+/// A count of directories is the wrong unit, because directories differ by
+/// orders of magnitude: a Node install is ~2,400 entries and a cargo target
+/// directory is tens of thousands. Measured on a Windows 11 host the rewrite
+/// runs at roughly 2,500 entries per second, so this budget bounds the work
+/// to a few seconds — paid once on a host, because the grants persist and
+/// every later spawn's probe skips them.
+const SYSTEM_READ_GRANT_ENTRY_BUDGET: usize = 32768;
+
+/// Every read-only root this spawn should NOT grant, decided once for all
+/// four read sources under one budget.
 ///
-/// `already_granted` alone does not fix that, and an earlier attempt that
-/// assumed it would was measured failing in exactly the same way: those build
-/// directories belong to the parent process's own target tree, not to the
-/// sandboxed workspace, so no root any other source grants is a prefix of
-/// them. What excludes them is [`hosts_an_executable`] — they hold object
-/// files and headers and nothing runnable, so they cannot answer a command
-/// name and are not worth a recursive rewrite.
+/// Read grants are the only ones with a cost problem, and they all have the
+/// same one: each is a recursive ACL rewrite whose price is the size of the
+/// tree. Deciding that per source is how the backend ended up unusable, so the
+/// decision lives here and nowhere else. Load-bearing workspace write grants
+/// are deliberately not routed through this: the spawn needs them, so their
+/// cost is not optional and skipping one would produce a sandbox that cannot
+/// do its job.
 ///
-/// Probe results are cached per path for the life of the process, since they
-/// depend on host permissions rather than on the per-spawn container. The
-/// selection itself is not cached, because it depends on the policy.
-fn closed_system_read_roots(already_granted: &[PathBuf]) -> Vec<PathBuf> {
-    let mut closed = Vec::new();
-    for root in system_read_roots() {
-        if closed.len() == SYSTEM_READ_GRANT_LIMIT {
-            sandbox_trace(
-                "system-read-roots",
-                format!(
-                    "decision path=<remaining> probe=unprobed action=skipped reason=grant-limit-{SYSTEM_READ_GRANT_LIMIT}-reached elapsed_ms=0"
-                ),
-            );
-            break;
-        }
-        if broad_system_root(&root) {
-            sandbox_trace(
-                "system-read-roots",
-                format!(
-                    "decision path={} probe=skipped action=skipped reason=broad-system-prefix elapsed_ms=0",
-                    root.display()
-                ),
-            );
+/// The order matters, because the budget is finite and spent in order. It
+/// matches the order the grant loop uses, so what this rules out is exactly
+/// what that loop would otherwise have paid for.
+///
+/// Two measurements from a Windows 11 developer machine shaped this:
+///
+/// * The home toolchain roots (`.cargo`, `.rustup`, `.cache`) are enormous on
+///   any machine that has actually built something. Granting them per spawn
+///   and removing them again afterwards is what made every sandboxed command
+///   time out at two minutes — not the `PATH` roots this module was written
+///   for (harn#7993, harn#8004).
+/// * `PATH` on a build host is mostly cargo build output directories, which
+///   hold object files and no executable. [`hosts_an_executable`] is what
+///   stops them crowding out the Node install they were hiding.
+///
+/// A root ruled out here is simply not opened to the child, which is a
+/// narrower sandbox rather than a broken one. A root that does not exist is
+/// never ruled out, so the caller's own existence handling still decides
+/// whether a missing load-bearing root fails the spawn.
+fn unaffordable_read_roots(
+    policy: &CapabilityPolicy,
+    write_roots: &[PathBuf],
+) -> BTreeSet<PathBuf> {
+    let mut skip = BTreeSet::new();
+    let mut remaining_entry_budget = SYSTEM_READ_GRANT_ENTRY_BUDGET;
+    let mut granted = 0usize;
+    // What a `PATH` root can be covered by, grown as roots are accepted. A
+    // proposed root is not a granted one: `~/.cargo` is a read root on every
+    // developer machine and is far too large to grant, so treating it as
+    // covering `~/.cargo\bin` would leave the child unable to read either.
+    let mut covered_by: Vec<PathBuf> = write_roots.to_vec();
+
+    // Same order as the grant loop: the policy's own read roots first, then
+    // the roots discovered from `PATH`.
+    let candidates = process_sandbox_readonly_roots(policy)
+        .into_iter()
+        .chain(process_sandbox_policy_read_roots(policy))
+        .chain(process_sandbox_preset_acl_roots(policy))
+        .map(|root| (root, false))
+        .chain(system_read_roots().into_iter().map(|root| (root, true)));
+
+    for (root, from_path) in candidates {
+        if skip.contains(&root) || !root.exists() {
             continue;
         }
-        if already_granted
-            .iter()
-            .any(|granted| root.starts_with(granted))
-        {
-            sandbox_trace(
-                "system-read-roots",
-                format!(
-                    "decision path={} probe=skipped action=skipped reason=already-granted-by-another-root elapsed_ms=0",
-                    root.display()
+        if granted == SYSTEM_READ_GRANT_LIMIT {
+            read_root_decision(
+                &root,
+                &format!(
+                    "probe=unprobed action=skipped reason=grant-limit-{SYSTEM_READ_GRANT_LIMIT}-reached elapsed_ms=0"
                 ),
             );
+            skip.insert(root);
             continue;
         }
-        if !hosts_an_executable(&root) {
-            sandbox_trace(
-                "system-read-roots",
-                format!(
-                    "decision path={} probe=skipped action=skipped reason=no-executable-in-directory elapsed_ms=0",
-                    root.display()
-                ),
-            );
-            continue;
+        // The next three rules apply only to roots discovered from `PATH`. A
+        // root the policy names is there because an embedder asked for it, so
+        // it is not ours to second-guess on shape — only on cost.
+        if from_path {
+            if broad_system_root(&root) {
+                read_root_decision(
+                    &root,
+                    "probe=skipped action=skipped reason=broad-system-prefix elapsed_ms=0",
+                );
+                skip.insert(root);
+                continue;
+            }
+            if covered_by.iter().any(|already| root.starts_with(already)) {
+                read_root_decision(
+                    &root,
+                    "probe=skipped action=skipped reason=already-granted-by-another-root elapsed_ms=0",
+                );
+                skip.insert(root);
+                continue;
+            }
+            if !hosts_an_executable(&root) {
+                read_root_decision(
+                    &root,
+                    "probe=skipped action=skipped reason=no-executable-in-directory elapsed_ms=0",
+                );
+                skip.insert(root);
+                continue;
+            }
         }
         let started = std::time::Instant::now();
         let readable = app_container_can_already_read(&root);
         let elapsed_ms = started.elapsed().as_millis();
         if readable {
-            sandbox_trace(
-                "system-read-roots",
-                format!(
-                    "decision path={} probe=already-open action=skipped reason=admits-all-application-packages elapsed_ms={elapsed_ms}",
-                    root.display()
+            read_root_decision(
+                &root,
+                &format!(
+                    "probe=already-open action=skipped reason=admits-all-application-packages elapsed_ms={elapsed_ms}"
                 ),
             );
+            skip.insert(root);
             continue;
         }
-        sandbox_trace(
-            "system-read-roots",
-            format!(
-                "decision path={} probe=closed action=will-grant reason=no-all-application-packages-entry elapsed_ms={elapsed_ms}",
-                root.display()
+        // The rewrite costs one unit per entry, so the remaining budget is
+        // what decides whether this root is affordable. Asking is bounded by
+        // the budget, so the question stays cheap even when the tree is vast.
+        let Some(entries) = tree_entry_count_within(&root, remaining_entry_budget) else {
+            read_root_decision(
+                &root,
+                &format!(
+                    "probe=closed action=skipped reason=tree-exceeds-remaining-entry-budget-{remaining_entry_budget} elapsed_ms={elapsed_ms}"
+                ),
+            );
+            skip.insert(root);
+            continue;
+        };
+        remaining_entry_budget -= entries;
+        granted += 1;
+        covered_by.push(root.clone());
+        read_root_decision(
+            &root,
+            &format!(
+                "probe=closed action=will-grant reason=no-all-application-packages-entry entries={entries} remaining_budget={remaining_entry_budget} elapsed_ms={elapsed_ms}"
             ),
         );
-        closed.push(root);
     }
-    closed
+    skip
+}
+
+/// One line per read root, naming what was decided and why. A spawn that
+/// takes too long or a toolchain the child cannot see is unreadable without
+/// it, and both were diagnosed from exactly these lines.
+fn read_root_decision(root: &Path, outcome: &str) {
+    sandbox_trace(
+        "read-roots",
+        format!("decision path={} {outcome}", root.display()),
+    );
 }
 
 /// Whether `path`'s DACL already admits every AppContainer, i.e. carries an

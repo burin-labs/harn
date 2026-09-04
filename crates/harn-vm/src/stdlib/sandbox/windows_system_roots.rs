@@ -193,6 +193,50 @@ fn parse_executable_extensions(raw: &str) -> Vec<String> {
     parsed
 }
 
+/// How many entries `dir` contains, counted recursively but abandoned as soon
+/// as the count passes `ceiling`. `None` means "larger than `ceiling`", which
+/// is the only fact the caller needs from a tree too big to grant.
+///
+/// The cost of opening a directory is proportional to how many files are
+/// inside it, so the size of the tree is the honest way to decide whether the
+/// rewrite is affordable — not the directory's name, and not where it sits.
+/// The walk is bounded by `ceiling`, so asking the question is cheap even
+/// when the answer is "enormous".
+///
+/// This is what stops a build tree that survives every other test. A cargo
+/// target directory is on `PATH` when tests run, it holds test executables so
+/// it can answer a command name, and nothing already grants it, so it reaches
+/// this point looking exactly like a toolchain. It is also tens of thousands
+/// of files, and rewriting it takes minutes: on a Windows 11 host every
+/// sandboxed command timed out at two minutes with `target\debug` and
+/// `target\debug\deps` selected for granting (harn#8004).
+pub(crate) fn tree_entry_count_within(dir: &Path, ceiling: usize) -> Option<usize> {
+    let mut count = 0usize;
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            // Unreadable subtrees are not counted. They also cannot be
+            // granted, so treating them as empty neither hides cost nor
+            // invents it.
+            continue;
+        };
+        for entry in entries.flatten() {
+            count += 1;
+            if count > ceiling {
+                return None;
+            }
+            if entry
+                .file_type()
+                .map(|kind| kind.is_dir() && !kind.is_symlink())
+                .unwrap_or(false)
+            {
+                pending.push(entry.path());
+            }
+        }
+    }
+    Some(count)
+}
+
 /// Roots that are never handed to a recursive ACL grant, whatever a probe
 /// says about them: a drive root, the Windows directory, either Program
 /// Files prefix, `ProgramData`, and the user's home. Rewriting the ACLs
@@ -313,6 +357,35 @@ mod tests {
     fn pathext_is_honoured_and_normalized_when_the_host_sets_one() {
         let extensions = parse_executable_extensions(".com;.Exe; .Ps1 ;notanext");
         assert_eq!(extensions, vec![".COM", ".EXE", ".PS1"]);
+    }
+
+    #[test]
+    fn a_tree_under_the_ceiling_is_counted_exactly() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).expect("create nested");
+        std::fs::write(dir.path().join("a.txt"), b"").expect("write a");
+        std::fs::write(nested.join("b.txt"), b"").expect("write b");
+        // Two files plus the directory itself.
+        assert_eq!(tree_entry_count_within(dir.path(), 64), Some(3));
+    }
+
+    #[test]
+    fn a_tree_over_the_ceiling_is_abandoned_rather_than_counted() {
+        // The build-tree case: the answer must be "too big", and getting it
+        // must not require walking the whole thing.
+        let dir = tempfile::tempdir().expect("temp dir");
+        for index in 0..32 {
+            std::fs::write(dir.path().join(format!("{index}.txt")), b"").expect("write");
+        }
+        assert_eq!(tree_entry_count_within(dir.path(), 8), None);
+    }
+
+    #[test]
+    fn an_unreadable_or_missing_tree_counts_as_empty_rather_than_enormous() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let absent = dir.path().join("does-not-exist");
+        assert_eq!(tree_entry_count_within(&absent, 64), Some(0));
     }
 
     #[test]
