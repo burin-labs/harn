@@ -60,7 +60,7 @@ use crate::value::VmError;
 #[path = "windows_system_roots.rs"]
 mod system_roots;
 
-use system_roots::{broad_system_root, system_read_roots};
+use system_roots::{broad_system_root, hosts_an_executable, system_read_roots};
 
 pub(super) struct Backend;
 
@@ -483,7 +483,40 @@ impl Drop for AppContainerProfile {
 struct WorkspaceAclGrants {
     label: String,
     sid: String,
+    /// Only the grants made to this spawn's own container SID. The persistent
+    /// system read grants are deliberately absent: see [`Grantee`].
     paths: Vec<PathBuf>,
+}
+
+/// The well-known group every AppContainer token carries. Windows itself puts
+/// it on `C:\Windows`, `C:\Program Files` and everything that inherits from
+/// them, which is why a sandboxed child can already run `cmd.exe`.
+const ALL_APPLICATION_PACKAGES_SID: &str = "S-1-15-2-1";
+
+/// Who an ACL grant names, which is also what decides its lifetime.
+///
+/// The two answers are not interchangeable, and picking the wrong one is what
+/// made this backend unusable. An ACL grant on Windows is a recursive rewrite
+/// (inheritance is not retroactive, so an inheritable entry placed on a
+/// directory does not reach the files already inside it), and a grant named
+/// for one spawn has to be taken away again when that spawn ends. Measured on
+/// a Windows 11 host, one such rewrite over a Node install of 2449 files costs
+/// ~1s, and the matching removal costs the same again — per spawn, forever,
+/// for every toolchain the agent might use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Grantee {
+    /// This spawn's own AppContainer SID. No other principal can use the
+    /// grant and the SID dies with the spawn, so the grant is removed on
+    /// drop. Correct for the workspace, whose contents are this run's alone.
+    ThisContainer,
+    /// [`ALL_APPLICATION_PACKAGES_SID`]. Correct for a host toolchain
+    /// directory, and it is what makes the cost bounded: the grant is the
+    /// read-execute entry the rest of `C:\Program Files` already carries, so
+    /// it is neither per-spawn nor removed. Every later spawn's cheap
+    /// non-recursive probe then sees the entry and skips the rewrite
+    /// entirely, which on the same host is a 5ms read in place of a 1s
+    /// rewrite.
+    EveryAppContainer,
 }
 
 /// Whether a root has to be on disk for the spawn to be well-formed.
@@ -521,17 +554,42 @@ impl WorkspaceAclGrants {
                 workspace_permission,
                 MustExist::Yes,
                 GrantIs::LoadBearing,
+                Grantee::ThisContainer,
             )
         });
         let read_only = process_sandbox_readonly_roots(policy)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", MustExist::Yes, GrantIs::BestEffort));
+            .map(|root| {
+                (
+                    root,
+                    "(OI)(CI)RX",
+                    MustExist::Yes,
+                    GrantIs::BestEffort,
+                    Grantee::ThisContainer,
+                )
+            });
         let process_read = process_sandbox_policy_read_roots(policy)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", MustExist::Yes, GrantIs::BestEffort));
+            .map(|root| {
+                (
+                    root,
+                    "(OI)(CI)RX",
+                    MustExist::Yes,
+                    GrantIs::BestEffort,
+                    Grantee::ThisContainer,
+                )
+            });
         let preset_roots = process_sandbox_preset_acl_roots(policy)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", MustExist::No, GrantIs::BestEffort));
+            .map(|root| {
+                (
+                    root,
+                    "(OI)(CI)RX",
+                    MustExist::No,
+                    GrantIs::BestEffort,
+                    Grantee::ThisContainer,
+                )
+            });
         // Host toolchains on PATH that the container cannot already read.
         // Unlike every other entry here this set is not preset-gated: the
         // product contract is reads-open on every profile, and a child that
@@ -548,7 +606,15 @@ impl WorkspaceAclGrants {
             .collect();
         let system_read = closed_system_read_roots(&already_granted)
             .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", MustExist::No, GrantIs::BestEffort));
+            .map(|root| {
+                (
+                    root,
+                    "(OI)(CI)RX",
+                    MustExist::No,
+                    GrantIs::BestEffort,
+                    Grantee::EveryAppContainer,
+                )
+            });
         let process_write = if policy_allows_workspace_write(policy) {
             process_sandbox_policy_write_roots(policy)
                 .into_iter()
@@ -558,13 +624,14 @@ impl WorkspaceAclGrants {
                         workspace_permission,
                         MustExist::Yes,
                         GrantIs::LoadBearing,
+                        Grantee::ThisContainer,
                     )
                 })
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
-        for (root, permission, must_exist, grant_is) in writable
+        for (root, permission, must_exist, grant_is, grantee) in writable
             .chain(read_only)
             .chain(process_read)
             .chain(preset_roots)
@@ -580,15 +647,42 @@ impl WorkspaceAclGrants {
                     format!("sandbox workspace root '{}' does not exist", root.display()),
                 ));
             }
-            sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
+            let grantee_sid = match grantee {
+                Grantee::ThisContainer => sid,
+                Grantee::EveryAppContainer => ALL_APPLICATION_PACKAGES_SID,
+            };
+            sandbox_trace(
+                label,
+                format!(
+                    "icacls grant begin path={} grantee={}",
+                    root.display(),
+                    match grantee {
+                        Grantee::ThisContainer => "this-container",
+                        Grantee::EveryAppContainer => "every-app-container",
+                    }
+                ),
+            );
             let granted = run_icacls(
                 &root,
-                ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
+                [
+                    "/grant",
+                    &format!("*{grantee_sid}:{permission}"),
+                    "/T",
+                    "/C",
+                ],
             );
             match (granted, grant_is) {
                 (Ok(()), _) => {
                     sandbox_trace(label, "icacls grant ok");
-                    paths.push(root);
+                    // Only a grant named for this spawn's own container SID is
+                    // recorded for removal. A read-execute entry for every
+                    // AppContainer is shared state that outlives this spawn by
+                    // design, and taking it away again would both restore the
+                    // per-spawn cost and race any concurrent spawn relying on
+                    // it.
+                    if grantee == Grantee::ThisContainer {
+                        paths.push(root);
+                    }
                 }
                 // A write grant the child depends on. Without it the child
                 // cannot write its own workspace, which is not a usable
@@ -637,22 +731,30 @@ impl Drop for WorkspaceAclGrants {
 /// whose PATH is mostly closed; a host that needs more than this many is
 /// telling us per-directory grants are the wrong mechanism, not that the
 /// limit should rise.
+///
+/// The ceiling binds only on a host's first spawn. The grants name
+/// [`Grantee::EveryAppContainer`] and are not removed, so every later spawn's
+/// probe finds the entry already there and skips the rewrite.
 const SYSTEM_READ_GRANT_LIMIT: usize = 24;
 
 /// The system read roots this spawn should grant: on `PATH`, not a broad
 /// system prefix, not already covered by a root another source grants, and
 /// carrying no `ALL APPLICATION PACKAGES` entry.
 ///
-/// `already_granted` is what makes this correct rather than merely cheap. A
-/// build tree on `PATH` is the agent's own workspace, which the workspace
-/// roots already grant; probing it finds no all-application-packages entry,
-/// calls it closed, and spends a recursive rewrite re-granting what is
-/// already granted. On a Windows continuous-integration host that is not
-/// hypothetical: the child's `PATH` carried 125 entries whose first 39 were
-/// cargo build output directories, with the Node install at position 109, so
-/// the cap filled with build directories, the loop stopped, and the one
-/// directory the whole mechanism exists to open was never even probed
-/// (harn#7993).
+/// Selection order matters because the budget is finite, and getting it wrong
+/// is what kept this mechanism from ever reaching the directory it exists to
+/// open. On a Windows build host the child's `PATH` carried 125 entries whose
+/// first 39 were cargo build output directories, with the Node install at
+/// position 109. Taken in `PATH` order they filled the budget, the loop
+/// stopped, and Node was never probed (harn#7993, harn#8004).
+///
+/// `already_granted` alone does not fix that, and an earlier attempt that
+/// assumed it would was measured failing in exactly the same way: those build
+/// directories belong to the parent process's own target tree, not to the
+/// sandboxed workspace, so no root any other source grants is a prefix of
+/// them. What excludes them is [`hosts_an_executable`] — they hold object
+/// files and headers and nothing runnable, so they cannot answer a command
+/// name and are not worth a recursive rewrite.
 ///
 /// Probe results are cached per path for the life of the process, since they
 /// depend on host permissions rather than on the per-spawn container. The
@@ -687,6 +789,16 @@ fn closed_system_read_roots(already_granted: &[PathBuf]) -> Vec<PathBuf> {
                 "system-read-roots",
                 format!(
                     "decision path={} probe=skipped action=skipped reason=already-granted-by-another-root elapsed_ms=0",
+                    root.display()
+                ),
+            );
+            continue;
+        }
+        if !hosts_an_executable(&root) {
+            sandbox_trace(
+                "system-read-roots",
+                format!(
+                    "decision path={} probe=skipped action=skipped reason=no-executable-in-directory elapsed_ms=0",
                     root.display()
                 ),
             );

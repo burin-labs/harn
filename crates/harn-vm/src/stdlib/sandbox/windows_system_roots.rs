@@ -18,13 +18,25 @@
 //!
 //! ## Why this set is not simply granted
 //!
-//! Granting read to the per-spawn container SID means `icacls /T` over the
-//! root, because Windows inheritance is not dynamic: an inheritable ACE
-//! placed on a directory does not reach the files already inside it. A
-//! recursive ACL rewrite of `C:\Windows` or `C:\Program Files` is both slow
-//! and a mutation of system state, so [`broad_system_root`] names the roots
-//! that are never granted under any circumstance. The backend probes first
-//! and grants only the narrow leaf roots that a probe proves are closed.
+//! Granting read means `icacls /T` over the root, because Windows
+//! inheritance is not dynamic: an inheritable entry placed on a directory
+//! does not reach the files already inside it. Measured on a Windows 11 host,
+//! that rewrite costs about a second over a Node install of 2449 files, while
+//! reading the directory's permissions to find out whether it is needed at
+//! all costs five milliseconds.
+//!
+//! Three things keep the cost bounded, and all three are load-bearing:
+//!
+//! * [`broad_system_root`] names the prefixes that are never granted under
+//!   any circumstance, because rewriting `C:\Windows` or `C:\Program Files`
+//!   takes minutes and mutates system state wholesale.
+//! * [`hosts_an_executable`] drops the directories that cannot answer a
+//!   command name, which is what keeps the budget available for the ones that
+//!   can.
+//! * The backend probes before it grants, and grants to the group every
+//!   AppContainer already carries rather than to one spawn's own container,
+//!   so a grant is made once on a host and every later spawn's probe finds it
+//!   and skips.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -92,6 +104,95 @@ fn compute_system_read_roots() -> Vec<PathBuf> {
     roots
 }
 
+/// Whether `dir` directly holds a file Windows would run by name, i.e. one
+/// whose extension appears in `PATHEXT`.
+///
+/// This is the test that decides whether a `PATH` directory is worth a
+/// recursive ACL rewrite at all, and it follows from why the mechanism
+/// exists: a child fails when it cannot read the interpreter its command
+/// names, and a directory holding no executable cannot be where that
+/// interpreter lives. Skipping those is not an optimization bolted onto a
+/// correct set — it is what keeps the budget available for the directories
+/// that can actually answer a command.
+///
+/// It is also the difference between working and not working on a Windows
+/// build host. Cargo puts every native library search directory on `PATH`
+/// when it runs a test binary, so the child's `PATH` opened with 39
+/// `target\debug\build\*\out` directories, none of which hold an executable
+/// and none of which carry an all-application-packages entry. Selected in
+/// `PATH` order they filled the grant budget, the loop stopped, and the Node
+/// install at position 109 was never reached (harn#7993, harn#8004).
+///
+/// Only the directory itself is read, never its subdirectories, and the
+/// answer is cached: this runs once per root per process.
+pub(crate) fn hosts_an_executable(dir: &Path) -> bool {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, bool>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Ok(map) = cache.lock() {
+        if let Some(known) = map.get(dir) {
+            return *known;
+        }
+    }
+    let answer = read_hosts_an_executable(dir);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(dir.to_path_buf(), answer);
+    }
+    answer
+}
+
+fn read_hosts_an_executable(dir: &Path) -> bool {
+    let extensions = executable_extensions();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        // A directory we cannot enumerate is one we also cannot usefully
+        // grant, and guessing "yes" would spend the budget this test exists
+        // to protect.
+        return false;
+    };
+    for entry in entries.flatten() {
+        if !entry
+            .file_type()
+            .map(|kind| kind.is_file())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(extension) = Path::new(&name).extension() else {
+            continue;
+        };
+        let extension = format!(".{}", extension.to_string_lossy().to_ascii_uppercase());
+        if extensions.iter().any(|candidate| *candidate == extension) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The extensions `PATHEXT` names, upper-cased and dot-prefixed. Read from
+/// the environment because a host may add to it; the fallback is the set
+/// Windows ships with, so an unset `PATHEXT` narrows nothing.
+fn executable_extensions() -> Vec<String> {
+    parse_executable_extensions(&std::env::var("PATHEXT").unwrap_or_default())
+}
+
+/// Split on the environment value rather than the environment, so the empty
+/// and malformed cases are provable without mutating process state.
+fn parse_executable_extensions(raw: &str) -> Vec<String> {
+    let parsed: Vec<String> = raw
+        .split(';')
+        .map(|entry| entry.trim().to_ascii_uppercase())
+        .filter(|entry| entry.starts_with('.') && entry.len() > 1)
+        .collect();
+    if parsed.is_empty() {
+        return [".COM", ".EXE", ".BAT", ".CMD"]
+            .iter()
+            .map(|entry| (*entry).to_string())
+            .collect();
+    }
+    parsed
+}
+
 /// Roots that are never handed to a recursive ACL grant, whatever a probe
 /// says about them: a drive root, the Windows directory, either Program
 /// Files prefix, `ProgramData`, and the user's home. Rewriting the ACLs
@@ -153,6 +254,65 @@ mod tests {
         // this asserts the shape that never depends on the host: a two-deep
         // path under a prefix is a leaf, and leaves are grantable.
         assert!(!broad_system_root(Path::new("C:\\Program Files\\nodejs")));
+    }
+
+    #[test]
+    fn a_directory_holding_an_executable_is_grant_worthy() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("tool.exe"), b"").expect("write tool");
+        assert!(hosts_an_executable(dir.path()));
+    }
+
+    #[test]
+    fn a_directory_holding_no_executable_is_not_grant_worthy() {
+        // The shape that broke the mechanism on a Windows build host: cargo
+        // puts native library search directories on PATH, and they carry
+        // object files and headers but nothing runnable. Selected in PATH
+        // order they consumed the whole grant budget before the Node install
+        // was reached.
+        let dir = tempfile::tempdir().expect("temp dir");
+        for name in ["libfoo.lib", "foo.o", "foo.h", "output"] {
+            std::fs::write(dir.path().join(name), b"").expect("write artifact");
+        }
+        assert!(!hosts_an_executable(dir.path()));
+    }
+
+    #[test]
+    fn an_executable_in_a_subdirectory_does_not_make_the_parent_grant_worthy() {
+        // Only a directory ON `PATH` resolves a command name, so a nested
+        // executable is not evidence that this directory answers one.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).expect("create nested");
+        std::fs::write(nested.join("tool.exe"), b"").expect("write tool");
+        assert!(!hosts_an_executable(dir.path()));
+    }
+
+    #[test]
+    fn a_missing_directory_is_not_grant_worthy() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let absent = dir.path().join("does-not-exist");
+        assert!(!hosts_an_executable(&absent));
+    }
+
+    #[test]
+    fn an_absent_or_malformed_pathext_falls_back_to_the_windows_default_set() {
+        // An unset PATHEXT must never narrow the set to nothing, because that
+        // would make every PATH directory look executable-free and silently
+        // disable the whole mechanism.
+        for raw in ["", "   ", ";;;", "bogus"] {
+            let extensions = parse_executable_extensions(raw);
+            assert!(
+                extensions.iter().any(|entry| entry == ".EXE"),
+                "PATHEXT {raw:?} produced {extensions:?}, which cannot match an .exe"
+            );
+        }
+    }
+
+    #[test]
+    fn pathext_is_honoured_and_normalized_when_the_host_sets_one() {
+        let extensions = parse_executable_extensions(".com;.Exe; .Ps1 ;notanext");
+        assert_eq!(extensions, vec![".COM", ".EXE", ".PS1"]);
     }
 
     #[test]

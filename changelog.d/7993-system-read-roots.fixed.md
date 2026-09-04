@@ -5,10 +5,11 @@
   anything installed system-wide was invisible: `node`, and any other tool on
   `PATH` outside the home directory, failed with "'node' is not recognized as
   an internal or external command" even though the command, the search path,
-  and the working directory were all correct. Every directory on the launching
-  process's `PATH`, plus the standard system prefixes and the hosted tool
-  cache, is now part of the read set on every profile rather than only when an
-  embedder opts into the developer-toolchains preset. Directories the host
+  and the working directory were all correct. Directories on the launching
+  process's `PATH` that hold a runnable command, plus the standard system
+  prefixes and the hosted tool cache, are now part of the read set on every
+  profile rather than only when an embedder opts into the developer-toolchains
+  preset. Directories the host
   already opens to sandboxed programs are detected and left untouched, so the
   common case adds no work and changes no permissions, and the broad system
   prefixes are never rewritten at all. A read grant that fails now leaves that
