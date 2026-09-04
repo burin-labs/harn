@@ -49,6 +49,9 @@ pub type ModelJobErrorKind = "invalid_request" \
   | "timeout" \
   | "canceled" \
   | "malformed_output" \
+  | "scope_denied" \
+  | "read_only_denied" \
+  | "stat_error" \
   | "asset_mismatch" \
   | "replay_mismatch"
 
