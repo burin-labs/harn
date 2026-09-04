@@ -148,108 +148,9 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
         return;
     }
     let stage_summary = summarize_stages(report);
-    // On Windows, a failure here has repeatedly turned out to be a `node`
-    // resolution problem inside the sandboxed `run` tool (harn#7993), and the
-    // standalone diagnostic probe test that used to be the only place this
-    // was visible does not reliably show a PASS/FAIL line under nextest's
-    // `ci` profile (`success-output = "never"` on its siblings, and its own
-    // line has gone missing from at least one real CI run). Driving the same
-    // probe from inside THIS already-failing test's own panic message
-    // guarantees visibility: nextest's `failure-output = "immediate-final"`
-    // always prints a failing test's message in full, with no dependency on
-    // whether a sibling test's own report renders.
-    #[cfg(windows)]
-    let env_probe = format!(
-        "\nwindows env probe (same Inherited-policy run tool, run inline \
-         because this test just failed):\n{}\n",
-        windows_env_probe_dump()
-    );
-    #[cfg(not(windows))]
-    let env_probe = String::new();
     panic!(
-        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}{env_probe}\nfull report:\n{report}"
+        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}\nfull report:\n{report}"
     );
-}
-
-/// Run the same `where node & set ...` probe
-/// `windows_only_diagnostic_probe_of_the_sandboxed_run_child_env` runs, in its
-/// own throwaway sandbox, through the same `Inherited`-policy sandboxed `run`
-/// tool. Returns a formatted dump (never panics) so callers can fold it into
-/// their own failure message regardless of whether this probe itself
-/// resolved `node`.
-///
-/// Each command below is its OWN `harness.process.exec` call, and status is
-/// read from Harn's own structured `result.status`/`result.success`, never
-/// from a same-line `%ERRORLEVEL%` expansion: cmd.exe parses and expands
-/// every `%VAR%` on a logical line BEFORE running any of the `&`-joined
-/// commands on it, so `cmd & set X=%ERRORLEVEL% & echo %X%` always reports
-/// the errorlevel from BEFORE `cmd` ran, not its actual result — a real
-/// defect an earlier version of this probe had (harn#7993 round 2), which
-/// made two earlier "PASS" verdicts on this exact check vacuous. Splitting
-/// each command into its own call sidesteps the whole class of same-line
-/// expansion timing bugs.
-#[cfg(windows)]
-fn windows_env_probe_dump() -> String {
-    let temp = TempDir::new().unwrap();
-    let sandbox_root = temp.path().to_path_buf();
-    let script = sandbox_root.join("probe.harn");
-    fs::write(
-        &script,
-        r#"
-fn dump(harness: Harness, label: string, command: string) {
-  let result = harness.process.shell(command)
-  harness.stdio.println("${label}_STATUS=${result.status}")
-  harness.stdio.println("${label}_SUCCESS=${result.success}")
-  harness.stdio.println("${label}_STDOUT_START")
-  harness.stdio.println(result.stdout)
-  harness.stdio.println("${label}_STDOUT_END")
-  harness.stdio.println("${label}_STDERR_START")
-  harness.stdio.println(result.stderr)
-  harness.stdio.println("${label}_STDERR_END")
-}
-
-fn main(harness: Harness) {
-  dump(harness, "WHERE", "where node")
-  dump(harness, "WHOAMI", "whoami /groups /fo list")
-  dump(harness, "ICACLS", "icacls \"C:\\Program Files\\nodejs\"")
-  dump(harness, "TYPE", "type \"C:\\Program Files\\nodejs\\package.json\"")
-  dump(harness, "ENV", "echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
-}
-"#,
-    )
-    .unwrap();
-
-    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = harn_state_lock::lock_harn_state_async().await;
-        let _cwd_guard = cwd_lock::lock_cwd_async().await;
-        harn_vm::reset_thread_local_state();
-        execute_run_with_sandbox_options(
-            &script.to_string_lossy(),
-            false,
-            HashSet::new(),
-            Vec::new(),
-            Vec::new(),
-            CliLlmMockMode::Off,
-            None,
-            RunProfileOptions::default(),
-            RunSandboxOptions::default().with_workspace_root(sandbox_root),
-        )
-        .await
-    });
-
-    // `result.status` is a word, not an exit code: the probe prints
-    // `WHERE_STATUS=completed`. Looking for `WHERE_STATUS=0` therefore never
-    // matched, so this read reported failure whether or not the child could
-    // resolve `node`, and the assertion built on it could not pass on any
-    // host. `success` is the field that actually carries the outcome.
-    let where_status_ok = outcome
-        .stdout
-        .lines()
-        .any(|line| line.trim() == "WHERE_SUCCESS=true");
-    format!(
-        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; WHOAMI = the token's groups and integrity level; ICACLS = the nodejs install dir's ACL; TYPE = a plain read of a file inside it; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
-        outcome.exit_code, outcome.stdout, outcome.stderr
-    )
 }
 
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
@@ -323,10 +224,6 @@ fn run_playground_case(
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_explain_repo_fixture_run_passes() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -347,10 +244,6 @@ fn burin_mini_explain_repo_fixture_run_passes() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -411,10 +304,6 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -526,10 +415,6 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -571,10 +456,6 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -636,10 +517,6 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -837,42 +714,6 @@ mod stage_summary_tests {
     }
 }
 
-/// DIAGNOSTIC PROBE (harn#7993). Asserts that `where node` resolves inside an
-/// `Inherited`-policy sandboxed `run`-tool child — the exact seam
-/// `burin_mini_comment_file_fixture_run_updates_workspace_copy`'s failing
-/// `node scripts/verify-comment.js` call goes through —
-/// `harness.process.exec` -> `process_command_config` ->
-/// `session_closed_env` -> `crate::security::resolve_env` — under
-/// `RunSandboxOptions::default()`, the same default `Inherited` policy that
-/// test runs under. `windows_env_probe_dump` does the actual work and never
-/// panics; `assert_report_passes` also calls it inline on a Windows failure
-/// so the diagnostic is guaranteed to appear in a report that is ALREADY
-/// failing (and therefore always shown in full), rather than depending on
-/// this test's own PASS/FAIL line rendering under nextest's `ci` profile.
-/// Keep both alongside the fixture test as a standing regression guard once
-/// the Windows red above is fixed; this one is cheaper to run in isolation
-/// and pinpoints the same seam.
-#[cfg(windows)]
-#[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
-fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
-    let dump = windows_env_probe_dump();
-    // `eprintln!` (not `harness.stdio`) so the transcript survives even if
-    // the probe script itself never got far enough to print anything.
-    eprintln!(
-        "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n{dump}\n=== end probe ==="
-    );
-    assert!(
-        dump.starts_with("where_node_ok=true"),
-        "the sandboxed run tool's child could not resolve 'node' via \
-         `where node`, under the SAME Inherited environment policy the \
-         burin-mini playground test uses\n{dump}"
-    );
-}
-
 /// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993). Every candidate fix for
 /// the Windows read-closed defect widens READS; none of them may widen
 /// WRITES. This drives the same seam the failing fixtures use
@@ -924,10 +765,6 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
 /// runner.
 #[cfg(windows)]
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     let (_temp, experiment_root) = setup_experiment_copy();
 
