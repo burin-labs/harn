@@ -181,12 +181,54 @@ select_dependency_minimums() {
   printf '%s\n' "${selected[@]}"
 }
 
+# `check_packaged_workspace`'s resolver-latest phase deliberately carries no
+# lock: it resolves against whatever is newest on crates.io today, so it
+# always builds the exact set a fresh downstream `cargo add` would get right
+# now. That is also its whole exposure — any transitive dependency that
+# ships a compile-broken release fails this workspace with no relation to a
+# Harn code change, and `--locked`/`--frozen` cannot help (there is no lock
+# for that synthetic workspace to honor). Each row below is one such known
+# release excluded by pinning it to the last good version, so the next
+# external break is one row to add and the fix is one row to delete once the
+# crate publishes a working release. `crate` / `precise_version` feed
+# `cargo update --manifest-path ... -p <crate> --precise <precise_version>`;
+# `reason` and `date_added` are for humans grepping this table, not read by
+# any script.
+#
+# crate    precise_version  reason                                                date_added
+external_publish_pins_table='
+tinyvec  1.12.0           tinyvec 1.13.0 (published 2026-09-02) does not compile: `vec!` is unreachable in tinyvec.rs, an upstream defect  2026-09-03
+'
+
+apply_external_publish_pins() {
+  local manifest="$1"
+  local line crate precise_version rest
+  while IFS= read -r line; do
+    [[ -n "${line// /}" ]] || continue
+    read -r crate precise_version rest <<<"$line"
+    [[ -n "$crate" ]] || continue
+    echo "=== Pinning $crate to $precise_version in the resolver-latest workspace (external_publish_pins_table: $rest) ==="
+    cargo update --manifest-path "$manifest" -p "$crate" --precise "$precise_version"
+  done <<<"$external_publish_pins_table"
+}
+
 stdlib_version="$(package_version harn-stdlib)"
 modules_version="$(package_version harn-modules)"
 vm_version="$(package_version harn-vm)"
 
 cargo_package() {
-  CARGO_BUILD_BUILD_DIR="$package_check_build_dir" cargo package "$@"
+  # `--frozen` (= `--locked` + `--offline`): the local `--config
+  # patch.crates-io.<crate>.path=...` overrides above redirect several deps
+  # to local workspace paths, and that source change makes cargo's verify
+  # build treat the graph as needing a fresh resolve even with `--locked`
+  # alone, silently consulting the live registry and picking up a newly
+  # published (and possibly broken) dependency version the workspace's own
+  # `Cargo.lock` never saw. `--offline` removes the registry as an escape
+  # hatch, so the build can only resolve from what the lock and local cache
+  # already pin. Confirmed empirically: `--locked` alone still let a
+  # verifying harn-cli build re-resolve tinyvec to a newer, broken release;
+  # `--frozen` builds the workspace-pinned version.
+  CARGO_BUILD_BUILD_DIR="$package_check_build_dir" cargo package --frozen "$@"
 }
 
 inspect_packaged_includes() {
@@ -242,6 +284,9 @@ check_packaged_workspace() {
       printf '"%s" = { path = "%s" }\n' "$crate" "$package_rel"
     done
   } >"$workspace_manifest"
+
+  cargo generate-lockfile --manifest-path "$workspace_manifest"
+  apply_external_publish_pins "$workspace_manifest"
 
   echo "=== Check all extracted publishable packages with resolver-latest dependencies ==="
   HARN_REQUIRE_CLI_AOT=1 \

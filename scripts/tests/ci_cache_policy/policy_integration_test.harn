@@ -3,6 +3,7 @@ import {
   ci_cache_policy_parse,
   macos_shared_cache_errors,
   setup_harn_cache_action_errors,
+  windows_pr_native_feedback_errors,
 } from "../../check_ci_cache_policy.harn"
 import "./fixtures.harn"
 
@@ -418,5 +419,63 @@ pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness
     errors.contains(
       "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 25 minutes",
     ),
+  )
+}
+
+/*
+ * Native-Windows runner-tier coverage.
+ *
+ * Before these three cases existed the fixture's nightly `runs-on` was inert:
+ * rewriting it to a bare hosted label changed no assertion, so the suite read
+ * green while asserting nothing about the producer's tier. A rule nothing
+ * exercises is a rule that can be deleted by accident.
+ */
+@test
+pub pipeline test_windows_native_feedback_accepts_the_blacksmith_producer_and_consumer(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(
+    windows_pr_native_feedback_errors(
+      policy(),
+      workflows()["ci.yml"],
+      workflows()["windows-nightly.yml"],
+    ),
+    [],
+  )
+}
+
+@test
+pub pipeline test_windows_native_feedback_rejects_a_hosted_only_producer(
+  harness: Harness,
+  task: unknown,
+) {
+  const nightly = workflows()["windows-nightly.yml"]
+  const invalid = {
+    ...nightly,
+    jobs: {nextest: {...nightly.jobs.nextest, "runs-on": "windows-latest"}},
+  }
+  const errors = windows_pr_native_feedback_errors(policy(), workflows()["ci.yml"], invalid)
+  assert(
+    errors.contains(
+      "windows-nightly.yml:nextest must use blacksmith-16vcpu-windows-2025, with HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true falling back to windows-latest",
+    ),
+  )
+}
+
+@test
+pub pipeline test_windows_native_feedback_rejects_a_producer_without_a_declared_tier(
+  harness: Harness,
+  task: unknown,
+) {
+  const nightly = workflows()["windows-nightly.yml"]
+  const nextest = nightly.jobs.nextest
+  // A Blacksmith-capable job with no HARN_RUNNER_TIER is the exact shape that
+  // sends `runner.environment` branches down the wrong path, and it is also the
+  // shape that leaves the Dev Drive guard unable to name a tier.
+  const invalid = {...nightly, jobs: {nextest: {...nextest, env: {}}}}
+  const errors = windows_pr_native_feedback_errors(policy(), workflows()["ci.yml"], invalid)
+  assert(
+    errors.contains("windows-nightly.yml:nextest must mirror its Blacksmith/hosted runner tier"),
   )
 }

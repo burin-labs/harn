@@ -51,11 +51,35 @@ env:
 
 jobs:
   nextest:
+    # NAME IS AN EVIDENCE KEY, NOT A RUNNER CLAIM. scripts/release_audit_contract.harn
+    # looks this lane up by exact job name, so renaming it to match the runner
+    # below would couple a CI capacity change to release certification, where a
+    # lane the reader cannot find is treated as satisfied rather than missing.
+    # The name stays pinned here and the rename is a separate change that moves
+    # the contract table and this string together.
     name: Workspace nextest (windows-latest)
-    runs-on: windows-latest
+    # Blacksmith capacity, one size above the pull-request `windows` job in
+    # ci.yml, because this lane compiles and runs the WHOLE workspace rather
+    # than an affected-crate closure — the one native Windows lane where core
+    # count buys real wall time. Both lanes fall back to GitHub-hosted capacity
+    # through the same single HARN_CI_DISABLE_BLACKSMITH_WINDOWS variable, so
+    # one flip moves the whole native Windows surface back together.
+    #
+    # This job is the sole writer of the shared `workspace-windows` rust-cache.
+    # Moving it here puts the writer on the SAME cache backend as its main
+    # consumer, which also runs on Blacksmith; the provider-neutral warm
+    # artifact below is unaffected, because it is an ordinary GitHub Actions
+    # artifact and every consumer tries it before rust-cache.
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-16vcpu-windows-2025' }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     env:
+      # Mirror the `runs-on` ladder exactly. Blacksmith runners register as
+      # ordinary self-hosted runners, so `runner.environment` reports
+      # `self-hosted` on them and any step branching on that context takes the
+      # wrong branch. One job-level tier variable is the single owner every step
+      # branches on instead.
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith' }}
       # Cache WRITER half of the rust-lld experiment — MUST stay byte-identical
       # to ci.yml's `windows` job (the restore-only consumer) or the shared-cache
       # policy's consumer/producer input comparison fails. Toggled together via
@@ -74,8 +98,11 @@ jobs:
       # old fixed 25 GB VHDX cap (harn#6027 / harn#6485). Growth remains bounded
       # by host free space on C:. Drive sizes are owned by cache-policy.json
       # windows_workspace_warm and locked by check_ci_cache_policy.harn.
+      # Tier-gated, not just variable-gated: the Blacksmith Windows image does
+      # not expose the Hyper-V New-VHD command this action needs, so the Dev
+      # Drive experiment is reachable only on the github-hosted fallback.
       - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: ${{ startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB' }}

@@ -557,13 +557,50 @@ impl Drop for WorkspaceAclGrants {
 }
 
 fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    if policy.process_sandbox.presets.is_none() {
-        return Vec::new();
-    }
-
+    // `presets: None` means "use the runtime defaults" per
+    // `ProcessSandboxPolicy`'s own documented contract (types.rs), and those
+    // defaults include `DeveloperToolchains` and `PackageManagerConfig`. This
+    // used to short-circuit on the raw `None` field and return nothing,
+    // silently granting neither preset's read roots on Windows for every
+    // policy that never explicitly customized `process_sandbox.presets` —
+    // the common case, since nothing in the burin-mini/playground path sets
+    // it. `process_sandbox_developer_toolchain_read_roots` and
+    // `process_sandbox_package_manager_config_read_roots` already resolve
+    // presets correctly via `effective_presets()`, so this guard was both
+    // redundant with their own checks and wrong when it disagreed with them
+    // (harn#7993).
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
+        .chain(windows_path_read_roots(policy))
+        .collect()
+}
+
+/// Every directory on this process's own `PATH`, gated on the same
+/// `DeveloperToolchains` preset as the home-relative roots above.
+///
+/// Unlike macOS (seatbelt) and Linux (Landlock), which are read-open by
+/// default and confine only writes, this backend's AppContainer is
+/// read-closed by construction: nothing outside an explicit icacls grant is
+/// visible to the child. `developer_toolchain_read_roots_for_home` only
+/// covers *home-relative* installs (`~/.cargo`, `~/.nvm`, ...), so a global,
+/// non-home-relative install on PATH — e.g. the official Node.js installer's
+/// `C:\Program Files\nodejs` — stays invisible, and `cmd.exe` reports the
+/// unreadable executable as "not recognized" rather than a permission error
+/// (harn#7993). A PATH entry is, definitionally, a developer toolchain
+/// location. `optional: true` in the icacls grant loop above already skips
+/// any entry that does not exist, so a stray or unusual PATH entry costs
+/// nothing.
+fn windows_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    use crate::orchestration::ProcessSandboxPreset;
+    if !super::process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains)
+    {
+        return Vec::new();
+    }
+    std::env::var_os("PATH")
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|dir| super::paths::normalize_for_policy(&dir))
         .collect()
 }
 
