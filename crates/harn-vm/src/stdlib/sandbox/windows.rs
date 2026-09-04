@@ -764,24 +764,32 @@ impl Drop for WorkspaceAclGrants {
     }
 }
 
-/// Ceiling on the total number of filesystem entries one spawn will rewrite
-/// permissions on, across every read root it grants.
+/// The largest tree one read root may be before it is not worth opening.
 ///
-/// A count of directories is the wrong unit, because directories differ by
-/// orders of magnitude: a Node install is ~2,400 entries and a cargo target
-/// directory is tens of thousands. Measured on a Windows 11 host the rewrite
-/// runs at roughly 2,500 entries per second, so this bounds one process's
-/// cold start to a few seconds.
+/// Affordability is a property of the root, not a race between roots. A shared
+/// budget spent in some order makes the toolchain a command actually names
+/// compete against ones it never will, and it loses on the ordering rather
+/// than on the merits: measured on a Windows runner, a shared 8,192-entry
+/// budget was consumed by cheaper directories and the Node install was refused
+/// with 2,822 left against the 2,865 it needed, so `node` stayed unreadable.
 ///
-/// It is deliberately small enough to exclude a build tree. Every small
-/// toolchain directory on a build runner's `PATH` is 2 to 129 entries and a
-/// Node install is ~2,450, so this covers all of them together and still
-/// refuses the 9,307-entry `target\debug`, whose executables are test
-/// binaries no agent command names. A larger budget bought nothing and cost
-/// real time: on a runner starting a dozen test processes at once, each
-/// spending it independently before any of them had finished granting, the
-/// first wave took two minutes.
-const SYSTEM_READ_GRANT_ENTRY_BUDGET: usize = 8192;
+/// Entries are the price (the rewrite runs at roughly 2,500 per second on a
+/// Windows 11 host), so this is the price of the most expensive root worth
+/// paying for. It admits every real language toolchain measured on a build
+/// runner, a Node install at 2,865 entries and a Python installation at 5,978,
+/// and refuses the 9,307-entry cargo build tree, whose executables are test
+/// binaries no agent command names.
+const READ_GRANT_ROOT_ENTRY_CEILING: usize = 6144;
+
+/// Backstop on the total a single spawn will rewrite, across every root.
+///
+/// The per-root ceiling above is what decides the normal case. This exists so
+/// a pathological host, one whose `PATH` carries dozens of closed toolchain
+/// directories, cannot turn many individually reasonable grants into one
+/// unreasonable spawn. It is deliberately far above what a real host reaches:
+/// the build runner that motivated all of this needs about 9,000 entries in
+/// total, once, because the grants are durable.
+const READ_GRANT_TOTAL_ENTRY_CEILING: usize = 65536;
 
 /// Every read-only root this spawn should NOT grant, decided once for all
 /// four read sources under one budget.
@@ -862,11 +870,11 @@ fn unaffordable_read_roots(
             skip.insert(root);
             continue;
         }
-        let Some(entries) = cached_tree_entry_count(&root, SYSTEM_READ_GRANT_ENTRY_BUDGET) else {
+        let Some(entries) = cached_tree_entry_count(&root, READ_GRANT_ROOT_ENTRY_CEILING) else {
             read_root_decision(
                 &root,
                 &format!(
-                    "probe=closed action=skipped reason=tree-exceeds-entry-budget-{SYSTEM_READ_GRANT_ENTRY_BUDGET}"
+                    "probe=closed action=skipped reason=tree-exceeds-root-ceiling-{READ_GRANT_ROOT_ENTRY_CEILING}"
                 ),
             );
             skip.insert(root);
@@ -875,17 +883,16 @@ fn unaffordable_read_roots(
         priced.push((entries, root));
     }
 
-    // Second pass: spend the budget cheapest first.
+    // Second pass: cheapest first, under the spawn backstop.
     //
     // Position on `PATH` is not a measure of worth, and spending in that order
-    // is what kept the Node install unreadable. On a Windows build runner the
-    // roots ahead of it are a dozen small toolchain directories of 2 to 129
-    // entries each and a 9,307-entry build tree; taken in order the build tree
-    // took the budget, and Node, at 2,448, never got any. Cheapest first opens
-    // the most toolchains per unit of work, and leaves an expensive root to
-    // take only what is genuinely spare.
+    // is what kept the Node install unreadable: on a Windows build runner a
+    // 9,307-entry build tree sat ahead of it and took everything. Ordering no
+    // longer decides whether a root is granted, since the per-root ceiling
+    // already settled that; it decides only who reaches the backstop first,
+    // and cheapest first opens the most toolchains before anything does.
     priced.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-    let mut remaining = SYSTEM_READ_GRANT_ENTRY_BUDGET;
+    let mut remaining = READ_GRANT_TOTAL_ENTRY_CEILING;
     for (entries, root) in priced {
         if covered_by.iter().any(|already| root.starts_with(already)) {
             read_root_decision(
@@ -899,7 +906,7 @@ fn unaffordable_read_roots(
             read_root_decision(
                 &root,
                 &format!(
-                    "probe=closed action=skipped reason=entries-{entries}-exceed-remaining-budget-{remaining}"
+                    "probe=closed action=skipped reason=entries-{entries}-exceed-remaining-spawn-ceiling-{remaining}"
                 ),
             );
             skip.insert(root);
