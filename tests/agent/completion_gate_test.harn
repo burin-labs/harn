@@ -8,12 +8,14 @@
 // (COMPLETION_GATE_MAX_VETOES = 3), and AND-of-oracles verify composition.
 // Everything here is PURE — no LLM, no host, no store — so the decisions are
 // deterministic and byte-stable.
+import { agent_completion_gate } from "std/agent/completion_gate"
 import {
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
   __completion_gate_combine_verify,
   __completion_gate_ladder,
 } from "std/agent/judge_internals"
+import { assert_not_nil } from "std/testing"
 
 fn classify_by_ext(path: string?, _diff: unknown) {
   if lowercase(path).ends_with(".md") {
@@ -351,4 +353,100 @@ pipeline test_escalated_feedback_override_renders_attempts_and_findings(
     {repeated_verification_failures: "Attempt {attempts}.{findings} Escalate."},
   )
   assert_eq(v.feedback, "Attempt 4. Findings: E0308. Escalate.")
+}
+
+/**
+ * The steered obligation set reaches the DETERMINISTIC exit authority, not only
+ * the LLM judge (harn#7795).
+ *
+ * The gate's typed context carried `task` as written at session start, so a
+ * user steer that narrowed or withdrew work reached the judge and never reached
+ * the ladder. A host facts callback is the ladder's own input seam, so capturing
+ * the context it is handed is the narrowest place this claim can be falsified.
+ */
+pipeline test_gate_context_carries_the_accepted_steer(harness: Harness, task: unknown) {
+  let seen = nil
+  const gate = agent_completion_gate(
+    harness.runtime,
+    {
+      facts: { ctx ->
+        seen = ctx
+        return {source_write_count: 1, requires_write: false}
+      },
+    },
+  )
+  const transcript = json_stringify(
+    [
+      {role: "user", content: "write the parser"},
+      {
+        role: "user",
+        content: "revert that and stop",
+        injectedMode: "interrupt_immediate",
+        messageId: "steer-1",
+      },
+    ],
+  )
+  const _ = gate.verify_completion(
+    {
+      session_id: "gate-steer",
+      task: "write the parser",
+      stop_reason: "",
+      text: "",
+      transcript: transcript,
+    },
+  )
+  // The unamended goal is untouched, so a host reading `task` keeps today's
+  // behavior.
+  assert_eq(seen.task, "write the parser")
+  // And the amended target is present beside it, structurally: one accepted
+  // steer, identified by its typed delivery mode rather than by position.
+  assert_eq(len(seen.obligations.steers), 1)
+  assert_eq(seen.obligations.steers[0].content, "revert that and stop")
+  assert_eq(seen.obligations.steers[0].message_id, "steer-1")
+  assert_eq(seen.obligations.original_task, "write the parser")
+}
+
+/**
+ * The no-op control, and the one that would catch this changing an unsteered
+ * run. Same gate, same call shape, a transcript with no delivered steer: the
+ * obligation set must render empty rather than absent or invented, so every
+ * gate that exists today behaves exactly as it did.
+ */
+pipeline test_gate_context_obligations_are_empty_without_a_steer(harness: Harness, task: unknown) {
+  let seen = nil
+  const gate = agent_completion_gate(
+    harness.runtime,
+    {
+      facts: { ctx ->
+        seen = ctx
+        return {source_write_count: 1, requires_write: false}
+      },
+    },
+  )
+  const transcript = json_stringify(
+    [
+      {role: "user", content: "write the parser"},
+      {role: "assistant", content: "done"},
+      // An audit-only injection drains after the last model call, so the model
+      // never saw it and it cannot have amended the task.
+      {role: "user", content: "ignore this", injectedMode: "audit_only", messageId: "audit-1"},
+    ],
+  )
+  const _ = gate.verify_completion(
+    {
+      session_id: "gate-nosteer",
+      task: "write the parser",
+      stop_reason: "",
+      text: "",
+      transcript: transcript,
+    },
+  )
+  assert_eq(seen.task, "write the parser")
+  // Assert the record is PRESENT before asserting its steer list is empty.
+  // `len` of a missing field would read as zero, so the emptiness check alone
+  // would pass on a binary that never sets `obligations` at all — the exact
+  // shape in which an absent value reads as a satisfied one.
+  assert_not_nil(seen.obligations)
+  assert_eq(seen.obligations.original_task, "write the parser")
+  assert_eq(len(seen.obligations.steers), 0)
 }

@@ -10,6 +10,7 @@ import {
   __completion_gate_feedback_keys,
   __completion_gate_ladder,
 } from "std/agent/judge_internals"
+import { CompletionObligations, completion_obligations_from_messages } from "std/agent/obligations"
 import { JudgeConfig } from "std/agent/options_types"
 
 /**
@@ -50,6 +51,22 @@ pub type CompletionGateContext = {
   stop_reason: string,
   text: string,
   messages: list,
+  /*
+   * What the run is CURRENTLY held to: the opening task amended by every
+   * accepted mid-run steer (harn#7795). `task` stays the goal as written at
+   * session start, so a host reading it keeps today's behavior; a host that
+   * wants the amended target reads this instead of re-deriving it.
+   *
+   * Derived here rather than by each host on purpose. The context already
+   * carries `messages`, so every host COULD call
+   * `completion_obligations_from_messages` itself, but that would put the
+   * supersession rule in each host and let them drift from the judge's
+   * reading of the same run. One derivation, one owner.
+   *
+   * An unsteered run renders an empty steer list, so this is a no-op for
+   * every gate that exists today.
+   */
+  obligations?: CompletionObligations,
 }
 
 /** Structured gate verdict delivered to a feedback decorator. */
@@ -296,12 +313,14 @@ fn __completion_gate_evaluate(
     }
   }
   const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
+  const task = to_string(payload?.task ?? "")
   const ctx = {
     session_id: session_id,
-    task: to_string(payload?.task ?? ""),
+    task: task,
     stop_reason: to_string(payload?.stop_reason ?? ""),
     text: to_string(payload?.text ?? ""),
     messages: messages,
+    obligations: completion_obligations_from_messages(messages, task),
   }
   const raw = if facts != nil {
     facts(ctx) ?? {}
