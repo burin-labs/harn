@@ -142,7 +142,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+          ./scripts/ci/workspace_warm_artifact.sh windows download-and-restore \
             --repo "${{ github.repository }}" \
             --target-dir "${CARGO_TARGET_DIR:-target}"
       - name: Report Windows warm restore outcome
@@ -193,7 +193,7 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
-          ./scripts/ci/windows_workspace_warm_artifact.sh pack \
+          ./scripts/ci/workspace_warm_artifact.sh windows pack \
             "${RUNNER_TEMP}/workspace-windows-warm"
       - name: Upload Windows workspace warm artifact
         if: ${{ github.ref == 'refs/heads/main' }}
