@@ -1678,7 +1678,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-    timeout-minutes: 60
+    # Standard hosted Windows runners need more wall time than the explicit
+    # Blacksmith escape hatch. Keep paid runs bounded while giving the free
+    # default enough room to compile and execute its canonical smoke proof.
+    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90 }}
     needs: windows-plan
     # Windows-sensitive candidates run once at merge-group admission. An exact
     # successful candidate proof suppresses the identical main-push run; every
