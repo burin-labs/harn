@@ -1282,18 +1282,91 @@ mod tests {
             ..Default::default()
         })
         .expect("construct denied capability set");
-        assert_eq!(denied.count(), 0);
+        assert_eq!(denied.profile_count(), 0);
 
         let allowed = ProcessCapabilities::for_policy(&CapabilityPolicy {
             side_effect_level: Some("network".to_string()),
             ..Default::default()
         })
         .expect("construct network capability set");
-        assert_eq!(allowed.count(), 2);
-        assert!(allowed.attributes.iter().all(|entry| !entry.Sid.is_null()));
+        assert_eq!(allowed.profile_count(), 2);
         assert!(allowed
-            .attributes
+            .profile_attributes
+            .iter()
+            .all(|entry| !entry.Sid.is_null()));
+        assert!(allowed
+            .profile_attributes
             .iter()
             .all(|entry| entry.Attributes == SE_GROUP_ENABLED as u32));
+    }
+
+    /// The profile list and the token list are deliberately different:
+    /// `CreateAppContainerProfile` accepts capability SIDs only, while the
+    /// child token additionally carries the groups that hold the machine's
+    /// default read grants. Without those, an ACL that grants only
+    /// `Everyone` or `BUILTIN\Users` fails the AppContainer access check and
+    /// a system toolchain is invisible to the child.
+    ///
+    /// Falsifier: before this split the two lists were one, so
+    /// `token_count()` equalled `profile_count()` and neither of the named
+    /// SIDs below was present under any policy.
+    #[test]
+    fn the_child_token_carries_the_default_read_grant_sids_under_every_policy() {
+        for level in ["process_exec", "network"] {
+            let capabilities = ProcessCapabilities::for_policy(&CapabilityPolicy {
+                side_effect_level: Some(level.to_string()),
+                ..Default::default()
+            })
+            .expect("construct capability set");
+
+            assert_eq!(
+                capabilities.token_count(),
+                capabilities.profile_count() + 4,
+                "the {level} token should carry the profile capabilities plus \
+                 Everyone, BUILTIN\\Users, ALL APPLICATION PACKAGES and the \
+                 launching user"
+            );
+            assert!(capabilities
+                .token_attributes
+                .iter()
+                .all(|entry| !entry.Sid.is_null()));
+            assert!(capabilities
+                .token_attributes
+                .iter()
+                .all(|entry| entry.Attributes == SE_GROUP_ENABLED as u32));
+
+            let rendered: Vec<String> = capabilities
+                .token_attributes
+                .iter()
+                .map(|entry| {
+                    let mut raw = std::ptr::null_mut();
+                    assert_ne!(
+                        unsafe { ConvertSidToStringSidW(entry.Sid, &mut raw) },
+                        0,
+                        "every token SID should render"
+                    );
+                    let value = wide_ptr_to_string(raw);
+                    unsafe {
+                        LocalFree(raw.cast());
+                    }
+                    value
+                })
+                .collect();
+            for expected in ["S-1-1-0", "S-1-5-32-545", "S-1-15-2-1"] {
+                assert!(
+                    rendered.iter().any(|sid| sid == expected),
+                    "the {level} token should carry {expected}; got {rendered:?}"
+                );
+            }
+            // The launching user's SID is machine-specific, so it is pinned by
+            // shape rather than by value: a real account SID, not a well-known
+            // one from the lists above.
+            assert!(
+                rendered
+                    .iter()
+                    .any(|sid| sid.starts_with("S-1-5-21-") || sid.starts_with("S-1-12-")),
+                "the {level} token should carry the launching user's own SID; got {rendered:?}"
+            );
+        }
     }
 }
