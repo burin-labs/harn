@@ -968,6 +968,35 @@ fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
+        .chain(windows_path_read_roots(policy))
+        .collect()
+}
+
+/// Every directory on this process's own `PATH`, gated on the same
+/// `DeveloperToolchains` preset as the home-relative roots above.
+///
+/// Unlike macOS (seatbelt) and Linux (Landlock), which are read-open by
+/// default and confine only writes, this backend's AppContainer is
+/// read-closed by construction: nothing outside an explicit icacls grant is
+/// visible to the child. `developer_toolchain_read_roots_for_home` only
+/// covers *home-relative* installs (`~/.cargo`, `~/.nvm`, ...), so a global,
+/// non-home-relative install on PATH — e.g. the official Node.js installer's
+/// `C:\Program Files\nodejs` — stays invisible, and `cmd.exe` reports the
+/// unreadable executable as "not recognized" rather than a permission error
+/// (harn#7993). A PATH entry is, definitionally, a developer toolchain
+/// location. `optional: true` in the icacls grant loop above already skips
+/// any entry that does not exist, so a stray or unusual PATH entry costs
+/// nothing.
+fn windows_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    use crate::orchestration::ProcessSandboxPreset;
+    if !super::process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains)
+    {
+        return Vec::new();
+    }
+    std::env::var_os("PATH")
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|dir| super::paths::normalize_for_policy(&dir))
         .collect()
 }
 
@@ -1479,24 +1508,29 @@ mod tests {
             .collect()
     }
 
-    /// The inverse of what this asserted before harn#7993. `presets: None`
-    /// means "use the runtime defaults", and those defaults include
-    /// `DeveloperToolchains`, so a policy that never customized presets must
-    /// get the home-relative toolchain roots. The old assertion encoded the
-    /// bug: it passed only because the function short-circuited on the raw
-    /// `None` field and disagreed with `effective_presets()`.
+    /// `presets: None` means "use the runtime defaults", so an untouched policy
+    /// must resolve to exactly what naming those defaults resolves to. Before
+    /// harn#7993 this function short-circuited on the raw `None` field and
+    /// returned nothing, so every policy that never customized
+    /// `process_sandbox.presets` -- the common case -- silently lost both
+    /// presets' read roots on Windows. Comparing the two policies rather than
+    /// asserting a concrete path keeps the case meaningful on a host with no
+    /// home directory, where both sides are legitimately empty.
     #[test]
-    fn implicit_default_presets_materialize_home_acl_roots() {
-        if crate::user_dirs::home_dir().is_none() {
-            return;
-        }
-        let policy = CapabilityPolicy::default();
+    fn implicit_default_presets_match_explicitly_named_defaults() {
+        let implicit = CapabilityPolicy::default();
+        let explicit = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(ProcessSandboxPreset::default_presets().to_vec()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        let roots = process_sandbox_preset_acl_roots(&policy);
-        assert!(
-            roots.iter().any(|path| path.ends_with(".cargo")),
-            "a default policy resolves to the default presets, so its home-relative \
-             toolchain roots must be granted: {roots:?}"
+        assert_eq!(
+            process_sandbox_preset_acl_roots(&implicit),
+            process_sandbox_preset_acl_roots(&explicit),
+            "an untouched policy must resolve the same Windows ACL roots as one naming the default presets"
         );
     }
 

@@ -317,9 +317,11 @@ benchmarks = { swe_bench_verified = 49.3 }
 # Google Gemini ─ pricing: https://ai.google.dev/gemini-api/docs/pricing,
 # verified 2026-08-22. Gemini 1.0 / 1.5 already retired; Gemini 2.0
 # Flash + Flash-Lite shut down 2026-06-01 per the deprecations page.
-# The 2.5 family remains served alongside the current 3.x lineup
+# Gemini 2.5 Flash is no longer servable on the direct Gemini API: the
+# endpoint 404s the id for new users and points at the 3.x lineup
 # (Gemini 3.7 Flash, Gemini 3.6 Flash, and Gemini 3.5 Flash-Lite are
-# current GA routes). Thinking tokens bill as output; implicit
+# current GA routes). The row stays for pricing history and for the
+# OpenRouter mirror, which still serves it. Thinking tokens bill as output; implicit
 # caching is automatic (90% discount on cache hits), explicit caching
 # adds hourly storage.
 # NOTE: this row previously carried Flash-Lite's $0.10/$0.40 rates.
@@ -331,6 +333,9 @@ provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+deprecated = true
+deprecation_note = "generativelanguage.googleapis.com returns HTTP 404 model_unavailable for this id: \"no longer available to new users\", naming models/gemini-3.6-flash as the replacement. Observed 2026-09-03. The OpenRouter mirror google/gemini-2.5-flash still serves."
+superseded_by = "gemini-3.5-flash-lite"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]

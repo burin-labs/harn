@@ -84,13 +84,13 @@ id = "gemini"
 catalog_provider = "gemini"
 display_name = "Gemini API"
 endpoint_style = "Gemini generateContent"
-recommended_model = "gemini-2.5-flash"
-recommended_selector = "gemini:gemini-2.5-flash"
+recommended_model = "gemini-3.5-flash-lite"
+recommended_selector = "gemini:gemini-3.5-flash-lite"
 recommended_tool_format = "native"
 usage_confidence = "medium"
 recommended_options = [
   'provider = "gemini"',
-  'model = "gemini-2.5-flash"',
+  'model = "gemini-3.5-flash-lite"',
   'tool_format = "native"',
   'structured_output_mode = "native_json"',
 ]

@@ -22,8 +22,25 @@ pub type WindowsWorkspaceWarmPolicy = {
   dev_drive_size_release_certify: string,
 }
 
+/**
+ * The macOS warm block, which is the Windows block without the Dev Drive.
+ *
+ * Dev Drive is a Windows storage feature with no macOS analogue, so those three
+ * sizes are absent here rather than defaulted. A shared type carrying them
+ * would make an inapplicable knob look configurable.
+ */
+pub type MacosWorkspaceWarmPolicy = {
+  artifact_name: string,
+  manifest_schema: string,
+  workflow: string,
+  job: string,
+  retention_days: int,
+  max_bytes: int,
+  build_headroom_bytes: int,
+}
+
 pub type CiCachePolicy = {
-  schema_version: 5,
+  schema_version: 6,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
@@ -31,6 +48,7 @@ pub type CiCachePolicy = {
   remote_sccache: bool,
   nextest_version: string,
   windows_workspace_warm: WindowsWorkspaceWarmPolicy,
+  macos_workspace_warm: MacosWorkspaceWarmPolicy,
   writers: list<CiCacheWriter>,
 }
 
@@ -306,11 +324,30 @@ pub const RELEASE_CACHE_SAVE_SWITCH = "$"
  */
 pub const RECOGNISED_SAVE_GUARDS = [PULL_REQUEST_RESTORE_ONLY_SAVE, RELEASE_CACHE_SAVE_SWITCH]
 
-pub const WINDOWS_WARM_PACK_MARKER = "windows_workspace_warm_artifact.sh pack"
+/**
+ * Command markers for one platform's warm-artifact steps.
+ *
+ * The platform is part of the marker, not just of the policy block it reads.
+ * One script serves both platforms, so a marker matching the script name alone
+ * would also match the other platform's step, and a workflow missing its own
+ * step would read as one that has it.
+ */
+pub const WINDOWS_WARM_PACK_MARKER = "workspace_warm_artifact.sh windows pack"
 
-pub const WINDOWS_WARM_RESTORE_MARKER = "windows_workspace_warm_artifact.sh download-and-restore"
+pub const WINDOWS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh windows download-and-restore"
+
+pub const MACOS_WARM_PACK_MARKER = "workspace_warm_artifact.sh macos pack"
+
+pub const MACOS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh macos download-and-restore"
 
 pub const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}"
+
+/** The macOS warm producer guard, identical in shape to the Windows one. */
+pub const MACOS_WARM_MAIN_GUARD = WINDOWS_WARM_MAIN_GUARD
+
+/** The macOS warm consumer guard on the nightly: pull requests only. */
+pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
+  + "{{ github.event_name == 'pull_request' }}"
 
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
@@ -344,6 +381,8 @@ pub const WINDOWS_STORAGE_TERMINAL_STEP = "Report Windows storage (terminal)"
 pub const WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP = "Report Windows storage (before build)"
 
 pub const WINDOWS_WARM_RESTORE_STEP_ID = "windows-warm-restore"
+
+pub const MACOS_WARM_RESTORE_STEP_ID = "macos-warm-restore"
 
 pub const WINDOWS_CACHE_FALLBACK_GUARD =
   "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && "
@@ -409,10 +448,24 @@ pub fn windows_workspace_warm_schema() {
   )
 }
 
+pub fn macos_workspace_warm_schema() {
+  return schema_closed_object(
+    {
+      artifact_name: schema_string() + {pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      manifest_schema: schema_string() + {pattern: "^harn[.][a-z0-9_]+[.]v[0-9]+$"},
+      workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
+      job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+      retention_days: schema_int() + {minimum: 1, maximum: 90},
+      max_bytes: schema_int() + {minimum: 1},
+      build_headroom_bytes: schema_int() + {minimum: 8589934592},
+    },
+  )
+}
+
 pub fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(5),
+      schema_version: schema_literal(6),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
@@ -420,6 +473,7 @@ pub fn policy_schema() {
       remote_sccache: schema_literal(false),
       nextest_version: nextest_version_schema(),
       windows_workspace_warm: windows_workspace_warm_schema(),
+      macos_workspace_warm: macos_workspace_warm_schema(),
       writers: schema_list(
         schema_closed_object(
           {
@@ -709,8 +763,9 @@ pub fn release_warm_cache_prune_errors(workflow: dict) -> list<string> {
 
 pub fn policy_from_validated(value: dict) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
+  const macos_warm = value.macos_workspace_warm
   return {
-    schema_version: 5,
+    schema_version: 6,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -728,6 +783,15 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
       dev_drive_size_default: warm.dev_drive_size_default,
       dev_drive_size_full_workspace: warm.dev_drive_size_full_workspace,
       dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
+    },
+    macos_workspace_warm: {
+      artifact_name: macos_warm.artifact_name,
+      manifest_schema: macos_warm.manifest_schema,
+      workflow: macos_warm.workflow,
+      job: macos_warm.job,
+      retention_days: macos_warm.retention_days,
+      max_bytes: macos_warm.max_bytes,
+      build_headroom_bytes: macos_warm.build_headroom_bytes,
     },
     writers: value.writers.map(
       { writer ->
