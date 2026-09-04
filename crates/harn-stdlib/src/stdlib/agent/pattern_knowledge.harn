@@ -1,5 +1,11 @@
 import { pl_curated_proposal } from "std/agent/pattern_knowledge_curated"
 import {
+  pl_insert_match,
+  pl_normalized_domain_words,
+  pl_score_skill,
+  pl_significant_words,
+} from "std/agent/pattern_knowledge_matching"
+import {
   pl_memory_options,
   pl_migration_marker,
   pl_namespace,
@@ -52,66 +58,6 @@ const DEFAULT_WINDOW_DAYS: int = 14
 const DEFAULT_SUPPRESSION_DAYS: int = 14
 
 const DEFAULT_SESSION_IMPORT_LIMIT: int = 100
-
-const STOP_WORDS = [
-  "about",
-  "after",
-  "again",
-  "all",
-  "and",
-  "any",
-  "are",
-  "can",
-  "could",
-  "for",
-  "from",
-  "has",
-  "have",
-  "how",
-  "into",
-  "just",
-  "make",
-  "more",
-  "not",
-  "now",
-  "off",
-  "the",
-  "this",
-  "that",
-  "then",
-  "there",
-  "these",
-  "those",
-  "through",
-  "use",
-  "using",
-  "was",
-  "what",
-  "when",
-  "where",
-  "with",
-  "would",
-  "you",
-  "your",
-]
-
-fn pl_normalize_words(text: string) -> list {
-  const cleaned = regex_replace(r"[^a-z0-9]+", " ", (text ?? "").lower()) ?? ""
-  return cleaned.split(" ").filter({ word -> word != "" }).to_list()
-}
-
-fn pl_significant_words(text: string) -> list {
-  let seen = []
-  let out = []
-  for word in pl_normalize_words(text) {
-    if len(word) < 3 || STOP_WORDS.contains(word) || seen.contains(word) {
-      continue
-    }
-    seen = seen + [word]
-    out = out + [word]
-  }
-  return out
-}
 
 /**
  * Return the current pattern-learning state for the selected project memory namespace.
@@ -1024,56 +970,15 @@ fn pattern_learning_observe_inner(
   }
 }
 
-fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
-  if len(query_words) == 0 {
-    return {learned_skill: skill_entry, score: 0.0, reason: "project learned skill"}
-  }
-  const haystack = join(
-    [skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body],
-    " ",
-  )
-  const skill_words = pl_significant_words(haystack)
-  let overlap = []
-  for word in query_words {
-    if skill_words.contains(word) && !overlap.contains(word) {
-      overlap = overlap + [word]
-    }
-  }
-  if len(overlap) == 0 {
-    return {}
-  }
-  return {
-    learned_skill: skill_entry,
-    score: (len(overlap) + 0.0) / (max(1, len(query_words)) + 0.0),
-    reason: "matched " + join(overlap.sorted()[0:min(4, len(overlap))], ", "),
-  }
-}
-
-fn pl_insert_match(matches: list, item: dict) -> list {
-  if item?.learned_skill == nil {
-    return matches
-  }
-  let out = []
-  let inserted = false
-  for existing in matches {
-    const before = item.score > existing.score
-      || (item.score == existing.score
-        && item.learned_skill.name
-          < existing.learned_skill.name)
-    if before && !inserted {
-      out = out + [item]
-      inserted = true
-    }
-    out = out + [existing]
-  }
-  if !inserted {
-    out = out + [item]
-  }
-  return out
-}
-
 /**
- * Rank accepted learned skills against a query string using deterministic lexical overlap.
+ * Rank accepted learned skills against a query string using deterministic
+ * lexical overlap.
+ *
+ * `options?.task_domain_words` is an optional host-supplied signal: the
+ * terms the host's own task-intent or language matcher already decided
+ * this task is genuinely about. When present, see `pl_score_skill` for how
+ * it narrows a match; when absent, ranking is exactly the lexical-overlap
+ * behavior this function has always had.
  *
  * @effects: [fs.read]
  * @errors: []
@@ -1086,9 +991,10 @@ pub fn pattern_learning_skill_matches(
   options: any = nil,
 ) -> list {
   const query_words = pl_significant_words(query)
+  const task_domain_words = pl_normalized_domain_words(options?.task_domain_words)
   let matches = []
   for skill_entry in pattern_learning_accepted_skills(fs, options) {
-    matches = pl_insert_match(matches, pl_score_skill(skill_entry, query_words))
+    matches = pl_insert_match(matches, pl_score_skill(skill_entry, query_words, task_domain_words))
   }
   return matches[0:min(max(0, limit), len(matches))]
 }

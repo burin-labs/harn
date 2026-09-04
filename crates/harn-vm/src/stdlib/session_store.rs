@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 
 use crate::llm::vm_value_to_json;
 use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected, Options};
+use crate::stdlib::canonical_store::CanonicalStore;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
@@ -367,11 +368,10 @@ async fn session_store_database_path_impl(
     )))
 }
 
-fn open_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
+fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
     let store = SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks())
         .map_err(store_error)?;
-    super::session_change::watch_store(store.path());
-    Ok(store)
+    Ok(CanonicalStore::new(store))
 }
 
 fn store_hooks() -> StoreHooks {
@@ -469,7 +469,7 @@ fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
 /// unredacted payloads and tells no surface that anything moved. Callers
 /// outside this crate go through here so "what a canonical store carries" has
 /// one answer.
-pub fn open_canonical_store(root: &Path) -> Result<SqliteSessionStore, VmError> {
+pub fn open_canonical_store(root: &Path) -> Result<CanonicalStore, VmError> {
     open_store(&SessionStoreDir::under_root(root))
 }
 
@@ -564,7 +564,7 @@ pub(crate) async fn open_canonical_agent_session(
     session_id: &str,
     parent_session_id: Option<String>,
     session_type: SessionType,
-) -> Result<SqliteSessionStore, VmError> {
+) -> Result<CanonicalStore, VmError> {
     let store = open_store(state_dir)?;
     let project_scope = state_dir
         .as_path()

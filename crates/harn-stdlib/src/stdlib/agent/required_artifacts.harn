@@ -1,0 +1,157 @@
+// The declared-artifact contract: what a run was supposed to produce, and
+// whether it exists when the run reaches its own end (harn#7915, cause 3).
+//
+// A model that calls tools successfully and then does the wrong thing leaves no
+// in-run signal at all. Every tool call succeeded, so the tool tally in
+// `std/agent/loop_terminal` is silent by construction and must stay silent. The
+// missing evidence has to come from somewhere else, and the only party who
+// knows what the run was for is the caller.
+//
+// So the caller declares it. `require_artifacts` names the paths the run is
+// supposed to leave behind, and a declared path that does not exist is positive
+// evidence of a run that did not do the work, in exactly the same way a failed
+// tool call is. The check is deterministic, costs no model call, and does not
+// consult the completion judge.
+//
+// WHAT THIS IS NOT. It is not a verifier. An existing file whose contents are
+// wrong passes here, and should: proving the contents correct is the judge's
+// job or the caller's own verification step. This answers the one question that
+// can be answered without a model, and answers it honestly.
+//
+// A THIRD ANSWER, ON PURPOSE, AND WHY `exists` CANNOT GIVE IT. Existence has
+// two answers only when the path is visible to this run at all. Under a
+// capability policy that does not cover the path, `harness.fs.exists` returns
+// FALSE rather than failing: the runtime collapses scope denial into absence by
+// design, and its own capability-roots test says so. Auditing with `exists`
+// would therefore convict a run for a path it was never permitted to look at,
+// which blames the model for the host's policy.
+//
+// So the audit probes with `harness.fs.status`, the typed sibling that reports
+// `scope_denied`, `read_only_denied` and `stat_error` distinctly from `missing`.
+// Only `missing` convicts. Everything undecidable lands in `unverifiable`, and
+// that list rides on the run record, so a contract that could not be checked
+// can never read as a contract that was satisfied.
+//
+/**
+ * The result of checking one run's declared artifacts.
+ *
+ * `declared` is the caller's list after normalization, so a reader can tell an
+ * empty contract from an unread one. The three lists partition it: every
+ * declared path lands in exactly one of present (implied by absence from the
+ * other two), `missing`, or `unverifiable`.
+ */
+pub type AgentDeclaredArtifactAudit = {
+  declared: list<string>,
+  missing: list<string>,
+  unverifiable: list<string>,
+}
+
+/**
+ * The `harness.fs.status` statuses that mean the declared artifact is there.
+ *
+ * Listed rather than inferred so an unrecognized future status falls into
+ * `unverifiable` instead of silently reading as present. A new status the
+ * runtime adds must be classified deliberately, not absorbed by a default.
+ */
+const __AGENT_DECLARED_ARTIFACT_PRESENT_STATUSES: list<string> = [
+  "present_file",
+  "present_dir",
+  "present_other",
+]
+
+/** One declared path's verdict: it is there, it is not, or it could not be told. */
+pub type AgentDeclaredArtifactVerdict = "present" | "missing" | "unverifiable"
+
+/**
+ * Classify one `harness.fs.status` status string.
+ *
+ * Exported and pure so the rule that decides a conviction can be falsified
+ * directly over every status the runtime documents, without needing a host
+ * whose capability policy denies a read.
+ *
+ * `missing` is the only status that convicts. `scope_denied`,
+ * `read_only_denied`, `stat_error` and anything unrecognized are undecidable
+ * facts about the host rather than about the run.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_declared_artifact_verdict("scope_denied")
+ */
+pub fn agent_declared_artifact_verdict(status: string) -> AgentDeclaredArtifactVerdict {
+  if contains(__AGENT_DECLARED_ARTIFACT_PRESENT_STATUSES, status) {
+    return "present"
+  }
+  if status == "missing" {
+    return "missing"
+  }
+  return "unverifiable"
+}
+
+fn __agent_declared_artifacts_from_options(opts: dict) -> list<string> {
+  // Normalized once here so the terminal region, the evidence record, and any
+  // future reader all see the same list. Blank entries are dropped rather than
+  // checked: an empty path is a caller typo, and probing it would convict a run
+  // for a mistake it did not make.
+  const declared = opts?.require_artifacts
+  if declared == nil {
+    return []
+  }
+  let paths: list<string> = []
+  for entry in declared {
+    const path = trim(to_string(entry))
+    if path != "" && !contains(paths, path) {
+      paths = paths.appending(path)
+    }
+  }
+  return paths
+}
+
+/**
+ * Audit the declared artifacts of one run against the filesystem.
+ *
+ * Paths resolve the way every other `harness.fs` call resolves them, so a
+ * relative path is relative to the same root the run's own tools wrote to.
+ *
+ * @effects: [fs]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_declared_artifacts_audit(harness.fs, {require_artifacts: ["dist/out.js"]})
+ */
+pub fn agent_declared_artifacts_audit(fs: HarnessFs, opts: dict) -> AgentDeclaredArtifactAudit {
+  const declared = __agent_declared_artifacts_from_options(opts)
+  let missing: list<string> = []
+  let unverifiable: list<string> = []
+  for path in declared {
+    // Three-valued on purpose; see the module comment. `missing` is the ONLY
+    // status that convicts. A probe that itself failed is a fact about the
+    // host, not about the run, and is recorded as such rather than guessed at.
+    const status = try {
+      to_string(fs.status(path)?.status ?? "stat_error")
+    } catch (_error) {
+      "stat_error"
+    }
+    const verdict = agent_declared_artifact_verdict(status)
+    if verdict == "missing" {
+      missing = missing.appending(path)
+    } else if verdict == "unverifiable" {
+      unverifiable = unverifiable.appending(path)
+    }
+  }
+  return {declared: declared, missing: missing, unverifiable: unverifiable}
+}
+
+/**
+ * Whether an audit found positive evidence that the run did not do the work.
+ *
+ * Named rather than inlined as `len(...) > 0` so that the one rule which
+ * convicts stays in the module that owns the contract, and so a reader can see
+ * at a glance that `unverifiable` is not part of it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_declared_artifacts_convict(audit: AgentDeclaredArtifactAudit) -> bool {
+  return len(audit.missing) > 0
+}
