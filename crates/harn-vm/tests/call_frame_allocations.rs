@@ -22,6 +22,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 thread_local! {
     /// Allocations made by *this* thread.
@@ -44,8 +45,13 @@ thread_local! {
 
 struct Counting;
 
+/// Process-wide shadow count retained only as the negative control proving why
+/// the attributed measurement must not use it.
+static PROCESS_ALLOCS: AtomicUsize = AtomicUsize::new(0);
+
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        PROCESS_ALLOCS.fetch_add(1, Ordering::Relaxed);
         // `try_with` rather than `with`: a thread allocating while its
         // thread-locals are being destroyed must not panic inside the
         // allocator. Losing a count during teardown cannot affect a
@@ -69,6 +75,12 @@ fn allocs_on_this_thread() -> usize {
 /// Compile and run `source`, returning the number of heap allocations performed
 /// during `vm.execute` only (compilation and VM setup are excluded).
 fn allocs_during_execute(source: &str) -> usize {
+    allocs_during_execute_after(source, || {})
+}
+
+/// Like [`allocs_during_execute`], with a hook that runs inside the measured
+/// window after the opening allocation count is captured.
+fn allocs_during_execute_after(source: &str, after_opening_count: impl FnOnce()) -> usize {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(source).expect("compile");
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -82,6 +94,7 @@ fn allocs_during_execute(source: &str) -> usize {
                 let mut vm = harn_vm::Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
                 let before = allocs_on_this_thread();
+                after_opening_count();
                 vm.execute(&chunk).await.expect("execute");
                 allocs_on_this_thread() - before
             })
@@ -135,6 +148,43 @@ fn marginal_per_iter(make: impl Fn(usize) -> String) -> f64 {
     marginal as f64 / (n2 - n1) as f64
 }
 
+/// Execute while a sibling thread makes `allocation_count` observable heap
+/// allocations inside the same measured window.
+fn execute_with_sibling_allocations(
+    source: &str,
+    allocation_count: usize,
+) -> (usize, usize, usize) {
+    use std::sync::{Arc, Barrier};
+
+    let start = Arc::new(Barrier::new(2));
+    let done = Arc::new(Barrier::new(2));
+    let sibling_allocations = Arc::new(AtomicUsize::new(0));
+    let sibling_start = Arc::clone(&start);
+    let sibling_done = Arc::clone(&done);
+    let sibling_count = Arc::clone(&sibling_allocations);
+    let sibling = std::thread::spawn(move || {
+        sibling_start.wait();
+        let before = allocs_on_this_thread();
+        let mut sink: Vec<Box<[u8; 64]>> = Vec::with_capacity(allocation_count);
+        for _ in 0..allocation_count {
+            sink.push(Box::new([0u8; 64]));
+        }
+        std::hint::black_box(&sink);
+        sibling_count.store(allocs_on_this_thread() - before, Ordering::Relaxed);
+        sibling_done.wait();
+    });
+
+    let process_before = PROCESS_ALLOCS.load(Ordering::Relaxed);
+    let measured = allocs_during_execute_after(source, || {
+        start.wait();
+        done.wait();
+    });
+    let process_measured = PROCESS_ALLOCS.load(Ordering::Relaxed) - process_before;
+    sibling.join().expect("sibling allocation thread");
+    let sibling_count = sibling_allocations.load(Ordering::Relaxed);
+    (measured, sibling_count, process_measured)
+}
+
 #[test]
 fn user_fn_call_allocates_at_most_twice() {
     let per_call = marginal_per_iter(user_fn_loop);
@@ -169,36 +219,28 @@ fn user_fn_call_allocates_at_most_twice() {
 /// agreement.
 #[test]
 fn a_concurrent_allocator_does_not_move_the_measurement() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
     let source = user_fn_loop(2000);
     // First execution pays one-time initialization; measure after it.
     let _warmup = allocs_during_execute(&source);
-    let quiet = allocs_during_execute(&source);
+    let (quiet, quiet_sibling_allocations, quiet_process_allocations) =
+        execute_with_sibling_allocations(&source, 0);
+    let (noisy, noise_allocations, noisy_process_allocations) =
+        execute_with_sibling_allocations(&source, 20_000);
 
-    let stop = Arc::new(AtomicBool::new(false));
-    let noise_stop = Arc::clone(&stop);
-    let noise = std::thread::spawn(move || {
-        let before = allocs_on_this_thread();
-        let mut sink: Vec<Vec<u8>> = Vec::new();
-        while !noise_stop.load(Ordering::Relaxed) {
-            sink.push(vec![0u8; 64]);
-            if sink.len() > 1024 {
-                sink.clear();
-            }
-        }
-        allocs_on_this_thread() - before
-    });
-
-    let noisy = allocs_during_execute(&source);
-    stop.store(true, Ordering::Relaxed);
-    let noise_allocations = noise.join().expect("noise thread");
+    assert_eq!(
+        quiet_sibling_allocations, 0,
+        "the quiet control unexpectedly allocated on its sibling thread"
+    );
 
     assert!(
         noise_allocations > 10_000,
         "the sibling only made {noise_allocations} allocations, so this case \
          would agree even with a process-wide counter"
+    );
+    assert!(
+        noisy_process_allocations.saturating_sub(quiet_process_allocations) > 10_000,
+        "negative control did not fire: a process-wide count moved only from \
+         {quiet_process_allocations} to {noisy_process_allocations}"
     );
     assert_eq!(
         quiet, noisy,
