@@ -1,5 +1,7 @@
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -100,22 +102,32 @@ struct PersistedOrchestratorStatus {
     status: Option<String>,
 }
 
+/// Dispatch one supervisor subcommand.
+///
+/// Each arm is boxed before it is awaited. An `async fn` call materializes its
+/// whole future in the caller's frame, and a `match` that awaits eleven of them
+/// inline holds every one of those states at once: this frame measured within
+/// five percent of the stack ceiling that aborts a tokio worker, which is one
+/// nested descent away from a crashed run with no diagnosis (harn#7931).
+/// Boxing moves each subcommand's state to the heap and leaves a pointer here,
+/// so the frame no longer grows with the number of subcommands.
 pub(crate) async fn handle(args: SupervisorArgs) -> OrchestratorResult<()> {
-    match args.command {
-        SupervisorCommand::Start(args) => run_start(args).await,
-        SupervisorCommand::Stop(args) => run_stop(args).await,
-        SupervisorCommand::List(args) => run_list(args).await,
-        SupervisorCommand::Inspect(args) => run_inspect(args).await,
-        SupervisorCommand::Pause(args) => run_pause(args).await,
-        SupervisorCommand::Resume(args) => run_resume(args).await,
-        SupervisorCommand::Fire(args) => run_fire(args).await,
-        SupervisorCommand::Replay(args) => run_replay(args).await,
+    let command: Pin<Box<dyn Future<Output = OrchestratorResult<()>> + Send>> = match args.command {
+        SupervisorCommand::Start(args) => Box::pin(run_start(args)),
+        SupervisorCommand::Stop(args) => Box::pin(run_stop(args)),
+        SupervisorCommand::List(args) => Box::pin(run_list(args)),
+        SupervisorCommand::Inspect(args) => Box::pin(run_inspect(args)),
+        SupervisorCommand::Pause(args) => Box::pin(run_pause(args)),
+        SupervisorCommand::Resume(args) => Box::pin(run_resume(args)),
+        SupervisorCommand::Fire(args) => Box::pin(run_fire(args)),
+        SupervisorCommand::Replay(args) => Box::pin(run_replay(args)),
         SupervisorCommand::Dlq(args) => match args.command {
-            SupervisorDlqCommand::List(list) => run_dlq_list(list).await,
-            SupervisorDlqCommand::Replay(replay) => run_dlq_replay(replay).await,
+            SupervisorDlqCommand::List(list) => Box::pin(run_dlq_list(list)),
+            SupervisorDlqCommand::Replay(replay) => Box::pin(run_dlq_replay(replay)),
         },
-        SupervisorCommand::Recover(args) => run_recover(args).await,
-    }
+        SupervisorCommand::Recover(args) => Box::pin(run_recover(args)),
+    };
+    command.await
 }
 
 async fn run_start(args: SupervisorStartArgs) -> OrchestratorResult<()> {

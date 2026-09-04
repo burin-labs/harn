@@ -29,26 +29,7 @@
     "nested descent overflows a worker stack. Frames already inside that band",
     "when the gate landed are listed as exceptions with an expiry and an owner."
   ],
-  "exceptions": [
-    {
-      "expires": "2026-12-01",
-      "max_bytes": 490705,
-      "path": "crates/harn-cli/src/commands/orchestrator/mod.rs",
-      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
-    },
-    {
-      "expires": "2026-12-01",
-      "max_bytes": 504584,
-      "path": "crates/harn-cli/src/commands/supervisor.rs",
-      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
-    },
-    {
-      "expires": "2026-12-01",
-      "max_bytes": 490471,
-      "path": "crates/harn-vm/src/llm/agent_host_primitives.rs",
-      "why": "Inside the near-ceiling band when the gate landed. Boxing or splitting is tracked by #7931."
-    }
-  ],
+  "exceptions": [],
   "files": [
     {
       "max_bytes": 227031,
