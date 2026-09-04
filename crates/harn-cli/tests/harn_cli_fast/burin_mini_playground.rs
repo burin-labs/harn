@@ -930,18 +930,23 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     // Negative control: prove the detector can see a write at these exact
     // paths before trusting that an absent file means the sandbox denied
     // it. Same target paths, no sandbox anywhere in the call path.
-    let control_status = std::process::Command::new("cmd.exe")
-        .args([
-            "/D",
-            "/C",
-            &format!(
-                "echo control > \"{}\" & echo control > \"{}\"",
+    // `raw_arg`, not `arg`. Rust quotes an ordinary argument for the
+    // MSVC convention and escapes the inner quotes as `\"`, which `cmd.exe`
+    // does not understand: it reports "The filename, directory name, or
+    // volume label syntax is incorrect" and the control fails before it can
+    // prove anything. `raw_arg` hands the command line over verbatim, which
+    // is the only way to pass a quoted path through `cmd /C`.
+    let control_status = {
+        use std::os::windows::process::CommandExt as _;
+        std::process::Command::new("cmd.exe")
+            .raw_arg(format!(
+                "/D /C echo control > \"{}\" & echo control > \"{}\"",
                 userprofile_escape.display(),
                 subdir_escape.display()
-            ),
-        ])
-        .status()
-        .expect("spawn the unsandboxed write-confinement negative control");
+            ))
+            .status()
+            .expect("spawn the unsandboxed write-confinement negative control")
+    };
     assert!(
         control_status.success(),
         "unsandboxed negative control command itself failed to run"
@@ -1096,6 +1101,13 @@ fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
 #[cfg(windows)]
 #[test]
 fn windows_sandboxed_run_child_can_read_the_host_node_toolchain() {
+    // Turn the backend's own per-decision trace on for this test's process.
+    // The backend keeps it behind an environment variable so production
+    // spawns stay quiet, but a timeout here is unreadable without it: the
+    // trace is what names which roots were probed, which were granted, and
+    // how many milliseconds each cost. Safe to set process-wide because the
+    // test runner gives every test its own process.
+    std::env::set_var("HARN_WINDOWS_SANDBOX_TRACE", "1");
     let (_temp, experiment_root) = setup_experiment_copy();
     let outcome = run_playground_case(
         experiment_root.clone(),

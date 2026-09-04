@@ -536,10 +536,18 @@ impl WorkspaceAclGrants {
         // Unlike every other entry here this set is not preset-gated: the
         // product contract is reads-open on every profile, and a child that
         // cannot read the interpreter its command names fails with a message
-        // that blames PATH rather than the sandbox.
-        let system_read = closed_system_read_roots()
-            .iter()
-            .cloned()
+        // that blames PATH rather than the sandbox. It is selected last, and
+        // told what the other sources already cover, so it never spends a
+        // recursive rewrite re-granting the workspace it is standing in.
+        let already_granted: Vec<PathBuf> = process_sandbox_roots(policy)
+            .into_iter()
+            .chain(process_sandbox_readonly_roots(policy))
+            .chain(process_sandbox_policy_read_roots(policy))
+            .chain(process_sandbox_policy_write_roots(policy))
+            .chain(process_sandbox_preset_acl_roots(policy))
+            .collect();
+        let system_read = closed_system_read_roots(&already_granted)
+            .into_iter()
             .map(|root| (root, "(OI)(CI)RX", MustExist::No, GrantIs::BestEffort));
         let process_write = if policy_allows_workspace_write(policy) {
             process_sandbox_policy_write_roots(policy)
@@ -631,54 +639,82 @@ impl Drop for WorkspaceAclGrants {
 /// limit should rise.
 const SYSTEM_READ_GRANT_LIMIT: usize = 24;
 
-/// The subset of [`system_read_roots`] an AppContainer child cannot already
-/// read: not a broad system prefix, and carrying no `ALL APPLICATION
-/// PACKAGES` entry.
+/// The system read roots this spawn should grant: on `PATH`, not a broad
+/// system prefix, not already covered by a root another source grants, and
+/// carrying no `ALL APPLICATION PACKAGES` entry.
 ///
-/// This is the whole reason the set is affordable. Granting read means a
-/// recursive ACL rewrite, because Windows inheritance is not dynamic: an
-/// inheritable entry placed on a directory does not reach the files already
-/// inside it. Rewriting every PATH directory unconditionally puts a recursive
-/// rewrite of the Windows directory and both Program Files prefixes on the
-/// critical path of every single command, which measured as a two-minute
-/// timeout on every sandboxed test rather than a slow one (harn#7993). So the
-/// common case has to cost nothing, and it does: on a stock install every
-/// candidate already admits sandboxed programs and this returns empty.
+/// `already_granted` is what makes this correct rather than merely cheap. A
+/// build tree on `PATH` is the agent's own workspace, which the workspace
+/// roots already grant; probing it finds no all-application-packages entry,
+/// calls it closed, and spends a recursive rewrite re-granting what is
+/// already granted. On a Windows continuous-integration host that is not
+/// hypothetical: the child's `PATH` carried 125 entries whose first 39 were
+/// cargo build output directories, with the Node install at position 109, so
+/// the cap filled with build directories, the loop stopped, and the one
+/// directory the whole mechanism exists to open was never even probed
+/// (harn#7993).
 ///
-/// Cached for the life of the process. The answer depends on host ACLs, not
-/// on the per-spawn container SID.
-fn closed_system_read_roots() -> &'static [PathBuf] {
-    static CLOSED: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
-    CLOSED.get_or_init(|| {
-        let mut closed = Vec::new();
-        for root in system_read_roots() {
-            if closed.len() == SYSTEM_READ_GRANT_LIMIT {
-                sandbox_trace(
-                    "system-read-roots",
-                    format!(
-                        "grant limit {SYSTEM_READ_GRANT_LIMIT} reached; remaining roots unprobed"
-                    ),
-                );
-                break;
-            }
-            if broad_system_root(&root) {
-                sandbox_trace(
-                    "system-read-roots",
-                    format!("broad root never granted path={}", root.display()),
-                );
-                continue;
-            }
-            if app_container_can_already_read(&root) {
-                continue;
-            }
+/// Probe results are cached per path for the life of the process, since they
+/// depend on host permissions rather than on the per-spawn container. The
+/// selection itself is not cached, because it depends on the policy.
+fn closed_system_read_roots(already_granted: &[PathBuf]) -> Vec<PathBuf> {
+    let mut closed = Vec::new();
+    for root in system_read_roots() {
+        if closed.len() == SYSTEM_READ_GRANT_LIMIT {
             sandbox_trace(
                 "system-read-roots",
-                format!("closed root will be granted path={}", root.display()),
+                format!(
+                    "decision path=<remaining> probe=unprobed action=skipped reason=grant-limit-{SYSTEM_READ_GRANT_LIMIT}-reached elapsed_ms=0"
+                ),
             );
-            closed.push(root);
+            break;
         }
-        closed
-    })
+        if broad_system_root(&root) {
+            sandbox_trace(
+                "system-read-roots",
+                format!(
+                    "decision path={} probe=skipped action=skipped reason=broad-system-prefix elapsed_ms=0",
+                    root.display()
+                ),
+            );
+            continue;
+        }
+        if already_granted
+            .iter()
+            .any(|granted| root.starts_with(granted))
+        {
+            sandbox_trace(
+                "system-read-roots",
+                format!(
+                    "decision path={} probe=skipped action=skipped reason=already-granted-by-another-root elapsed_ms=0",
+                    root.display()
+                ),
+            );
+            continue;
+        }
+        let started = std::time::Instant::now();
+        let readable = app_container_can_already_read(&root);
+        let elapsed_ms = started.elapsed().as_millis();
+        if readable {
+            sandbox_trace(
+                "system-read-roots",
+                format!(
+                    "decision path={} probe=already-open action=skipped reason=admits-all-application-packages elapsed_ms={elapsed_ms}",
+                    root.display()
+                ),
+            );
+            continue;
+        }
+        sandbox_trace(
+            "system-read-roots",
+            format!(
+                "decision path={} probe=closed action=will-grant reason=no-all-application-packages-entry elapsed_ms={elapsed_ms}",
+                root.display()
+            ),
+        );
+        closed.push(root);
+    }
+    closed
 }
 
 /// Whether `path`'s DACL already admits every AppContainer, i.e. carries an
@@ -687,10 +723,21 @@ fn closed_system_read_roots() -> &'static [PathBuf] {
 /// the grants do and stays free of hand-rolled ACL walking. This read is
 /// non-recursive and costs milliseconds, unlike the `/T` grant it avoids.
 ///
+/// Cached per path: host permissions do not change under us, and the same
+/// roots are re-examined on every spawn.
+///
 /// A DACL that cannot be read counts as already-open. That is the cheap
 /// direction and it matches what this backend did before the probe existed:
 /// an unreadable DACL never adds a recursive ACL rewrite.
 fn app_container_can_already_read(path: &Path) -> bool {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, bool>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Ok(map) = cache.lock() {
+        if let Some(known) = map.get(path) {
+            return *known;
+        }
+    }
     let Ok(dacl) = read_icacls(path) else {
         sandbox_trace(
             "system-read-roots",
@@ -702,7 +749,11 @@ fn app_container_can_already_read(path: &Path) -> bool {
     // The friendly name is localized, so match the raw SID too. `icacls`
     // renders an unresolved SID as `*S-1-15-2-1:(...)`; the trailing colon
     // keeps `S-1-15-2-1` from matching a longer sibling SID.
-    dacl.contains("ALL APPLICATION PACKAGES") || dacl.contains("S-1-15-2-1:")
+    let readable = dacl.contains("ALL APPLICATION PACKAGES") || dacl.contains("S-1-15-2-1:");
+    if let Ok(mut map) = cache.lock() {
+        map.insert(path.to_path_buf(), readable);
+    }
+    readable
 }
 
 fn read_icacls(path: &Path) -> io::Result<String> {
