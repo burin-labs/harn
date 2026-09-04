@@ -24,13 +24,28 @@ const POLL: Duration = Duration::from_millis(250);
 
 struct WatchState {
     stop: Arc<AtomicBool>,
+    /// Wakes the loop out of its poll wait so a stop is observed at once.
+    /// Without it, joining costs up to one whole [`POLL`] interval, and a
+    /// store handle closing on a hot path would pay that every time.
+    wake: mpsc::Sender<notify::Result<notify::Event>>,
     thread: JoinHandle<()>,
 }
 
-static REGISTERED: RwLock<Vec<PathBuf>> = RwLock::new(Vec::new());
+/// Canonical store paths with at least one open handle in this process, each
+/// with the number of handles holding it.
+///
+/// Counted rather than a plain set, because "which stores may be watched" is a
+/// lifetime question and a set has no answer to it. A path that is only ever
+/// added accumulates: this process then attaches a reader, a filesystem
+/// watcher and a thread to every database it has ever opened, including ones
+/// whose handle is long gone. In the test binary that is also how one case
+/// reaches into another's temporary directory — a subscription taken by one
+/// case starts a watcher over a sibling's store and leaves `-wal` and `-shm`
+/// sidecars in a directory the sibling is asserting on (harn#7960).
+static REGISTERED: RwLock<Vec<(PathBuf, usize)>> = RwLock::new(Vec::new());
 static WATCHERS: RwLock<Vec<(PathBuf, WatchState)>> = RwLock::new(Vec::new());
 
-fn registered() -> std::sync::RwLockWriteGuard<'static, Vec<PathBuf>> {
+fn registered() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, usize)>> {
     REGISTERED
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -42,22 +57,64 @@ fn watchers() -> std::sync::RwLockWriteGuard<'static, Vec<(PathBuf, WatchState)>
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Remember a canonical store path so a later subscription can watch it.
-pub(super) fn register_store_path(path: &Path) {
+/// One open handle's claim on watching a canonical store path.
+///
+/// Held by the store handle itself, so the path stays watchable for exactly as
+/// long as something in this process has the store open. The last claim to
+/// drop also stops the running watcher, which closes its reader before the
+/// caller can observe the directory again.
+#[must_use = "dropping the registration stops the path being watched"]
+pub(crate) struct StoreWatchRegistration {
+    /// `None` for a path that is not watchable at all, such as `:memory:`.
+    path: Option<PathBuf>,
+}
+
+impl Drop for StoreWatchRegistration {
+    fn drop(&mut self) {
+        let Some(path) = self.path.take() else {
+            return;
+        };
+        let released = {
+            let mut paths = registered();
+            match paths.iter().position(|(seen, _)| seen == &path) {
+                Some(index) => {
+                    paths[index].1 = paths[index].1.saturating_sub(1);
+                    if paths[index].1 == 0 {
+                        paths.remove(index);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                None => false,
+            }
+        };
+        if released {
+            stop_watcher(&path);
+        }
+    }
+}
+
+/// Claim a canonical store path so a subscription may watch it.
+pub(super) fn register_store_path(path: &Path) -> StoreWatchRegistration {
     if path == Path::new(":memory:") {
-        return;
+        return StoreWatchRegistration { path: None };
     }
     let path = path.to_path_buf();
-    let mut paths = registered();
-    if !paths.iter().any(|seen| seen == &path) {
-        paths.push(path);
+    {
+        let mut paths = registered();
+        match paths.iter_mut().find(|(seen, _)| seen == &path) {
+            Some(entry) => entry.1 += 1,
+            None => paths.push((path.clone(), 1)),
+        }
     }
+    StoreWatchRegistration { path: Some(path) }
 }
 
 /// Start or stop watchers to match whether anyone is subscribed.
 pub(super) fn sync_watchers(subscribers_live: bool) {
     if subscribers_live {
-        let paths = registered().clone();
+        let paths: Vec<PathBuf> = registered().iter().map(|(path, _)| path.clone()).collect();
         for path in paths {
             if !path.is_file() {
                 continue;
@@ -67,10 +124,46 @@ pub(super) fn sync_watchers(subscribers_live: bool) {
     } else {
         let running = std::mem::take(&mut *watchers());
         for (_path, state) in running {
-            state.stop.store(true, Ordering::Relaxed);
-            let _ = state.thread.join();
+            stop_and_join(state);
         }
     }
+}
+
+/// Stop and join the watcher for one path, if it is running.
+///
+/// Joining rather than signalling and returning is the point: the reader the
+/// thread owns is what creates the SQLite sidecars, so a caller that drops its
+/// last handle and then reads the directory must not race the close.
+fn stop_watcher(path: &Path) {
+    let state = {
+        let mut running = watchers();
+        running
+            .iter()
+            .position(|(seen, _)| seen == path)
+            .map(|index| running.remove(index).1)
+    };
+    if let Some(state) = state {
+        stop_and_join(state);
+    }
+}
+
+/// Signal one watcher and wait for its reader to close.
+///
+/// The wake is a send rather than a channel drop: the loop's own filesystem
+/// callback holds the other sender, so closing this one would not disconnect
+/// the receiver and the join would still wait out a poll interval.
+fn stop_and_join(state: WatchState) {
+    state.stop.store(true, Ordering::Relaxed);
+    let _ = state.wake.send(Ok(notify::Event::default()));
+    let _ = state.thread.join();
+}
+
+/// How many watchers are running for `path`. Test-only: the invariant this
+/// module now holds is about the watcher set, so a case should assert on that
+/// set rather than on the SQLite sidecars it happens to leave behind.
+#[cfg(test)]
+fn watcher_count_for(path: &Path) -> usize {
+    watchers().iter().filter(|(seen, _)| seen == path).count()
 }
 
 fn start_watcher(path: PathBuf) {
@@ -97,11 +190,22 @@ fn start_watcher(path: PathBuf) {
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let thread_path = path.clone();
+    let (wake, events) = mpsc::channel();
+    let thread_wake = wake.clone();
     let thread = thread::Builder::new()
         .name("harn-session-wal-watch".to_string())
-        .spawn(move || watch_loop(thread_path, reader, initial_version, thread_stop))
+        .spawn(move || {
+            watch_loop(
+                thread_path,
+                reader,
+                initial_version,
+                thread_stop,
+                thread_wake,
+                events,
+            );
+        })
         .expect("start session WAL watcher");
-    running.push((path, WatchState { stop, thread }));
+    running.push((path, WatchState { stop, wake, thread }));
 }
 
 fn watch_loop(
@@ -109,8 +213,9 @@ fn watch_loop(
     reader: rusqlite::Connection,
     mut last_version: i64,
     stop: Arc<AtomicBool>,
+    tx: mpsc::Sender<notify::Result<notify::Event>>,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
 ) {
-    let (tx, rx) = mpsc::channel();
     let mut watcher = match notify::recommended_watcher(move |event| {
         let _ = tx.send(event);
     }) {
@@ -183,6 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn foreign_title_write_reaches_a_subscriber_in_this_process() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
         let root = TempDir::new().expect("root");
         let store = open_canonical_store(root.path()).expect("open canonical store");
         store
@@ -212,8 +318,36 @@ mod tests {
         assert_eq!(title, "after");
     }
 
+    /// The claim on watching a path belongs to the open handle. Before that
+    /// was true, `register_store_path` only ever appended, so this count
+    /// stayed at one after the drop and every later subscription reattached a
+    /// reader and a thread to a database nobody had open.
+    #[tokio::test]
+    async fn a_closed_store_stops_being_watched() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
+        let root = TempDir::new().expect("root");
+        let (tx, _rx) = mpsc::channel();
+        let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));
+
+        let store = open_canonical_store(root.path()).expect("open canonical store");
+        let database = store.path().to_path_buf();
+        assert_eq!(
+            super::watcher_count_for(&database),
+            1,
+            "a store held open under a live subscription is watched",
+        );
+
+        drop(store);
+        assert_eq!(
+            super::watcher_count_for(&database),
+            0,
+            "the last handle to close takes the watcher with it",
+        );
+    }
+
     #[tokio::test]
     async fn local_update_does_not_double_publish_through_the_watcher() {
+        let _bus = crate::stdlib::session_change::test_support::exclusive_bus().await;
         let root = TempDir::new().expect("root");
         let (tx, rx) = mpsc::channel();
         let _subscription = subscribe_session_changes(Arc::new(Recording(tx)));

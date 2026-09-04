@@ -282,21 +282,37 @@ where
             .build()
             .expect("build Harn lifecycle cleanup runtime")
     });
-    LIFECYCLE_CLEANUP_SPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    note_lifecycle_cleanup_spawn();
     runtime.spawn(future)
 }
 
-/// Count of detached recovery tasks handed to the process-owned runtime.
-///
-/// Whether an execution transfers cleanup is decided synchronously as it
-/// drops, so this counter is the exact observable for "this drop scheduled no
-/// recovery" — a claim no amount of waiting can establish.
-static LIFECYCLE_CLEANUP_SPAWNS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
+#[cfg(test)]
+thread_local! {
+    /// Detached recovery tasks this thread has handed to the process-owned
+    /// runtime.
+    ///
+    /// Whether an execution transfers cleanup is decided synchronously as it
+    /// drops, so a count is the exact observable for "this drop scheduled no
+    /// recovery" — a claim no amount of waiting can establish. It is counted
+    /// per thread rather than per process because the decision happens on the
+    /// dropping thread: a process-wide total answers "did anything anywhere
+    /// schedule recovery", which a sibling case sharing the test binary can
+    /// move under the reader's feet, and a `before == after` assertion then
+    /// fails having observed someone else's work (harn#7960).
+    static LIFECYCLE_CLEANUP_SPAWNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_lifecycle_cleanup_spawn() {
+    LIFECYCLE_CLEANUP_SPAWNS.with(|count| count.set(count.get().saturating_add(1)));
+}
+
+#[cfg(not(test))]
+fn note_lifecycle_cleanup_spawn() {}
 
 #[cfg(test)]
 pub(crate) fn lifecycle_cleanup_spawn_count() -> u64 {
-    LIFECYCLE_CLEANUP_SPAWNS.load(std::sync::atomic::Ordering::SeqCst)
+    LIFECYCLE_CLEANUP_SPAWNS.with(std::cell::Cell::get)
 }
 
 /// Spawn a long-lived child that inherits execution policy but owns an

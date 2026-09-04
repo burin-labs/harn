@@ -338,7 +338,17 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
         )
         .expect("claim top-level lifecycle");
         super::super::seed_host_session_provider_model(session_id, "mock", "fixture");
+
+        // Positive control for the counter the inline case reads. A per-thread
+        // count that never moves would let that case pass without proving
+        // anything, so the drop that is supposed to transfer recovery has to
+        // move it here.
+        let spawns_before = crate::vm::subtask::lifecycle_cleanup_spawn_count();
         drop(vm);
+        assert!(
+            crate::vm::subtask::lifecycle_cleanup_spawn_count() > spawns_before,
+            "dropping a top-level VM must schedule recovery on this thread",
+        );
     });
     drop(source_runtime);
 

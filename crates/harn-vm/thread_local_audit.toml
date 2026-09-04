@@ -873,3 +873,15 @@ path = "src/test_env.rs"
 statics = ["OVERRIDES"]
 category = "thread_private"
 plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/vm/subtask.rs"
+statics = ["LIFECYCLE_CLEANUP_SPAWNS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/test_panic_silence.rs"
+statics = ["SILENT"]
+category = "thread_private"
+plan = "thread_private_test"
