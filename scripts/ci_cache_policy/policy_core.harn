@@ -321,6 +321,12 @@ pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
 
 pub const BLACKSMITH_8CPU_WINDOWS_RUNNER = "blacksmith-8vcpu-windows-2025"
 
+// The nightly compiles and runs the WHOLE workspace, not an affected-crate
+// closure, so it is the one Windows lane where core count buys real wall time.
+// The cache generation it writes does not depend on vCPU count, so the producer
+// and its consumer may sit on different sizes of the same tier.
+pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
+
 pub const WINDOWS_WARM_RESTORE_STEP = "Restore Windows workspace warm artifact"
 
 pub const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
