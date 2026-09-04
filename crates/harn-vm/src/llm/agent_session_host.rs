@@ -65,6 +65,7 @@ enum AgentFinalizationStage {
 
 mod assistant_messages;
 pub(crate) mod cancellation;
+mod control_history;
 mod daemon_bridge;
 mod inbox;
 mod lifecycle;
@@ -1026,6 +1027,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, HOST_SESSION_BUILTINS);
+    control_history::register_control_history_primitives(vm);
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);
     lifecycle::register_lifecycle_primitives(vm);

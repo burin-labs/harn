@@ -8,9 +8,15 @@
 // the authority that decides whether the run may stop: the judge then vetoes a
 // stop the user themselves authorized, and orders work the user withdrew.
 //
+// The typed control rows a session writes as it accepts each control word are
+// the authority. A transcript-only reading remains as a fallback for a store
+// written before those rows existed, and every result says which reading it is:
+// the fallback can see a steer but is structurally blind to a stop, and a stop
+// it cannot see must never read as a stop that did not happen.
+//
 // Derived once, at the judge payload seam, and carried on the evidence
 // snapshot. No consumer re-derives it from raw transcript history.
-import { agent_session_messages } from "std/agent/state"
+import { agent_session_control_events, agent_session_messages } from "std/agent/state"
 
 /**
  * One accepted mid-run user directive, with the delivery mode that proves the
@@ -19,16 +25,43 @@ import { agent_session_messages } from "std/agent/state"
 pub type CompletionSteer = {message_id: string, mode: string, content: string}
 
 /**
+ * An accepted stop, as the session recorded it at acceptance.
+ *
+ * A stop unwinds the loop and delivers no user message, so it cannot be
+ * reconstructed from transcript history the way a steer can. The control
+ * record is the only place it is visible.
+ */
+pub type CompletionAcceptedStop = {control_id: string, method: string, status: string}
+
+/**
+ * How this obligation set learned what it knows.
+ *
+ * `control_record` means it read the typed rows written when each control was
+ * accepted. `delivered_messages` means it fell back to the mode stamped on
+ * delivered user messages, which can see steers and CANNOT see a stop.
+ *
+ * Carried so a fallback result can never be read as a recorded one. A consumer
+ * that gives an accepted stop precedence must check this before concluding
+ * that no stop happened: under the fallback, "no stop" means "not visible from
+ * here", not "did not occur".
+ */
+pub type CompletionObligationSource = "control_record" | "delivered_messages"
+
+/**
  * The completion target a run is currently held to.
  *
  * `original_task` is the task the session opened with. `steers` are the
  * accepted mid-run user directives, oldest first. Later entries supersede
  * conflicting earlier ones — including requirements frozen at loop start.
+ * `accepted_stop` is set only when a stop was recorded; `source` says whether
+ * that silence is authoritative.
  */
 pub type CompletionObligations = {
   schema?: "harn.completion_obligations.v1",
   original_task: string,
   steers: list<CompletionSteer>,
+  accepted_stop?: CompletionAcceptedStop,
+  source?: CompletionObligationSource,
 }
 
 // `audit_only` messages drain at `loop_exit`, after the last model call. The
@@ -111,7 +144,93 @@ pub fn completion_obligations_from_messages(
       steers = steers.appending(steer)
     }
   }
-  return {schema: "harn.completion_obligations.v1", original_task: original_task, steers: steers}
+  // Tagged as the fallback reading. This path sees delivered messages only, so
+  // its silence about a stop is an absence of evidence and not evidence of
+  // absence; `accepted_stop` is deliberately left unset rather than set false.
+  return {
+    schema: "harn.completion_obligations.v1",
+    original_task: original_task,
+    steers: steers,
+    source: "delivered_messages",
+  }
+}
+
+// Only a `stop` row withdraws the run's remaining obligations, and only when
+// the surface wrote it at acceptance. A `heuristic` row was reconstructed from
+// prose by a consumer, so it may not name a stop that happened.
+const __OBLIGATION_RECORDED_PROVENANCE: string = "recorded"
+
+// The two control words the model is expected to have seen before the run
+// reached its next exit decision. A `queue` note drains after the last model
+// call, so it cannot have changed what was asked.
+const __OBLIGATION_STEER_ACTIONS: list<string> = ["steer", "interrupt"]
+
+fn __obligation_steer_from_control(event: unknown) -> CompletionSteer? {
+  if !contains(__OBLIGATION_STEER_ACTIONS, to_string(event?.action ?? "")) {
+    return nil
+  }
+  const content = __obligation_clip(__obligation_text(event?.text))
+  if content == "" {
+    return nil
+  }
+  return {
+    message_id: to_string(event?.message_id ?? ""),
+    mode: to_string(event?.delivery_mode ?? ""),
+    content: content,
+  }
+}
+
+/**
+ * completion_obligations_from_control_events.
+ *
+ * Derive the run's current completion target from the typed control rows the
+ * session wrote as it accepted each control word.
+ *
+ * This is the only derivation that can see an accepted stop. A stop unwinds the
+ * loop without delivering a user message, so the transcript-only derivation is
+ * structurally blind to it and reports a run as still owing the work the person
+ * running it just withdrew.
+ *
+ * A row whose provenance is not `recorded` was reconstructed from prose by some
+ * later consumer. Such a row may still contribute a steer, which only ever adds
+ * obligation, but it never establishes a stop: a guessed stop would silence work
+ * nobody cancelled.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_obligations_from_control_events([], "ship the fix")
+ */
+pub fn completion_obligations_from_control_events(
+  events: any,
+  original_task: string,
+) -> CompletionObligations {
+  let steers: list<CompletionSteer> = []
+  let accepted_stop = nil
+  for event in events ?? [] {
+    const steer = __obligation_steer_from_control(event)
+    if steer != nil {
+      steers = steers.appending(steer)
+    }
+    const recorded = to_string(event?.provenance ?? "") == __OBLIGATION_RECORDED_PROVENANCE
+    if recorded && to_string(event?.action ?? "") == "stop" {
+      accepted_stop = {
+        control_id: to_string(event?.control_id ?? ""),
+        method: to_string(event?.method ?? ""),
+        status: to_string(event?.status ?? ""),
+      }
+    }
+  }
+  const base = {
+    schema: "harn.completion_obligations.v1",
+    original_task: original_task,
+    steers: steers,
+    source: "control_record",
+  }
+  if accepted_stop == nil {
+    return base
+  }
+  return base + {accepted_stop: accepted_stop}
 }
 
 /**
@@ -132,12 +251,38 @@ pub fn agent_completion_obligations(
   session_id: any,
   original_task: string,
 ) -> CompletionObligations {
+  const events = try {
+    agent_session_control_events(agent, session_id)
+  } catch (e) {
+    []
+  }
+  if len(events ?? []) > 0 {
+    return completion_obligations_from_control_events(events, original_task)
+  }
+  // No control row at all. That is either a session where nobody used a control
+  // word, or a store written before the control schema existed — and from here
+  // those two are the same observation. Fall back to the transcript reading and
+  // let `source` say so, rather than reporting an unrecorded stop as no stop.
   const messages = try {
     agent_session_messages(agent, session_id)
   } catch (e) {
     []
   }
   return completion_obligations_from_messages(messages, original_task)
+}
+
+// The stop block leads the steering section: a stop ends the run outright, so an
+// authority that reads it has no remaining question about what is still owed.
+// Empty when no stop was recorded, which keeps an uninterrupted run's prompt
+// byte-identical to the pre-control-record prompt.
+fn __obligation_stop_prompt(accepted_stop: CompletionAcceptedStop?) -> string {
+  if accepted_stop == nil {
+    return ""
+  }
+  return "\n\nThe user STOPPED this run before it finished. The stop was accepted by the"
+    + " session, so the agent had no opportunity to continue past it. Remaining work is no"
+    + " longer owed: do not order more work, and do not count as a gap anything the run was"
+    + " cut off from doing. Judge only what the run had already produced when the stop landed."
 }
 
 /**
@@ -158,8 +303,9 @@ pub fn agent_completion_obligations(
  */
 pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> string {
   const steers = obligations?.steers ?? []
+  const stop_block = __obligation_stop_prompt(obligations?.accepted_stop)
   if len(steers) == 0 {
-    return ""
+    return stop_block
   }
   const total = len(steers)
   const omitted = if total > __OBLIGATION_STEER_RENDER_LIMIT {
@@ -183,7 +329,8 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
   } else {
     "(" + to_string(omitted) + " earlier steering messages omitted; the most recent are shown)\n"
   }
-  return "\n\nAccepted user steering, in order (the user sent these AFTER the completion goal"
+  return stop_block
+    + "\n\nAccepted user steering, in order (the user sent these AFTER the completion goal"
     + " above, and the agent received them mid-run):\n"
     + omission_note
     + join(lines, "\n")
@@ -205,7 +352,8 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
  *
  * A stable digest of the amended completion target, for binding a terminal
  * decision to the obligations it was decided under. Two runs that differ only
- * in accepted steering must not share an evidence identity.
+ * in accepted steering, or in whether the user stopped them, must not share an
+ * evidence identity.
  *
  * @effects: []
  * @errors: []
@@ -214,8 +362,12 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
  */
 pub fn completion_obligations_digest(obligations: CompletionObligations?) -> string {
   const steers = obligations?.steers ?? []
-  if len(steers) == 0 {
+  const accepted_stop = obligations?.accepted_stop
+  if len(steers) == 0 && accepted_stop == nil {
     return ""
   }
-  return "sha256:" + sha256(json_stringify(steers))
+  if accepted_stop == nil {
+    return "sha256:" + sha256(json_stringify(steers))
+  }
+  return "sha256:" + sha256(json_stringify({steers: steers, accepted_stop: accepted_stop}))
 }
