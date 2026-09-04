@@ -177,6 +177,17 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
 /// tool. Returns a formatted dump (never panics) so callers can fold it into
 /// their own failure message regardless of whether this probe itself
 /// resolved `node`.
+///
+/// Each command below is its OWN `harness.process.exec` call, and status is
+/// read from Harn's own structured `result.status`/`result.success`, never
+/// from a same-line `%ERRORLEVEL%` expansion: cmd.exe parses and expands
+/// every `%VAR%` on a logical line BEFORE running any of the `&`-joined
+/// commands on it, so `cmd & set X=%ERRORLEVEL% & echo %X%` always reports
+/// the errorlevel from BEFORE `cmd` ran, not its actual result — a real
+/// defect an earlier version of this probe had (harn#7993 round 2), which
+/// made two earlier "PASS" verdicts on this exact check vacuous. Splitting
+/// each command into its own call sidesteps the whole class of same-line
+/// expansion timing bugs.
 #[cfg(windows)]
 fn windows_env_probe_dump() -> String {
     let temp = TempDir::new().unwrap();
@@ -185,16 +196,24 @@ fn windows_env_probe_dump() -> String {
     fs::write(
         &script,
         r#"
-fn main(harness: Harness) {
-  let result = harness.process.exec("cmd.exe", "/D", "/C", "where node & set PROBE_WHERE_STATUS=%ERRORLEVEL% & echo PROBE_WHERE_STATUS=%PROBE_WHERE_STATUS% & echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
-  harness.stdio.println("PROBE_STATUS=${result.status}")
-  harness.stdio.println("PROBE_SUCCESS=${result.success}")
-  harness.stdio.println("PROBE_STDOUT_START")
+fn dump(harness: Harness, label: string, command: string) {
+  let result = harness.process.exec("cmd.exe", "/D", "/C", command)
+  harness.stdio.println("${label}_STATUS=${result.status}")
+  harness.stdio.println("${label}_SUCCESS=${result.success}")
+  harness.stdio.println("${label}_STDOUT_START")
   harness.stdio.println(result.stdout)
-  harness.stdio.println("PROBE_STDOUT_END")
-  harness.stdio.println("PROBE_STDERR_START")
+  harness.stdio.println("${label}_STDOUT_END")
+  harness.stdio.println("${label}_STDERR_START")
   harness.stdio.println(result.stderr)
-  harness.stdio.println("PROBE_STDERR_END")
+  harness.stdio.println("${label}_STDERR_END")
+}
+
+fn main(harness: Harness) {
+  dump(harness, "WHERE", "where node")
+  dump(harness, "WHOAMI", "whoami /groups /fo list")
+  dump(harness, "ICACLS", "icacls \"C:\\Program Files\\nodejs\"")
+  dump(harness, "TYPE", "type \"C:\\Program Files\\nodejs\\package.json\"")
+  dump(harness, "ENV", "echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
 }
 "#,
     )
@@ -221,9 +240,9 @@ fn main(harness: Harness) {
     let where_status_ok = outcome
         .stdout
         .lines()
-        .any(|line| line.trim() == "PROBE_WHERE_STATUS=0");
+        .any(|line| line.trim() == "WHERE_STATUS=0");
     format!(
-        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (contains PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list, PROBE_ENV_START..PROBE_ENV_END, as the child itself saw them):\n{}\nfull script stderr:\n{}",
+        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; WHOAMI = the token's groups and integrity level; ICACLS = the nodejs install dir's ACL; TYPE = a plain read of a file inside it; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
         outcome.exit_code, outcome.stdout, outcome.stderr
     )
 }
@@ -818,191 +837,5 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
         "the sandboxed run tool's child could not resolve 'node' via \
          `where node`, under the SAME Inherited environment policy the \
          burin-mini playground test uses\n{dump}"
-    );
-}
-
-/// Every `tool_call_update` transcript event for the `run` tool, across every
-/// stage, regardless of status: `raw_input` (the command asked for),
-/// `raw_output` (what the tool returned, e.g. its captured stdout/exit
-/// status), and `error` when the call failed outright. Unlike
-/// `summarize_stages` (which only looks at failed stages/calls), this reads
-/// a *successful* run tool call's own output too, since the diagnostic probe
-/// below deliberately runs a command (`cmd.exe /D /C where node & ... & set`)
-/// that is expected to exit 0 either way — the interesting content is in
-/// what it printed, not whether it "failed".
-#[cfg(windows)]
-fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
-    let mut out = String::new();
-    let Some(stages) = report["stages"].as_array() else {
-        return "  (no execution.run.stages in this report)\n".to_string();
-    };
-    for stage in stages {
-        let Some(events) = stage["transcript"]["events"].as_array() else {
-            continue;
-        };
-        for event in events {
-            if event["kind"] != "tool_call_update" {
-                continue;
-            }
-            let metadata = &event["metadata"];
-            if metadata["tool_name"] != "run" {
-                continue;
-            }
-            out.push_str(&format!(
-                "  tool_call_update status={} raw_input={} raw_output={} error={}\n",
-                metadata["status"].as_str().unwrap_or("<none>"),
-                metadata["raw_input"],
-                metadata["raw_output"],
-                metadata["error"].as_str().unwrap_or("<none>"),
-            ));
-        }
-    }
-    if out.is_empty() {
-        out.push_str("  (no run tool_call_update events found in any stage's transcript)\n");
-    }
-    out
-}
-
-/// DIAGNOSTIC PROBE (harn#7993), round 2. `windows_only_diagnostic_probe_of_the_sandboxed_run_child_env`
-/// above measures `harness.process.exec` under `execute_run_with_sandbox_options`
-/// (burin_mini_playground.rs:181-207 at time of writing), which installs a
-/// `SessionEnvironment` and PASSED on CI (job 100828333196) with a full,
-/// correct 120-entry PATH including `C:\Program Files\nodejs\`. But that is
-/// not the seam the real fixture's `run` tool goes through:
-/// `burin_mini_comment_file_fixture_run_updates_workspace_copy` calls
-/// `execute_playground_inputs`, which installs no `SessionEnvironment` and no
-/// `CapabilityPolicy` at all (`configured_vm`/`execute_playground` never call
-/// `SessionEnvironment::launch_from_snapshot` or push an execution policy).
-/// The probe above therefore measures a healthy, unrelated seam and its
-/// 120-entry PATH says nothing about what the failing seam's child actually
-/// sees. This probe drives `execute_playground_inputs` itself — the exact
-/// same entry point, experiment, and mocked-LLM orchestration as the failing
-/// fixture, differing only in the `run` tool's command string — so the
-/// dumped `where node` result and full `set` output come from the process
-/// that is actually failing on Windows CI, not a stand-in for it.
-#[cfg(windows)]
-#[test]
-fn windows_run_tool_env_probe_through_execute_playground_inputs() {
-    let (_temp, experiment_root) = setup_experiment_copy();
-    let outcome = run_playground_case(
-        experiment_root.clone(),
-        "Comment what this file does".to_string(),
-        "windows_run_tool_env_probe.jsonl",
-    );
-    let stdout = match &outcome {
-        Ok(stdout) => stdout.clone(),
-        Err(error) => error.clone(),
-    };
-    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
-    let transcript_dump = if report_path.exists() {
-        let report = read_json(&report_path);
-        dump_run_tool_transcript(&report)
-    } else {
-        format!(
-            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
-            report_path.display()
-        )
-    };
-    let full_dump = format!(
-        "=== windows_run_tool_env_probe_through_execute_playground_inputs ===\n\
-         playground stdout/error:\n{stdout}\n\
-         run tool transcript:\n{transcript_dump}\n\
-         === end probe ==="
-    );
-    eprintln!("{full_dump}");
-    assert!(
-        full_dump.contains("PROBE_WHERE_STATUS=0"),
-        "the run tool's child (through execute_playground_inputs, the SAME \
-         seam burin_mini_comment_file_fixture_run_updates_workspace_copy \
-         uses) could not resolve 'node' via `where node`\n{full_dump}"
-    );
-}
-
-/// TEMPORARY PROBE-ONLY TEST (harn#7993). DELETE THIS TEST in the fix push
-/// once the command-shape question below is answered — it exists only to
-/// force a full diagnostic dump into a Windows CI log this round.
-///
-/// Round 2 established: the run-tool seam, cwd, and env are fine —
-/// `windows_run_tool_env_probe_through_execute_playground_inputs`'s
-/// `where node` PASSED on the same box the 5 real fixtures FAILED on with
-/// `node scripts/verify-comment.js` -> "'node' is not recognized". Same
-/// seam, same env, same cwd; only the command SHAPE differs: the failing
-/// fixture's `run` command is bare `node ...`, spawned through
-/// `crate::shells::default_shell_invocation`'s outer shell, while the probe
-/// wrapped everything in an explicit inner `cmd.exe /D /C`.
-///
-/// Addendum (still round 2): `default_shell_invocation` read from
-/// shells.rs on this branch answers what the outer invocation IS without
-/// another CI round — COMSPEC resolves to shell id `cmd`,
-/// `default_args_for_id("cmd")` is `["/C"]`, so the real fixture spawns as
-/// `Command::new(<COMSPEC>)` with args `["/C", "node scripts/verify-comment.js"]`,
-/// and Rust's Windows arg quoting wraps the second arg in one `"..."`
-/// string — meaning the earlier `where`-node probe actually ran as
-/// `cmd /C "cmd.exe /D /C where node & ..."`, an extra layer of inner cmd
-/// neither this test nor the failing fixture has. What is still open: a
-/// status-0 `where node` only proves a match was found on PATH, not that
-/// cmd would actually execute it — `where` also matches an extensionless
-/// file, and if a shim earlier on PATH (e.g. a package-manager shim dir)
-/// comes before the real `nodejs` directory, `where`'s first hit can differ
-/// from what bare `node` resolves to.
-///
-/// This test runs 8 commands through the identical seam
-/// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
-/// `run_captured_spawn`) to isolate exactly which layer of that shape
-/// matters: a bare `node --version` (matches the real failure's shape);
-/// the same wrapped in `cmd.exe /D /C` and in `cmd.exe /C` (no `/D`, to
-/// check AutoRun); `where node` (its stdout — the matched path(s), not just
-/// its exit status — is what settles whether a shim shadows the real
-/// binary); `echo %PATH%` and `echo %PATHEXT%` as BARE commands (so we see
-/// what the OUTER shell's own child inherits, with no inner cmd in
-/// between); an absolute-path node invocation; and `dir` on that same
-/// absolute path, to confirm the file is actually there regardless of what
-/// PATH says. It also prints `default_shell_invocation` for the real
-/// fixture's exact command string, so the outer program/args/default_args
-/// are on record from a live call, not only from source reading.
-///
-/// Always panics (never green) so nextest's `failure-output =
-/// "immediate-final"` guarantees the dump prints in full regardless of
-/// whether any individual probe command happened to succeed — this test's
-/// job is visibility, not a pass/fail verdict.
-#[cfg(windows)]
-#[test]
-fn windows_only_temporary_command_shape_probe_delete_after_harn_7993() {
-    let (_temp, experiment_root) = setup_experiment_copy();
-    let outcome = run_playground_case(
-        experiment_root.clone(),
-        "Comment what this file does".to_string(),
-        "windows_command_shape_probe.jsonl",
-    );
-    let stdout = match &outcome {
-        Ok(stdout) => stdout.clone(),
-        Err(error) => error.clone(),
-    };
-    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
-    let transcript_dump = if report_path.exists() {
-        let report = read_json(&report_path);
-        dump_run_tool_transcript(&report)
-    } else {
-        format!(
-            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
-            report_path.display()
-        )
-    };
-    let fixture_command = "node scripts/verify-comment.js";
-    let shell_invocation_dump = match harn_vm::shells::default_shell_invocation(fixture_command) {
-        Ok(invocation) => format!("{invocation:?}"),
-        Err(error) => format!("default_shell_invocation error: {error}"),
-    };
-    panic!(
-        "probe-only diagnostic dump (harn#7993 round 2 — DELETE THIS TEST in \
-         the fix push, it is designed to always fail)\n\
-         === windows_only_temporary_command_shape_probe_delete_after_harn_7993 ===\n\
-         default_shell_invocation({fixture_command:?}) = {shell_invocation_dump}\n\
-         playground stdout/error:\n{stdout}\n\
-         run tool transcript (8 commands: bare node --version; cmd /D /C node \
-         --version; cmd /C node --version; where node; bare echo %PATH%; bare \
-         echo %PATHEXT%; absolute-path node.exe; dir on that same absolute \
-         path):\n{transcript_dump}\n\
-         === end probe ==="
     );
 }
