@@ -303,6 +303,11 @@ fn windows_blacksmith_tier_expression() -> string {
     + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}' }}"
 }
 
+fn windows_pr_timeout_expression() -> string {
+  return "$"
+    + "{{ vars.${WINDOWS_BLACKSMITH_ENABLE_VAR} == 'true' && 60 || 90 }}"
+}
+
 /**
  * One guard for both native Windows jobs. The Blacksmith Windows image does not
  * expose the Hyper-V `New-VHD` command `setup-dev-drive` needs, so the Dev Drive
@@ -336,6 +341,12 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job: dict, producer: dict) ->
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
     errors = errors + ["ci.yml:windows must mirror its Blacksmith/hosted runner tier"]
+  }
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != windows_pr_timeout_expression() {
+    errors = errors
+      + [
+        "ci.yml:windows must cap paid Windows runs at 60 minutes and allow the hosted fallback 90 minutes",
+      ]
   }
   if trim(producer["runs-on"] ?? "") != windows_nightly_blacksmith_runner_expression() {
     errors = errors

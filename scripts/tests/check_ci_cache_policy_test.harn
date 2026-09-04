@@ -530,6 +530,16 @@ pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(
         "ci.yml:windows must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-8vcpu-windows-2025",
       ),
   )
+  const fixed_timeout = {
+    ...declared["ci.yml"],
+    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "timeout-minutes": 60}},
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), fixed_timeout, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must cap paid Windows runs at 60 minutes and allow the hosted fallback 90 minutes",
+      ),
+  )
   const wrong_tier = {
     ...declared["ci.yml"],
     jobs: {
