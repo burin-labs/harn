@@ -453,9 +453,12 @@ fn windows_storage_budget_errors(job: dict) -> list<string> {
   )
   if smoke_step == nil
     || !contains(smoke_body, "HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print")
+    || !contains(smoke_body, " -ef ")
     || contains(smoke_body, "/debug/harn.exe\" run") {
     errors = errors
-      + ["ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution"]
+      + [
+        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
+      ]
   }
   if smoke_completion_epoch != WINDOWS_TEST_COMPLETED_EXPRESSION
     || !contains(smoke_body, "WINDOWS_NATIVE_TEST_COMPLETED_EPOCH")

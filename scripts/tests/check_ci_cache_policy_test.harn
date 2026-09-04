@@ -771,7 +771,35 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   assert(
     windows_pr_native_feedback_errors(policy(), direct_smoke, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution",
+        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
+      ),
+  )
+  const textual_path_identity = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Smoke test harn run" {
+              return step
+            }
+            return {...step, run: step.run.replace(" -ef ", " == ")}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(
+      policy(),
+      textual_path_identity,
+      declared["windows-nightly.yml"],
+    )
+      .contains(
+        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
       ),
   )
   const silent_tail = {

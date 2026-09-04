@@ -494,7 +494,7 @@ pub fn workflows() {
                 ),
               },
               run:
-                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
+                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n[[ \"$harn_bin\" -ef \"$harn_bin\" ]]\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
             },
             {
               name: "Report Windows storage (terminal)",
