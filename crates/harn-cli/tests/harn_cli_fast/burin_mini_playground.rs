@@ -958,3 +958,97 @@ fn windows_sandboxed_run_child_can_read_a_system_toolchain_outside_the_workspace
          commands and their outputs:\n{dump}\nplayground stdout/error:\n{stdout}"
     );
 }
+
+/// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993 swarm brief,
+/// coordination/windows-sandbox-swarm-2026-09-04.md). Every candidate fix
+/// for the Windows read-closed defect widens READS; none of them may widen
+/// WRITES. This drives the same seam the failing fixtures use
+/// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
+/// `run_captured_spawn` -> the Windows sandbox backend) and checks the real
+/// filesystem afterward, not `cmd.exe`'s own stdout wording — candidates
+/// A/B/C may implement confinement through different mechanisms with
+/// different denial text/exit codes, but the file either exists on disk or
+/// it does not, and that check is mechanism-agnostic.
+///
+/// Two writes target locations a normal, unsandboxed user process can
+/// always write to (`%USERPROFILE%`, `%TEMP%`) — both OUTSIDE the
+/// workspace — so a failure there can only be the sandbox's own write
+/// confinement, never an ambient OS permission the account never had. A
+/// third write lands inside the workspace (the run tool's cwd is
+/// `workspace_root(fs)`, see `experiments/burin-mini/lib/workspace.harn`)
+/// and MUST succeed: a candidate that closes reads by also closing writes
+/// it used to allow is a regression, not a fix, even if the 5 real
+/// fixtures happen to pass.
+///
+/// Any escape file this test finds is deleted before the assertion panics,
+/// so a broken candidate does not leave stray files on the runner.
+#[cfg(windows)]
+#[test]
+fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_write_confinement_probe.jsonl",
+    );
+    let stdout = match &outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+
+    let userprofile_escape = std::env::var("USERPROFILE")
+        .map(|dir| Path::new(&dir).join("harn-escape-7993-userprofile.txt"));
+    let temp_escape =
+        std::env::var("TEMP").map(|dir| Path::new(&dir).join("harn-escape-7993-temp.txt"));
+    let inside_write = experiment_root
+        .join("workspace")
+        .join("harn-write-confinement-7993-inside.txt");
+
+    let mut failures = Vec::new();
+    for (label, escape_path) in [
+        ("USERPROFILE", userprofile_escape.as_ref().ok()),
+        ("TEMP", temp_escape.as_ref().ok()),
+    ] {
+        let Some(escape_path) = escape_path else {
+            failures.push(format!(
+                "  {label}: environment variable not set, could not check for an escape file"
+            ));
+            continue;
+        };
+        if escape_path.exists() {
+            let contents = fs::read_to_string(escape_path).unwrap_or_default();
+            failures.push(format!(
+                "  WRITE ESCAPED CONFINEMENT: {label} target {} exists (contents: {contents:?}) \
+                 -- the sandboxed run tool wrote outside the workspace",
+                escape_path.display()
+            ));
+            let _ = fs::remove_file(escape_path);
+        }
+    }
+    match fs::read_to_string(&inside_write) {
+        Ok(contents) if contents.contains("inside-workspace") => {}
+        Ok(contents) => failures.push(format!(
+            "  WRITE INSIDE THE WORKSPACE PRODUCED WRONG CONTENT: {} = {contents:?}",
+            inside_write.display()
+        )),
+        Err(error) => failures.push(format!(
+            "  WRITE INSIDE THE WORKSPACE DID NOT HAPPEN: {} ({error}) -- a confinement fix \
+             must not also break writes the sandbox is supposed to allow",
+            inside_write.display()
+        )),
+    }
+
+    if failures.is_empty() {
+        return;
+    }
+    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let report_dump = if report_path.exists() {
+        format!("{}", read_json(&report_path))
+    } else {
+        format!("(no report at {})", report_path.display())
+    };
+    panic!(
+        "write-confinement check failed:\n{}\nplayground stdout/error:\n{stdout}\nfull report:\n{report_dump}",
+        failures.join("\n")
+    );
+}
