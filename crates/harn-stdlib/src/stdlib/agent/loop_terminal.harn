@@ -2,6 +2,11 @@ import "std/agent/loop_call_budget"
 import "std/agent/loop_support"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
+import {
+  AgentDeclaredArtifactAudit,
+  agent_declared_artifacts_audit,
+  agent_declared_artifacts_convict,
+} from "std/agent/required_artifacts"
 
 /**
  * Why a run that reached its own end did not do the work, or `nil` when there
@@ -18,9 +23,9 @@ import "std/agent/loop_turn_scope"
  * - A run that called no tools at all is not abandoned. Answering a question is
  *   a legitimate completed run, and treating a quiet run as a failed one would
  *   be a worse defect than the one this fixes.
- * - A run with even one successful tool call is not abandoned by this rule.
+ * - A run with even one successful tool call is not abandoned by THE TOOL TALLY.
  *   Whether what it did was CORRECT is a different question, and the judge's or
- *   a declared-artifact contract's to answer.
+ *   the declared-artifact contract's to answer.
  *
  * What does convict:
  *
@@ -32,6 +37,13 @@ import "std/agent/loop_turn_scope"
  *   the same structured reader that feeds the session name lists, which counts
  *   a handler throw and a `permission_denied` refusal alike and never
  *   substring-matches prose.
+ * - `declared_artifact_missing`: the caller declared what the run must produce
+ *   and a declared path does not exist. This is the issue's third cause, the
+ *   run whose every tool call succeeded and which nonetheless did the wrong
+ *   thing. A tool tally cannot see it and must not try; the caller's own
+ *   declaration is the only evidence available without a model call. Ordered
+ *   last so that a run which produced nothing because nothing worked is
+ *   reported by the more proximate cause.
  *
  * The call counts, not the session name lists, decide the second rule.
  * `successful_tools_seen` and `rejected_tools_seen` deduplicate by tool NAME,
@@ -47,12 +59,16 @@ pub fn __agent_loop_abandonment_cause(
   successful_tools_seen: list,
   attempted_tool_calls: int,
   succeeded_tool_calls: int,
+  artifacts: AgentDeclaredArtifactAudit,
 ) -> string? {
   if len(agent_required_tools_missing_from_session(opts, successful_tools_seen)) > 0 {
     return "required_tool_missing"
   }
   if attempted_tool_calls > 0 && succeeded_tool_calls == 0 {
     return "no_tool_call_succeeded"
+  }
+  if agent_declared_artifacts_convict(artifacts) {
+    return "declared_artifact_missing"
   }
   return nil
 }
@@ -333,6 +349,11 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
   // loop still holds the evidence, and the only owner of the abandoned/finished
   // distinction on the ordinary path.
   let abandonment = nil
+  // Present on every run that declared a contract, convicted or not. A verdict
+  // reported only on conviction cannot be told apart from a contract that was
+  // never checked, and that is the exact shape in which a silently-skipped gate
+  // reads as a satisfied one.
+  let declared_artifacts = nil
   if __agent_loop_terminal_seals_natural(
     final_status,
     stop_reason,
@@ -341,11 +362,19 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
   ) {
     const attempted = state?.tool_calls_attempted ?? 0
     const succeeded = state?.tool_calls_succeeded ?? 0
+    // The filesystem read happens once, here, and only for a run that is about
+    // to seal a natural terminal. A caller who declared nothing pays nothing:
+    // the audit's declared list is empty and it touches no path.
+    const artifacts = agent_declared_artifacts_audit(harness.fs, opts)
+    if len(artifacts.declared) > 0 {
+      declared_artifacts = artifacts
+    }
     const cause = __agent_loop_abandonment_cause(
       opts,
       state?.successful_tools_seen ?? [],
       attempted,
       succeeded,
+      artifacts,
     )
     if cause != nil {
       // COMPOSE, never overwrite. The typed kind has to change or a host
@@ -388,6 +417,7 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session: dict, state: di
       final_status: final_status,
       stop_reason: stop_reason,
       abandonment: abandonment,
+      declared_artifacts: declared_artifacts,
       terminal_write_unverified: terminal_write_unverified,
       call_budget: call_budget,
       verify_attempts: verify_attempts,

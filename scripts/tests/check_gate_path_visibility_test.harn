@@ -1,0 +1,62 @@
+import {
+  census_violations,
+  is_negated_exists_line,
+  negated_exists_count,
+} from "../check_gate_path_visibility.harn"
+
+pipeline test_detector_finds_the_skip_shaped_guard(harness: Harness, task: unknown) {
+  assert(is_negated_exists_line("  if !fs.exists(path) {"))
+  assert(is_negated_exists_line("  if !harness.fs.exists(path) {"))
+  assert(is_negated_exists_line("    if path == \".\" || !fs.exists(joined) {"))
+}
+
+pipeline test_detector_ignores_prose_and_the_positive_form(harness: Harness, task: unknown) {
+  // A doc comment describing the shape is not a use of it. Without this the
+  // module documentation in path_visibility.harn counted against its own file.
+  assert(!is_negated_exists_line(" *     if !fs.exists(path) { continue }"))
+  assert(!is_negated_exists_line("// if !fs.exists(path) {"))
+  // A string literal naming the call is describing it too.
+  assert(!is_negated_exists_line("  if !trimmed.contains(\"fs.exists(\") {"))
+  // The positive form is the convict shape, which this ratchet does not govern.
+  assert(!is_negated_exists_line("  if fs.exists(path) {"))
+  assert(!is_negated_exists_line("  const there = fs.exists(path)"))
+}
+
+pipeline test_count_is_per_line(harness: Harness, task: unknown) {
+  const text = join(
+    [
+      "fn probe() {",
+      "  if !fs.exists(a) {",
+      "    return 1",
+      "  }",
+      "  if !fs.exists(b) {",
+      "    return 1",
+      "  }",
+      "}",
+    ],
+    "\n",
+  )
+  assert_eq(negated_exists_count(text), 2)
+  assert_eq(negated_exists_count("fn probe() {}"), 0)
+}
+
+pipeline test_growth_above_the_baseline_is_a_violation(harness: Harness, task: unknown) {
+  const lines = census_violations([{path: "scripts/a.harn", count: 2, allowed: 1}])
+  assert_eq(len(lines), 1)
+  const first = to_string(lines[0] ?? "")
+  assert(first.contains("baseline allows 1"))
+  assert(first.contains("scripts/a.harn"))
+}
+
+pipeline test_a_stale_row_is_a_violation_too(harness: Harness, task: unknown) {
+  // A row that outlives the guards it covered leaves headroom for a new one,
+  // so shrinking has to be reported rather than silently accepted.
+  const lines = census_violations([{path: "scripts/a.harn", count: 0, allowed: 1}])
+  assert_eq(len(lines), 1)
+  assert(to_string(lines[0] ?? "").contains("Tighten the row"))
+}
+
+pipeline test_a_file_at_its_baseline_is_clean(harness: Harness, task: unknown) {
+  assert_eq(census_violations([{path: "scripts/a.harn", count: 1, allowed: 1}]), [])
+  assert_eq(census_violations([]), [])
+}

@@ -1,0 +1,43 @@
+import { path_visibility, visibility_failure } from "../path_visibility.harn"
+
+/**
+ * The distinction the whole module exists for, on the real builtin.
+ *
+ * A missing file and a denied path both report `exists: false` to a caller that
+ * only looks at that field. This asserts the classifier keeps them apart, and
+ * that a missing file is NOT reported as a denial, which is the false-positive
+ * direction that would make every gate red for no reason.
+ *
+ * The denied direction cannot be exercised here: `harn test` runs without the
+ * worktree filesystem sandbox, so no path is refusable in this process. It is
+ * covered end to end by scripts/tests/path_visibility_denial_test.sh, which
+ * runs a script under `harn run`, where the sandbox is on.
+ */
+pipeline test_a_missing_file_is_missing_and_not_a_denial(harness: Harness, task: unknown) {
+  const missing = path_visibility(harness.fs, "example gate", "definitely-not-here.txt")
+  assert(missing.visible)
+  assert(!missing.exists)
+  assert_eq(missing.status, "missing")
+  assert_eq(missing.denial, "")
+}
+
+pipeline test_a_present_file_is_visible_with_no_denial(harness: Harness, task: unknown) {
+  const present = path_visibility(harness.fs, "example gate", "path_visibility_test.harn")
+  assert(present.visible)
+  assert(present.exists)
+  assert_eq(present.status, "present_file")
+  assert_eq(present.denial, "")
+}
+
+pipeline test_visibility_failure_is_empty_only_when_nothing_was_denied(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(visibility_failure("example gate", []), "")
+  const failure = visibility_failure("example gate", ["a denied", "b denied"])
+  assert(contains(failure, "example gate"))
+  assert(contains(failure, "2 path(s)"))
+  assert(contains(failure, "failure rather than a skip"))
+  assert(contains(failure, "a denied"))
+  assert(contains(failure, "b denied"))
+}

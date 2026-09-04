@@ -248,6 +248,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/primitives" => "stdlib/agent/primitives.harn",
     "agent/progress" => "stdlib/agent/progress.harn",
     "agent/required_tools" => "stdlib/agent/required_tools.harn",
+    "agent/required_artifacts" => "stdlib/agent/required_artifacts.harn",
     "agent/purpose_labels" => "stdlib/agent/purpose_labels.harn",
     "agent/loop_purpose_labels" => "stdlib/agent/loop_purpose_labels.harn",
     "agent/monologue_actuation" => "stdlib/agent/monologue_actuation.harn",
