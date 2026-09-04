@@ -1,5 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { relative_path } from "std/fs"
+import { path_visibility } from "./path_visibility.harn"
 
 // Test roots whose files are enumerated one by one inside a Makefile recipe
 // rather than discovered by walking the directory. A file added to one of
@@ -187,8 +188,18 @@ pub fn unlisted_test_files(block: string, root: string, file_names: list<string>
   return out.sort()
 }
 
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "check-test-target-coverage"
+
 fn test_files_in(fs: HarnessFs, root_dir: string, suffix: string) -> list<string> {
-  if !fs.exists(root_dir) {
+  // Returning an empty list here drives the scanned count to zero, and the
+  // report prints that count without asserting it is non-zero, so a denial
+  // reads as "every hand-listed test file is covered".
+  const seen = path_visibility(fs, CHECK_NAME, root_dir)
+  if seen.denial != "" {
+    throw seen.denial
+  }
+  if !seen.exists {
     return []
   }
   let names: list<string> = []

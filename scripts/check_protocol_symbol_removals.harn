@@ -31,6 +31,7 @@ import {
   resolve_commit,
   trailer_values,
 } from "./git_base.harn"
+import { path_visibility, visibility_failure } from "./path_visibility.harn"
 
 const REMOVAL_TRAILER = "Allow-Protocol-Removal:"
 
@@ -161,6 +162,9 @@ pub fn failure_report(base: string, findings: list<dict>) -> string {
  * predates these files, or a path was renamed out from under the watch list —
  * otherwise reports the same clean exit as a branch that removed nothing.
  */
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "check-protocol-symbol-removals"
+
 fn scope_line(
   base: string,
   resolved: string,
@@ -237,9 +241,19 @@ pipeline main(harness: Harness, task: unknown) {
   let compared = 0
   let symbol_total = 0
   let unreadable: list<string> = []
+  let denied: list<string> = []
   let probe_failures: list<dict> = []
   for entry in WATCHED {
-    if !harness.fs.exists(entry.path) {
+    // A path this run was not permitted to read is not a path that was
+    // removed. Both used to land in `unreadable`, which is printed and never
+    // gates the exit code, so a denial read as a clean comparison of a file
+    // nobody looked at.
+    const seen = path_visibility(harness.fs, CHECK_NAME, entry.path)
+    if seen.denial != "" {
+      denied = denied + [seen.denial]
+      continue
+    }
+    if !seen.exists {
       unreadable = unreadable + [entry.path + " (missing at HEAD)"]
       continue
     }
@@ -272,6 +286,13 @@ pipeline main(harness: Harness, task: unknown) {
   }
   if declared.count > 0 {
     harness.stdio.println("  declared removals: " + declared.join(", "))
+  }
+  // Denials decide the exit code. They are the reason this gate can no longer
+  // report success over paths it never inspected.
+  const denial_failure = visibility_failure(CHECK_NAME, denied)
+  if denial_failure != "" {
+    harness.stdio.eprintln(denial_failure)
+    return 1
   }
   if findings.count > 0 {
     harness.stdio.eprintln(failure_report(base, findings))

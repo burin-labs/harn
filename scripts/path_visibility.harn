@@ -1,0 +1,99 @@
+/**
+ * One owner for "a path this run was never allowed to look at is not a path
+ * that is missing".
+ *
+ * `harness.fs.exists` answers a single boolean, and a capability-policy scope
+ * denial is reported through it as `false`. That is deliberate at the builtin,
+ * but it makes every gate built on `exists` unable to tell "this file is not
+ * here" from "this run was never permitted to look". The dangerous shape is the
+ * skipping one:
+ *
+ *     if !fs.exists(path) { continue }   // denial silently skips the check
+ *
+ * The check then does not run, nothing is added to the findings list, and the
+ * gate exits 0 having proved nothing about that path. That is the same class as
+ * [[guard_scope]]: an absence reading as a satisfied measurement, except here
+ * the absence is manufactured by the sandbox rather than by a bad glob.
+ *
+ * `fs.status(path, access)` answers with a typed state instead. A denial sets
+ * `visible` false and `exists` to nil, so nil is the discriminator: a caller
+ * that writes `status?.exists ?? false` has reintroduced the original bug.
+ * This module reads the typed shape once, at the boundary that owns it, so no
+ * gate has to remember that rule.
+ */
+
+/**
+ * What a gate is allowed to conclude about one path.
+ *
+ * `denial` is empty when the run could actually look. When it is non-empty the
+ * caller must treat it as a finding and fail, never as an absent file: the
+ * whole point is that we do not know what is there. The message always contains
+ * the word "denied" so an operator scanning output can find it, and names the
+ * path and the roots the policy did allow so the fix is actionable.
+ */
+pub type PathVisibility = {
+  visible: bool,
+  exists: bool,
+  status: string,
+  denial: string,
+}
+
+/**
+ * Classify one path for a gate, for read access.
+ *
+ * `check` is the gate's own name, quoted back into any denial message so the
+ * operator knows which check stopped being able to see.
+ */
+pub fn path_visibility(fs: HarnessFs, check: string, path: string) -> PathVisibility {
+  const info = fs.status(path, "read")
+  if info == nil {
+    // No typed answer at all. Refusing here rather than guessing keeps an
+    // unavailable instrument from reading as a clean one.
+    return {
+      visible: false,
+      exists: false,
+      status: "unreported",
+      denial: check + ": path visibility denied or unreported for `" + path
+        + "` (fs.status returned nothing, so absence cannot be distinguished from denial)",
+    }
+  }
+  const status = to_string(info?.status ?? "unreported")
+  // A denial and a stat error both set exists to nil. Testing nil rather than
+  // the status string means a new non-visible state cannot silently pass.
+  const visible = info?.visible ?? false
+  if !visible || info?.exists == nil {
+    return {
+      visible: false,
+      exists: false,
+      status: status,
+      denial: check + ": read denied for `" + path + "` (fs.status=" + status
+        + "). This path was not inspected, so treat it as unproven rather than"
+        + " absent. Allowed roots: " + __visibility_roots(info),
+    }
+  }
+  return {visible: true, exists: info?.exists ?? false, status: status, denial: ""}
+}
+
+fn __visibility_roots(info: dict) -> string {
+  const roots = info?.roots ?? []
+  if type_of(roots) != "list" || len(roots) == 0 {
+    return "<none reported>"
+  }
+  return roots.map({ root -> return to_string(root) }).to_list().join(", ")
+}
+
+/**
+ * The failure a gate prints when any path it needed was denied.
+ *
+ * Returns empty when `denials` is empty, so a caller can guard on the string
+ * exactly the way [[guard_scope]]'s empty-scope failure is used.
+ */
+pub fn visibility_failure(check: string, denials: list<string>) -> string {
+  if len(denials) == 0 {
+    return ""
+  }
+  return check + " could not inspect " + to_string(len(denials))
+    + " path(s) because access was denied. A denied path is not a clean one:"
+    + " every claim this gate makes about it would be vacuous, so this is a"
+    + " failure rather than a skip.\n  " + denials.join("\n  ")
+}

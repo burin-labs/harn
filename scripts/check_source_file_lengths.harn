@@ -1,4 +1,8 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import { path_visibility, visibility_failure } from "./path_visibility.harn"
+
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "check-source-file-lengths"
 
 const MAX_LINES = 1500
 
@@ -141,7 +145,14 @@ fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) 
   } else {
     path_join(root, rel_dir)
   }
-  if !harness.fs.exists(dir) {
+  // An empty list here means "this ratchet governs nothing under that root".
+  // A denial and an absent directory used to produce the same empty list, so a
+  // policy that hid a source tree read exactly like a repository that has none.
+  const seen = path_visibility(harness.fs, CHECK_NAME, dir)
+  if seen.denial != "" {
+    throw seen.denial
+  }
+  if !seen.exists {
     return []
   }
   let paths: list<string> = []
@@ -774,11 +785,27 @@ fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> 
     }
   }
   let out: list<string> = []
+  let denied: list<string> = []
   for line in res.stdout.lines() {
     const path = line.trim()
-    if path != "" && fs.exists(path_join(root, path)) {
+    if path == "" {
+      continue
+    }
+    // The reconciliation exists to make a vanished inventory loud. Filtering it
+    // through a call that cannot report a denial would re-open the same hole
+    // one policy change away, which is exactly what the doc above describes.
+    const seen = path_visibility(fs, CHECK_NAME, path_join(root, path))
+    if seen.denial != "" {
+      denied = denied + [seen.denial]
+      continue
+    }
+    if seen.exists {
       out = out.appending(normalize_source_path(path))
     }
+  }
+  const denial_failure = visibility_failure(CHECK_NAME, denied)
+  if denial_failure != "" {
+    return {ok: false, paths: [], error: denial_failure}
   }
   return {ok: true, paths: out, error: ""}
 }

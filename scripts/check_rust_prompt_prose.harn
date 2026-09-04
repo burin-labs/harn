@@ -11,6 +11,8 @@
 // Pure logic lives in `pub fn`s that take source text directly so the paired
 // test can drive them with no filesystem. `main` does the globbing / reads and
 // argv / env handling.
+import { path_visibility } from "./path_visibility.harn"
+
 const DEFAULT_THRESHOLD = 200
 
 const DEFAULT_ALLOWLIST = "scripts/allowed_long_strings.txt"
@@ -601,11 +603,20 @@ fn rel_from_glob(path: string, root: string) -> string {
  * and excluded-file filtering; file entries (ending `.rs`) are included when
  * present and not excluded. Path order follows the input `paths` list.
  */
+/** This gate's own name, quoted back into any denial it reports. */
+const CHECK_NAME = "lint-no-rust-prompt-prose"
+
 fn collect_files(fs: HarnessFs, root: string, paths: list<string>) -> list<string> {
   let out: list<string> = []
   for path in paths {
     if path.ends_with(".rs") {
-      if fs.exists(join_root(root, path)) && !EXCLUDED_PROTECTED_FILES.contains(path) {
+      const seen = path_visibility(fs, CHECK_NAME, join_root(root, path))
+      if seen.denial != "" {
+        throw seen.denial
+      }
+      // A protected file dropped here is never read, so the claim that it
+      // carries no hard-coded prompt prose is never tested.
+      if seen.exists && !EXCLUDED_PROTECTED_FILES.contains(path) {
         out = out + [path]
       }
     } else {
