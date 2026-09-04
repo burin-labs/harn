@@ -1,0 +1,157 @@
+// std/agent/pattern_knowledge_matching.harn
+//
+// Ranking boundary for cross-session pattern learning. This module owns the
+// vocabulary a task and a learned skill are reduced to, and the score that
+// decides whether a learned skill is served for a task. `pattern_knowledge`
+// retains the lifecycle around it: capture, curation, review, and the public
+// entry points that call in here.
+const STOP_WORDS = [
+  "about",
+  "after",
+  "again",
+  "all",
+  "and",
+  "any",
+  "are",
+  "can",
+  "could",
+  "for",
+  "from",
+  "has",
+  "have",
+  "how",
+  "into",
+  "just",
+  "make",
+  "more",
+  "not",
+  "now",
+  "off",
+  "the",
+  "this",
+  "that",
+  "then",
+  "there",
+  "these",
+  "those",
+  "through",
+  "use",
+  "using",
+  "was",
+  "what",
+  "when",
+  "where",
+  "with",
+  "would",
+  "you",
+  "your",
+]
+
+pub fn pl_normalize_words(text: string) -> list {
+  const cleaned = regex_replace(r"[^a-z0-9]+", " ", (text ?? "").lower()) ?? ""
+  return cleaned.split(" ").filter({ word -> word != "" }).to_list()
+}
+
+pub fn pl_significant_words(text: string) -> list {
+  let seen = []
+  let out = []
+  for word in pl_normalize_words(text) {
+    if len(word) < 3 || STOP_WORDS.contains(word) || seen.contains(word) {
+      continue
+    }
+    seen = seen + [word]
+    out = out + [word]
+  }
+  return out
+}
+
+pub fn pl_normalized_domain_words(value: any) -> list {
+  let seen = []
+  let out = []
+  if type_of(value) != "list" {
+    return out
+  }
+  for entry in value {
+    const word = to_string(entry ?? "").trim().lower()
+    if word && !seen.contains(word) {
+      seen = seen + [word]
+      out = out + [word]
+    }
+  }
+  return out
+}
+
+/**
+ * Score one learned skill against a query's significant words.
+ *
+ * `task_domain_words` is the host's own task-signal, not a second opinion
+ * computed here: the host's own task-intent or language matcher already
+ * decided what this task is genuinely about, and passes those terms
+ * through unchanged. When it is non-empty, a lexical hit only counts if the
+ * matched word is also one the host flagged as a real domain term, not an
+ * incidental overlap on a word this module's own stopword list happens not
+ * to cover (a repository-meta learned skill sharing generic words like
+ * "file" or "new" with an unrelated task, for one measured example). When
+ * it is empty -- the host found no task domain to name -- scoring is
+ * unchanged from before this field existed: any nonzero lexical overlap
+ * counts. This narrows only on positive host signal; it never turns a match
+ * back on that today's overlap check would have rejected.
+ */
+pub fn pl_score_skill(skill_entry: dict, query_words: list, task_domain_words: list = []) -> dict {
+  if len(query_words) == 0 {
+    return {learned_skill: skill_entry, score: 0.0, reason: "project learned skill"}
+  }
+  const haystack = join(
+    [skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body],
+    " ",
+  )
+  const skill_words = pl_significant_words(haystack)
+  let overlap = []
+  for word in query_words {
+    if skill_words.contains(word) && !overlap.contains(word) {
+      overlap = overlap + [word]
+    }
+  }
+  if len(overlap) == 0 {
+    return {}
+  }
+  if len(task_domain_words) > 0 {
+    let domain_overlap = []
+    for word in overlap {
+      if task_domain_words.contains(word) {
+        domain_overlap = domain_overlap + [word]
+      }
+    }
+    if len(domain_overlap) == 0 {
+      return {}
+    }
+  }
+  return {
+    learned_skill: skill_entry,
+    score: (len(overlap) + 0.0) / (max(1, len(query_words)) + 0.0),
+    reason: "matched " + join(overlap.sorted()[0:min(4, len(overlap))], ", "),
+  }
+}
+
+pub fn pl_insert_match(matches: list, item: dict) -> list {
+  if item?.learned_skill == nil {
+    return matches
+  }
+  let out = []
+  let inserted = false
+  for existing in matches {
+    const before = item.score > existing.score
+      || (item.score == existing.score
+        && item.learned_skill.name
+          < existing.learned_skill.name)
+    if before && !inserted {
+      out = out + [item]
+      inserted = true
+    }
+    out = out + [existing]
+  }
+  if !inserted {
+    out = out + [item]
+  }
+  return out
+}
