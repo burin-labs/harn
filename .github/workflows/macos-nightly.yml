@@ -39,6 +39,20 @@ on:
 permissions:
   contents: read
 
+# Supersede an in-flight pull-request run when the same pull request pushes
+# again. Only the final head becomes a merge parent, so a superseded run's
+# result is never read by anything.
+#
+# Non-pull-request runs each get their own group via `github.run_id`, never a
+# shared ref key. A shared key would make two dispatches on one ref queue behind
+# each other, and release certification dispatches this workflow at an exact
+# commit: the release evidence reader requires a `workflow_dispatch` run at that
+# exact head, so serializing or cancelling those would turn a capacity setting
+# into a release-path dependency.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
