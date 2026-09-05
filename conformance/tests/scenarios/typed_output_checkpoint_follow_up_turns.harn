@@ -1,0 +1,54 @@
+// A follow-up turn must stay its own message, and a validator correction must
+// leave every earlier turn byte-identical.
+//
+// This is the cacheable claim made concrete: the route caches whole messages,
+// so the first turn surviving a retry unchanged is the whole point. Rewriting
+// it, as the checkpoint used to, is what made a judge re-ask read back only its
+// system prompt.
+import { typed_output_checkpoint } from "std/checkpoint"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision"],
+    properties: {decision: {type: "string", enum: ["merge", "wait"]}},
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"decision\":\"merge\"}"), llm_text("{\"decision\":\"wait\"}")],
+    { ->
+      const checkpoint = typed_output_checkpoint(
+        harness.agent,
+        harness.llm,
+        "captain.next_action",
+        "BASE TURN: choose the next action.",
+        schema,
+        {
+          provider: "mock",
+          session_id: "follow-up-turn-session",
+          validator_retries: 1,
+          repair: {enabled: false},
+        },
+        fn(data) { return {ok: data.decision == "wait", errors: ["decision must be wait"]} },
+        ["FOLLOW-UP TURN: itemize your reasoning."],
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(checkpoint.ok)
+      harness.stdio.println(checkpoint.data.decision)
+      // The first ask carries two turns, not one concatenated turn.
+      harness.stdio.println(len(calls[0].messages))
+      harness.stdio.println(calls[0].messages[0].content)
+      harness.stdio.println(calls[0].messages[1].content)
+      // The retry leaves the base turn byte-identical and corrects the last.
+      harness.stdio.println(len(calls[1].messages))
+      harness.stdio.println(calls[1].messages[0].content == calls[0].messages[0].content)
+      harness.stdio.println(calls[1].messages[1].content == calls[0].messages[1].content)
+      harness.stdio.println(
+        contains(calls[1].messages[1].content, "FOLLOW-UP TURN: itemize your reasoning."),
+      )
+      harness.stdio.println(contains(calls[1].messages[1].content, "decision must be wait"))
+    },
+  )
+}
