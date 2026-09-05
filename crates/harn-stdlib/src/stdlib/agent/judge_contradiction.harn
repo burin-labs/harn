@@ -1,4 +1,11 @@
+import { CompletionEvidenceSnapshot } from "std/agent/completion_evidence"
 import { JudgeCheckpointRequest, __judge_run_checkpoint } from "std/agent/judge_internals"
+import {
+  CompletionJudgeVerdict,
+  __judge_completion_verdict_contradicts_itself,
+  __judge_completion_verdict_read,
+  __judge_ungrounded_gap_quotes,
+} from "std/agent/judge_verdict"
 import { agent_emit_event } from "std/agent/state"
 
 /** Judge response after at most one self-contradiction re-ask. */
@@ -51,10 +58,77 @@ pub fn __judge_resolve_contradiction(
   if !contradictory {
     return {data: data, reasked: false}
   }
-  const reask = __judge_run_checkpoint(
+  return __judge_reask_once(
     harness,
-    request + {user: request.user + __JUDGE_CONTRADICTION_RETRY_PROMPT},
+    request,
+    data,
+    __JUDGE_CONTRADICTION_RETRY_PROMPT,
+    "contradiction",
   )
+}
+
+/**
+ * Resolve a refusal that quoted evidence the judge was never shown.
+ *
+ * Same treatment and the same reasoning as the contradiction above: the reply
+ * is not usable, and handing the actor a complaint sourced to a line that is
+ * not in the file view is worse than asking again. Measured 2026-09-05 on two
+ * scheduler trials, where the judge refused ten times over a file view it had
+ * been shown, phrasing the gap against "the current scheduler.go shown in the
+ * live edited window".
+ *
+ * The re-ask names the offending quotes, because a judge told only "that was
+ * wrong" has the same reply available to it.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_resolve_ungrounded_quotes(harness, request, data, ["queue = append(queue, s)"])
+ */
+pub fn __judge_resolve_ungrounded_quotes(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  data: dict,
+  quotes: list<string>,
+) -> JudgeContradictionResolution {
+  if len(quotes) == 0 {
+    return {data: data, reasked: false}
+  }
+  return __judge_reask_once(
+    harness,
+    request,
+    data,
+    __judge_ungrounded_quote_retry_prompt(quotes),
+    "ungrounded_quote",
+  )
+}
+
+/** The instruction added to the user turn when a refusal quoted absent evidence. */
+fn __judge_ungrounded_quote_retry_prompt(quotes: list<string>) -> string {
+  return "\n\nYour previous reply refused the work and attributed it to evidence above, "
+    + "but these quotes do not appear anywhere in the evidence you were given:\n"
+    + join(quotes.map({ quote -> "  - " + quote }), "\n")
+    + "\nRe-read the evidence and answer again. Quote only lines that are actually there. "
+    + "If the evidence does not in fact show the gap you had in mind, that gap is not "
+    + "supported and you should not raise it; if the evidence shows the work IS done, reply `done`."
+}
+
+/**
+ * One re-ask on the user turn, with the reason named.
+ *
+ * Both re-ask reasons share this so the retry stays a single behaviour: the
+ * stable system prefix is untouched (so the cached prompt prefix stays
+ * byte-identical), a re-ask whose checkpoint could not be read keeps the first
+ * reply rather than inventing one, and the attempt is recorded either way.
+ */
+fn __judge_reask_once(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  data: dict,
+  prompt: string,
+  reason: string,
+) -> JudgeContradictionResolution {
+  const reask = __judge_run_checkpoint(harness, request + {user: request.user + prompt})
   const readable = reask.checkpoint?.ok ?? false
   agent_emit_event(
     harness.agent,
@@ -64,10 +138,100 @@ pub fn __judge_resolve_contradiction(
       schema: "harn.completion_judge_contradiction_retry.v1",
       reask_status: to_string(reask.checkpoint?.status ?? "ok"),
       reask_readable: readable,
+      reask_reason: reason,
     },
   )
   if readable {
     return {data: reask.checkpoint?.data ?? {}, reasked: true}
   }
   return {data: data, reasked: true}
+}
+
+/**
+ * A judge reply after every re-ask, with the reply it came from.
+ *
+ * `contradiction_reasked` is deliberately NOT "either re-ask happened". The
+ * arbitration ladder reads it to tell a FIRST self-contradiction from one that
+ * survived being pointed out, and a grounding re-ask says nothing about that.
+ * Folding the two together would let a quote correction overrule a judge whose
+ * contradiction had never been challenged.
+ */
+pub type JudgeSettledReply = {
+  decoded: CompletionJudgeVerdict,
+  reply_of_record: dict,
+  contradiction_reasked: bool,
+}
+
+/**
+ * Run both re-ask reasons in order and return the reply of record.
+ *
+ * Two things can make a reply unusable, and both are readable without a model:
+ *
+ * 1. `done` beside a named gap. The judge accepted and refused inside one
+ *    object (harn#7910, harn#8060).
+ * 2. A refusal quoting evidence that is not in the packet the judge was handed
+ *    (#8100). Measured on two scheduler trials, where the judge refused ten
+ *    times over a file view that already showed the fix.
+ *
+ * Each is re-asked exactly once, in that order, because a grounding check
+ * should run against the reply the contradiction pass settled on rather than
+ * against one already superseded. `reply_of_record` is whichever reply survived
+ * both, so callers never read a clause off a superseded one.
+ *
+ * The grounding pass only applies to a refusal: an approval names no gap, so it
+ * quotes nothing and there is nothing to ground.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_settle_reply(harness, request, contract, payload, data, decoded)
+ */
+pub fn __judge_settle_reply(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  contract: unknown,
+  payload: CompletionEvidenceSnapshot,
+  data: dict,
+  decoded: CompletionJudgeVerdict,
+) -> JudgeSettledReply {
+  const contradiction = __judge_resolve_contradiction(
+    harness,
+    request,
+    data,
+    __judge_completion_verdict_contradicts_itself(decoded),
+  )
+  const after_contradiction = if contradiction.reasked {
+    __judge_completion_verdict_read(contradiction.data, contract, payload.judge_evidence_packet)
+  } else {
+    decoded
+  }
+  // `payload.judge_evidence` is the RENDERED packet the judge was handed, so
+  // this compares a quote against what it saw and never against what the
+  // workspace happens to hold now.
+  const grounding = if after_contradiction.verdict == "continue" {
+    __judge_resolve_ungrounded_quotes(
+      harness,
+      request,
+      contradiction.data,
+      __judge_ungrounded_gap_quotes(after_contradiction.gaps, payload.judge_evidence),
+    )
+  } else {
+    {data: contradiction.data, reasked: false}
+  }
+  if grounding.reasked {
+    return {
+      decoded: __judge_completion_verdict_read(
+        grounding.data,
+        contract,
+        payload.judge_evidence_packet,
+      ),
+      reply_of_record: grounding.data,
+      contradiction_reasked: contradiction.reasked,
+    }
+  }
+  return {
+    decoded: after_contradiction,
+    reply_of_record: contradiction.data,
+    contradiction_reasked: contradiction.reasked,
+  }
 }

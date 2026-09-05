@@ -33,7 +33,7 @@ pub import {
   __completion_arbitrate_contradiction,
   __completion_arbitrate_verification,
 } from "std/agent/judge_arbitration"
-import { __judge_resolve_contradiction } from "std/agent/judge_contradiction"
+import { __judge_settle_reply } from "std/agent/judge_contradiction"
 import { __judge_evidence_projection_from_lifecycle } from "std/agent/judge_evidence"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -49,11 +49,13 @@ import {
 } from "std/agent/judge_internals"
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
 pub import {
+  CompletionJudgeGapItem,
   CompletionJudgeVerdict,
   __judge_clamp_completion_detail,
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import {
   agent_completion_obligations,
@@ -74,8 +76,16 @@ pub import { agent_turn_end_judge_cap } from "std/agent/turn_end"
 /** Action the completion-judge model is allowed to return. */
 pub type CompletionJudgeAction = "accept" | "continue"
 
-/** Runtime completion decision after deadline and policy enforcement. */
-pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
+/**
+ * Runtime completion decision after deadline and policy enforcement.
+ *
+ * The two stop actions differ on ONE question: had the deterministic verifier
+ * oracle already answered when the loop ran out of judge invocations?
+ * `stop_verified` means it had, and it passed; the judge's dissent is kept on
+ * the receipt rather than deciding the run. `stop_unverified` is every other
+ * stop, including a cap reached over a `failed` or `not_run` oracle.
+ */
+pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified" | "stop_verified"
 
 pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
 
@@ -505,25 +515,21 @@ fn __judge_invoke_structured(
     contract,
     payload.judge_evidence_packet,
   )
-  // A judge that answered `done` while naming a gap has contradicted itself.
-  // Same treatment, same reason: re-ask the JUDGE once with the contradiction
-  // named, rather than sending the actor a refusal built out of the judge's own
-  // claim that the work is finished. Without this the identical reply comes back
-  // on every invocation and the run dies at the cap. See harn#8060.
-  const contradiction = __judge_resolve_contradiction(
+  // Both re-ask reasons, in order, owned by the module that owns re-asks: a
+  // `done` that also names a gap (harn#8060), then a refusal quoting evidence
+  // it was never shown (#8100). The sequencing lives there so this function
+  // does not grow a second copy of "re-ask, then re-decode, then remember which
+  // reply is now of record".
+  const settled = __judge_settle_reply(
     harness,
     reask_request,
+    contract,
+    payload,
     resolved.data,
-    __judge_completion_verdict_contradicts_itself(itemized_decoded),
+    itemized_decoded,
   )
-  // `contradiction.data` is the reply of record: the re-ask when one happened,
-  // and the itemization pass's reply unchanged when none did. Every read below
-  // goes through it so no clause is left describing a superseded reply.
-  const decoded = if contradiction.reasked {
-    __judge_completion_verdict_read(contradiction.data, contract, payload.judge_evidence_packet)
-  } else {
-    itemized_decoded
-  }
+  const decoded = settled.decoded
+  const reply_of_record = settled.reply_of_record
   const requirement_report = decoded.requirement_report
   const unassessed = resolved.omitted && requirement_report != nil
   // A judge that REFUSED and itemized nothing has assessed nothing either, but
@@ -533,7 +539,7 @@ fn __judge_invoke_structured(
   // not supply, in place of the reason the judge actually gave.
   const declined_unassessed = requirement_report != nil
     && !resolved.omitted
-    && completion_requirement_report_omitted(contract, contradiction.data?.requirement_report)
+    && completion_requirement_report_omitted(contract, reply_of_record?.requirement_report)
   const requirements_pending = requirement_report != nil
     && !requirement_report.complete
     && !declined_unassessed
@@ -568,7 +574,7 @@ fn __judge_invoke_structured(
     // Whether the self-contradiction was already pointed out to the judge and
     // came back anyway. The arbitration below reads it so a FIRST contradiction
     // is never overruled — only one that survived its resolution.
-    contradiction_reasked: contradiction.reasked,
+    contradiction_reasked: settled.contradiction_reasked,
     reason: if unassessed {
       "completion_judge_report_omitted"
     } else if requirements_pending {
@@ -634,9 +640,22 @@ pub fn __done_contract_judge_system(opts: dict) -> string {
     "Return `done` only when the claim covers the visible request and names adequate evidence.",
     "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
     "Judge the substance of the claim, never its wire format. Response markers, sentinels, and layout are enforced elsewhere, and their absence is never a reason to continue.",
-    "Return only `verdict`, one concise `detail`, and the `gap_class` the gap belongs to.",
-    "On `done`, use `detail` for the strongest evidence that every requirement is met.",
-    "On `continue`, use `detail` for the single most important gap and the substantive next action that closes it, never a restatement or formatting instruction.",
+    "On `done`, use `detail` for the strongest evidence that every requirement is met, and set no gap fields.",
+    // The old instruction here was "use `detail` for the single most important
+    // gap". A judge holding three objections could not state them, so it named
+    // one, the actor fixed it, and the next invocation named the next. The
+    // default cap is three. See #8100.
+    "On `continue`, list in `gaps` EVERY gap you currently hold — not the most important one.",
+    "The actor can only converge on a set it is shown in full, and you may not add a criterion later that you could have named now.",
+    "Give each gap the `criterion` from the task it is against, and the substantive next action that closes it, never a restatement or formatting instruction.",
+    // #8091: the refusals read like a judge restating its previous position
+    // rather than re-reading the current state. The packet labels the current
+    // file view; nothing told the judge it outranks what it said last round.
+    "Where the evidence shows a labelled current-state view of a file, that view is the file's state NOW.",
+    "It supersedes anything you or the actor said about that file in an earlier round, including your own previous verdict.",
+    "When a gap is about the content of a file shown in the evidence above, copy the line that proves it into `evidence_quote`, verbatim.",
+    "A quote that does not appear in that evidence is refused and sent back to you, so quote what is there rather than what you expect to be there.",
+    "Keep `detail` as the one-line summary of the whole refusal.",
   ]
   if extra != "" {
     lines = lines.appending("Additional rubric:\n" + extra)
@@ -704,7 +723,36 @@ fn __judge_directive(
   defer_feedback: bool,
 ) -> CompletionDirective {
   const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
-  const reason = if terminal_reason != "" {
+  // A cap is a statement about the JUDGE running out of turns, not about the
+  // work. When the deterministic oracle already ran and passed, the run has a
+  // stronger answer than the judge was being asked for, so the cap stops it as
+  // verified and the dissent stays on the receipt (`outcome`, `gap_class`,
+  // `reason`) for whoever grades it later. `observed` is a positive reading
+  // ONLY on "passed": `not_run` also covers "the gate could not read facts",
+  // and treating that as verified would convert a genuine non-convergence into
+  // a clean stop, which is the worse defect. An explicit
+  // `terminal_judge_reason` is untouched — that is the judge naming a terminal,
+  // not the loop running out of room.
+  const cap_reached = completion_judge_cap_reached || turn_end_judge_cap_reached
+  const verified_at_cap = cap_reached
+    && terminal_reason == ""
+    && to_string(payload?.verification?.observed ?? "") == "passed"
+  const action = if verified_at_cap {
+    "stop_verified"
+  } else if terminal_reason != "" || cap_reached {
+    "stop_unverified"
+  } else if verdict.vetoed {
+    "continue"
+  } else {
+    "accept"
+  }
+  // A cap over a passed oracle gets its OWN wire reason. Reusing the cap label
+  // would leave a run that finished and one that never converged sharing a
+  // single value, which is what #8058 is about. Which cap it was is not lost:
+  // `invoked` on the same receipt names the judge that ran.
+  const reason = if verified_at_cap {
+    "judge_cap_reached_over_verified_pass"
+  } else if terminal_reason != "" {
     terminal_reason
   } else if completion_judge_cap_reached {
     "completion_judge_cap_reached"
@@ -712,15 +760,6 @@ fn __judge_directive(
     "turn_end_judge_cap_reached"
   } else {
     to_string(verdict?.reason ?? verdict?.reasoning ?? "")
-  }
-  const action = if terminal_reason != ""
-    || completion_judge_cap_reached
-    || turn_end_judge_cap_reached {
-    "stop_unverified"
-  } else if verdict.vetoed {
-    "continue"
-  } else {
-    "accept"
   }
   const has_feedback = verdict.vetoed
     && trim(to_string(verdict?.feedback ?? "")) != ""
