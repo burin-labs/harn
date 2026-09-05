@@ -13,6 +13,7 @@ use harn_vm::VmValue;
 use tempfile::tempdir;
 
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+const FOREIGN_SWEEP_CHILD_ENV: &str = "HARN_TEST_COMMAND_ARTIFACT_FOREIGN_SWEEP_CHILD";
 
 struct ChildGuard(process::Child);
 
@@ -145,7 +146,7 @@ fn command_creation_sweeps_stale_sibling_and_keeps_fresh_output_readable() {
 }
 
 #[test]
-fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
+fn command_creation_pressure_caps_recent_completed_siblings_and_keeps_new_output_readable() {
     let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
     let temp = tempdir().unwrap();
     let _tmpdir_guard = TmpdirEnvGuard(std::env::var_os("TMPDIR"));
@@ -153,13 +154,11 @@ fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
     let _retention_guard = EnvGuard::set("HARN_COMMAND_ARTIFACT_RETENTION_SECS", "86400");
     std::env::set_var("TMPDIR", temp.path());
 
-    let old_completed = temp
+    let recent_completed = temp
         .path()
         .join(format!("harn-command-cmd_{}_100_1", std::process::id()));
-    std::fs::create_dir(&old_completed).unwrap();
-    std::fs::write(old_completed.join("combined.txt"), "old").unwrap();
-    let old = FileTime::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_mins(1));
-    filetime::set_file_mtime(&old_completed, old).unwrap();
+    std::fs::create_dir(&recent_completed).unwrap();
+    std::fs::write(recent_completed.join("combined.txt"), "recent").unwrap();
 
     let spawner = Arc::new(MockSpawner::new());
     let _guard = install_spawner(spawner.clone());
@@ -169,9 +168,20 @@ fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo new"]));
     let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
 
-    assert!(!old_completed.exists());
+    assert!(!recent_completed.exists());
     let output_path = require_str(&run_resp, "output_path");
     assert!(std::path::Path::new(&output_path).exists());
+    let artifact_count = std::fs::read_dir(temp.path())
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("harn-command-cmd_")
+        })
+        .count();
+    assert_eq!(artifact_count, 1);
 
     let mut read_req = dict();
     read_req.insert(
@@ -180,6 +190,53 @@ fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
     );
     let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "new\n");
+}
+
+#[test]
+fn registered_result_survives_a_foreign_pressure_sweep_until_bounded_eviction() {
+    let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+    let temp = tempdir().unwrap();
+    let _tmpdir_guard = TmpdirEnvGuard(std::env::var_os("TMPDIR"));
+    let _max_dirs_guard = EnvGuard::set("HARN_COMMAND_ARTIFACT_MAX_DIRS", "1");
+    let _retention_guard = EnvGuard::set("HARN_COMMAND_ARTIFACT_RETENTION_SECS", "86400");
+    std::env::set_var("TMPDIR", temp.path());
+
+    let spawner = Arc::new(MockSpawner::new());
+    let _guard = install_spawner(spawner.clone());
+    spawner.enqueue(MockProcessConfig::with_stdout(0, "parent\n"));
+    let mut run_req = dict();
+    run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo parent"]));
+    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+
+    let child_test = "process_artifact_retention::foreign_pressure_sweep_child";
+    let status = process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", child_test, "--nocapture"])
+        .env(FOREIGN_SWEEP_CHILD_ENV, "1")
+        .status()
+        .unwrap();
+    assert!(status.success(), "foreign pressure sweep child failed");
+
+    let mut read_req = dict();
+    read_req.insert(
+        "command_id".into(),
+        vstr(&require_str(&run_resp, "command_id")),
+    );
+    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    assert_eq!(require_str(&read_resp, "content"), "parent\n");
+}
+
+#[test]
+fn foreign_pressure_sweep_child() {
+    if std::env::var_os(FOREIGN_SWEEP_CHILD_ENV).is_none() {
+        return;
+    }
+    let spawner = Arc::new(MockSpawner::new());
+    let _guard = install_spawner(spawner.clone());
+    spawner.enqueue(MockProcessConfig::with_stdout(0, "child\n"));
+    let mut run_req = dict();
+    run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo child"]));
+    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+    assert!(std::path::Path::new(&require_str(&run_resp, "output_path")).exists());
 }
 
 #[test]
