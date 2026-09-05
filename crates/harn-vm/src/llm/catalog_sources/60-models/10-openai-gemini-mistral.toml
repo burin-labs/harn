@@ -1,12 +1,51 @@
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
 # OpenAI section verified 2026-08-22 against the models and pricing docs
-# (platform.openai.com now redirects to developers.openai.com). Current
-# lineup: the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
+# (platform.openai.com now redirects to developers.openai.com), and the GPT-6
+# Astra row verified 2026-09-04 against the live API. Current
+# lineup: gpt-6-astra, the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
 # the gpt-5.4 tier family, and gpt-5.3-codex for agentic coding. The entire
 # GPT-4/o-series legacy exits by 2026-10-23 (announced 2026-04-22), and
 # the gpt-5 dated snapshots plus o3/o3-pro shut down 2026-12-11
 # (announced 2026-06-11).
+
+# GPT-6 Astra — OpenAI's frontier release of 2026-09-03, verified against the
+# live API on 2026-09-04. One id only (`gpt-6-astra`); OpenAI publishes no
+# dated snapshot for it, so there is nothing to pin a `current_snapshot` to.
+#
+# Two constraints make this row differ from the GPT-5.6 family in ways that
+# matter at request time, both probed rather than transcribed:
+#
+#  1. The effort ladder is low/medium/high/xhigh. `none` and `max` are both
+#     rejected, and OpenAI's own model page is wrong about `max`.
+#  2. Function tools are unusable on `/v1/chat/completions` for this model at
+#     ANY effort, including when the caller omits `reasoning_effort` entirely.
+#     The 400 advises falling back to `reasoning_effort: "none"`, which this
+#     model also rejects, so that suggestion is unsatisfiable. Tools must go
+#     through the Responses API. The capability row carries
+#     `reasoning_tools_require_responses` so Harn routes there automatically.
+#
+# Pricing carries the same >272k input band as GPT-5.6 (2x input, 1.5x output
+# applied to the whole request). Flex and Fast serving tiers are both accepted
+# by the live API; only Flex has a published rate (50% of standard), so Fast is
+# deliberately absent here rather than carrying an invented multiplier.
+[models."gpt-6-astra"]
+name = "GPT-6 Astra"
+blurb = "OpenAI's most capable model, for the hardest planning, coding, and review work at the highest cost."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-astra"
+equivalence_group = "gpt-6-astra"
+released = "2026-09-03"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
 
 # GPT-5.6 — current OpenAI family. The bare gpt-5.6 API alias routes to Sol;
 # Harn resolves it through the alias catalog so receipts keep the explicit
