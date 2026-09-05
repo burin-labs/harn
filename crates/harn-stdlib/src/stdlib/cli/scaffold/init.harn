@@ -623,7 +623,7 @@ fn __connector_files(project_name: string, harn_range: string, harn_version: str
     + "}\n"
   const main_harn = "import \"connectors/echo\"\n"
     + "\n"
-    + "pipeline default(harness: Harness, _task: unknown) {\n"
+    + "pipeline default(harness: Harness) {\n"
     + "  harness.stdio.log(provider_id())\n"
     + "}\n"
   const test_harn = "import \"../connectors/echo\"\n"

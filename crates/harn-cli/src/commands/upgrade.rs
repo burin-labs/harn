@@ -181,7 +181,7 @@ fn install_verified_archive(
         &lock,
         &lock_path,
         harn_flock::LockMode::Exclusive,
-        Duration::from_secs(60),
+        Duration::from_mins(1),
     )
     .map_err(|error| error.to_string())?;
     let candidate = staging.path().join(harn_binary_name());
