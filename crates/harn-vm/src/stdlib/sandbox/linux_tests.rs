@@ -139,7 +139,7 @@ fn filesystem_metadata_syscalls_include_fchmodat2() {
     let allowed = allowed_syscalls(&policy);
 
     assert!(
-        allowed.contains(&452),
+        allowed.contains(&SYS_FCHMODAT2),
         "modern tools use fchmodat2 to preserve symlink metadata",
     );
 }
