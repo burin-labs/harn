@@ -178,12 +178,16 @@ pub(super) fn plan(
         )
         .check_with_facts(&program, &source);
         let boundaries = harn_lint::RuntimeBoundaries::collect(&program, module_context);
+        let imported_type_declarations = module_graph
+            .imported_type_declarations_for_file(file)
+            .unwrap_or_default();
         let infos = collect_callable_infos(
             &program,
             &source,
             &exported,
             referenced_by_value,
             manifest_host_entries.names_for(file),
+            &imported_type_declarations,
         );
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {

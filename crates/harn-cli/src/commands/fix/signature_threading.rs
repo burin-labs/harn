@@ -16,7 +16,7 @@ use super::alias_widening::AliasWidening;
 use super::capability_arguments::type_expr_carries_capability;
 use super::capability_migrations::collect_callable_node_calls;
 use super::value_escape::FrozenCause;
-use super::{CallSite, CallableInfo};
+use super::{AmbientCapabilityCall, CallSite, CallableInfo};
 
 /// The attribute that declares an embedding host supplies the arguments.
 /// The type checker owns the vocabulary; `harn-lint` keeps the boundary policy.
@@ -54,11 +54,16 @@ pub(super) fn collect_callable_infos(
     exported_names: &BTreeSet<String>,
     referenced_by_value: &BTreeSet<String>,
     manifest_handlers: &BTreeSet<String>,
+    visible_type_declarations: &[SNode],
 ) -> Vec<CallableInfo> {
     // A value-referenced callable is frozen unless the alias that fixes its
     // arity moves with it (#6153). Deciding that needs the whole file, so it is
     // decided once here rather than per callable.
     let widening = AliasWidening::analyze(program, source, referenced_by_value);
+    let match_patterns = harn_parser::lexical::module_match_pattern_catalog_with_visible(
+        program,
+        visible_type_declarations,
+    );
     let mut infos = Vec::new();
     for node in program {
         let (attributes, inner) = match &node.node {
@@ -97,6 +102,14 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                retain_lexically_resolved_calls(
+                    params,
+                    body,
+                    source,
+                    &match_patterns,
+                    &mut calls,
+                    &mut ambient_capability_calls,
+                );
                 annotate_nested_closure_capability_bindings(inner, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
@@ -142,6 +155,14 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                retain_lexically_resolved_calls(
+                    params,
+                    body,
+                    source,
+                    &match_patterns,
+                    &mut calls,
+                    &mut ambient_capability_calls,
+                );
                 annotate_nested_closure_capability_bindings(inner, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
@@ -185,6 +206,24 @@ pub(super) fn collect_callable_infos(
             .retain(|call| !local_callable_names.contains(&call.name));
     }
     infos
+}
+
+fn retain_lexically_resolved_calls(
+    params: &[TypedParam],
+    body: &[SNode],
+    source: &str,
+    match_patterns: &harn_parser::lexical::MatchPatternCatalog,
+    calls: &mut Vec<CallSite>,
+    ambient_calls: &mut Vec<AmbientCapabilityCall>,
+) {
+    let lexical_references = harn_parser::lexical::lexically_resolved_identifier_spans(
+        params,
+        body,
+        Some(source),
+        match_patterns,
+    );
+    calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));
+    ambient_calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));
 }
 
 fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<String> {

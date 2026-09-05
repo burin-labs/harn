@@ -30,6 +30,40 @@ fn is_explicit_seeded_random_call(name: &str, arg_count: usize) -> bool {
 }
 
 impl Linter<'_> {
+    pub(super) fn push_lexical_call_spans(
+        &mut self,
+        params: &[TypedParam],
+        body: &[SNode],
+    ) -> bool {
+        // The outer callable's analysis already walks nested callables with
+        // their own scopes. Recomputing every nested body would turn deeply
+        // nested source into quadratic lint work.
+        if !self.lexical_call_spans.is_empty() {
+            return false;
+        }
+        let spans = harn_parser::lexical::lexically_resolved_identifier_spans(
+            params,
+            body,
+            self.source,
+            &self.match_patterns,
+        );
+        self.lexical_call_spans.push(spans);
+        true
+    }
+
+    pub(super) fn pop_lexical_call_spans(&mut self, pushed: bool) {
+        if pushed {
+            self.lexical_call_spans.pop();
+        }
+    }
+
+    pub(super) fn call_is_lexically_bound(&self, span: Span) -> bool {
+        self.lexical_call_spans
+            .iter()
+            .rev()
+            .any(|spans| spans.contains(&(span.start, span.end)))
+    }
+
     pub(super) fn check_renamed_stdlib_symbol(&mut self, name: &str, span: Span) {
         if harness_stdio_replacement(name).is_some() {
             return;
@@ -258,6 +292,9 @@ impl Linter<'_> {
         }
 
         for (name, arg_count, span) in calls {
+            if self.call_is_lexically_bound(span) {
+                continue;
+            }
             self.check_ambient_clock_builtin(&name, span);
             self.check_ambient_stdio_builtin(&name, span);
             self.check_ambient_fs_builtin(&name, span);
