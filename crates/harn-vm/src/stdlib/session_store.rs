@@ -12,7 +12,7 @@ use std::sync::Arc;
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
     ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
-    SessionEventKind, SessionImporter, SessionStatus, SessionStore, SessionType,
+    SessionEventKind, SessionImporter, SessionLeaseError, SessionStatus, SessionStore, SessionType,
     SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
@@ -1080,6 +1080,16 @@ fn store_error(error: StoreError) -> VmError {
         StoreError::Contention { .. } => categorized_error(message, ErrorCategory::ResourceBusy),
         StoreError::SchemaIncompatible { .. } => {
             categorized_error(message, ErrorCategory::SchemaIncompatible)
+        }
+        _ => VmError::Runtime(message),
+    }
+}
+
+pub(crate) fn session_lease_error(context: &str, error: SessionLeaseError) -> VmError {
+    let message = format!("{context}: {error}");
+    match error {
+        SessionLeaseError::Contended { .. } => {
+            categorized_error(message, ErrorCategory::ResourceBusy)
         }
         _ => VmError::Runtime(message),
     }

@@ -102,6 +102,18 @@ async fn maintenance_store_owns_mutation_admission_once() {
     let maintenance =
         SqliteSessionStore::open_for_maintenance(&database).expect("maintenance store");
 
+    let competing_maintenance = match SqliteSessionStore::open_for_maintenance(&database) {
+        Ok(_) => panic!("a second maintenance owner must not enter"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        competing_maintenance,
+        StoreError::Contention {
+            kind: StoreContention::ProjectLeaseHeld,
+            ..
+        }
+    ));
+
     let error = ordinary
         .create(CreateSession::default())
         .await

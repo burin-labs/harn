@@ -329,8 +329,10 @@ pub enum StoreContention {
     DatabaseLocked,
     /// Exclusive session-store maintenance currently excludes ordinary writes.
     MaintenanceActive,
-    /// A live session writer prevents exclusive maintenance from starting.
-    ActiveWriter,
+    /// Another project lease prevents exclusive maintenance from starting.
+    /// The operating-system lock does not distinguish a writer from another
+    /// maintenance owner, so callers must not infer the contending process.
+    ProjectLeaseHeld,
 }
 
 impl std::fmt::Display for StoreContention {
@@ -339,7 +341,7 @@ impl std::fmt::Display for StoreContention {
             Self::DatabaseBusy => f.write_str("database_busy"),
             Self::DatabaseLocked => f.write_str("database_locked"),
             Self::MaintenanceActive => f.write_str("maintenance_active"),
-            Self::ActiveWriter => f.write_str("active_writer"),
+            Self::ProjectLeaseHeld => f.write_str("project_lease_held"),
         }
     }
 }

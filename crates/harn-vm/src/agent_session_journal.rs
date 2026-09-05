@@ -186,7 +186,7 @@ pub(crate) async fn prepare(
     // owns the project lease exclusively, so acquiring in this order closes
     // the window where cleanup could delete a session during preparation.
     let writer_lease = SessionWriteLease::try_acquire(state_dir.as_path(), session_id)
-        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
+        .map_err(|error| session_store::session_lease_error("agent transcript journal", error))?;
     let store = session_store::open_canonical_agent_session(
         &state_dir,
         session_id,
@@ -968,7 +968,7 @@ mod tests {
         assert!(matches!(
             error,
             harn_session_store::StoreError::Contention {
-                kind: harn_session_store::StoreContention::ActiveWriter,
+                kind: harn_session_store::StoreContention::ProjectLeaseHeld,
                 ..
             }
         ));
