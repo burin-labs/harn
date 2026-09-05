@@ -1,5 +1,10 @@
 import { read_yaml } from "std/fs"
-import { path_visibility, visibility_failure, zero_scan_failure } from "./path_visibility.harn"
+import {
+  path_visibility,
+  scan_glob,
+  visibility_failure,
+  zero_scan_failure,
+} from "./path_visibility.harn"
 
 const CHECK_NAME = "Scheduled workflow contract"
 
@@ -126,7 +131,7 @@ fn main(harness: Harness) {
   const records = unwrap(parsed)?.workflow ?? []
   let documents: dict = {}
   let scanned = 0
-  for absolute in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+  for absolute in scan_glob(harness.fs, CHECK_NAME, WORKFLOW_GLOB).sorted() {
     const path = repo_relative(absolute)
     const document = read_yaml(harness.fs, absolute, nil)
     if document == nil {

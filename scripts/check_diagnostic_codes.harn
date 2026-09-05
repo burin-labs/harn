@@ -10,6 +10,8 @@
 //
 // Pure logic lives in `pub fn`s that take source text directly so the paired
 // test can drive them with no filesystem. `main` does the globbing/reads.
+import { scan_glob } from "./path_visibility.harn"
+
 const REGISTRY = "crates/harn-parser/src/diagnostic_codes.rs"
 
 // Ordered so `missing` reporting matches Python's `sorted(...)`.
@@ -403,7 +405,7 @@ pipeline main(harness: Harness, task: unknown) {
  */
 fn sorted_rs_files(fs: HarnessFs, root: string) -> list<string> {
   let paths: list<string> = []
-  for path in fs.glob("${root}/**/*.rs") {
+  for path in scan_glob(fs, "check-diagnostic-codes", "${root}/**/*.rs") {
     paths = paths + [path]
   }
   return paths.sorted()

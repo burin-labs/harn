@@ -2,6 +2,8 @@
 // conformance suite exceeds the threshold checked into
 // scripts/xfail_threshold.txt. Catches "fix one, regress one" drift
 // without forcing a clean-up sprint every time a flake is muted.
+import { require_scanned } from "./path_visibility.harn"
+
 /** Count occurrences of `needle` in `haystack`. */
 pub fn count_substring(haystack: string, needle: string) -> int {
   if needle == "" {
@@ -17,7 +19,11 @@ pub fn count_substring(haystack: string, needle: string) -> int {
  * the literal `@xfail:` string when describing the convention.
  */
 pub fn count_xfail_markers(fs: HarnessFs, root: string) -> int {
+  // scan-refused: require_scanned on the entry count below.
   const entries = fs.walk(root)
+  // A denied or mis-rooted walk returns an empty list, which would report a
+  // marker count of zero exactly like a clean tree.
+  require_scanned("check-xfail-count", "path(s) under `" + root + "`", len(entries))
   let total = 0
   for entry in entries {
     if entry.is_file && entry.path.ends_with(".harn") {

@@ -18,16 +18,14 @@
 // allowlist below with a brief comment explaining why. All suppressions are
 // pre-existing technical debt tracked under the deflake epic; new entries
 // require explicit reviewer justification.
-
 // -------------------------------------------------------------------------------------------------
-
 // Per-pattern allowlists — pre-existing violations from before the deflake
 // epic. Remove entries as each tier of #1057 completes.
-
 // -------------------------------------------------------------------------------------------------
-
 // std::thread::sleep in test files
 // Legitimate uses: waiting on real subprocess I/O that cannot be time-paused.
+import { scan_glob } from "./path_visibility.harn"
+
 const THREAD_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
   // Real subprocess lifecycle e2e: probes OS process-group death and
@@ -901,7 +899,7 @@ fn load_files(fs: HarnessFs, rels: list<string>) -> list {
 pipeline main(harness: Harness, task: unknown) {
   let test_rels: list<string> = []
   let runtime_rels: list<string> = []
-  for g in harness.fs.glob("crates/**/*.rs") {
+  for g in scan_glob(harness.fs, "lint-test-patterns", "crates/**/*.rs") {
     const rel = rel_path(g)
     if !harness.fs.stat(rel).is_file {
       // Mirror `find -type f`: a directory can match the glob (e.g. a
@@ -916,7 +914,7 @@ pipeline main(harness: Harness, task: unknown) {
     }
   }
   let harn_rels: list<string> = []
-  for g in harness.fs.glob("conformance/tests/**/*.harn") {
+  for g in scan_glob(harness.fs, "lint-test-patterns", "conformance/tests/**/*.harn") {
     const rel = rel_path(g)
     if harness.fs.stat(rel).is_file {
       harn_rels = harn_rels + [rel]

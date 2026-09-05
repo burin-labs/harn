@@ -156,6 +156,7 @@ fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) 
     return []
   }
   let paths: list<string> = []
+  // scan-refused: zero_scan_failure on source_count in main.
   const entries = harness.fs.walk(dir, {max_depth: 1, follow_symlinks: false}).filter(
     { entry -> entry.depth == 1 },
   )
