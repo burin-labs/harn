@@ -91,22 +91,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           CHECK_OUTCOME: ${{ steps.cutover.outcome }}
+          MEASURED_STATE: ${{ steps.cutover.outputs.state }}
           DESCRIPTION: ${{ steps.cutover.outputs.description }}
           TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          sha="$(git rev-parse origin/main)"
-          state=success
-          if [[ "$CHECK_OUTCOME" != success ]]; then
-            state=failure
-          fi
-          description="${DESCRIPTION:-development cutover measurement failed}"
-          gh api "repos/$GH_REPO/statuses/$sha" -X POST \
-            -f state="$state" \
-            -f context="development cutover" \
-            -f description="${description:0:139}" \
-            -f target_url="$TARGET_URL" >/dev/null
-          if [[ "$state" == failure ]]; then
-            echo "::error::$description"
-            exit 1
-          fi
+        run: ./scripts/publish_development_cutover_status.sh
