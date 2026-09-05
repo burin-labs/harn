@@ -57,10 +57,7 @@ fn __enqueue_mock_cell(llm: HarnessLlm, arm: string, evidence: string) {
   llm.mock_enqueue(
     {
       text: json_stringify(
-        {
-          verdict: "done",
-          detail: "The inspected evidence supports the report.",
-        },
+        {verdict: "done", detail: "The inspected evidence supports the report."},
       ),
     },
   )
@@ -144,11 +141,7 @@ fn main(harness: Harness) -> int {
         max_iterations: 6,
         max_tokens: max_tokens,
         final_wrapup: false,
-          verify_completion_judge: {
-            provider: provider,
-            model: model,
-            max_invocations: 2,
-          },
+        verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
       },
     ) },
   )
