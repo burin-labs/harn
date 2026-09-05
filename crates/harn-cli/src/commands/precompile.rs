@@ -18,22 +18,31 @@
 //! preconditions for porting each are filed as #2348 (`harn bench` →
 //! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
 use harn_vm::bytecode_cache::{CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use harn_parser::DiagnosticSeverity;
-use harn_vm::module_artifact::ModuleArtifact;
+use harn_vm::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 
 use crate::cli::PrecompileArgs;
 use crate::command_error;
 use crate::commands::collect_harn_files;
-use crate::compiler_context::{imported_symbols_for_source, SourceCompilerAuthority};
+use crate::compiler_context::{ensure_builtin_signatures_installed, SourceCompilerAuthority};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
 use crate::typecheck_imports::checker_with_resolved_imports;
 
 mod artifact_path;
+mod reuse;
 use artifact_path::output_path;
+use reuse::{artifact_keys, Outcome};
+
+/// Machine-readable per-source result the inner compiler writes to stdout for
+/// the `.harn` driver that spawned it. The driver's only other channel is the
+/// child's exit status, which already means succeeded-or-failed and cannot
+/// carry a third state without redefining a nonzero exit. A line on a stream
+/// the driver captures and never forwards adds it without a flag.
+pub const PRECOMPILE_OUTCOME_PREFIX: &str = "precompile-outcome:";
 
 /// Env var the embedded `cli/precompile` script reads to find the
 /// running `harn` binary path. Set from `std::env::current_exe()` so
@@ -104,6 +113,7 @@ pub async fn run(args: PrecompileArgs) {
 #[derive(Default)]
 struct Stats {
     compiled: usize,
+    reused: usize,
     failed: usize,
 }
 
@@ -113,7 +123,6 @@ struct Stats {
 struct PrecompileArtifacts {
     entry_chunk: harn_vm::Chunk,
     module_artifact: Option<ModuleArtifact>,
-    module_compilation_context: harn_vm::module_artifact::ModuleCompilationContext,
 }
 
 /// Rust compiler entrypoint used by the `.harn` directory-walk driver for
@@ -149,10 +158,24 @@ pub fn run_inner_compile(args: PrecompileArgs) {
     for source in &sources {
         let result = precompile_one(source, source_root.as_deref(), args.out.as_deref());
         match result {
-            Ok(out_path) => {
-                stats.compiled += 1;
+            Ok(outcome) => {
+                let label = match outcome {
+                    Outcome::Compiled(_) => {
+                        stats.compiled += 1;
+                        "compiled"
+                    }
+                    Outcome::Reused(_) => {
+                        stats.reused += 1;
+                        "reused"
+                    }
+                };
+                println!("{PRECOMPILE_OUTCOME_PREFIX} {label}");
                 if !args.quiet {
-                    println!("{} -> {}", source.display(), out_path.display());
+                    println!(
+                        "{} -> {}",
+                        source.display(),
+                        outcome.destination().display()
+                    );
                 }
             }
             Err(err) => {
@@ -167,8 +190,8 @@ pub fn run_inner_compile(args: PrecompileArgs) {
 
     if !args.quiet {
         eprintln!(
-            "precompile: {} succeeded, {} failed",
-            stats.compiled, stats.failed
+            "precompile: {} compiled, {} reused, {} failed",
+            stats.compiled, stats.reused, stats.failed
         );
     }
     if stats.failed > 0 {
@@ -180,16 +203,32 @@ fn precompile_one(
     source_path: &Path,
     source_root: Option<&Path>,
     out_root: Option<&Path>,
-) -> Result<PathBuf, String> {
+) -> Result<Outcome, String> {
     let source = std::fs::read_to_string(source_path).map_err(|e| format!("read: {e}"))?;
     let path_str = source_path.to_string_lossy();
 
+    // Installed here rather than as a side effect of parsing, because both the
+    // parse below and the import resolution the keys come from need it.
+    ensure_builtin_signatures_installed();
+    let authority = SourceCompilerAuthority::for_source(source_path);
+
+    // Recompiling a source whose artifacts already carry its keys reproduces
+    // them byte for byte, so everything below this point would be dead work.
+    let (keys, compilation_context) = artifact_keys(source_path, &source, source_root, &authority);
+    let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
+    let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
+    if keys.match_artifacts_at(&entry_dest, &module_dest) {
+        return Ok(Outcome::Reused(entry_dest));
+    }
+
+    // Parsed only once reuse has been ruled out. A source whose stored
+    // artifacts carry its own hash parsed cleanly when they were written, so on
+    // the hit path this is the largest cost there was left to skip.
     let (parsed_source, program) = parse_source_file(&path_str);
     debug_assert_eq!(parsed_source, source);
 
     // Resolve imports like `execute`/`harn check` so a call to an imported
     // symbol that shadows a builtin is checked against the right signature.
-    let authority = SourceCompilerAuthority::for_source(source_path);
     let checker = checker_with_resolved_imports(authority.typechecker(), source_path);
 
     let mut had_type_error = false;
@@ -208,46 +247,37 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
-    let module_provenance = authority.module_provenance();
-    let artifacts = compile_artifacts(source_path, &source, &program, authority)?;
-    let entry_key = if source_root.is_some() {
-        harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, &source)
-    } else {
-        harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source)
-    };
+    let artifacts = compile_artifacts(
+        source_path,
+        &source,
+        &program,
+        authority,
+        compilation_context,
+    )?;
 
-    let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
-    harn_vm::bytecode_cache::store_at(&entry_dest, &entry_key, &artifacts.entry_chunk)
+    harn_vm::bytecode_cache::store_at(&entry_dest, &keys.entry, &artifacts.entry_chunk)
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
 
     if let Some(module_artifact) = &artifacts.module_artifact {
-        let module_source = harn_vm::module_source::ModuleSource::from_text(source.as_str());
-        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(
-            &module_source,
-            &artifacts.module_compilation_context,
-            module_provenance,
-        );
-        let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
-        harn_vm::bytecode_cache::store_module_at(&module_dest, &module_key, module_artifact)
+        harn_vm::bytecode_cache::store_module_at(&module_dest, &keys.module, module_artifact)
             .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
     }
 
-    Ok(entry_dest)
+    Ok(Outcome::Compiled(entry_dest))
 }
 
-/// Compile both the entry-chunk view and the module-artifact view of the
-/// same source. A `.harn` file with a `pipeline default { ... }` block is
-/// callable as both an entry and an importable module; one without is
-/// importable but produces an entry chunk that just returns `nil`. We
-/// emit both artifacts unconditionally so the runtime loader hits the
-/// cache regardless of how the user invokes the file.
+/// Compile both the entry-chunk view and the module-artifact view of the same
+/// source. A `.harn` file with a `pipeline default { ... }` block is callable
+/// as both an entry and an importable module; one without is importable but
+/// produces an entry chunk that returns `nil`. Both are emitted so the runtime
+/// loader hits the cache however the user invokes the file.
 fn compile_artifacts(
     source_path: &Path,
     source: &str,
     program: &[harn_parser::SNode],
     authority: SourceCompilerAuthority,
+    imported: ModuleCompilationContext,
 ) -> Result<PrecompileArtifacts, String> {
-    let imported = imported_symbols_for_source(source_path, source);
     let entry_chunk = authority
         .compiler_with_imported_symbols(
             imported.enum_candidates().iter().cloned(),
@@ -262,6 +292,5 @@ fn compile_artifacts(
     Ok(PrecompileArtifacts {
         entry_chunk,
         module_artifact,
-        module_compilation_context: imported,
     })
 }
