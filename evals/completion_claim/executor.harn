@@ -37,10 +37,7 @@ fn __checkpoint_events(events: list, schema: string) -> list {
 fn __enqueue_mock_cell(llm: HarnessLlm, arm: string, evidence: string) {
   llm.mock_clear()
   llm.mock_enqueue(
-    {
-      text: "",
-      tool_calls: [{id: "inspect-1", name: "inspect_status", arguments: {}}],
-    },
+    {text: "", tool_calls: [{id: "inspect-1", name: "inspect_status", arguments: {}}]},
   )
   if arm == "treatment" {
     llm.mock_enqueue(
