@@ -187,10 +187,33 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
     }
     messages = kept
   }
-  let next_history = history
+  // How many times running the same demand has been re-issued while the actor's
+  // knowledge state did not move. One repeat is ordinary: the actor may not have
+  // acted yet. A second means the demand and the answer have both stopped
+  // changing, so further rounds cannot produce a different outcome and the run
+  // is spending its remaining budget to arrive at the cap (#8058 item 1).
+  //
+  // Counted here because this is where "the demand is unchanged" is already
+  // decided; a second reader of the same condition is how the two would drift.
+  let unchanged_repeats = 0
+  for entry in suppressed {
+    if entry.suppression_reason == "unchanged_next_step" {
+      unchanged_repeats = to_int(history?.unchanged_repeats ?? 0) + 1
+    }
+  }
+  let next_history = if unchanged_repeats > 0 {
+    history + {unchanged_repeats: unchanged_repeats}
+  } else {
+    history
+  }
   for message in messages {
     if message.next_step != "" {
-      next_history = {next_step: message.next_step, knowledge_state: knowledge_state}
+      // A demand that got through is a fresh one, so the streak restarts.
+      next_history = {
+        knowledge_state: knowledge_state,
+        next_step: message.next_step,
+        unchanged_repeats: 0,
+      }
     }
   }
   return {messages: messages, suppressed: suppressed, history: next_history}

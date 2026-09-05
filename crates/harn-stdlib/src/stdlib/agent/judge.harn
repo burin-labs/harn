@@ -1135,7 +1135,24 @@ fn __judge_directive(
   const verified_at_cap = cap_reached
     && terminal_reason == ""
     && to_string(payload?.verification?.observed ?? "") == "passed"
-  const action = if verified_at_cap {
+  // Item 1 of the same issue: do not walk to the cap to learn what is already
+  // decided. When the same demand has been re-issued twice while the actor's
+  // knowledge state did not move, the exchange has converged on disagreement —
+  // the actor has answered and the judge has not accepted, and neither side is
+  // producing new information. Every remaining round is spend, and the run ends
+  // at the cap anyway.
+  //
+  // Guarded by the SAME positive reading as the cap case, and for the same
+  // reason: `passed` only. A repeated demand over a verifier that failed or was
+  // never run is a run that has not converged, and stopping it as verified
+  // would launder exactly the case the cap exists to catch. Unguarded, this
+  // would be the more dangerous of the two, because it fires earlier.
+  const demand_exhausted = terminal_reason == ""
+    && !cap_reached
+    && verdict.vetoed
+    && to_int(feedback_history?.unchanged_repeats ?? 0) >= 2
+    && to_string(payload?.verification?.observed ?? "") == "passed"
+  const action = if verified_at_cap || demand_exhausted {
     "stop_verified"
   } else if terminal_reason != "" || cap_reached {
     "stop_unverified"
@@ -1148,7 +1165,13 @@ fn __judge_directive(
   // would leave a run that finished and one that never converged sharing a
   // single value, which is what #8058 is about. Which cap it was is not lost:
   // `invoked` on the same receipt names the judge that ran.
-  const reason = if verified_at_cap {
+  // Its own wire reason, kept distinct from the cap's. Both stop verified with
+  // the judge dissenting, but a reader grading these later needs to tell "the
+  // judge ran out of turns" from "the exchange stopped moving and we cut it
+  // short", because only the second says rounds were saved.
+  const reason = if demand_exhausted && !verified_at_cap {
+    "judge_demand_unanswered_over_verified_pass"
+  } else if verified_at_cap {
     "judge_cap_reached_over_verified_pass"
   } else if terminal_reason != "" {
     terminal_reason
