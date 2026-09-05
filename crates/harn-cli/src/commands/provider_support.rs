@@ -201,6 +201,15 @@ struct EmpiricalIndex {
     by_model: BTreeMap<(String, String), EmpiricalBucket>,
 }
 
+struct ProviderSupportBuildContext<'a> {
+    providers_by_id: &'a BTreeMap<String, &'a CatalogProvider>,
+    models_by_provider: &'a BTreeMap<String, Vec<&'a CatalogModel>>,
+    models_by_key: &'a BTreeMap<(String, String), &'a CatalogModel>,
+    capability_rows_by_provider: &'a BTreeMap<String, Vec<ProviderCapabilityMatrixRow>>,
+    empirical: &'a EmpiricalIndex,
+    snapshot: &'a ProviderSourceSnapshot,
+}
+
 #[derive(Debug, Default, Clone)]
 struct EmpiricalBucket {
     sources: BTreeSet<String>,
@@ -283,21 +292,20 @@ fn build_report_from_parts(
     ids.sort();
     ids.dedup();
 
+    let context = ProviderSupportBuildContext {
+        providers_by_id: &providers_by_id,
+        models_by_provider: &models_by_provider,
+        models_by_key: &models_by_key,
+        capability_rows_by_provider: &capability_rows_by_provider,
+        empirical: &empirical,
+        snapshot: &snapshot,
+    };
+
     let providers = ids
         .into_iter()
         .map(|id| {
             let note = note_by_id.get(&id).copied();
-            build_entry(
-                &id,
-                note,
-                &providers_by_id,
-                &models_by_provider,
-                &models_by_key,
-                &capability_rows_by_provider,
-                &catalog.qc_defaults,
-                &empirical,
-                &snapshot,
-            )
+            build_entry(&id, note, &context)
         })
         .collect();
 
@@ -357,30 +365,26 @@ fn build_credentials(
 fn build_entry(
     id: &str,
     note: Option<&SupportNoteEntry>,
-    providers_by_id: &BTreeMap<String, &CatalogProvider>,
-    models_by_provider: &BTreeMap<String, Vec<&CatalogModel>>,
-    models_by_key: &BTreeMap<(String, String), &CatalogModel>,
-    capability_rows_by_provider: &BTreeMap<String, Vec<ProviderCapabilityMatrixRow>>,
-    qc_defaults: &BTreeMap<String, String>,
-    empirical: &EmpiricalIndex,
-    snapshot: &ProviderSourceSnapshot,
+    context: &ProviderSupportBuildContext<'_>,
 ) -> ProviderSupportEntry {
     let catalog_provider = note
         .and_then(|entry| entry.catalog_provider.as_deref())
         .unwrap_or(id);
-    let provider = providers_by_id.get(catalog_provider).copied();
+    let provider = context.providers_by_id.get(catalog_provider).copied();
     let model_id = recommended_model_id(
         note,
         catalog_provider,
-        models_by_provider,
-        capability_rows_by_provider,
-        qc_defaults,
+        context.models_by_provider,
+        context.capability_rows_by_provider,
+        &context.snapshot.catalog.qc_defaults,
     )
     .unwrap_or_else(|| "*".to_string());
-    let model = models_by_key
+    let model = context
+        .models_by_key
         .get(&(catalog_provider.to_string(), model_id.clone()))
         .copied();
-    let provider_models = models_by_provider
+    let provider_models = context
+        .models_by_provider
         .get(catalog_provider)
         .map(Vec::as_slice)
         .unwrap_or_default();
@@ -390,8 +394,8 @@ fn build_entry(
         capabilities::lookup_with_source_config(
             catalog_provider,
             &model_id,
-            &snapshot.capabilities,
-            &snapshot.config,
+            &context.snapshot.capabilities,
+            &context.snapshot.config,
         )
     };
     let recommended_tool_format = note
@@ -409,7 +413,7 @@ fn build_entry(
     let selector = note
         .and_then(|entry| entry.recommended_selector.clone())
         .unwrap_or_else(|| selector_for(catalog_provider, &model_id));
-    let empirical_summary = empirical_summary_for(empirical, catalog_provider, &model_id);
+    let empirical_summary = empirical_summary_for(context.empirical, catalog_provider, &model_id);
     let display_name = note
         .and_then(|entry| entry.display_name.clone())
         .or_else(|| provider.map(|provider| provider.display_name.clone()))
