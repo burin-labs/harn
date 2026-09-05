@@ -1,8 +1,10 @@
 import {
   approval_allow_all_reviewer,
   approval_review_system_prompt,
+  approval_reviewer_for,
 } from "std/agent/approval_review"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { llm_text, with_llm_script } from "std/testing"
 
 // The `AutoReview` seam: an approval nobody is present to give.
 //
@@ -55,6 +57,44 @@ fn raising_reviewer() {
 }
 
 pipeline default(harness: Harness) {
+  // The caller supplies only a host overlay. Harn must project its bundled
+  // policy before the first decision so an omitted floor cannot read as an
+  // empty floor and an omitted threshold table cannot deny every valid review.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
+    ],
+    { _ ->
+      const reviewer = approval_reviewer_for(
+        harness,
+        {host_guidance: "Use the stated goal as the authorization boundary."},
+        "Read the requested source file.",
+      )
+      const floor = reviewer({tool: "run", category: "credential_exfiltration"})
+      assert(floor.approved == false, "the projected bundled floor must refuse before review")
+      assert(
+        floor.unavailable_reason == "floor",
+        "the refusal must be made by the floor rather than an unavailable model",
+      )
+      const permitted = reviewer({tool: "read_file", category: "read_a_source_file"})
+      assert(
+        permitted.approved == true,
+        "the projected verdict thresholds must approve low risk with high authorization",
+      )
+      const calls = harness.llm.mock_calls()
+      assert(
+        len(calls) == 1,
+        "the floor case must not call the model; the ordinary case must call it exactly once",
+      )
+      assert(
+        contains(calls[0].system, "Use the stated goal as the authorization boundary."),
+        "host guidance must survive resolution against the bundled policy",
+      )
+    },
+  )
   const tools = run_tools()
   // Asks for `run`. With no host bridge in this context, an ask that reaches
   // the prompt comes back `approval_unavailable`.
