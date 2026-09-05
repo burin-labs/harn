@@ -21,12 +21,14 @@ use harn_vm::bytecode_cache::{CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
 use std::path::{Path, PathBuf};
 
 use harn_parser::DiagnosticSeverity;
-use harn_vm::module_artifact::ModuleArtifact;
+use harn_vm::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 
 use crate::cli::PrecompileArgs;
 use crate::command_error;
 use crate::commands::collect_harn_files;
-use crate::compiler_context::{imported_symbols_for_source, SourceCompilerAuthority};
+use crate::compiler_context::{
+    ensure_builtin_signatures_installed, imported_symbols_for_source, SourceCompilerAuthority,
+};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
@@ -34,6 +36,17 @@ use crate::typecheck_imports::checker_with_resolved_imports;
 
 mod artifact_path;
 use artifact_path::output_path;
+
+/// Machine-readable per-source result the inner compiler writes to stdout for
+/// the `.harn` driver that spawned it.
+///
+/// The driver's only other channel is the child's exit status, which already
+/// means succeeded-or-failed and cannot carry a third state without redefining
+/// what a nonzero exit from this command means. A line on a stream the driver
+/// captures and never forwards adds the state without touching that contract,
+/// and without a flag: the driver reads it unconditionally because there is no
+/// configuration under which it would not want to know.
+pub const PRECOMPILE_OUTCOME_PREFIX: &str = "precompile-outcome:";
 
 /// Env var the embedded `cli/precompile` script reads to find the
 /// running `harn` binary path. Set from `std::env::current_exe()` so
@@ -104,6 +117,7 @@ pub async fn run(args: PrecompileArgs) {
 #[derive(Default)]
 struct Stats {
     compiled: usize,
+    reused: usize,
     failed: usize,
 }
 
@@ -113,7 +127,6 @@ struct Stats {
 struct PrecompileArtifacts {
     entry_chunk: harn_vm::Chunk,
     module_artifact: Option<ModuleArtifact>,
-    module_compilation_context: harn_vm::module_artifact::ModuleCompilationContext,
 }
 
 /// Rust compiler entrypoint used by the `.harn` directory-walk driver for
@@ -149,8 +162,18 @@ pub fn run_inner_compile(args: PrecompileArgs) {
     for source in &sources {
         let result = precompile_one(source, source_root.as_deref(), args.out.as_deref());
         match result {
-            Ok(out_path) => {
-                stats.compiled += 1;
+            Ok(outcome) => {
+                let (label, out_path) = match &outcome {
+                    Outcome::Compiled(path) => {
+                        stats.compiled += 1;
+                        ("compiled", path)
+                    }
+                    Outcome::Reused(path) => {
+                        stats.reused += 1;
+                        ("reused", path)
+                    }
+                };
+                println!("{PRECOMPILE_OUTCOME_PREFIX} {label}");
                 if !args.quiet {
                     println!("{} -> {}", source.display(), out_path.display());
                 }
@@ -167,8 +190,8 @@ pub fn run_inner_compile(args: PrecompileArgs) {
 
     if !args.quiet {
         eprintln!(
-            "precompile: {} succeeded, {} failed",
-            stats.compiled, stats.failed
+            "precompile: {} compiled, {} reused, {} failed",
+            stats.compiled, stats.reused, stats.failed
         );
     }
     if stats.failed > 0 {
@@ -180,16 +203,46 @@ fn precompile_one(
     source_path: &Path,
     source_root: Option<&Path>,
     out_root: Option<&Path>,
-) -> Result<PathBuf, String> {
+) -> Result<Outcome, String> {
     let source = std::fs::read_to_string(source_path).map_err(|e| format!("read: {e}"))?;
     let path_str = source_path.to_string_lossy();
 
+    // The parse below needs the builtin signature table, and so does the import
+    // resolution the keys are derived from, so it is installed before the reuse
+    // check rather than as a side effect of parsing.
+    ensure_builtin_signatures_installed();
+    let authority = SourceCompilerAuthority::for_source(source_path);
+
+    // Both destination artifacts, and both keys that describe them, are known
+    // before any compile work happens: the entry key from this file's source
+    // and its transitive import hashes, the module key from the same import
+    // graph this file's compilation would be given. If artifacts carrying
+    // exactly those keys are already on disk, recompiling reproduces them byte
+    // for byte, so the whole typecheck-and-compile pass is dead work.
+    //
+    // This is the property the tree-level stamp could not express. A stamp over
+    // every source in a tree makes one edited file invalidate every artifact in
+    // it; a per-file key makes an edited file invalidate itself and its
+    // dependents, because a dependency's hash is folded into every dependent's
+    // context hash.
+    let (keys, compilation_context) = artifact_keys(source_path, &source, source_root, &authority);
+    let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
+    let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
+    if harn_vm::bytecode_cache::entry_artifact_at_matches(&entry_dest, &keys.entry)
+        && harn_vm::bytecode_cache::module_artifact_at_matches(&module_dest, &keys.module)
+    {
+        return Ok(Outcome::Reused(entry_dest));
+    }
+
+    // Parsed only once the reuse check has failed. A source whose stored
+    // artifacts carry its own hash parsed cleanly when they were written, so
+    // parsing it again to reach a decision already made would be the largest
+    // remaining cost on a path whose entire purpose is to do no work.
     let (parsed_source, program) = parse_source_file(&path_str);
     debug_assert_eq!(parsed_source, source);
 
     // Resolve imports like `execute`/`harn check` so a call to an imported
     // symbol that shadows a builtin is checked against the right signature.
-    let authority = SourceCompilerAuthority::for_source(source_path);
     let checker = checker_with_resolved_imports(authority.typechecker(), source_path);
 
     let mut had_type_error = false;
@@ -208,31 +261,72 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
-    let module_provenance = authority.module_provenance();
-    let artifacts = compile_artifacts(source_path, &source, &program, authority)?;
-    let entry_key = if source_root.is_some() {
-        harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, &source)
-    } else {
-        harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source)
-    };
+    let artifacts = compile_artifacts(
+        source_path,
+        &source,
+        &program,
+        authority,
+        compilation_context,
+    )?;
 
-    let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
-    harn_vm::bytecode_cache::store_at(&entry_dest, &entry_key, &artifacts.entry_chunk)
+    harn_vm::bytecode_cache::store_at(&entry_dest, &keys.entry, &artifacts.entry_chunk)
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
 
     if let Some(module_artifact) = &artifacts.module_artifact {
-        let module_source = harn_vm::module_source::ModuleSource::from_text(source.as_str());
-        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(
-            &module_source,
-            &artifacts.module_compilation_context,
-            module_provenance,
-        );
-        let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
-        harn_vm::bytecode_cache::store_module_at(&module_dest, &module_key, module_artifact)
+        harn_vm::bytecode_cache::store_module_at(&module_dest, &keys.module, module_artifact)
             .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
     }
 
-    Ok(entry_dest)
+    Ok(Outcome::Compiled(entry_dest))
+}
+
+/// The keys the two artifacts for `source_path` will be stored under.
+///
+/// Derived exactly as the writers below derive them, from one call site, so a
+/// reuse decision and the write it skips cannot disagree about what identifies
+/// an artifact. The module compilation context is the import graph projection
+/// the module compiler is handed, so computing it here costs the graph walk the
+/// compile would have paid anyway rather than adding one.
+fn artifact_keys(
+    source_path: &Path,
+    source: &str,
+    source_root: Option<&Path>,
+    authority: &SourceCompilerAuthority,
+) -> (ArtifactKeys, ModuleCompilationContext) {
+    let entry = if source_root.is_some() {
+        harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, source)
+    } else {
+        harn_vm::bytecode_cache::CacheKey::from_source(source_path, source)
+    };
+    // Returned rather than recomputed inside the compile below. It is the one
+    // expensive input the reuse check and the compile share, and walking the
+    // import graph twice for the same file would hand back on the miss path
+    // some of what the hit path saves.
+    let compilation_context = imported_symbols_for_source(source_path, source);
+    let module_source = harn_vm::module_source::ModuleSource::from_text(source);
+    let module = harn_vm::bytecode_cache::CacheKey::from_module_source(
+        &module_source,
+        &compilation_context,
+        authority.module_provenance(),
+    );
+    (ArtifactKeys { entry, module }, compilation_context)
+}
+
+struct ArtifactKeys {
+    entry: harn_vm::bytecode_cache::CacheKey,
+    module: harn_vm::bytecode_cache::CacheKey,
+}
+
+/// What one source cost this invocation.
+///
+/// `Reused` is a success that did no compile work. It is distinct from
+/// `Compiled` rather than folded into it because "the tree is up to date" and
+/// "the tree was rebuilt" are the two states a caller of an incremental
+/// compiler needs told apart, and because a reuse count is the only direct
+/// evidence that the reuse path was reached at all.
+enum Outcome {
+    Compiled(PathBuf),
+    Reused(PathBuf),
 }
 
 /// Compile both the entry-chunk view and the module-artifact view of the
@@ -246,8 +340,8 @@ fn compile_artifacts(
     source: &str,
     program: &[harn_parser::SNode],
     authority: SourceCompilerAuthority,
+    imported: ModuleCompilationContext,
 ) -> Result<PrecompileArtifacts, String> {
-    let imported = imported_symbols_for_source(source_path, source);
     let entry_chunk = authority
         .compiler_with_imported_symbols(
             imported.enum_candidates().iter().cloned(),
@@ -262,6 +356,5 @@ fn compile_artifacts(
     Ok(PrecompileArtifacts {
         entry_chunk,
         module_artifact,
-        module_compilation_context: imported,
     })
 }

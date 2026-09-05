@@ -49,7 +49,7 @@ fn single_file_dispatch_matches_inner_compile() {
         harn.stdout,
     );
     assert!(
-        harn.stderr.contains("1 succeeded, 0 failed"),
+        harn.stderr.contains("1 compiled, 0 reused, 0 failed"),
         "stderr should report 1/0; got: {}",
         harn.stderr
     );
@@ -79,7 +79,7 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
         "current path and inner compiler produced different artifact sets"
     );
     assert!(
-        harn.stderr.contains("2 succeeded, 0 failed"),
+        harn.stderr.contains("2 compiled, 0 reused, 0 failed"),
         "stderr should report 2/0; got: {}",
         harn.stderr
     );
@@ -197,7 +197,7 @@ pipeline default(harness: Harness, task: unknown) {
         outcome.stderr
     );
     assert!(
-        outcome.stderr.contains("1 succeeded, 0 failed"),
+        outcome.stderr.contains("1 compiled, 0 reused, 0 failed"),
         "stderr should report 1/0; got:\n{}",
         outcome.stderr
     );
@@ -323,8 +323,8 @@ fn keep_going_continues_past_failed_source() {
         "should exit nonzero when any source fails"
     );
     assert!(
-        harn.stderr.contains("1 succeeded, 1 failed")
-            || harn.stderr.contains("1 succeeded, 0 failed"),
+        harn.stderr.contains("1 compiled, 0 reused, 1 failed")
+            || harn.stderr.contains("1 compiled, 0 reused, 0 failed"),
         "stderr should report mixed result; got: {}",
         harn.stderr
     );
@@ -343,10 +343,116 @@ fn quiet_suppresses_per_file_output_but_not_failures() {
         harn.stdout
     );
     assert!(
-        !harn.stderr.contains("succeeded"),
+        !harn.stderr.contains("reused"),
         "--quiet should suppress the summary line too; got: {:?}",
         harn.stderr
     );
+}
+
+/// Precompiling a tree twice must do the work once.
+///
+/// The tree-level stamp this replaces could only answer "did anything change",
+/// so one edited file rebuilt every artifact beside it. These assertions are on
+/// counts rather than on wall time because a reuse that is merely fast and a
+/// reuse that happened are different claims, and only the second one is what
+/// makes an edited file cost one compile instead of N.
+#[test]
+fn unchanged_tree_reuses_every_artifact() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    write_graph(workdir.path());
+
+    let first = run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+    assert_eq!(first.exit_code, 0, "stderr={}", first.stderr);
+    assert!(
+        first.stderr.contains("5 compiled, 0 reused, 0 failed"),
+        "a cold tree must compile every source; got: {}",
+        first.stderr
+    );
+
+    let second = run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+    assert_eq!(second.exit_code, 0, "stderr={}", second.stderr);
+    assert!(
+        second.stderr.contains("0 compiled, 5 reused, 0 failed"),
+        "an unchanged tree must compile nothing; got: {}",
+        second.stderr
+    );
+}
+
+/// Editing a module nothing imports must invalidate exactly that module.
+///
+/// This is the claim the whole change exists to make true, and the one the
+/// stamp got wrong: `leaf` has no dependents, so the other four artifacts are
+/// still exactly what recompiling them would produce.
+#[test]
+fn editing_a_leaf_recompiles_only_that_leaf() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    write_graph(workdir.path());
+    run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+
+    std::fs::write(
+        workdir.path().join("leaf.harn"),
+        "pub fn leaf_value() -> int { return 8 }\n",
+    )
+    .expect("edit leaf");
+
+    let after = run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+    assert_eq!(after.exit_code, 0, "stderr={}", after.stderr);
+    assert!(
+        after.stderr.contains("1 compiled, 4 reused, 0 failed"),
+        "an edited leaf must recompile only itself; got: {}",
+        after.stderr
+    );
+}
+
+/// Editing a shared dependency must invalidate it and every dependent.
+///
+/// The negative control for the test above. Reuse is sound only because a
+/// dependency's hash is folded into each dependent's context hash, and the way
+/// this change could be wrong is by reusing a dependent whose dependency moved.
+/// A run that reported 1 compiled here would be serving stale bytecode, which
+/// is worse than the recompilation it saved.
+#[test]
+fn editing_a_shared_dependency_recompiles_every_dependent() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    write_graph(workdir.path());
+    run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+
+    std::fs::write(
+        workdir.path().join("dep.harn"),
+        "pub fn dep_value() -> int { return 99 }\n",
+    )
+    .expect("edit shared dependency");
+
+    let after = run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+    assert_eq!(after.exit_code, 0, "stderr={}", after.stderr);
+    assert!(
+        after.stderr.contains("4 compiled, 1 reused, 0 failed"),
+        "dep and its three importers must recompile, leaf must not; got: {}",
+        after.stderr
+    );
+}
+
+/// Five sources: `dep` imported by `a`, `b` and `c`, and `leaf` imported by
+/// nobody. Two disjoint invalidation sets, so a fix that recompiles everything
+/// and a fix that recompiles nothing both fail one of the tests above.
+fn write_graph(root: &Path) {
+    std::fs::write(
+        root.join("dep.harn"),
+        "pub fn dep_value() -> int { return 1 }\n",
+    )
+    .expect("write dep");
+    std::fs::write(
+        root.join("leaf.harn"),
+        "pub fn leaf_value() -> int { return 2 }\n",
+    )
+    .expect("write leaf");
+    for name in ["a", "b", "c"] {
+        std::fs::write(
+            root.join(format!("{name}.harn")),
+            "import { dep_value } from \"./dep\"\npipeline default() { const value = dep_value() }\n",
+        )
+        .expect("write dependent");
+    }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
