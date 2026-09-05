@@ -11,6 +11,11 @@ use harn_lexer::Span;
 
 use crate::ast::{is_discard_name, BindingPattern, Node, SNode, TypedParam};
 
+mod call_resolution;
+pub use call_resolution::{
+    lexically_resolved_identifier_spans, module_match_pattern_catalog_with_visible,
+};
+
 /// Stable identity for a source binding. Patterns do not carry individual
 /// spans, so the declaration span plus the bound name is the narrowest source
 /// identity available without changing the AST.
@@ -113,6 +118,19 @@ impl MatchPatternCatalog {
         self.enum_names.contains(name)
     }
 
+    /// Add enum declarations visible through an enclosing module scope.
+    pub fn extend_declarations(&mut self, declarations: &[SNode]) {
+        for node in declarations {
+            let declaration = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
+                self.register_enum(name, variants);
+            }
+        }
+    }
+
     fn register_enum(&mut self, name: &str, variants: &[crate::ast::EnumVariant]) {
         for owners in self.variant_owners.values_mut() {
             owners.retain(|owner| owner != name);
@@ -126,6 +144,15 @@ impl MatchPatternCatalog {
                 .push(name.to_string());
         }
     }
+}
+
+/// Build the final enum catalog visible from module-owned callable bodies.
+///
+/// This mirrors the module scope shared by type checking and lowering. Nested
+/// block enums stay lexical to their body and are registered by the analysis
+/// as it walks that body.
+pub fn module_match_pattern_catalog(program: &[SNode]) -> MatchPatternCatalog {
+    module_match_pattern_catalog_with_visible(program, &[])
 }
 
 impl BindingId {
@@ -338,20 +365,28 @@ enum ScopeBinding {
 
 type Scope = HashMap<String, ScopeBinding>;
 
-struct LexicalAnalysis {
+struct LexicalAnalysis<'source> {
     captured: HashSet<BindingId>,
     reassigned: BTreeSet<String>,
     resolved: HashMap<(usize, usize), BindingId>,
+    lexically_resolved: HashSet<(usize, usize)>,
     match_patterns: MatchPatternCatalog,
+    source: Option<&'source str>,
 }
 
-impl LexicalAnalysis {
+impl<'source> LexicalAnalysis<'source> {
     fn new(match_patterns: &MatchPatternCatalog) -> Self {
+        Self::new_with_source(match_patterns, None)
+    }
+
+    fn new_with_source(match_patterns: &MatchPatternCatalog, source: Option<&'source str>) -> Self {
         Self {
             captured: HashSet::new(),
             reassigned: BTreeSet::new(),
             resolved: HashMap::new(),
+            lexically_resolved: HashSet::new(),
             match_patterns: match_patterns.clone(),
+            source,
         }
     }
 
@@ -641,6 +676,26 @@ impl LexicalAnalysis {
                     );
                 }
             }
+            Node::InterpolatedString(segments) => {
+                let Some(source) = self.source else {
+                    return;
+                };
+                for segment in segments {
+                    let harn_lexer::StringSegment::Expression(expression, line, column) = segment
+                    else {
+                        continue;
+                    };
+                    let Some(expression) = crate::interpolation::parse_expression(
+                        Some(source),
+                        expression,
+                        *line,
+                        *column,
+                    ) else {
+                        continue;
+                    };
+                    self.walk_node(&expression, scopes, inside_nested_callable, owner);
+                }
+            }
             _ => self.walk_children(node, scopes, inside_nested_callable, owner),
         }
     }
@@ -777,7 +832,11 @@ impl LexicalAnalysis {
         scopes: &[Scope],
         inside_nested_callable: bool,
     ) {
-        match resolve(scopes, name) {
+        let resolved = resolve(scopes, name);
+        if resolved.is_some() {
+            self.lexically_resolved.insert((span.start, span.end));
+        }
+        match resolved {
             Some(ScopeBinding::Current(binding)) => {
                 self.resolved
                     .insert((span.start, span.end), binding.clone());

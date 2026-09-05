@@ -116,6 +116,11 @@ pub(crate) struct Linter<'a> {
     /// A local binding named `harness` is not enough to safely rewrite
     /// capability calls to `harness.*`.
     pub(super) harness_param_stack: Vec<Option<String>>,
+    /// Bare-call spans that resolve to lexical values in the current callable.
+    /// This keeps local callbacks out of builtin migration and call-graph rules.
+    pub(super) lexical_call_spans: Vec<HashSet<(usize, usize)>>,
+    /// Enum vocabulary visible to lexical match-pattern resolution.
+    pub(super) match_patterns: harn_parser::lexical::MatchPatternCatalog,
     /// Which receivers in this file are the host `Harness`, and the
     /// spelling-independent call recognizer built on them. Collected in a
     /// prepass so the registry rules can consult the same facts the walk does.
@@ -202,6 +207,8 @@ impl<'a> Linter<'a> {
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
             harness_param_stack: Vec::new(),
+            lexical_call_spans: Vec::new(),
+            match_patterns: harn_parser::lexical::MatchPatternCatalog::default(),
             harness_facts: HarnessFacts::default(),
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,

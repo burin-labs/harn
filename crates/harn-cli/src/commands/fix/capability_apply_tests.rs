@@ -1031,6 +1031,140 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_local_callables() 
 }
 
 #[test]
+fn capability_apply_ignores_ambient_builtin_names_shadowed_by_callable_parameters() {
+    let (result, updated) = apply_single(
+        "pub fn callback_call(call: fn() -> int) -> int { return call() }\n\npub fn callback_git(git: fn() -> int) -> int { return git() }\n\npub fn callback_default(call: fn() -> int, value: int = call()) -> int { return value }\n\npub fn callback_interpolation(call: fn() -> int) -> string { return \"${call()}\" }\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("HarnessLlm") && !updated.contains("HarnessTools"),
+        "lexical callbacks must not acquire ambient capability authority:\n{updated}"
+    );
+    assert!(updated.contains("fn callback_call(call: fn() -> int) -> int"));
+    assert!(
+        updated.contains("fn callback_interpolation(call: fn() -> int) -> string"),
+        "interpolated callback calls must use the same lexical resolution:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn callback_default(call: fn() -> int, value: int = call()) -> int"),
+        "default expressions must use left-to-right lexical resolution:\n{updated}"
+    );
+}
+
+#[test]
+fn capability_apply_separates_a_callback_from_a_same_named_module_callable() {
+    let (result, updated) = apply_single(
+        "fn call() -> string { return read_file(\"value.txt\") }\n\npub fn invoke(call: fn() -> int) -> int { return call() }\n",
+    );
+
+    assert!(!result.applied.is_empty(), "{result:#?}\n{updated}");
+    assert!(
+        updated.contains("fn call(fs: HarnessFs) -> string"),
+        "the genuine ambient call must prove that migration planning ran:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn invoke(call: fn() -> int) -> int"),
+        "the lexical callback must not inherit the module callable's authority:\n{updated}"
+    );
+}
+
+#[test]
+fn capability_apply_resolves_shadowing_at_each_call_site() {
+    let (result, updated) = apply_single(
+        "pub fn mixed() {\n  const nested = fn(call: fn() -> int) -> int { return call() }\n  const local = nested(fn() -> int { return 7 })\n  return call(\"mock\", \"outside ${local}\")\n}\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "mixed"),
+        vec![param("llm", "HarnessLlm")]
+    );
+    assert_eq!(call_arities(&updated, "call"), vec![0]);
+    assert_eq!(method_receiver_paths(&updated, "call"), vec!["llm"]);
+}
+
+#[test]
+fn capability_apply_resolves_enum_payload_callback_bindings() {
+    let (result, updated) = apply_single(
+        "enum Handler {\n  Wrap(callback: fn() -> int)\n}\n\npub fn invoke(handler: Handler) -> int {\n  match handler {\n    Handler.Wrap(call) -> { return call() }\n  }\n}\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("HarnessLlm"),
+        "an enum payload callback must not acquire ambient LLM authority:\n{updated}"
+    );
+    assert_eq!(call_arities(&updated, "call"), vec![0]);
+}
+
+#[test]
+fn capability_apply_resolves_imported_enum_payload_callback_bindings() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let types = temp.path().join("types.harn");
+    let entry = temp.path().join("main.harn");
+    fs::write(
+        &types,
+        "pub enum Handler {\n  Wrap(callback: fn() -> int)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entry,
+        "import { Handler } from \"./types\"\n\npub fn invoke(handler: Handler) -> int {\n  match handler {\n    Handler.Wrap(call) -> { return call() }\n  }\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options_at(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+    let updated = fs::read_to_string(entry).unwrap();
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(result.applied.is_empty(), "{result:#?}\n{updated}");
+    assert!(!updated.contains("HarnessLlm"), "{updated}");
+    assert_eq!(call_arities(&updated, "call"), vec![0]);
+}
+
+#[test]
+fn capability_apply_respects_source_order_for_block_bindings() {
+    let (result, updated) = apply_single(
+        "pub fn ordered(call: fn() -> int, condition: bool) -> int {\n  if condition {\n    const first = call()\n    const call = fn() -> int { return 4 }\n    return first * 10 + call()\n  }\n  return 0\n}\n\npub fn ambient_before_binding() {\n  const first = call(\"mock\", \"before binding\")\n  const call = fn() -> int { return 4 }\n  const local = call()\n  return \"${first}${local}\"\n}\n",
+    );
+
+    // The deliberate inner redeclaration retains the expected shadow-variable
+    // warning; no capability or type diagnostic may survive the rewrite.
+    assert_eq!(
+        result.post_apply_diagnostics_count, 1,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        updated.contains("fn ordered(call: fn() -> int, condition: bool) -> int"),
+        "the outer lexical callback must not acquire ambient authority:\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "ambient_before_binding"),
+        vec![param("llm", "HarnessLlm")]
+    );
+    assert_eq!(call_arities(&updated, "call"), vec![0, 0, 0]);
+    assert_eq!(method_receiver_paths(&updated, "call"), vec!["llm"]);
+}
+
+#[test]
 fn capability_apply_still_migrates_unshadowed_ambient_builtins() {
     let (result, updated) = apply_single("fn main() {\n  scan(\".\")\n}\n");
 
