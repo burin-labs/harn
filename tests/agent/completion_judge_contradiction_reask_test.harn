@@ -1,0 +1,374 @@
+// Run: harn test tests/agent/completion_judge_contradiction_reask_test.harn
+//
+// harn#8060. `done` beside a populated `gap_class` is refused (harn#7910), and
+// refusing it once is right. Refusing it N times is not: the re-ask prompt was
+// unchanged between invocations, so a judge whose reply is stable returned the
+// identical contradiction on every call, the actor was handed the judge's own
+// "the work is finished" text as its next step, and the run died at
+// `turn_end_judge_cap_reached` having never actually been refused by anyone.
+//
+// Measured on two hosted coding cells at harn v0.10.129: ten of ten completion
+// judge invocations replied `{"verdict":"done","gap_class":"other"}` with a
+// detail naming a passing verifier, ten of ten were inverted to `continue`, and
+// both runs ended `completion_unverified` over a declared verifier that had
+// passed and a clean-checkout re-execution that had passed.
+//
+// The fix is in two halves and this file pins both, with the controls that
+// separate them from a blanket weakening:
+//   1. the contradiction is re-asked ONCE with the contradiction named;
+//   2. if it survives that AND names nothing AND the deterministic gate observed
+//      the verifier passing, the refusal is overruled rather than spent.
+// A NAMED gap converts nothing, in either half. That is harn#7910's case and it
+// must keep failing exactly as it does today.
+import { agent_capture_events } from "std/agent/events"
+import { __completion_contradiction_arbitration_converts } from "std/agent/judge_internals"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+
+const CONVERSION = "gap_contradicts_done_survived_reask_over_passing_verifier"
+
+const RETRY_SCHEMA = "harn.completion_judge_contradiction_retry.v1"
+
+fn __completion_receipts(events: unknown) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/** Count conversions by `converted_from` ONLY. */
+fn __conversion_count(events: unknown) -> int {
+  let count = 0
+  for receipt in __completion_receipts(events) {
+    if receipt?.converted_from == CONVERSION {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+/** Count the re-asks by their own receipt, never by a judge-call arithmetic. */
+fn __reask_count(events: unknown) -> int {
+  return len(
+    events.filter(
+      { event -> event.type == "typed_checkpoint" && event?.checkpoint?.schema == RETRY_SCHEMA },
+    )
+      .to_list(),
+  )
+}
+
+/** A gate that reports exactly the reading the case is about. */
+fn __gate_reporting(confirm: bool, reason: string, observed: string) {
+  return { _payload ->
+    {
+      confirm: confirm,
+      message: "checked",
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+/**
+ * The reply shape measured in the field: an acceptance whose detail cites the
+ * passing verifier, with `gap_class` populated anyway.
+ */
+fn __judge_done_with_gap(gap_class: string?) -> dict {
+  const detail =
+    "Median is implemented across lexer, AST, parser, and aggregation logic. The required verifier passed all 3 tests with 0 failures."
+  const body = if gap_class == nil {
+    {verdict: "done", detail: detail}
+  } else {
+    {verdict: "done", detail: detail, gap_class: gap_class}
+  }
+  return {text: json_stringify(body)}
+}
+
+fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the requested change.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 6,
+            verify_completion_judge: {provider: "mock", max_invocations: 3},
+          }
+            + opts_extra,
+        ) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+// The conditions, at the owning interface.
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_contradiction_arbitration_requires_every_clause(harness: Harness, task: unknown) {
+  assert(
+    __completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "all five clauses hold",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "unresolved_authorization",
+      true,
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "a NAMED gap is never converted — this is harn#7910's case",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "missing_artifact",
+      true,
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "a missing artifact is never converted",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "other",
+      false,
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "a FIRST contradiction still refuses; only one that survived its re-ask converts",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      false,
+      "verified_after_write",
+      "passed",
+    ),
+    "a gate that never ran cannot overrule anyone",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      true,
+      "facts_unavailable",
+      "passed",
+    ),
+    "`facts_unavailable` blocks the conversion even alongside a passed reading",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      true,
+      "verified_after_write",
+      "not_run",
+    ),
+    "an unrun verifier is not a passing one",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      true,
+      "verified_after_write",
+      "failed",
+    ),
+    "a failing verifier is not a passing one",
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Half one: the contradiction is resolved once, and a judge that takes an exit
+// is believed. No arbitration is involved in either of these.
+
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_a_contradiction_is_reasked_exactly_once(harness: Harness, task: unknown) {
+  // The judge drops the field on the re-ask, which is the exit the prompt asks
+  // for. That reply is the one of record, so the run finishes with NO conversion
+  // — nothing was overruled, the judge simply answered.
+  const captured = __run(
+    harness,
+    "contradiction-reask-resolves",
+    [llm_done(), __judge_done_with_gap("other"), __judge_done_with_gap(nil), llm_done()],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(__reask_count(captured.events), 1)
+  assert_eq(__conversion_count(captured.events), 0)
+  assert_eq(captured.result.status, "done")
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].action, "accept")
+  assert_eq(receipts[0].converted_from, nil)
+}
+
+pipeline test_a_reask_that_names_a_real_gap_is_believed(harness: Harness, task: unknown) {
+  // The other exit the prompt offers. The judge turns its contradiction into an
+  // honest refusal, and that refusal stands: the run must not finish.
+  const captured = __run(
+    harness,
+    "contradiction-reask-refuses",
+    [
+      llm_done(),
+      __judge_done_with_gap("other"),
+      {
+        text: json_stringify(
+          {
+            verdict: "continue",
+            detail: "the vendored directory was modified",
+            gap_class: "unmet_manner_clause",
+          },
+        ),
+      },
+      llm_done(),
+      __judge_done_with_gap("unmet_manner_clause"),
+      llm_done(),
+      __judge_done_with_gap("unmet_manner_clause"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert(
+    captured.result.status != "done",
+    "a judge that named a manner-clause gap on the re-ask still produced a finished run: "
+      + to_string(captured.result.status),
+  )
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Half two: the contradiction survives, and the run must not be spent on it.
+// This is the falsifier for harn#8060.
+
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_a_surviving_unnamed_contradiction_cannot_reach_the_cap(
+  harness: Harness,
+  task: unknown,
+) {
+  // The measured shape: the judge returns the same self-contradiction however
+  // many times it is asked, on a run the gate observed verifying green.
+  const captured = __run(
+    harness,
+    "contradiction-survives",
+    [
+      llm_done(),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  // The conversion count comes first deliberately: it is counted by
+  // `converted_from` alone. Reverting the arbitration must fail HERE, naming the
+  // missing conversion, rather than downstream on a status a dozen unrelated
+  // changes could also move.
+  assert_eq(__conversion_count(captured.events), 1)
+  assert_eq(__reask_count(captured.events), 1)
+  assert_eq(captured.result.status, "done")
+  assert(
+    to_string(captured.result?.terminal?.reason ?? "") != "turn_end_judge_cap_reached",
+    "the run reached the judge cap on a contradiction nobody could answer",
+  )
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].action, "accept")
+  assert_eq(receipts[0].converted_from, CONVERSION)
+  assert_eq(receipts[0].gap_class, "other")
+  assert(receipts[0].invoked.deterministic, "the gate must be recorded as having run")
+  assert_eq(receipts[0].verification.observed, "passed")
+}
+
+pipeline test_a_surviving_named_contradiction_still_refuses(harness: Harness, task: unknown) {
+  // The direction control that matters most. Same gate, same green verifier,
+  // same stubborn judge — but it names an obligation. harn#7910's run returns
+  // exactly this, and it must still be refused.
+  const captured = __run(
+    harness,
+    "contradiction-named-survives",
+    [
+      llm_done(),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert(
+    captured.result.status != "done",
+    "a judge naming an unresolved authorization gap still produced a finished run: "
+      + to_string(captured.result.status),
+  )
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+pipeline test_a_surviving_contradiction_without_a_passing_verifier_still_refuses(
+  harness: Harness,
+  task: unknown,
+) {
+  // The evidence clause, end to end. `other` names nothing on either side, so
+  // with no positive reading from the gate there is nothing to prefer the
+  // acceptance over — and the refusal stands.
+  const captured = __run(
+    harness,
+    "contradiction-unrun",
+    [
+      llm_done(),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      __judge_done_with_gap("other"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "no_workspace_write", "not_run")},
+  )
+  assert(
+    captured.result.status != "done",
+    "an unnamed contradiction converted with no passing verifier behind it: "
+      + to_string(captured.result.status),
+  )
+  assert_eq(__conversion_count(captured.events), 0)
+}
