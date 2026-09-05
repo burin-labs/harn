@@ -29,8 +29,8 @@ pub fn connector_lifecycle(
     let by_id = {}
     let seen_paths = {}
     for binding in bindings ?? [] {
-      const binding_id = (binding?.binding_id ?? binding?.id ?? "binding-")
-        + to_string(len(by_id.keys()))
+      const binding_id = binding?.binding_id ?? binding?.id
+        ?? ("binding-" + to_string(len(by_id.keys())))
       const path = binding?.path ?? binding?.match?.path
       if path != nil && path != "" {
         if seen_paths.get(path) {

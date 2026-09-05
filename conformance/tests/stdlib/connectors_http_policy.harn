@@ -16,7 +16,7 @@ pipeline test(harness: Harness, task: unknown) {
     {provider: "left", bindings: 1},
   )
   const before = left.state(harness.runtime)
-  assert_eq(before.bindings.one0.binding_id, "one0")
+  assert_eq(before.bindings.one.binding_id, "one")
   assert(is_err(left.activate(harness.runtime, [{path: "/same"}, {match: {path: "/same"}}])))
   assert_eq(left.state(harness.runtime), before)
   harness.runtime.store_set("connector.left.rate", {tokens: 1})
