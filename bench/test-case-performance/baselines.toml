@@ -28,6 +28,35 @@ involuntary_context_switches = 6475
 fs_inputs = 0
 fs_outputs = 0
 
+# The organization's own Apple Silicon runners (label `macos-arm64`) sit
+# between the workstation above and the hosted image, and each host runs two
+# runners, so a sibling job can share the cores. Measured with the workload on
+# one such runner while its sibling was busy; the gate's re-measure rounds
+# absorb the rest. Owned-hardware release certification judges against this
+# profile, never the hosted one, so a faster host cannot pass vacuously.
+[platform.macos_owned_arm64]
+measured_at = "2026-09-05T19:05:00Z"
+source_commit = "bec20a36b0d1a6e3c9f7c6b1a2f4e5d6c7b8a9f0"
+host = "self-hosted Apple Silicon runner (macos-arm64), shared host"
+sample_count = 1
+regression_x = 2.0
+warn_utilization = 0.8
+telemetry_warn_x = 4.0
+max_child_wall_ms = 880.0
+sum_user_ms = 3280.0
+sum_sys_ms = 120.0
+setup_p50_ms = 20.0
+setup_p90_ms = 40.0
+
+[platform.macos_owned_arm64.telemetry]
+max_rss_kb = 99616
+major_faults = 0
+minor_faults = 30261
+voluntary_context_switches = 1
+involuntary_context_switches = 4587
+fs_inputs = 0
+fs_outputs = 0
+
 # GitHub's macos-26-arm64 hosted image is materially slower than the local
 # Apple Silicon workstation above. Keep a separate observed profile so hosted
 # release certification is sensitive to regressions without weakening local

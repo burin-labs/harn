@@ -49,7 +49,7 @@ fi
 performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_command_line="$(grep -Fn 'make check-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_binary_line="$(grep -Fn 'export HARN_BIN="${CARGO_TARGET_DIR:-./target}/debug/harn"' "$workflow" | cut -d: -f1)"
-performance_profile_line="$(grep -Fn 'HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64' "$workflow" | cut -d: -f1)"
+performance_profile_line="$(grep -Fn "HARN_TEST_CASE_PERFORMANCE_PROFILE: \${{ runner.environment == 'self-hosted' && 'macos_owned_arm64' || 'macos_hosted_arm64' }}" "$workflow" | cut -d: -f1)"
 nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' "$workflow" | cut -d: -f1)"
 
 if [[ -z "$performance_id_line" || -z "$performance_command_line" || -z "$performance_binary_line" || -z "$performance_profile_line" ]]; then
@@ -66,6 +66,17 @@ fi
 # let the hosted cache restore replace it; both are keyed on the same context.
 if ! grep -Fq 'echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"' "$workflow"; then
   echo "macOS workspace tests must build into the persistent target on self-hosted runners" >&2
+  exit 1
+fi
+# The persistent target is keyed on the runner: two runners on one host sharing
+# a target would let one job's rebuild replace the binary another job still runs.
+if ! grep -Fq 'target="${HOME}/harn-ci/target/macos-workspace-${RUNNER_NAME' "$workflow"; then
+  echo "macOS workspace tests must key the persistent target on the runner, not the host" >&2
+  exit 1
+fi
+# Owned hardware is judged against its own measured baseline profile.
+if ! grep -Fq 'macos_owned_arm64' "$ROOT_DIR/bench/test-case-performance/baselines.toml"; then
+  echo "the owned Apple Silicon performance profile must exist in the baseline file" >&2
   exit 1
 fi
 if ! grep -Fq "if: \${{ runner.environment != 'self-hosted' }}" "$workflow"; then
