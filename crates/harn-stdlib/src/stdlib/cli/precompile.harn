@@ -215,9 +215,7 @@ fn main(harness: Harness) {
     // collapse everything into out_root with no subdirectories.
     const placed = __destination_path(source, source_root, out_root, "harnbc")
     if placed == nil {
-      harness.stdio.eprintln(
-        source + ": cannot place under --out: not relative to " + source_root,
-      )
+      harness.stdio.eprintln(source + ": cannot place under --out: not relative to " + source_root)
       harness.runtime.exit(1)
     }
     // Unreachable default: the exit above is terminal, but the checker does
