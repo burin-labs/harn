@@ -26,7 +26,7 @@
  *   HARN_PRECOMPILE_KEEP_GOING — "1" to continue after a per-file error
  *   HARN_PRECOMPILE_QUIET      — "1" to suppress per-file progress
  */
-fn __collect_harn_files(fs: HarnessFs, root: string) -> list<string> {
+fn __walk_harn_files(fs: HarnessFs, root: string) -> dict {
   // walk_dir returns a flat list of {path, is_dir, is_file, depth}. We
   // only emit `.harn` files. Walk order is stable per the builtin
   // contract; we sort + dedupe afterwards to match the Rust impl which
@@ -35,12 +35,23 @@ fn __collect_harn_files(fs: HarnessFs, root: string) -> list<string> {
   // The Rust collect_harn_files() (crates/harn-cli/src/commands/mod.rs)
   // also drops files with a sibling `<name>.conformance-skip` marker;
   // mirror that here so a directory with skip markers walks identically.
+  //
+  // The walk's own depth-0 entry is returned alongside the files, and it is
+  // the root every destination path is computed against. The caller's root is
+  // whatever the user typed and may be relative, while every walked path is
+  // absolute; deriving a relative path by mixing the two silently yields
+  // nothing, which is how the output mirror came to collapse. Reading the root
+  // back out of the same walk that produced the files keeps one spelling.
   const entries = fs.walk(root)
+  let walked_root = ""
   let files = []
   for entry in entries {
     const path = entry["path"]
     const is_file = entry["is_file"] ?? false
     if !is_file {
+      if (entry["depth"] ?? -1) == 0 {
+        walked_root = path
+      }
       continue
     }
     if path_extension(path) != ".harn" {
@@ -62,7 +73,7 @@ fn __collect_harn_files(fs: HarnessFs, root: string) -> list<string> {
     }
     prev = path
   }
-  return out
+  return {root: walked_root, files: out}
 }
 
 fn __destination_path(
@@ -70,25 +81,28 @@ fn __destination_path(
   source_root: string,
   out_root: string,
   extension: string,
-) -> string {
+) -> string? {
   // Mirror the Rust output_path() exactly: when out_root is empty, write
   // adjacent to source; otherwise compute the relative path from
   // source_root and join under out_root, then swap the extension.
+  //
+  // Returns nil rather than a basename when a source under a directory walk
+  // will not relativize. A basename there is not a fallback, it is a different
+  // destination: every equally named module in the tree lands on it and all
+  // but the last are overwritten, with nothing written to the paths the caller
+  // was promised and a zero exit. An empty source_root is the single-file
+  // case, where the basename IS the mirrored path.
   if out_root == "" {
     return path_with_extension(source_path, extension)
   }
-  const relative = if source_root == "" {
-    path_basename(source_path)
-  } else {
-    let rel = path_relative_to(source_path, source_root)
-    if rel == nil {
-      path_basename(source_path)
-    } else {
-      rel
-    }
+  if source_root == "" {
+    return path_with_extension(path_join(out_root, path_basename(source_path)), extension)
   }
-  const joined = path_join(out_root, relative)
-  return path_with_extension(joined, extension)
+  const relative = path_relative_to(source_path, source_root)
+  if relative == nil {
+    return nil
+  }
+  return path_with_extension(path_join(out_root, relative), extension)
 }
 
 fn __ensure_parent(fs: HarnessFs, path: string) {
@@ -170,15 +184,21 @@ fn main(harness: Harness) {
   }
   const info = harness.fs.stat(target)
   const is_dir = info["is_dir"] ?? false
-  const sources = if is_dir {
-    __collect_harn_files(harness.fs, target)
+  const walked = if is_dir {
+    __walk_harn_files(harness.fs, target)
   } else {
-    [target]
+    {root: "", files: [target]}
   }
-  const source_root = if is_dir {
-    target
-  } else {
-    ""
+  const sources = walked["files"] ?? []
+  // The walk's own spelling of the root, not the caller's. See
+  // __walk_harn_files: mixing a relative root with absolute walked paths is
+  // what collapsed the mirror.
+  const source_root = walked["root"] ?? ""
+  if is_dir && source_root == "" {
+    harness.stdio.eprintln(
+      "internal error: directory walk of " + target + " reported no root entry",
+    )
+    harness.runtime.exit(70)
   }
   if len(sources) == 0 {
     harness.stdio.eprintln("error: no .harn files found under " + target)
@@ -193,12 +213,21 @@ fn main(harness: Harness) {
     // preserves the source-tree mirroring the Rust output_path() does;
     // without this, the child (which sees a single-file target) would
     // collapse everything into out_root with no subdirectories.
+    const placed = __destination_path(source, source_root, out_root, "harnbc")
+    if placed == nil {
+      harness.stdio.eprintln(
+        source + ": cannot place under --out: not relative to " + source_root,
+      )
+      harness.runtime.exit(1)
+    }
+    // Unreachable default: the exit above is terminal, but the checker does
+    // not narrow through it.
+    const mirrored = placed ?? ""
     const per_file_out = if out_root == "" {
       ""
     } else {
-      let dest = __destination_path(source, source_root, out_root, "harnbc")
-      __ensure_parent(harness.fs, dest)
-      path_parent(dest)
+      __ensure_parent(harness.fs, mirrored)
+      path_parent(mirrored)
     }
     const child = __spawn_precompile(harness.process, bin, source, per_file_out, source_root)
     const exit_code = child["exit_code"] ?? -1
@@ -209,8 +238,7 @@ fn main(harness: Harness) {
         compiled = compiled + 1
       }
       if !quiet {
-        const dest = __destination_path(source, source_root, out_root, "harnbc")
-        harness.stdio.println(source + " -> " + dest)
+        harness.stdio.println(source + " -> " + mirrored)
       }
     } else {
       failed = failed + 1
