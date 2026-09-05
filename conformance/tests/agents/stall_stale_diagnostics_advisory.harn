@@ -37,6 +37,13 @@ fn run(agent: HarnessAgent, random: HarnessRandom, dispatches: list, config: dic
       state,
       true,
       item,
+      "",
+      false,
+      false,
+      "",
+      nil,
+      false,
+      item,
     )
     state = obs.state
     if obs.warning != nil {

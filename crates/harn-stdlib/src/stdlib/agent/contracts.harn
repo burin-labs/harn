@@ -1,4 +1,5 @@
 import { AgentDeclaredArtifactAudit } from "std/agent/required_artifacts"
+import { AgentStallCheckpoint } from "std/agent/stall_types"
 
 /** Producer-owned classification of an agent-loop terminal. */
 pub type AgentTerminalKind = "natural" \
@@ -241,6 +242,7 @@ pub type AgentAbandonment = {
  * nil if any call is unpriced; `known_cost_usd` is the priced-call lower bound.
  */
 pub type AgentResult = {
+  stall_checkpoint?: AgentStallCheckpoint,
   status: string,
   final_status: string,
   stop_reason: string,

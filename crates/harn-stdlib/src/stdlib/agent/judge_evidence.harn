@@ -94,7 +94,7 @@ fn __judge_evidence_role(
   return "other"
 }
 
-fn __judge_tool_descriptor(opts: dict, name: any) -> CompletionToolSemantics {
+pub fn __judge_tool_descriptor(opts: dict, name: any) -> CompletionToolSemantics {
   const entry = __judge_tool_entry(opts, name)
   const annotations = agent_tool_annotations(entry, opts?.policy, name)
   const read_only = entry != nil && agent_tool_is_read_only(entry, opts?.policy, name)

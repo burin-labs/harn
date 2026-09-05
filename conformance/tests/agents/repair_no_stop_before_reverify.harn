@@ -8,33 +8,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * post-edit re-verify has run. When the verify closure vetoes, the loop
  * continues instead of stopping — the edit was re-verified, not taken on faith.
  */
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+
 fn repair_tools() {
-  let tools = tool_registry()
-  tools = tool_define(
-    tools,
-    "run_test",
-    "Run the test suite",
-    {
-      handler: { _args ->
-        throw "test failed: assertion X"
-      },
-      parameters: {},
-      returns: {type: "string"},
-      annotations: {kind: "read"},
-    },
-  )
-  tools = tool_define(
-    tools,
-    "apply_fix",
-    "Apply a corrective edit",
-    {
-      handler: { _args -> "edit applied" },
-      parameters: {},
-      returns: {type: "string"},
-      annotations: {kind: "edit", side_effect_level: "workspace_write"},
-    },
-  )
-  return tools
+  return repair_test_tools("test failed: assertion X", true, "read")
 }
 
 /** Vetoes the FIRST completion (the unverified post-edit done), confirms after. */

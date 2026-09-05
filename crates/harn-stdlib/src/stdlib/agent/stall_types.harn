@@ -107,6 +107,17 @@ pub type AgentStallState = {
   monologue_actuation: MonologueActuationState,
 }
 
+/** Committed detector state plus at most one completed, unconsumed dispatch. */
+pub type AgentStallCheckpoint = {
+  session_id: string,
+  state: AgentStallState,
+  dispatch: list?,
+  dispatch_position: int,
+  consumed_dispatch_position: int,
+  dispatch_made_edit: bool,
+  verification_dispatch: list,
+}
+
 /** Result of folding one turn through the configured stall detectors. */
 pub type AgentStallObservation = {
   state: AgentStallState,

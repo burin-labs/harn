@@ -20,22 +20,10 @@ fn events_of(events: any, kind: string) {
   return events.filter({ event -> event.type == kind })
 }
 
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+
 fn repair_tools() {
-  let tools = tool_registry()
-  tools = tool_define(
-    tools,
-    "run_test",
-    "Run the test suite",
-    {
-      handler: { _args ->
-        throw "AssertionError: expected 5 got 4"
-      },
-      parameters: {},
-      returns: {type: "string"},
-      annotations: {kind: "read"},
-    },
-  )
-  return tools
+  return repair_test_tools("AssertionError: expected 5 got 4", false, "read")
 }
 
 fn run_test_call(id: string) {

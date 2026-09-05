@@ -1,0 +1,162 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn call(name: string, id: string) {
+  return {tool_calls: [{id: id, name: name, arguments: {}}]}
+}
+
+fn stage(harness: Harness, options: dict, script: list) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { -> agent_loop(harness, "Continue the task", nil, options) },
+  )
+}
+
+pipeline default(harness: Harness) {
+  let calls = []
+  let tools = tool_registry()
+  for descriptor in [
+    {name: "edit", kind: "edit"},
+    {name: "verify", kind: "verify"},
+    {name: "fail", kind: "verify"},
+    {name: "look", kind: "read"},
+  ] {
+    const name = descriptor.name
+    tools = tool_define(
+      tools,
+      name,
+      name,
+      {
+        handler: { _args ->
+          calls = calls + [name]
+          if name == "fail" {
+            throw "AssertionError: expected 5 got 4"
+          }
+          return "ok"
+        },
+        parameters: {},
+        annotations: {
+          kind: descriptor.kind,
+          completion_evidence_role: if descriptor.kind == "verify" {
+            "verification"
+          } else {
+            nil
+          },
+        },
+      },
+    )
+  }
+  const session = "checkpoint-" + harness.random.uuid()
+  const options = {
+    session_id: session,
+    provider: "mock",
+    tools: tools,
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 2,
+    stall_diagnostics: {enabled: true, post_edit_reverify: false},
+  }
+  const first = stage(harness, options, [call("edit", "e"), call("verify", "v")])
+  require calls == ["edit", "verify"], "first stage must actually execute edit and verification"
+  const checkpoint = first.stall_checkpoint
+  require checkpoint.dispatch_position == checkpoint.consumed_dispatch_position + 1,
+    "final dispatch must remain pending at handoff"
+  const latest = agent_stall_checkpoint_state(harness.agent, checkpoint)
+  require latest.write_epoch == 1 && latest.verified_write_epoch == 1,
+    "final verification must cover the edit before another model turn"
+  const second = stage(
+    harness,
+    options + {stall_checkpoint: checkpoint},
+    [llm_text("Done. ##DONE##")],
+  )
+  const committed = agent_stall_checkpoint_state(harness.agent, second.stall_checkpoint)
+  require committed.write_epoch == 1 && committed.verified_write_epoch == 1,
+    "handoff must consume evidence exactly once"
+  require calls == ["edit", "verify"], "reporting must not repeat the edit"
+  for invalid in [
+    checkpoint + {consumed_dispatch_position: checkpoint.dispatch_position + 1},
+    checkpoint + {dispatch_position: checkpoint.consumed_dispatch_position + 2},
+    checkpoint + {dispatch: nil},
+    checkpoint + {session_id: "different-session"},
+  ] {
+    const rejected = try {
+      stage(harness, options + {stall_checkpoint: invalid}, [call("edit", "forbidden")])
+    }
+    require is_err(rejected) && contains(to_string(unwrap_err(rejected)), "stall checkpoint"),
+      "agent_loop must reject invalid checkpoints at ingestion"
+  }
+  require calls == ["edit", "verify"], "invalid checkpoint cannot reach tool dispatch"
+  const one_turn = options + {session_id: "repair-" + harness.random.uuid(), max_iterations: 1}
+  const failing = stage(harness, one_turn, [call("fail", "f1")])
+  const diagnosed = agent_stall_checkpoint_state(harness.agent, failing.stall_checkpoint)
+  require diagnosed.last_diagnostic_class == "fail",
+    "failed verifier must establish current failure"
+  const read = stage(
+    harness,
+    one_turn + {stall_checkpoint: failing.stall_checkpoint},
+    [call("look", "l1")],
+  )
+  require agent_stall_checkpoint_state(harness.agent, read.stall_checkpoint).last_diagnostic_class
+    == "fail",
+    "successful read must not clear failed verification"
+  const before_deferred = len(calls)
+  const deferred = stage(
+    harness,
+    one_turn + {stall_checkpoint: read.stall_checkpoint},
+    [{tool_calls: call("edit", "e2").tool_calls + call("verify", "deferred-v").tool_calls}],
+  )
+  require len(calls) == before_deferred + 1 && calls[len(calls) - 1] == "edit",
+    "canonical phase boundary must execute mutation and defer verification"
+  const pending_repair = agent_stall_checkpoint_state(harness.agent, deferred.stall_checkpoint)
+  require pending_repair.last_diagnostic_class == "fail" && pending_repair.reverify_owed,
+    "deferred verification cannot clear the failure or the reverify obligation"
+  const repaired = stage(
+    harness,
+    one_turn + {stall_checkpoint: deferred.stall_checkpoint},
+    [{tool_calls: call("fail", "f2").tool_calls + call("verify", "v2").tool_calls}],
+  )
+  require calls[len(calls) - 2] == "fail" && calls[len(calls) - 1] == "verify",
+    "both ordered verifications must execute"
+  require agent_stall_checkpoint_state(harness.agent, repaired.stall_checkpoint)
+    .last_diagnostic_class
+    == "pass",
+    "last executed verification must clear the earlier failure"
+  const before_stop = len(calls)
+  const stopped = stage(
+    harness,
+    options
+      + {
+        stall_checkpoint: second.stall_checkpoint,
+        loop_control: { _state -> {action: "stop", reason: "requested_stop"} },
+      },
+    [call("look", "s1"), call("edit", "must-not-run")],
+  )
+  require stopped.stop_reason == "requested_stop" && len(calls) == before_stop + 1,
+    "accepted stop must prevent the next scripted mutation"
+  const repeated_options = options
+    + {
+      session_id: "repeat-" + harness.random.uuid(),
+      stall_diagnostics: {enabled: true, threshold: 3, inject_feedback: false},
+    }
+  const inspected = stage(harness, repeated_options, [call("look", "r1"), call("look", "r2")])
+  require len(inspected.stall_warnings) == 0, "two calls must not trip threshold three"
+  const repeated = stage(
+    harness,
+    repeated_options + {stall_checkpoint: inspected.stall_checkpoint},
+    [call("look", "r3"), llm_text("Done. ##DONE##")],
+  )
+  require len(repeated.stall_warnings) > 0, "repeated calls must trip across stage boundary"
+  const disabled = stage(
+    harness,
+    options + {stall_diagnostics: false},
+    [llm_text("Done. ##DONE##")],
+  )
+  require disabled.stall_checkpoint == nil, "disabled detector must not report measured state"
+  contract_effect(harness.stdio, "verified_handoff", committed.verified_write_epoch == 1)
+  contract_effect(harness.stdio, "cross_stage_repeat", len(repeated.stall_warnings) > 0)
+  contract_negative(harness.stdio, "no_early_repeat", len(inspected.stall_warnings) > 0)
+}

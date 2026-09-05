@@ -33,7 +33,7 @@ fn repair_tools() {
       handler: { _args -> "all tests pass" },
       parameters: {},
       returns: {type: "string"},
-      annotations: {kind: "read"},
+      annotations: {kind: "read", completion_evidence_role: "verification"},
     },
   )
   return tools

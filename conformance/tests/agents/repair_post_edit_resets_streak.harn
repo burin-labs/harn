@@ -36,7 +36,7 @@ fn repair_tools() {
       },
       parameters: {tag: {type: "string"}},
       returns: {type: "string"},
-      annotations: {kind: "read"},
+      annotations: {kind: "read", completion_evidence_role: "verification"},
     },
   )
   tools = tool_define(

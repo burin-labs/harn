@@ -14,33 +14,10 @@ import { llm_text, with_llm_script } from "std/testing"
  * Scenario B (stuck): the same failure persists and the loop hard-stops =>
  * result.current_failure is present (the hand-back says WHAT failed).
  */
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
+
 fn repair_tools() {
-  let tools = tool_registry()
-  tools = tool_define(
-    tools,
-    "run_test",
-    "Run the test suite",
-    {
-      handler: { _args ->
-        throw "AssertionError: expected 5 got 4"
-      },
-      parameters: {},
-      returns: {type: "string"},
-      annotations: {kind: "read"},
-    },
-  )
-  tools = tool_define(
-    tools,
-    "apply_fix",
-    "Apply a corrective edit",
-    {
-      handler: { _args -> "edit applied" },
-      parameters: {},
-      returns: {type: "string"},
-      annotations: {kind: "edit", side_effect_level: "workspace_write"},
-    },
-  )
-  return tools
+  return repair_test_tools("AssertionError: expected 5 got 4", true, "read")
 }
 
 fn run_test_call(id: string) {

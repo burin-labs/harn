@@ -87,6 +87,7 @@ pub type AgentLoopPostTurnContext = {
   budget: AgentLoopBudget,
   bridge_step_delivered: int,
   completed_no_information_gain: bool,
+  stall_checkpoint: dict?,
   consecutive_failure_count: int,
   dispatch: AgentToolDispatch,
   dispatched_turn_opts: dict,
@@ -326,6 +327,7 @@ pub fn agent_loop_post_turn_transition(
   let post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
     + {
       _session_successful_tools: context.successful_tools_seen,
+      _stall_checkpoint: context.stall_checkpoint,
       _session_rejected_tools: context.rejected_tools_seen,
       _consecutive_text_only: next.consecutive_text_only,
       _turn_end_judge_invocations: next.turn_end_judge_invocations,
