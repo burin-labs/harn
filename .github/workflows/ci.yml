@@ -2508,6 +2508,18 @@ jobs:
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
         run: |
+          # A skipped job is valid only when its owning condition permits it.
+          # Missing, pending, failed, and cancelled results always fail closed.
+          require_result() {
+            local result="$1" message="$2"
+            shift 2
+            if [ "$result" = "success" ] || { [ "$result" = "skipped" ] && "$@"; }; then
+              return 0
+            fi
+            echo "::error::$message"
+            exit 1
+          }
+
           # Hard-required lanes: a hard failure here must fail the aggregate,
           # because the lanes that `needs` them would all skip and skips are
           # otherwise tolerated below — without this the aggregate could go
@@ -2559,15 +2571,8 @@ jobs:
           release_contract_result="${{ needs['release-contract'].result }}"
           release_contract_expected="$RELEASE_CONTRACT_EXPECTED"
           echo "Release contract: $release_contract_result (expected=$release_contract_expected)"
-          if [ "$release_contract_result" != "success" ]; then
-            if [ "$release_contract_result" = "skipped" ] \
-              && [ "$release_contract_expected" != "true" ]; then
-              :
-            else
-              echo "::error::Release contract failed, or did not report a verdict while release-relevant paths were touched."
-              exit 1
-            fi
-          fi
+          require_result "$release_contract_result" \
+            "Release contract failed, or did not report a verdict while release-relevant paths were touched." [ "$release_contract_expected" != "true" ]
 
           # The heavy Linux Rust lanes (rust-checks, audit-scripts) skip on a
           # docs/website/markdown-only PR (gated by the `changes` job) and run
@@ -2578,10 +2583,7 @@ jobs:
           rust_checks_result="${{ needs['rust-checks'].result }}"
           lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
           echo "Rust lint: $rust_checks_result (lint_ok=$lint_ok)"
-          if [ "$rust_checks_result" != "success" ] && [ "$rust_checks_result" != "skipped" ]; then
-            echo "::error::Rust lint failed."
-            exit 1
-          fi
+          require_result "$rust_checks_result" "Rust lint failed." true
           if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$lint_ok" != "true" ]; then
             echo "::error::Rust lint proof is missing."
             exit 1
@@ -2594,10 +2596,7 @@ jobs:
           stack_frames_result="${{ needs['stack-frames'].result }}"
           stack_frames_ok="${{ needs['stack-frames'].outputs.gate_ok }}"
           echo "Stack frame budget: $stack_frames_result (gate_ok=$stack_frames_ok)"
-          if [ "$stack_frames_result" != "success" ] && [ "$stack_frames_result" != "skipped" ]; then
-            echo "::error::Stack frame budget failed."
-            exit 1
-          fi
+          require_result "$stack_frames_result" "Stack frame budget failed." true
           if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$stack_frames_ok" != "true" ]; then
             echo "::error::Stack frame proof is missing."
             exit 1
@@ -2606,39 +2605,18 @@ jobs:
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
           workspace_tests_ok="${{ needs['rust-check-inputs'].outputs.workspace_tests_ok }}"
           echo "Rust producer: $rust_check_inputs_result (workspace_tests_ok=$workspace_tests_ok)"
-          if [ "$rust_check_inputs_result" != "success" ]; then
-            if [ "$rust_check_inputs_result" = "skipped" ] \
-              && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-              :
-            else
-              echo "::error::Rust audit artifact build failed or skipped while Rust proof was required."
-              exit 1
-            fi
-          fi
+          require_result "$rust_check_inputs_result" \
+            "Rust audit artifact build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
           echo "Rust artifacts ready: $rust_artifacts_ready_result"
-          if [ "$rust_artifacts_ready_result" != "success" ]; then
-            if [ "$rust_artifacts_ready_result" = "skipped" ] \
-              && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-              :
-            else
-              echo "::error::Rust artifact handoff failed or skipped while Rust proof was required."
-              exit 1
-            fi
-          fi
+          require_result "$rust_artifacts_ready_result" \
+            "Rust artifact handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
-          if [ "$security_tests_ready_result" != "success" ]; then
-            if [ "$security_tests_ready_result" = "skipped" ] \
-              && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-              :
-            else
-              echo "::error::Linux security test input handoff failed or skipped while Rust proof was required."
-              exit 1
-            fi
-          fi
+          require_result "$security_tests_ready_result" \
+            "Linux security test input handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
           # With co-location active the environment-neutral suite proof lives
           # inside the single persistent producer. A successful artifact build
           # without the explicit test marker must fail closed.
@@ -2655,15 +2633,8 @@ jobs:
           rust_cache_refresh_result="${{ needs['rust-cache-refresh'].result }}"
           rust_cache_refresh_expected="${{ needs.changes.outputs.rust_cache_refresh }}"
           echo "Rust cache refresh: $rust_cache_refresh_result (expected=$rust_cache_refresh_expected)"
-          if [ "$rust_cache_refresh_result" != "success" ]; then
-            if [ "$rust_cache_refresh_result" = "skipped" ] \
-              && [ "$rust_cache_refresh_expected" != "true" ]; then
-              :
-            else
-              echo "::error::Rust cache refresh failed or skipped while a main-scoped cache write was required."
-              exit 1
-            fi
-          fi
+          require_result "$rust_cache_refresh_result" \
+            "Rust cache refresh failed or skipped while a main-scoped cache write was required." [ "$rust_cache_refresh_expected" != "true" ]
 
           rust_test_result="${{ needs['rust-test'].result }}"
           echo "Rust workspace tests (archive mode): $rust_test_result"
@@ -2680,25 +2651,13 @@ jobs:
 
           rust_security_result="${{ needs['rust-security'].result }}"
           echo "Linux sandbox tests: $rust_security_result"
-          if [ "$rust_security_result" != "success" ]; then
-            if [ "$rust_security_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-              :
-            else
-              echo "::error::Linux sandbox tests failed or skipped while Rust checks were required."
-              exit 1
-            fi
-          fi
+          require_result "$rust_security_result" \
+            "Linux sandbox tests failed or skipped while Rust checks were required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           harn_audit_result="${{ needs['harn-audit'].result }}"
           echo "Harn proof workers: $harn_audit_result"
-          if [ "$harn_audit_result" != "success" ]; then
-            if [ "$harn_audit_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-              :
-            else
-              echo "::error::Harn proof workers failed or skipped while Rust proof was required."
-              exit 1
-            fi
-          fi
+          require_result "$harn_audit_result" \
+            "Harn proof workers failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           ci_walltime_report_result="${{ needs['ci-walltime-report'].result }}"
           echo "CI timing report: $ci_walltime_report_result"
@@ -2711,14 +2670,8 @@ jobs:
 
           audit_scripts_result="${{ needs['audit-scripts'].result }}"
           echo "Repository policy checks: $audit_scripts_result"
-          if [ "$audit_scripts_result" != "success" ]; then
-            if [ "$audit_scripts_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
-              :
-            else
-              echo "::error::Repository policy checks failed or skipped while Rust proof was required."
-              exit 1
-            fi
-          fi
+          require_result "$audit_scripts_result" \
+            "Repository policy checks failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           # Native Windows runs once on a Windows-sensitive merge-group
           # candidate. Its exact successful proof suppresses the identical
@@ -2726,10 +2679,7 @@ jobs:
           # Treat a planned skip as passing; only an actual failure fails.
           windows_result="${{ needs.windows.result }}"
           echo "Rust on Windows (build + smoke test): $windows_result"
-          if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then
-            echo "::error::Windows job failed."
-            exit 1
-          fi
+          require_result "$windows_result" "Windows job failed." true
 
           # The cross-compile check runs on every source-changing event. A push
           # may skip only when this exact workflow + SHA already passed on
@@ -2760,10 +2710,7 @@ jobs:
           # passing here; only an actual failure should fail the gate.
           macos_result="${{ needs.macos.result }}"
           echo "Rust on macOS (deny-warnings build + lint): $macos_result"
-          if [ "$macos_result" != "success" ] && [ "$macos_result" != "skipped" ]; then
-            echo "::error::macOS job failed."
-            exit 1
-          fi
+          require_result "$macos_result" "macOS job failed." true
 
           # Portal and docs-site jobs are path-gated by `changes`: they run
           # when the frontend/docs surfaces or this workflow change, and skip
@@ -2771,17 +2718,11 @@ jobs:
           # only an actual job failure should fail the aggregate status.
           portal_result="${{ needs.portal.result }}"
           echo "Portal frontend: $portal_result"
-          if [ "$portal_result" != "success" ] && [ "$portal_result" != "skipped" ]; then
-            echo "::error::Portal frontend failed."
-            exit 1
-          fi
+          require_result "$portal_result" "Portal frontend failed." true
 
           docs_site_result="${{ needs['docs-site'].result }}"
           echo "Docs site: $docs_site_result"
-          if [ "$docs_site_result" != "success" ] && [ "$docs_site_result" != "skipped" ]; then
-            echo "::error::Docs site failed."
-            exit 1
-          fi
+          require_result "$docs_site_result" "Docs site failed." true
 
           docs_checks_result="${{ needs['docs-checks'].result }}"
           docs_checks_expected="${{ needs.changes.outputs.docs_checks }}"
@@ -2806,21 +2747,12 @@ jobs:
           vscode_result="${{ needs.vscode.result }}"
           vscode_expected="${{ needs.changes.outputs.vscode }}"
           echo "VS Code extension: $vscode_result"
-          if [ "$vscode_result" != "success" ]; then
-            if [ "$vscode_result" = "skipped" ] && [ "$vscode_expected" != "true" ]; then
-              :
-            else
-              echo "::error::VS Code extension failed or skipped while editor proof was required."
-              exit 1
-            fi
-          fi
+          require_result "$vscode_result" \
+            "VS Code extension failed or skipped while editor proof was required." [ "$vscode_expected" != "true" ]
 
           setup_harn_result="${{ needs['setup-harn-action'].result }}"
           echo "Setup Harn action: $setup_harn_result"
-          if [ "$setup_harn_result" != "success" ] && [ "$setup_harn_result" != "skipped" ]; then
-            echo "::error::Setup Harn action failed."
-            exit 1
-          fi
+          require_result "$setup_harn_result" "Setup Harn action failed." true
 
           failed=0
           for name in "${!results[@]}"; do
