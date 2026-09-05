@@ -141,13 +141,17 @@ pipeline test_a_reply_predating_the_field_still_decodes(harness: Harness, task: 
   assert_eq(verdict.gaps[0]?.requirement_id, "", "as unattributed")
 }
 
-// The two replays. Both use vocabulary lifted from real runs rather than
-// invented strings, because the thing being tested is whether the constraint
-// holds against ids a real ledger actually produced.
+/**
+ * The ledger behind the first of the two replays.
+ *
+ * Both replays use vocabulary lifted from real runs rather than invented
+ * strings, because the thing being tested is whether the constraint holds
+ * against ids a real ledger actually produced. These three are verbatim from
+ * the acceptance rejection one run emitted three times, ids and names both.
+ * They are hash-suffixed, which is precisely the shape prose matching would
+ * fail on and a typed constraint does not care about.
+ */
 fn packet_ledger() -> CompletionRequirementContract {
-  // Verbatim from the acceptance rejection the run emitted three times, ids and
-  // names both. The ids are hash-suffixed, which is precisely the shape prose
-  // matching would fail on and a typed constraint does not care about.
   return {
     requirements: [
       {
