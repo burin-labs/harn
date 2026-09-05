@@ -1066,10 +1066,9 @@ pub type CompletionBoundaryReading = {
  *
  * Clause 7 exists because the skip does not only skip the judge, it skips
  * everything behind the judge, and the pending-requirements check that turns a
- * done into a continue lives inside the structured invocation. Found by
- * lane-forensics against harn#8126, reproduced with one variable changed: the
- * same run whose gate reason is `verified` asks the judge once and ends
- * `completion_unverified`.
+ * done into a continue lives inside the structured invocation. Found against
+ * harn#8126 and reproduced with one variable changed: the same run whose gate
+ * reason is `verified` asks the judge once and ends `completion_unverified`.
  *
  * There is deliberately no clause for "the gate accepted". `verified_after_write`
  * is emitted only on the ladder's allow branch, so the acceptance is carried by

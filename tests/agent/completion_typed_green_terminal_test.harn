@@ -344,8 +344,8 @@ pipeline test_the_verification_judge_keeps_every_other_boundary(harness: Harness
 
 // The acceptance ledger. The skip does not only skip the judge, it skips
 // everything behind the judge, and the pending-requirements check that turns a
-// done into a continue lives inside the structured invocation. Found by
-// lane-forensics against harn#8126; the case below is theirs. See harn#8110.
+// done into a continue lives inside the structured invocation. Found against
+// harn#8126, and the case below is the reproduction as reported. See harn#8110.
 
 // -------------------------------------------------------------------------------------------------
 
