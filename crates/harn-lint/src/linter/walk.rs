@@ -1,6 +1,3 @@
-//! The main AST dispatch, isolated so `lint_node` does not dominate the
-//! surrounding state-tracking plumbing.
-
 mod casts;
 
 use harn_lexer::{FixEdit, Span, StringSegment};

@@ -11,6 +11,9 @@ use harn_lexer::Span;
 
 use crate::ast::{is_discard_name, BindingPattern, Node, SNode, TypedParam};
 
+mod call_resolution;
+pub use call_resolution::lexically_resolved_identifier_spans;
+
 /// Stable identity for a source binding. Patterns do not carry individual
 /// spans, so the declaration span plus the bound name is the narrowest source
 /// identity available without changing the AST.
@@ -316,47 +319,6 @@ pub fn resolved_identifier_bindings(
         parameter_scope(params, &BindingOwner::Current),
     );
     analysis.resolved
-}
-
-/// Return identifier-use spans that resolve to any lexical binding.
-///
-/// Unlike [`resolved_identifier_bindings`], this includes callable names whose
-/// declaration identity is immaterial to the consumer. When supplied, `source`
-/// lets the same analysis also reach expression holes inside interpolated
-/// strings while retaining their containing-file spans.
-pub fn lexically_resolved_identifier_spans(
-    params: &[TypedParam],
-    body: &[SNode],
-    source: Option<&str>,
-    match_patterns: &MatchPatternCatalog,
-) -> HashSet<(usize, usize)> {
-    let mut analysis = LexicalAnalysis::new_with_source(match_patterns, source);
-    // Parameter defaults execute left to right. An earlier parameter can
-    // shadow a builtin in a later default, while the current and later
-    // parameters are not visible yet.
-    let mut visible_params = Scope::new();
-    for param in params {
-        if let Some(default) = &param.default_value {
-            analysis.walk_node(
-                default,
-                std::slice::from_ref(&visible_params),
-                false,
-                &BindingOwner::Current,
-            );
-        }
-        visible_params.extend(parameter_scope(
-            std::slice::from_ref(param),
-            &BindingOwner::Current,
-        ));
-    }
-    analysis.walk_body_with_bindings(
-        body,
-        Vec::new(),
-        false,
-        BindingOwner::Current,
-        parameter_scope(params, &BindingOwner::Current),
-    );
-    analysis.lexically_resolved
 }
 
 /// Resolve a property receiver to its root binding and ordered property path.
