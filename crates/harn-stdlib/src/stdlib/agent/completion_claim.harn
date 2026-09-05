@@ -139,7 +139,9 @@ pub fn agent_completion_claim_apply_options(options: dict? = nil) {
       id: "completion_claim",
       source: "std/agent/completion_claim",
       body: "When the task is complete, call task_complete exactly once. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: "
-        + json_stringify(requirement_ids)
+        + json_stringify(
+        requirement_ids,
+      )
         + ". A tool-free final response remains available as a compatibility fallback.",
     },
   )
@@ -149,7 +151,9 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
   let matches = []
   for result in __dispatch_results_list(dispatch) {
     if to_string(result?.tool_name ?? result?.name ?? "") == __COMPLETION_CLAIM_TOOL_NAME
-      && __tool_result_ok(result) {
+      && __tool_result_ok(
+      result,
+    ) {
       matches = matches + [result]
     }
   }
@@ -196,6 +200,22 @@ fn __completion_claim_invalid(reason: string, feedback: string) -> CompletionCla
 
 fn __completion_claim_has_supporting_result(lifecycle: AgentTranscriptToolLifecycle) -> bool {
   return lifecycle.results.any({ result -> result.origin == "dispatch" && result.outcome == "ok" })
+}
+
+fn __completion_claim_supported_ref_ids(
+  lifecycle_by_id: dict,
+  own_call_id: string,
+) -> list<string> {
+  let refs: list<string> = []
+  for tool_call_id in lifecycle_by_id.keys() {
+    const matches: list<AgentTranscriptToolLifecycle> = lifecycle_by_id[tool_call_id] ?? []
+    if tool_call_id != own_call_id
+      && len(matches) == 1
+      && __completion_claim_has_supporting_result(matches[0]) {
+      refs = refs + [tool_call_id]
+    }
+  }
+  return refs
 }
 
 fn __completion_claim_validate_requirements(
@@ -251,10 +271,15 @@ fn __completion_claim_validate_requirements(
       }
       const matches: list<AgentTranscriptToolLifecycle> = lifecycle_by_id[evidence_ref] ?? []
       if len(matches) != 1 {
+        const available = __completion_claim_supported_ref_ids(lifecycle_by_id, own_call_id)
         return __completion_claim_invalid(
           "completion_claim_evidence_ref_unresolved",
           "Completion evidence ref `" + evidence_ref
-            + "` did not resolve to exactly one recorded tool call.",
+            + "` did not resolve to exactly one recorded tool call. Available successful tool_call_id values: "
+            + json_stringify(
+            available,
+          )
+            + ".",
         )
       }
       if !__completion_claim_has_supporting_result(matches[0]) {

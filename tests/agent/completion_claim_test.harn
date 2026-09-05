@@ -95,6 +95,11 @@ pipeline test_fabricated_ref_is_rejected_before_judging(harness: Harness, task: 
   )
   assert_eq(disposition.kind, "invalid")
   assert_eq(disposition.reason, "completion_claim_evidence_ref_unresolved")
+  assert(disposition.feedback.contains("Available successful tool_call_id values: ["))
+  assert(disposition.feedback.contains("\"edit-1\""))
+  assert(disposition.feedback.contains("\"look-1\""))
+  assert(!disposition.feedback.contains("complete-1"))
+  assert(!disposition.feedback.contains("invented-404\"]"))
 }
 
 pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown) {
@@ -314,7 +319,7 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-              == "harn.completion_claim_observation.v1"
+            == "harn.completion_claim_observation.v1"
         },
       )
         .to_list()
@@ -367,7 +372,7 @@ pipeline test_invalid_claim_continues_without_calling_a_judge(harness: Harness, 
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-              == "harn.completion_claim_observation.v1"
+            == "harn.completion_claim_observation.v1"
         },
       )
         .map({ event -> event.checkpoint })
