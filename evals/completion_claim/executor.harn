@@ -1,7 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { tool_define, tool_registry } from "std/tools"
 
 fn __inspect_tools(evidence: string) {
   return tool_define(
