@@ -291,7 +291,7 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_claim_observation.v1"
+              == "harn.completion_claim_observation.v1"
         },
       )
         .to_list()
@@ -344,7 +344,7 @@ pipeline test_invalid_claim_continues_without_calling_a_judge(harness: Harness, 
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_claim_observation.v1"
+              == "harn.completion_claim_observation.v1"
         },
       )
         .map({ event -> event.checkpoint })
