@@ -292,6 +292,29 @@ pub fn resolved_identifier_bindings(
     analysis.resolved
 }
 
+/// Return identifier-use spans that resolve to any lexical binding.
+///
+/// Unlike [`resolved_identifier_bindings`], this includes callable names whose
+/// declaration identity is immaterial to the consumer. `source` lets the same
+/// analysis reach expression holes inside interpolated strings while retaining
+/// their containing-file spans.
+pub fn lexically_resolved_identifier_spans(
+    params: &[TypedParam],
+    body: &[SNode],
+    source: &str,
+) -> HashSet<(usize, usize)> {
+    let mut analysis =
+        LexicalAnalysis::new_with_source(&MatchPatternCatalog::default(), Some(source));
+    analysis.walk_body_with_bindings(
+        body,
+        Vec::new(),
+        false,
+        BindingOwner::Current,
+        parameter_scope(params, &BindingOwner::Current),
+    );
+    analysis.lexically_resolved
+}
+
 /// Resolve a property receiver to its root binding and ordered property path.
 ///
 /// Both ordinary and optional property access recurse through the same lexical
@@ -338,20 +361,28 @@ enum ScopeBinding {
 
 type Scope = HashMap<String, ScopeBinding>;
 
-struct LexicalAnalysis {
+struct LexicalAnalysis<'source> {
     captured: HashSet<BindingId>,
     reassigned: BTreeSet<String>,
     resolved: HashMap<(usize, usize), BindingId>,
+    lexically_resolved: HashSet<(usize, usize)>,
     match_patterns: MatchPatternCatalog,
+    source: Option<&'source str>,
 }
 
-impl LexicalAnalysis {
+impl<'source> LexicalAnalysis<'source> {
     fn new(match_patterns: &MatchPatternCatalog) -> Self {
+        Self::new_with_source(match_patterns, None)
+    }
+
+    fn new_with_source(match_patterns: &MatchPatternCatalog, source: Option<&'source str>) -> Self {
         Self {
             captured: HashSet::new(),
             reassigned: BTreeSet::new(),
             resolved: HashMap::new(),
+            lexically_resolved: HashSet::new(),
             match_patterns: match_patterns.clone(),
+            source,
         }
     }
 
@@ -641,6 +672,26 @@ impl LexicalAnalysis {
                     );
                 }
             }
+            Node::InterpolatedString(segments) => {
+                let Some(source) = self.source else {
+                    return;
+                };
+                for segment in segments {
+                    let harn_lexer::StringSegment::Expression(expression, line, column) = segment
+                    else {
+                        continue;
+                    };
+                    let Some(expression) = crate::interpolation::parse_expression(
+                        Some(source),
+                        expression,
+                        *line,
+                        *column,
+                    ) else {
+                        continue;
+                    };
+                    self.walk_node(&expression, scopes, inside_nested_callable, owner);
+                }
+            }
             _ => self.walk_children(node, scopes, inside_nested_callable, owner),
         }
     }
@@ -777,7 +828,11 @@ impl LexicalAnalysis {
         scopes: &[Scope],
         inside_nested_callable: bool,
     ) {
-        match resolve(scopes, name) {
+        let resolved = resolve(scopes, name);
+        if resolved.is_some() {
+            self.lexically_resolved.insert((span.start, span.end));
+        }
+        match resolved {
             Some(ScopeBinding::Current(binding)) => {
                 self.resolved
                     .insert((span.start, span.end), binding.clone());

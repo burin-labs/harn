@@ -97,6 +97,13 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                retain_lexically_resolved_calls(
+                    params,
+                    body,
+                    source,
+                    &mut calls,
+                    &mut ambient_capability_calls,
+                );
                 annotate_nested_closure_capability_bindings(inner, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
@@ -142,6 +149,13 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                retain_lexically_resolved_calls(
+                    params,
+                    body,
+                    source,
+                    &mut calls,
+                    &mut ambient_capability_calls,
+                );
                 annotate_nested_closure_capability_bindings(inner, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
@@ -185,6 +199,19 @@ pub(super) fn collect_callable_infos(
             .retain(|call| !local_callable_names.contains(&call.name));
     }
     infos
+}
+
+fn retain_lexically_resolved_calls(
+    params: &[TypedParam],
+    body: &[SNode],
+    source: &str,
+    calls: &mut Vec<CallSite>,
+    ambient_calls: &mut Vec<AmbientCapabilityCall>,
+) {
+    let lexical_references =
+        harn_parser::lexical::lexically_resolved_identifier_spans(params, body, source);
+    calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));
+    ambient_calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));
 }
 
 fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<String> {

@@ -1033,7 +1033,7 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_local_callables() 
 #[test]
 fn capability_apply_ignores_ambient_builtin_names_shadowed_by_callable_parameters() {
     let (result, updated) = apply_single(
-        "fn callback_call(call: fn() -> int) -> int { return call() }\nfn callback_git(git: fn() -> int) -> int { return git() }\n",
+        "fn call() -> string { return read_file(\"value.txt\") }\nfn callback_call(call: fn() -> int) -> int { return call() }\nfn callback_git(git: fn() -> int) -> int { return git() }\nfn callback_interpolation(call: fn() -> int) -> string { return \"${call()}\" }\n",
     );
 
     assert_eq!(
@@ -1043,6 +1043,14 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_callable_parameter
     assert!(
         !updated.contains("HarnessLlm") && !updated.contains("HarnessTools"),
         "lexical callbacks must not acquire ambient capability authority:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn callback_call(call: fn() -> int) -> int"),
+        "the callback must not inherit authority from the same-named module callable:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn callback_interpolation(call: fn() -> int) -> string"),
+        "interpolated callback calls must use the same lexical resolution:\n{updated}"
     );
 }
 
