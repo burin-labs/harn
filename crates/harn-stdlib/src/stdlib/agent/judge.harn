@@ -72,8 +72,18 @@ pub import { agent_turn_end_judge_cap } from "std/agent/turn_end"
 /** Action the completion-judge model is allowed to return. */
 pub type CompletionJudgeAction = "accept" | "continue"
 
-/** Runtime completion decision after deadline and policy enforcement. */
-pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
+/**
+ * Runtime completion decision after deadline and policy enforcement.
+ *
+ * The two stop actions differ on ONE question: had the deterministic verifier
+ * oracle already answered when the loop ran out of judge invocations?
+ * `stop_verified` means it had, and it passed; the judge's dissent is kept on
+ * the receipt rather than deciding the run. `stop_unverified` is every other
+ * stop, including a cap reached over a `failed` or `not_run` oracle.
+ */
+pub type CompletionDirectiveAction = CompletionJudgeAction \
+  | "stop_unverified" \
+  | "stop_verified"
 
 pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
 
@@ -697,7 +707,36 @@ fn __judge_directive(
   defer_feedback: bool,
 ) -> CompletionDirective {
   const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
-  const reason = if terminal_reason != "" {
+  // A cap is a statement about the JUDGE running out of turns, not about the
+  // work. When the deterministic oracle already ran and passed, the run has a
+  // stronger answer than the judge was being asked for, so the cap stops it as
+  // verified and the dissent stays on the receipt (`outcome`, `gap_class`,
+  // `reason`) for whoever grades it later. `observed` is a positive reading
+  // ONLY on "passed": `not_run` also covers "the gate could not read facts",
+  // and treating that as verified would convert a genuine non-convergence into
+  // a clean stop, which is the worse defect. An explicit
+  // `terminal_judge_reason` is untouched — that is the judge naming a terminal,
+  // not the loop running out of room.
+  const cap_reached = completion_judge_cap_reached || turn_end_judge_cap_reached
+  const verified_at_cap = cap_reached
+    && terminal_reason == ""
+    && to_string(payload?.verification?.observed ?? "") == "passed"
+  const action = if verified_at_cap {
+    "stop_verified"
+  } else if terminal_reason != "" || cap_reached {
+    "stop_unverified"
+  } else if verdict.vetoed {
+    "continue"
+  } else {
+    "accept"
+  }
+  // A cap over a passed oracle gets its OWN wire reason. Reusing the cap label
+  // would leave a run that finished and one that never converged sharing a
+  // single value, which is what #8058 is about. Which cap it was is not lost:
+  // `invoked` on the same receipt names the judge that ran.
+  const reason = if verified_at_cap {
+    "judge_cap_reached_over_verified_pass"
+  } else if terminal_reason != "" {
     terminal_reason
   } else if completion_judge_cap_reached {
     "completion_judge_cap_reached"
@@ -705,15 +744,6 @@ fn __judge_directive(
     "turn_end_judge_cap_reached"
   } else {
     to_string(verdict?.reason ?? verdict?.reasoning ?? "")
-  }
-  const action = if terminal_reason != ""
-    || completion_judge_cap_reached
-    || turn_end_judge_cap_reached {
-    "stop_unverified"
-  } else if verdict.vetoed {
-    "continue"
-  } else {
-    "accept"
   }
   const has_feedback = verdict.vetoed
     && trim(to_string(verdict?.feedback ?? "")) != ""

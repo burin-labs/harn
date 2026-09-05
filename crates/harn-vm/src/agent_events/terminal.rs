@@ -149,7 +149,7 @@ impl AgentTerminalKind {
 /// callback `stop`) that must NOT be reported as a natural completion — that
 /// conflation is the Burin #4642 failure mode. Sourced from the loop's own
 /// terminal-`done` assignments and `__agent_loop_sealed_stop_reason`.
-const NATURAL_STOP_REASONS: [&str; 9] = [
+const NATURAL_STOP_REASONS: [&str; 10] = [
     "",
     "completed",
     "natural",
@@ -158,6 +158,10 @@ const NATURAL_STOP_REASONS: [&str; 9] = [
     "required_tools_satisfied",
     "sentinel",
     "stalled_turn_end_judge",
+    // The completion judge ran out of invocations while the deterministic
+    // verifier had already passed. The oracle answered, so the run completed;
+    // the judge's dissent is on the completion directive receipt.
+    "judge_cap_reached_over_verified_pass",
     "done",
 ];
 
