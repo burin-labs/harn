@@ -175,9 +175,13 @@ pub fn __agent_loop_project_terminal_result(
             opts?.verify_completion_judge,
             agent_completion_review(harness.llm, opts),
           ),
-          cap_reached: final_status == "completion_unverified"
-            && stop_reason
-              == "completion_judge_cap_reached",
+          // The cap was reached whether or not it proved fatal. Since #8058 a
+          // cap over a passed verifier seals `done` with its own reason, so
+          // gating this on `completion_unverified` alone would report zero
+          // caps on exactly the runs that hit one.
+          cap_reached: (final_status == "completion_unverified"
+            && stop_reason == "completion_judge_cap_reached")
+            || stop_reason == "judge_cap_reached_over_verified_pass",
         },
       }
   }
@@ -188,8 +192,10 @@ pub fn __agent_loop_project_terminal_result(
           invocations: state.turn_end_judge_invocations,
           vetoes: state.turn_end_judge_vetoes,
           max_invocations: agent_turn_end_judge_cap(opts?.turn_end_condition),
-          cap_reached: final_status == "completion_unverified"
-            && stop_reason == "turn_end_judge_cap_reached",
+          // Same as above: a verified cap still counts as a cap.
+          cap_reached: (final_status == "completion_unverified"
+            && stop_reason == "turn_end_judge_cap_reached")
+            || stop_reason == "judge_cap_reached_over_verified_pass",
         },
       }
   }
