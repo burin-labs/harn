@@ -445,9 +445,11 @@ sources = [
   "crates/harn-cli/src/cli/providers.rs",
   "crates/harn-cli/src/commands/providers.rs",
   "crates/harn-cli/src/commands/providers/",
-  "crates/harn-vm/src/llm_config.rs",
+  "crates/harn-vm/src/llm_config/",
+  "crates/harn-provider-catalog/src/",
   "crates/harn-vm/src/llm/capabilities.rs",
   "crates/harn-vm/src/provider_catalog.rs",
+  "crates/harn-vm/src/provider_catalog/",
 ]
 ci = true
 make_all = true
