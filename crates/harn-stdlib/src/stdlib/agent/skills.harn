@@ -66,6 +66,10 @@ fn __tool_registry_has(registry: dict, name: string) {
  * to notice: the model is simply told its session is `${HARN_SESSION_ID}`.
  * Returning nil rather than the raw prompt lets each caller keep its own
  * framing for the unavailable case instead of this deciding for them.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
  */
 pub fn __skill_rendered_prompt(
   agent: HarnessAgent,

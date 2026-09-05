@@ -496,12 +496,12 @@ fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict)
  *
  * Internal, but exported so a conformance case can assert the served bytes
  * without standing up a live agent session around it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
  */
-pub fn __agent_active_skill_prompt(
-  agent: HarnessAgent,
-  session_id: any,
-  active: list?,
-) -> string {
+pub fn __agent_active_skill_prompt(agent: HarnessAgent, session_id: any, active: list?) -> string {
   if len(active ?? []) == 0 {
     return ""
   }
