@@ -8,7 +8,7 @@ use std::process::Command;
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
 
-const DOCTOR_SCHEMA_VERSION: u32 = 2;
+const DOCTOR_SCHEMA_VERSION: u32 = 3;
 
 fn binary_path() -> std::path::PathBuf {
     // CARGO_BIN_EXE_<name> is set by Cargo for integration tests in the
@@ -53,6 +53,10 @@ fn doctor_json_smoke() {
     assert!(host["os"].is_string());
     assert!(host["arch"].is_string());
     assert!(host["harn_version"].is_string());
+    let process_sandbox = &host["process_sandbox"];
+    assert!(process_sandbox["backend"].is_string());
+    assert!(process_sandbox["filesystem_mechanism"].is_string());
+    assert!(process_sandbox["active"].is_boolean());
 
     // Summary uses the new "blocking"/"warning" names per the spec.
     let summary = &data["summary"];
@@ -133,6 +137,7 @@ fn doctor_json_smoke() {
         "actionlint",
         "platform:file-watcher",
         "platform:browser-opener",
+        "platform:process-sandbox",
     ];
     for check in checks {
         for field in ["id", "status", "label", "detail"] {

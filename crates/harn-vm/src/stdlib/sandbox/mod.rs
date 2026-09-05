@@ -69,6 +69,8 @@ use paths::{
     normalize_io_device_path, path_is_within, relocated_runtime_roots,
 };
 
+#[cfg(all(test, target_os = "linux"))]
+mod enforcement_report;
 mod handler_env;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -189,6 +191,19 @@ pub(crate) trait SandboxBackend {
     /// Stable identifier used in diagnostics and conformance fixtures.
     fn name() -> &'static str;
 
+    /// Stable identifier for the filesystem-confinement mechanism this
+    /// backend attempts to attach. This names the mechanism even when the
+    /// running host cannot supply it, so diagnostics can distinguish
+    /// "Landlock unavailable" from "no backend exists for this platform".
+    fn filesystem_mechanism() -> &'static str;
+
+    /// Whether this host can enforce the backend's filesystem mechanism.
+    /// This may differ from [`Self::available`] when a composite backend can
+    /// still enforce non-filesystem restrictions.
+    fn filesystem_available() -> bool {
+        Self::available()
+    }
+
     /// Whether the platform mechanism this backend uses is available
     /// on the running host (e.g. Landlock kernel support, the
     /// `/usr/bin/sandbox-exec` binary, AppContainer APIs).
@@ -283,6 +298,9 @@ impl SandboxBackend for NoopBackend {
     fn name() -> &'static str {
         "noop"
     }
+    fn filesystem_mechanism() -> &'static str {
+        "none"
+    }
     fn available() -> bool {
         false
     }
@@ -315,6 +333,18 @@ pub(crate) fn reset_sandbox_state() {
 /// callers can record which backend produced a recorded run.
 pub fn active_backend_name() -> &'static str {
     ActiveBackend::name()
+}
+
+/// Stable identifier for the active backend's filesystem-confinement
+/// mechanism. Paired with [`active_backend_available`]: the name says what the
+/// backend needs, while the boolean says whether this host can enforce it.
+pub fn active_backend_filesystem_mechanism() -> &'static str {
+    ActiveBackend::filesystem_mechanism()
+}
+
+/// Whether the active backend can enforce its filesystem mechanism here.
+pub fn active_backend_filesystem_available() -> bool {
+    ActiveBackend::filesystem_available()
 }
 
 /// Whether the platform mechanism backing the active sandbox backend

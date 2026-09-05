@@ -698,6 +698,39 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      # Report the mechanism from the runtime that actually installs it, then
+      # force a live outside-write through the same branch. On Linux runners
+      # without Landlock the write must succeed; treating a missing file as a
+      # denial would make the detector's absence read as sandbox coverage.
+      - name: Report process filesystem confinement
+        timeout-minutes: 5
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: |
+          set -euo pipefail
+          if ! output="$(
+            cargo test --locked -p harn-vm --lib \
+              process_filesystem_sandbox_report_matches_live_escape -- --nocapture 2>&1
+          )"; then
+            printf '%s\n' "$output"
+            exit 1
+          fi
+          printf '%s\n' "$output"
+          marker=""
+          while IFS= read -r line; do
+            case "$line" in
+              HARN_SANDBOX_ENFORCEMENT*) marker="$line"; break ;;
+            esac
+          done <<< "$output"
+          if [[ -z "$marker" ]]; then
+            echo "sandbox enforcement probe produced no receipt" >&2
+            exit 1
+          fi
+          {
+            echo "### Process filesystem confinement"
+            echo
+            echo "\`$marker\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       # The kill switch retains the archive-mode fallback, but the normal path
       # executes the already-compiled suite directly in this warm workspace.
       - name: Build portable workspace test archive
@@ -718,7 +751,7 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
-          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
+          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -997,7 +1030,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
+          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
 
   rust-security:
     name: Run Linux sandbox tests
