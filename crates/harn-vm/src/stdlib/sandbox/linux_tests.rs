@@ -134,6 +134,88 @@ fn network_ceiling_allows_all_socket_syscalls() {
 }
 
 #[test]
+fn filesystem_metadata_syscalls_include_fchmodat2() {
+    let policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
+    let allowed = allowed_syscalls(&policy);
+
+    assert!(
+        allowed.contains(&452),
+        "modern tools use fchmodat2 to preserve symlink metadata",
+    );
+}
+
+#[test]
+fn sandboxed_tar_extracts_symlinks_without_widening_the_write_root() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let source = workspace.path().join("archive-source");
+    let extract = workspace.path().join("extract");
+    std::fs::create_dir(&source).expect("archive source");
+    std::fs::create_dir(&extract).expect("extract root");
+    std::fs::write(source.join("harn"), "fixture binary").expect("fixture binary");
+    std::os::unix::fs::symlink("harn", source.join("harn-dap")).expect("fixture symlink");
+    let archive = workspace.path().join("harn.tar.gz");
+    let create = Command::new("tar")
+        .args(["-czf"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(&source)
+        .arg(".")
+        .output()
+        .expect("create archive");
+    assert!(
+        create.status.success(),
+        "create archive: {}",
+        String::from_utf8_lossy(&create.stderr),
+    );
+
+    let mut policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
+    policy.workspace_roots = vec![workspace.path().display().to_string()];
+    policy.side_effect_level = Some("process_exec".to_string());
+    let run_tar = |destination: &Path| {
+        let args = vec![
+            "-xzf".to_string(),
+            archive.display().to_string(),
+            "-C".to_string(),
+            destination.display().to_string(),
+        ];
+        let mut command = Command::new("tar");
+        command.args(&args).current_dir(workspace.path());
+        let preparation = Backend::prepare_std_command(
+            "tar",
+            &args,
+            &mut command,
+            &policy,
+            SandboxProfile::Worktree,
+        )
+        .expect("prepare sandboxed tar");
+        assert!(matches!(preparation, PrepareOutcome::Direct));
+        command.output().expect("run sandboxed tar")
+    };
+
+    let extracted = run_tar(&extract);
+    assert!(
+        extracted.status.success(),
+        "extract archive: {}",
+        String::from_utf8_lossy(&extracted.stderr),
+    );
+    assert_eq!(
+        std::fs::read_link(extract.join("harn-dap")).expect("extracted symlink"),
+        Path::new("harn"),
+    );
+
+    let outside = tempfile::tempdir().expect("outside workspace");
+    let refused = run_tar(outside.path());
+    assert!(
+        !refused.status.success(),
+        "fchmodat2 must not weaken the Landlock write boundary",
+    );
+    assert!(
+        !outside.path().join("harn").exists(),
+        "an out-of-scope extraction must write nothing",
+    );
+}
+
+#[test]
 fn network_ceiling_grants_exact_name_service_files_without_opening_run() {
     let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
     assert!(network_name_service_read_roots(&policy).is_empty());
