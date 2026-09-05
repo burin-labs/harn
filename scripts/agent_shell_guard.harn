@@ -49,13 +49,7 @@ fn command_groups(command: string) -> list<list<ShellCommandStage>> {
 }
 
 fn stage_program(stage: ShellCommandStage) -> string {
-  if len(stage.argv) == 0 {
-    return ""
-  }
-  // Keep only the basename so `./target/release/harn` and `/usr/bin/make`
-  // classify the same as their bare names.
-  const parts = (stage.argv[0] ?? "").split("/")
-  return parts[len(parts) - 1] ?? ""
+  return argv_program(stage.argv)
 }
 
 pub fn program_of(segment: string) -> string {
@@ -145,6 +139,8 @@ fn argv_program(argv: list<string>) -> string {
   if len(argv) == 0 {
     return ""
   }
+  // Keep only the basename so `./target/release/harn` and `/usr/bin/make`
+  // classify the same as their bare names.
   const parts = to_string(argv[0] ?? "").split("/")
   return parts[len(parts) - 1] ?? ""
 }
