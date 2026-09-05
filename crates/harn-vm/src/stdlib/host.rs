@@ -926,9 +926,13 @@ async fn dispatch_builtin_host_operation(
                 .unwrap_or_default();
             Ok(VmValue::String(arcstr::ArcStr::from(path)))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("host_call: unsupported operation {capability}.{operation}"),
-        )))),
+        // A capability the host does not implement is the boundary refusing,
+        // not the script raising an application value. Only a raw `throw` is
+        // redacted as an undeclared value on the way out to a tool caller, so
+        // a refusal spelled as one stops naming the operation it refused.
+        _ => Err(VmError::Runtime(format!(
+            "host_call: unsupported operation {capability}.{operation}"
+        ))),
     }
 }
 
@@ -1120,9 +1124,9 @@ async fn host_call_builtin(
         .cloned()
         .unwrap_or_default();
     let Some((capability, operation)) = name.split_once('.') else {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("host_call: unsupported operation name '{name}'"),
-        ))));
+        return Err(VmError::Runtime(format!(
+            "host_call: unsupported operation name '{name}'"
+        )));
     };
     dispatch_host_operation_with_ctx(Some(&ctx), capability, operation, &params).await
 }
