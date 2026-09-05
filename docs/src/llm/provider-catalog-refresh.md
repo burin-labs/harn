@@ -33,20 +33,27 @@ different providers are compared independently.
 ```bash
 # Default: replay against bundled fixtures, write report + candidate
 # under .harn-runs/provider_catalog/.
-harn run scripts/update_provider_catalog.harn
+harn provider catalog refresh
 
 # Live mode: hit real provider sources. Key-required adapters attach
 # the configured auth header from env vars; missing keys produce a
 # "skipped" diagnostic in the report instead of a failure.
-harn run scripts/update_provider_catalog.harn -- --live
+harn provider catalog refresh --live
 
 # CI gate: same fixture replay, but compare against the committed
 # goldens at scripts/provider_catalog_fixtures/expected_*.
-harn run scripts/update_provider_catalog.harn -- --check
+harn provider catalog refresh --check
 
 # Refresh the committed goldens after intentional adapter changes.
-harn run scripts/update_provider_catalog.harn -- --check --update
+harn provider catalog refresh --check --update
 ```
+
+The command stops a refresh that exceeds 120 seconds and reports a timeout as
+a failed, incomplete refresh rather than an empty catalog. Pass
+`--timeout-secs <seconds>` to choose a different bound, or
+`--timeout-secs 0` to wait indefinitely. Fixture mode is the default and does
+not grant the child process network access; `--live` selects live sources and
+adds that grant explicitly.
 
 The CI gate is wired into `make check-provider-catalog-drift` and runs
 from `make all`.
