@@ -24,6 +24,10 @@ set -euo pipefail
 #      widened past their age, keeps both.
 #   8. A live process outranks the cap. With room for nothing, a tree a build
 #      is holding is still kept.
+#   9. A restored seed's timestamps are not an idle reading. The entry's own
+#      mtime is frozen at seed time because Cargo writes into `debug/`, so a
+#      tree built into minutes ago must survive the idle bound, while a tree
+#      idle at every depth must still be retired.
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 gc="$repo_root/scripts/prune_stale_targets.sh"
@@ -192,6 +196,41 @@ done
 grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$nocap" \
   || fail "with room for nothing, an idle warm tree was still kept" "$nocap"
 
+# A restored seed's timestamps must not read as an idle tree. `cargo_target_seed.sh`
+# lays a tree down with the seed's own mtimes, and Cargo then writes into
+# `debug/` rather than the entry root for the rest of that tree's life, so the
+# entry's own mtime is frozen at seed time no matter how much is built. Ranking
+# on it retired a tree that a worktree was actively building into: measured on
+# the fleet cache, eight of fourteen entries read 2026-08-09 at the entry while
+# their `debug/` read 2026-09-04, and one was removed as a cold cache mid-build.
+git -C "$repos/live" worktree add -q "$repos/seeded" -b seeded
+git -C "$repos/live" worktree add -q "$repos/abandoned" -b abandoned
+seeded="$targets/${repos_leaf}-seeded"
+abandoned="$targets/${repos_leaf}-abandoned"
+mkdir -p "$seeded/debug" "$abandoned/debug"
+# The restored seed: entry stamped at seed time, built into just now.
+touch -t 202001010000 "$seeded"
+touch "$seeded/debug"
+# The control: nothing has touched this tree at any depth.
+touch -t 202001010000 "$abandoned/debug" "$abandoned"
+
+# Room for nothing, so rank protects no entry and only the idle bound can
+# decide. A tree built into within the bound must survive that bound being
+# measured at all.
+seedcap="$tmp_root/seedcap.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=0 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=3600 \
+  bash "$gc" --dry-run >"$seedcap" 2>&1
+grep -Fq "would remove cold cache: ${repos_leaf}-seeded" "$seedcap" \
+  && fail "a tree built into minutes ago was retired on its restored seed mtime" "$seedcap"
+# Negative control on the same run: the fix must not simply stop retiring
+# things. A tree nothing has touched at any depth is still cache.
+grep -Fq "would remove cold cache: ${repos_leaf}-abandoned" "$seedcap" \
+  || fail "a tree idle at every depth was kept, so the idle bound now decides nothing" "$seedcap"
+
 # Print what the pass actually decided. A green run that shows only "ok"
 # cannot be told apart from one that scanned nothing.
 echo "--- retention report (dry run) ---"
@@ -202,4 +241,6 @@ echo "--- retention cap ---"
 cat "$capped"
 echo "--- retention cap, idle bound widened (negative control) ---"
 cat "$uncapped"
+echo "--- restored-seed mtime and its negative control ---"
+cat "$seedcap"
 echo "prune_stale_targets_retention_test: ok"
