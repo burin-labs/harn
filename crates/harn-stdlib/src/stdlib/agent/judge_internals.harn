@@ -1019,6 +1019,9 @@ pub type CompletionBoundaryReading = {
   final_text: string,
   // Deferred tool effects that outlive this turn.
   pending_tool_batch_effect_count: int,
+  // Declared acceptance-ledger rows this boundary has not established as met.
+  // Zero when the run declared no ledger.
+  ledger_pending_count: int,
 }
 
 /**
@@ -1053,6 +1056,20 @@ pub type CompletionBoundaryReading = {
  *    judge exists for.
  * 6. `pending_tool_batch_effect_count == 0` — no deferred effect outlives the
  *    turn. A pending effect means the verifier's reading is already stale.
+ * 7. `ledger_pending_count == 0` — no declared acceptance row is outstanding.
+ *    The verifier answers "did the declared command pass"; the ledger answers
+ *    "was each thing the task asked for delivered", and a green verifier is not
+ *    an answer to the second. The judge is where a declared row is assessed, so
+ *    skipping it over an open ledger would seal a done that nothing measured.
+ *    Note what this clause is NOT: it does not let the judge be skipped because
+ *    a ledger came back met. It only refuses the skip when one is outstanding.
+ *
+ * Clause 7 exists because the skip does not only skip the judge, it skips
+ * everything behind the judge, and the pending-requirements check that turns a
+ * done into a continue lives inside the structured invocation. Found by
+ * lane-forensics against harn#8126, reproduced with one variable changed: the
+ * same run whose gate reason is `verified` asks the judge once and ends
+ * `completion_unverified`.
  *
  * There is deliberately no clause for "the gate accepted". `verified_after_write`
  * is emitted only on the ladder's allow branch, so the acceptance is carried by
@@ -1079,6 +1096,7 @@ pub fn __completion_typed_green_terminal(reading: CompletionBoundaryReading) -> 
     && reading.stop_reason == "sentinel"
     && trim(reading.final_text) != ""
     && reading.pending_tool_batch_effect_count == 0
+    && reading.ledger_pending_count == 0
 }
 
 /**
