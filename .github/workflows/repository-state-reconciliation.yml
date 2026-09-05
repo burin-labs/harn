@@ -17,7 +17,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: repository-state-reconciliation-${{ github.repository }}
+  # A scheduled reconciliation and a merge-group cancellation establish
+  # different claims. Let each supersede only older work of its own event type
+  # so one controller cannot cancel the other before its proof runs.
+  group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

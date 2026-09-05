@@ -122,6 +122,7 @@ grep -Fq 'run: ./scripts/check_development_cutover.sh' "$workflow"
 grep -Fq 'context="development cutover"' "$workflow"
 grep -Fq 'name: Cancel obsolete speculative workflows' "$workflow"
 grep -Fq "if: github.event_name == 'merge_group'" "$workflow"
+grep -Fq 'group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name }}' "$workflow"
 grep -Fq 'run: ./scripts/cancel_superseded_merge_groups.sh --repo "$TARGET_REPO" --apply' "$workflow"
 
 echo "development_cutover_monitor_test: ok"
