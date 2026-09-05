@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::test_util;
 
-use test_util::process::{harn_e2e_command, run_harn_e2e as run};
+use test_util::process::{command_schema_version, harn_e2e_command, run_harn_e2e as run};
 
 fn parse_json(s: &str, label: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|err| {
@@ -51,7 +51,7 @@ fn doctor_json_envelope_parses() {
         outcome.stderr
     );
     let value = parse_json(&outcome.stdout, "doctor --json");
-    assert_eq!(value["schemaVersion"], 2);
+    assert_eq!(value["schemaVersion"], command_schema_version("doctor"));
     assert_eq!(value["ok"], true);
 }
 
@@ -67,7 +67,8 @@ fn doctor_json_envelope_carries_schema_and_top_level_keys() {
     let outcome = run(&["doctor", "--json"], &[]);
     let value = parse_json(&outcome.stdout, "doctor --json");
     assert_eq!(
-        value["schemaVersion"], 2,
+        value["schemaVersion"],
+        command_schema_version("doctor"),
         "doctor schema version drifted; bump DOCTOR_SCHEMA_VERSION + downstream consumers"
     );
     assert_eq!(value["ok"], true, "doctor --json should have ok=true");

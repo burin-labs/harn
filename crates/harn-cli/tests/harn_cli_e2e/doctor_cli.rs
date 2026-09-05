@@ -8,7 +8,7 @@ use std::process::Command;
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
 
-const DOCTOR_SCHEMA_VERSION: u32 = 3;
+use crate::test_util::process::command_schema_version;
 
 fn binary_path() -> std::path::PathBuf {
     // CARGO_BIN_EXE_<name> is set by Cargo for integration tests in the
@@ -29,7 +29,7 @@ fn doctor_json_smoke() {
     );
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("doctor --json is valid JSON");
-    let data = assert_envelope(&parsed, DOCTOR_SCHEMA_VERSION);
+    let data = assert_envelope(&parsed, command_schema_version("doctor"));
 
     // Stable top-level keys consumed by host preflight automation
     // (`checks`, `hardware`, `summary`, `next_step`) plus the new
@@ -186,7 +186,10 @@ fn doctor_appears_in_json_schemas_catalog() {
     let entries = data.as_array().expect("data is an array");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["command"], "doctor");
-    assert_eq!(entries[0]["schemaVersion"], DOCTOR_SCHEMA_VERSION);
+    assert_eq!(
+        entries[0]["schemaVersion"],
+        command_schema_version("doctor")
+    );
 }
 
 /// Asserts that no check ever surfaces a literal env-var value in `detail`.

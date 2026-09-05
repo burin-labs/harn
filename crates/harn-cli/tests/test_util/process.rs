@@ -96,6 +96,15 @@ pub fn harn_e2e_command() -> Command {
     command
 }
 
+/// Read the command's registered schema contract instead of copying its version.
+pub fn command_schema_version(command: &str) -> u32 {
+    harn_cli::json_envelope::catalog()
+        .into_iter()
+        .find(|entry| entry.command == command)
+        .unwrap_or_else(|| panic!("command has no registered JSON schema: {command}"))
+        .schema_version
+}
+
 /// Captured result from one real `harn` CLI invocation.
 pub struct HarnCliOutput {
     pub stdout: String,
