@@ -5,12 +5,12 @@ import {
   __tool_result_ok,
 } from "std/agent/loop_result_status"
 import { __with_prompt_fragment } from "std/agent/preflight"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import {
   AgentTranscriptToolLifecycle,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
 import { ToolRegistry } from "std/tools"
-import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 const __COMPLETION_CLAIM_TOOL_NAME = "task_complete"
 
