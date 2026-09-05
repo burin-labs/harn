@@ -2,9 +2,26 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-verifier="$root/scripts/verify_release_archive_provenance.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+release_tools="$tmp/release-tools"
+"$root/scripts/stage_release_tools.sh" "$release_tools"
+verifier="$release_tools/verify_release_archive_provenance.sh"
+
+# The finalizer runs this staged copy after checking out the release tag. Prove
+# the policy is self-contained rather than accidentally resolving dependencies
+# from the current main checkout.
+mv "$release_tools/release_contract.env" "$tmp/release_contract.env"
+if "$verifier" --help >"$tmp/missing-contract.out" 2>"$tmp/missing-contract.err"; then
+  echo "FAIL: staged verifier ran without release_contract.env" >&2
+  exit 1
+fi
+if ! grep -Fq "release_contract.env" "$tmp/missing-contract.err"; then
+  echo "FAIL: missing staged release contract was not diagnosed" >&2
+  cat "$tmp/missing-contract.err" >&2
+  exit 1
+fi
+mv "$tmp/release_contract.env" "$release_tools/release_contract.env"
 
 readonly repo="burin-labs/harn"
 readonly tag="v0.10.40"
@@ -383,7 +400,7 @@ require_workflow_text "make_latest: \${{ needs.setup.outputs.make_latest }}"
 require_workflow_text "is_prerelease: \${{ steps.resolve.outputs.is_prerelease }}"
 require_workflow_text "source scripts/lib/release_version.sh"
 require_workflow_text 'policy_dir="$RUNNER_TEMP/release-provenance-policy"'
-require_workflow_text 'cp scripts/lib/release_version.sh "$policy_dir/lib/release_version.sh"'
+require_workflow_text 'scripts/stage_release_tools.sh "$policy_dir"'
 require_workflow_text 'cp .github/release-bot-allowed-signers "$policy_dir/release-bot-allowed-signers"'
 require_workflow_text 'bash "$RUNNER_TEMP/release-provenance-policy/verify_release_archive_provenance.sh"'
 require_workflow_text '--allowed-signers "$RUNNER_TEMP/release-provenance-policy/release-bot-allowed-signers"'
