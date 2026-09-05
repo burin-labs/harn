@@ -1,0 +1,203 @@
+// Run: harn test tests/agent/judge_self_citation_test.harn
+//
+// The completion judge must not read its own veto back as evidence (harn#7757).
+//
+// The mechanism, verified in code rather than assumed: when a completion veto
+// is injected after a turn whose native `tool_use` block was never dispatched,
+// the harness closes that orphaned block by synthesizing a `tool_result` that
+// carries the veto text as the observation, under the ORIGINAL tool's name and
+// call id, with an error outcome. The transcript lifecycle then reads that as a
+// failed call of that tool, and the evidence packet selects it as the latest
+// problem. The next judge call is shown its own rejection in the slot reserved
+// for what the workspace did.
+//
+// These arms assert by record provenance, never by matching the veto prose,
+// because prose is the thing that rots.
+import { __judge_evidence_projection } from "std/agent/judge"
+import { agent_transcript_tool_lifecycle_report } from "std/agent/transcript"
+
+const VETO = "The corrective directive states that the mandatory step of listing the required "
+  + "files via terminal is missing from the action history."
+
+fn assistant_calling(tool_name: string, call_id: string) -> dict {
+  return {
+    role: "assistant",
+    content: "Applying the change.",
+    _harn: {
+      kind: "assistant",
+      tool_calls: [{id: call_id, function: {name: tool_name, arguments: {path: "src/app.py"}}}],
+    },
+  }
+}
+
+/** A result the tool itself returned. */
+fn dispatched_result(tool_name: string, call_id: string, content: string, outcome: string) -> dict {
+  return {
+    role: "user",
+    content: content,
+    _harn: {kind: "tool_result", tool_call_id: call_id, tool_name: tool_name, outcome: outcome},
+  }
+}
+
+/**
+ * The result the harness synthesizes to close an orphaned `tool_use`, in the
+ * exact shape `synthesize_orphan_tool_results` writes: the orphaned call's own
+ * name and id, an error outcome, the injected feedback as the content, and the
+ * `harness_repair` origin that says who wrote it.
+ */
+fn repair_result(tool_name: string, call_id: string, feedback: string) -> dict {
+  return {
+    role: "user",
+    content: feedback,
+    _harn: {
+      kind: "tool_result",
+      tool_call_id: call_id,
+      tool_name: tool_name,
+      outcome: "error",
+      origin: "harness_repair",
+    },
+  }
+}
+
+const EDIT_TOOLS = {
+  tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}],
+}
+
+pipeline test_a_repaired_orphan_is_not_evidence_the_tool_failed(harness: Harness, task: unknown) {
+  const messages = [
+    {role: "user", content: "Fix the parser."},
+    assistant_calling("edit", "edit-1"),
+    repair_result("edit", "edit-1", VETO),
+  ]
+  const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
+  assert_eq(len(projected.packet.actions), 0)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, 1)
+  // The veto text must not reach the judge through the evidence packet at all.
+  assert(!contains(projected.serialized, VETO))
+}
+
+pipeline test_the_omission_is_counted_not_silent(harness: Harness, task: unknown) {
+  // A judge shown fewer actions than the run made must be able to tell why. If
+  // the drop were silent, a tagging bug and a genuinely actionless run would
+  // produce the same packet.
+  const messages = [
+    {role: "user", content: "Fix the parser."},
+    assistant_calling("edit", "edit-1"),
+    repair_result("edit", "edit-1", VETO),
+  ]
+  const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
+  assert_eq(projected.stats.omitted_harness_authored_result_count, 1)
+  assert_eq(projected.packet.relevant_action_count, 0)
+}
+
+pipeline test_a_repair_cannot_become_requirement_evidence(harness: Harness, task: unknown) {
+  // Requirement evidence is a parallel projection consumed separately from
+  // `packet.actions`. Even if a future repair carries structured artifact data,
+  // the harness's own record must not prove that a workspace mutation happened.
+  const synthetic_with_data = repair_result("edit", "edit-1", VETO)
+    + {
+      _harn: repair_result("edit", "edit-1", VETO)._harn
+        + {outcome: "ok", data: {mutation_status: "applied", changed_paths: ["src/app.py"]}},
+    }
+  const projected = __judge_evidence_projection(
+    [
+      {role: "user", content: "Fix the parser."},
+      assistant_calling("edit", "edit-1"),
+      synthetic_with_data,
+    ],
+    EDIT_TOOLS,
+  )
+  assert_eq(len(projected.packet.requirement_evidence), 0)
+  assert(!contains(projected.serialized, "src/app.py"))
+}
+
+pipeline test_a_real_failed_call_is_still_evidence(harness: Harness, task: unknown) {
+  // NEGATIVE CONTROL. The same shape with a dispatched error result keeps
+  // today's behavior exactly: a tool that really failed is a problem the judge
+  // must see, and this fix must not hide it.
+  const messages = [
+    {role: "user", content: "Fix the parser."},
+    assistant_calling("edit", "edit-1"),
+    dispatched_result("edit", "edit-1", "write failed: permission denied", "error"),
+  ]
+  const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
+  assert_eq(len(projected.packet.actions), 1)
+  assert_eq(projected.packet.actions[0]?.has_error_result, true)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, nil)
+  assert(!contains(projected.serialized, "omitted_harness_authored_result_count"))
+  assert(contains(projected.serialized, "permission denied"))
+}
+
+pipeline test_a_dispatched_result_survives_a_later_repair(harness: Harness, task: unknown) {
+  // A call can carry both: the tool ran, and the harness later appended a
+  // repair result under the same id. The real observation must stay, and only
+  // the harness-authored one drops.
+  const messages = [
+    {role: "user", content: "Fix the parser."},
+    assistant_calling("edit", "edit-1"),
+    dispatched_result("edit", "edit-1", "write applied to src/app.py", "ok"),
+    repair_result("edit", "edit-1", VETO),
+  ]
+  const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
+  assert_eq(len(projected.packet.actions), 1)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, 1)
+  assert(contains(projected.serialized, "write applied"))
+  assert(!contains(projected.serialized, VETO))
+  // The veto must not flip the call's outcome to a failure either.
+  assert_eq(projected.packet.actions[0]?.has_error_result, false)
+}
+
+pipeline test_the_repair_origin_is_read_from_the_dispatch_envelope(
+  harness: Harness,
+  task: unknown,
+) {
+  // The tag is carried on the storage-only `_harn` envelope, so it is a fact
+  // the dispatch seam wrote, not something re-derived from message shape here.
+  const report = agent_transcript_tool_lifecycle_report(
+    [
+      assistant_calling("edit", "edit-1"),
+      dispatched_result("edit", "edit-1", "write applied", "ok"),
+      repair_result("edit", "edit-1", VETO),
+    ],
+  )
+  assert_eq(len(report.calls), 1)
+  assert_eq(len(report.calls[0]?.results ?? []), 2)
+  assert_eq(report.calls[0]?.results?.[0]?.origin, "dispatch")
+  assert_eq(report.calls[0]?.results?.[1]?.origin, "harness_repair")
+}
+
+pipeline test_an_untagged_result_reads_as_dispatched(harness: Harness, task: unknown) {
+  // Sessions written before the tag existed carry no origin. The safe reading
+  // keeps such a result IN the evidence: a tagging gap must show up as a judge
+  // that sees too much, never as one that silently drops real observations.
+  const report = agent_transcript_tool_lifecycle_report(
+    [
+      assistant_calling("edit", "edit-1"),
+      dispatched_result("edit", "edit-1", "write applied", "ok"),
+    ],
+  )
+  assert_eq(report.calls[0]?.results?.[0]?.origin, "dispatch")
+}
+
+pipeline test_a_typed_result_row_preserves_its_origin(harness: Harness, task: unknown) {
+  // Normalization is used at more than one boundary. A row already projected
+  // into the public transcript shape must not lose provenance when it passes
+  // through the lifecycle reader again.
+  const typed_repair = {
+    schema: "harn.agent.transcript.row.v1",
+    kind: "tool_result",
+    role: "tool",
+    iteration: 1,
+    index: 1,
+    name: "edit",
+    tool_call_id: "edit-1",
+    text: VETO,
+    outcome: "error",
+    origin: "harness_repair",
+    data: {},
+  }
+  const report = agent_transcript_tool_lifecycle_report(
+    [assistant_calling("edit", "edit-1"), typed_repair],
+  )
+  assert_eq(report.calls[0]?.results?.[0]?.origin, "harness_repair")
+}

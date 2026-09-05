@@ -594,6 +594,15 @@ fn empty_user_suite_fails_closed_unless_explicitly_allowed() {
         "{}",
         String::from_utf8_lossy(&allowed.stderr)
     );
+    // The sibling control for the assertion above. Without it, a run that
+    // stopped reporting its coverage entirely would satisfy the empty-stderr
+    // check, and the line whose whole job is to expose a collapsed selection
+    // could be deleted without any test noticing.
+    assert!(
+        String::from_utf8_lossy(&allowed.stdout).contains("ran 0 case(s) from 1 discoverable"),
+        "the coverage line belongs on stdout beside the summary; stdout:\n{}",
+        String::from_utf8_lossy(&allowed.stdout)
+    );
 
     let positive = Command::new(binary_path())
         .args([

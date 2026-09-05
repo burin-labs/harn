@@ -21,11 +21,30 @@ fn assistant_calling(tool_name: string, call_id: string) -> dict {
   }
 }
 
-fn dispatched_result(tool_name: string, call_id: string, content: string) -> dict {
+fn dispatched_result(
+  tool_name: string,
+  call_id: string,
+  content: string,
+  outcome: string = "ok",
+) -> dict {
   return {
     role: "user",
     content: content,
-    _harn: {kind: "tool_result", tool_call_id: call_id, tool_name: tool_name, outcome: "ok"},
+    _harn: {kind: "tool_result", tool_call_id: call_id, tool_name: tool_name, outcome: outcome},
+  }
+}
+
+fn harness_repair_result(tool_name: string, call_id: string, content: string) -> dict {
+  return {
+    role: "user",
+    content: content,
+    _harn: {
+      kind: "tool_result",
+      tool_call_id: call_id,
+      tool_name: tool_name,
+      outcome: "error",
+      origin: "harness_repair",
+    },
   }
 }
 
@@ -70,6 +89,30 @@ pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown
   )
   assert_eq(disposition.kind, "invalid")
   assert_eq(disposition.reason, "completion_claim_evidence_ref_invalid")
+}
+
+pipeline test_claim_cannot_cite_harness_authored_feedback(harness: Harness, task: unknown) {
+  const messages = [
+    assistant_calling("edit", "edit-1"),
+    harness_repair_result("edit", "edit-1", "The harness says the edit is still missing."),
+  ]
+  const disposition = agent_completion_claim_disposition(
+    messages,
+    completion_dispatch(claim("implementation", ["edit-1"])),
+    {},
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_evidence_ref_unsupported")
+}
+
+pipeline test_claim_cannot_cite_a_failed_dispatch(harness: Harness, task: unknown) {
+  const disposition = agent_completion_claim_disposition(
+    [assistant_calling("edit", "edit-1"), dispatched_result("edit", "edit-1", "permission denied", "error")],
+    completion_dispatch(claim("implementation", ["edit-1"])),
+    {},
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_evidence_ref_unsupported")
 }
 
 pipeline test_claim_must_cover_the_declared_requirement_contract(harness: Harness, task: unknown) {

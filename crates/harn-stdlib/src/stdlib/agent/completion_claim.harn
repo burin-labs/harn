@@ -172,6 +172,12 @@ fn __completion_claim_invalid(reason: string, feedback: string) -> CompletionCla
   return {kind: "invalid", reason: reason, feedback: feedback}
 }
 
+fn __completion_claim_has_supporting_result(lifecycle: AgentTranscriptToolLifecycle) -> bool {
+  return lifecycle.results.any({ result ->
+    result.origin == "dispatch" && result.outcome == "ok"
+  })
+}
+
 fn __completion_claim_validate_requirements(
   claim: CompletionClaim,
   own_call_id: string,
@@ -229,6 +235,13 @@ fn __completion_claim_validate_requirements(
           "completion_claim_evidence_ref_unresolved",
           "Completion evidence ref `" + evidence_ref
             + "` did not resolve to exactly one recorded tool call.",
+        )
+      }
+      if !__completion_claim_has_supporting_result(matches[0]) {
+        return __completion_claim_invalid(
+          "completion_claim_evidence_ref_unsupported",
+          "Completion evidence ref `" + evidence_ref
+            + "` has no successful dispatched result and cannot support completion.",
         )
       }
       seen_requirement_refs = seen_requirement_refs + {[evidence_ref]: true}

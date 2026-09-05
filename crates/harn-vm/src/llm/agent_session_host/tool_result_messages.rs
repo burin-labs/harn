@@ -13,6 +13,7 @@
 //! has to close them first.
 
 use super::{dict_get, list_items, vm_to_json};
+use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::{DictMap, VmDictExt, VmValue};
 
 /// Normalize either structural Harn record representation at this host seam.
@@ -89,6 +90,9 @@ pub(super) struct ToolResultMessageInput<'a> {
     pub(super) ok: bool,
     pub(super) screenshots: &'a [VmValue],
     pub(super) data: Option<&'a VmValue>,
+    /// Who authored this result. Defaults to `Dispatch`; only the orphan-repair
+    /// synthesizer below sets `HarnessRepair`.
+    pub(super) origin: ToolResultOrigin,
 }
 
 pub(super) fn tool_result_message(input: ToolResultMessageInput<'_>) -> VmValue {
@@ -153,6 +157,7 @@ pub(super) fn tool_result_message(input: ToolResultMessageInput<'_>) -> VmValue 
         input.name,
         input.ok,
         input.data,
+        input.origin,
     )
 }
 
@@ -347,6 +352,10 @@ pub(super) fn synthesize_orphan_tool_results(
             // an image.
             screenshots: &[],
             data: None,
+            // The content here is the harness's own injected feedback, riding
+            // under the orphaned call's name and id. Say so, or a completion
+            // authority reads it back as a failed call of that tool.
+            origin: ToolResultOrigin::HarnessRepair,
         }));
     }
     out
