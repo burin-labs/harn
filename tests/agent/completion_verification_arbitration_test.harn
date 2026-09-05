@@ -16,7 +16,11 @@ import {
   __judge_evidence_projection,
   agent_completion_adjudicator_declared,
 } from "std/agent/judge"
-import { __completion_arbitration_converts } from "std/agent/judge_internals"
+import {
+  __completion_arbitration_converts,
+  __completion_contradiction_arbitration_converts,
+  __completion_verifier_answered_pass,
+} from "std/agent/judge_internals"
 import { agent_loop } from "std/agent/loop"
 import { llm_done, with_llm_script } from "std/testing"
 
@@ -117,6 +121,7 @@ pipeline test_arbitration_requires_every_clause(harness: Harness, task: unknown)
     __completion_arbitration_converts(
       "failed_verification",
       true,
+      true,
       "verified_after_write",
       "passed",
     ),
@@ -126,19 +131,21 @@ pipeline test_arbitration_requires_every_clause(harness: Harness, task: unknown)
     !__completion_arbitration_converts(
       "unmet_manner_clause",
       true,
+      true,
       "verified_after_write",
       "passed",
     ),
     "a manner-clause refusal is never converted",
   )
   assert(
-    !__completion_arbitration_converts("other", true, "verified_after_write", "passed"),
+    !__completion_arbitration_converts("other", true, true, "verified_after_write", "passed"),
     "an unnamed gap is never converted",
   )
   assert(
     !__completion_arbitration_converts(
       "failed_verification",
       false,
+      true,
       "verified_after_write",
       "passed",
     ),
@@ -147,12 +154,19 @@ pipeline test_arbitration_requires_every_clause(harness: Harness, task: unknown)
   // The isolated clause-3 case: a POSITIVE reading is present and the gate still
   // reports that it could not look. The reading loses.
   assert(
-    !__completion_arbitration_converts("failed_verification", true, "facts_unavailable", "passed"),
+    !__completion_arbitration_converts(
+      "failed_verification",
+      true,
+      true,
+      "facts_unavailable",
+      "passed",
+    ),
     "`facts_unavailable` blocks the conversion even alongside a passed reading",
   )
   assert(
     !__completion_arbitration_converts(
       "failed_verification",
+      true,
       true,
       "verified_after_write",
       "not_run",
@@ -162,6 +176,7 @@ pipeline test_arbitration_requires_every_clause(harness: Harness, task: unknown)
   assert(
     !__completion_arbitration_converts(
       "failed_verification",
+      true,
       true,
       "verified_after_write",
       "failed",
@@ -527,4 +542,102 @@ pipeline test_the_original_reading_now_skips_the_judge_entirely(harness: Harness
   assert_eq(captured.result.status, "done")
   // And nothing was converted, because nothing refused.
   assert_eq(__conversion_count(captured.events), 0)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The clause that was missing, and the runs that found it.
+//
+// Four headless sessions on a release binary ended terminal by sentinel over a
+// declared verifier that had run and failed, and each accepting receipt carried
+// `converted_from: "failed_verification_contradicted_by_gate"` beside a reading
+// of `observed: "passed"` with an EMPTY command and `oracle_expected: false`.
+// A model judge refused on failed verification, correctly, and was overruled by
+// a positive answer about a verifier that never existed.
+//
+// Every clause the conversion already had was satisfied on those runs. The gate
+// ran, the reason was not `facts_unavailable`, the reading said passed, and the
+// gap class was `failed_verification`. Nothing available to the predicate could
+// tell that reading apart from a real one, because the one field that could
+// was not consulted.
+
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_a_pass_with_no_declared_oracle_converts_nothing(harness: Harness, task: unknown) {
+  // The four sessions, at the predicate. Same arguments they carried.
+  assert(
+    !__completion_arbitration_converts(
+      "failed_verification",
+      true,
+      false,
+      "verified_after_write",
+      "passed",
+    ),
+    "a passing reading with no declared oracle is an answer about nothing and may not overrule a judge",
+  )
+  assert(
+    !__completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      true,
+      false,
+      "verified_after_write",
+      "passed",
+    ),
+    "and the sibling conversion is not exempt from the same clause",
+  )
+}
+
+pipeline test_a_declared_oracle_that_passed_still_converts(harness: Harness, task: unknown) {
+  // THE DIRECTION CONTROL, and the reason the clause is `oracle_expected` and
+  // not something broader. The mechanism must keep working on every run that
+  // actually declared a verifier and saw it pass, or the fix is a retirement.
+  assert(
+    __completion_arbitration_converts(
+      "failed_verification",
+      true,
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "a real declared verifier that passed still overrules a failed-verification refusal",
+  )
+  assert(
+    __completion_contradiction_arbitration_converts(
+      "other",
+      true,
+      true,
+      true,
+      "verified_after_write",
+      "passed",
+    ),
+    "and so does the contradiction conversion after its re-ask",
+  )
+}
+
+pipeline test_the_shared_precondition_is_the_only_copy(harness: Harness, task: unknown) {
+  // Three sites overrule or short-circuit a judge on a green verifier, and the
+  // clause they disagreed about is why this predicate exists. Asserting the
+  // shared one directly keeps a future clause from being added to one caller
+  // and missed by the others, which is the shape that produced the four runs.
+  assert(
+    __completion_verifier_answered_pass(true, true, "verified_after_write", "passed"),
+    "the oracle ran, was declared, and passed",
+  )
+  assert(
+    !__completion_verifier_answered_pass(true, false, "verified_after_write", "passed"),
+    "no declared oracle means no positive answer, whatever the reading says",
+  )
+  assert(
+    !__completion_verifier_answered_pass(false, true, "verified_after_write", "passed"),
+    "a gate that never ran answered nothing",
+  )
+  assert(
+    !__completion_verifier_answered_pass(true, true, "facts_unavailable", "passed"),
+    "a gate that could not look answered nothing either",
+  )
+  assert(
+    !__completion_verifier_answered_pass(true, true, "verified_after_write", "failed"),
+    "and a red reading is not a positive answer",
+  )
 }

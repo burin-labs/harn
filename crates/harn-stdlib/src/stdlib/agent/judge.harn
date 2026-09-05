@@ -958,6 +958,7 @@ fn __completion_policy_run_stage(
         {
           deterministic_invoked: evaluation.invoked.deterministic,
           deterministic_reason: evaluation.deterministic_reason,
+          oracle_expected: payload.verification?.oracle_expected ?? false,
           observed: to_string(payload.verification?.observed ?? "not_run"),
           stop_reason: payload.stop_reason,
           final_text: payload.text,
