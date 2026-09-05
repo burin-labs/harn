@@ -1,4 +1,8 @@
+#[cfg(unix)]
+use std::collections::BTreeSet;
 use std::fs;
+#[cfg(unix)]
+use std::io::BufRead;
 
 use tempfile::TempDir;
 
@@ -534,6 +538,12 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
 /// with SIGTERM, a worker killed with SIGKILL, and a wait that genuinely
 /// expired. The first two must name their signal; the third must not be a
 /// start failure at all.
+///
+/// The supervisor owns the run and replaces a worker that dies before
+/// acquiring, so reaching a start failure means killing every replacement
+/// until it stops offering one. That the run survives the first kill is
+/// asserted here too: it is the difference between a supervisor that absorbs
+/// a casualty and one that never had to.
 #[cfg(unix)]
 #[test]
 fn a_killed_pre_acquire_worker_names_its_signal_and_a_timeout_does_not() {
@@ -602,28 +612,68 @@ fn a_killed_pre_acquire_worker_names_its_signal_and_a_timeout_does_not() {
                 .expect("supervised run pipes stderr"),
         );
         let mut seen: Vec<String> = Vec::new();
-        wait_until_worker_is_queued(&mut stderr, &mut seen);
-
         let receipts = temp.path().join("leases/receipts");
-        let run_id = queued_run_id(&receipts);
-        let worker_pid = queued_worker_pid(&run_id);
 
-        let killed = std::process::Command::new("kill")
-            .args([signal, &worker_pid.to_string()])
-            .status()
-            .expect("signal the worker");
-        assert!(killed.success(), "kill {signal} did not succeed");
-
-        // Drain the rest of the pipe so the supervisor never blocks writing.
-        let mut rest = String::new();
-        let _ = std::io::Read::read_to_string(&mut stderr, &mut rest);
-        seen.extend(rest.lines().map(str::to_string));
+        // One kill no longer ends the run: the supervisor owns it and replaces
+        // a worker that dies before acquiring, so a single signal is absorbed
+        // and the run keeps waiting on a lease this test never releases. Kill
+        // every replacement as it announces its own wait. The run terminates
+        // when the supervisor stops replacing, and the receipt then carries the
+        // signal that killed the last worker.
+        let mut run_id = String::new();
+        let mut killed_pids: BTreeSet<u32> = BTreeSet::new();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if stderr.read_line(&mut line).expect("read worker stderr") == 0 {
+                break;
+            }
+            seen.push(line.trim_end().to_string());
+            if !line.contains("Waiting for rust-heavy lease") {
+                continue;
+            }
+            if run_id.is_empty() {
+                run_id = queued_run_id(&receipts);
+            }
+            let worker_pid = queued_worker_pid(&run_id, &killed_pids);
+            let killed = std::process::Command::new("kill")
+                .args([signal, &worker_pid.to_string()])
+                .status()
+                .expect("signal the worker");
+            assert!(killed.success(), "kill {signal} did not succeed");
+            killed_pids.insert(worker_pid);
+            // The supervisor bounds its own replacements. Without this the
+            // loop would wait out the configured 600s rather than reporting
+            // that the bound stopped holding.
+            assert!(
+                killed_pids.len() <= 16,
+                "the supervisor never stopped replacing killed workers: {seen:?}"
+            );
+        }
+        assert!(
+            !run_id.is_empty(),
+            "the worker never reported waiting for the lease: {seen:?}"
+        );
+        // The sibling control for the loop above. A supervisor that stopped
+        // replacing workers entirely would kill exactly once and still reach
+        // every assertion below, which is the behavior this run has to prove
+        // is gone.
+        assert!(
+            killed_pids.len() > 1,
+            "the supervisor must replace a worker that died before acquiring, \
+             but only one worker ever waited: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|entry| entry.contains("replacing it")),
+            "the supervisor must say on stderr that it replaced a worker: {seen:?}"
+        );
 
         let status = supervisor.wait().expect("supervisor reaps its worker");
         assert_eq!(
             status.code(),
             Some(75),
-            "a killed worker must use the supervisor status"
+            "a run whose workers all died before acquiring must use the \
+             supervisor status"
         );
         read_run_receipt(&receipts, &run_id)
     };
@@ -720,46 +770,23 @@ fn a_killed_pre_acquire_worker_names_its_signal_and_a_timeout_does_not() {
     );
 }
 
-/// Block on the worker's own "waiting for the lease" line.
-///
-/// This is an event wait, not a poll: the read blocks until the worker writes
-/// that line, which it emits on its first deferral. Reaching end of stream
-/// without it panics, so a worker that never queued can never be mistaken for
-/// one that queued instantly.
-#[cfg(unix)]
-fn wait_until_worker_is_queued(
-    stderr: &mut dyn std::io::BufRead,
-    seen: &mut Vec<String>,
-) -> String {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let read = stderr.read_line(&mut line).expect("read worker stderr");
-        assert!(
-            read != 0,
-            "worker stderr ended before it reported waiting for the lease: {seen:?}"
-        );
-        seen.push(line.trim_end().to_string());
-        if line.contains("Waiting for rust-heavy lease") {
-            return line.trim_end().to_string();
-        }
-    }
-}
-
 /// Resolve the queued worker's PID once the wait line proves it is alive.
 ///
 /// The non-vacuity check is the panic: an empty match fails the test rather
 /// than letting a kill that hit nothing look like a kill that was delivered.
 #[cfg(unix)]
-fn queued_worker_pid(run_id: &str) -> u32 {
+fn queued_worker_pid(run_id: &str, already_killed: &BTreeSet<u32>) -> u32 {
     let found = std::process::Command::new("pgrep")
         .args(["-f", run_id])
         .output()
         .expect("pgrep the worker");
+    // A worker already signalled may still be reapable and still match, so
+    // excluding it is what makes each pass kill a genuinely new process
+    // instead of re-signalling a corpse and reading that as delivery.
     let pids: Vec<u32> = String::from_utf8_lossy(&found.stdout)
         .lines()
         .filter_map(|line| line.trim().parse().ok())
-        .filter(|pid| *pid != std::process::id())
+        .filter(|pid| *pid != std::process::id() && !already_killed.contains(pid))
         .collect();
     *pids.last().unwrap_or_else(|| {
         panic!("no live process carried run id {run_id} after it reported waiting")

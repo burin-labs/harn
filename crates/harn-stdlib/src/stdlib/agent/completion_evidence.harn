@@ -226,6 +226,14 @@ fn completion_evidence_clip(value: string) -> string {
 // order as one retained action.
 const COMPLETION_RESEARCH_SUMMARY_LIMIT = 6
 
+// Distinct paths whose latest mutation is carried into the packet. The packet
+// keeps one action per touched path rather than one mutation overall, because
+// a single slot cannot represent a two-file change and silently reports the
+// displaced file as untouched (#8090). Six is the same order as the read
+// budget above; a wider refactor degrades to the most recently touched files
+// and counts the rest in `omitted_older_action_count`.
+pub const COMPLETION_MUTATION_TARGET_LIMIT = 6
+
 const COMPLETION_READ_DIGEST_CHAR_LIMIT = 200
 
 const COMPLETION_READ_TARGET_KEYS = [
@@ -245,14 +253,24 @@ const COMPLETION_READ_TARGET_KEYS = [
 ]
 
 /**
- * What a read-only call looked at.
+ * What a call looked at or wrote, as a canonical locator.
  *
  * Prefer a canonical locator key when the arguments carry one, because that is
  * what a judge weighing "was this stop justified?" needs to see. Fall back to
  * the bounded arguments themselves so an unrecognized shape degrades to less
  * detail rather than to nothing.
+ *
+ * Shared by both evidence paths on purpose. Read-only calls use it to say what
+ * was inspected; mutations use it as the key that keeps the latest edit per
+ * path, which is what stops a second edit from displacing the first (#8090).
+ * One extractor means the two paths can never disagree about what a call
+ * addressed.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
  */
-fn completion_read_target(args: dict) -> string {
+pub fn completion_read_target(args: dict) -> string {
   for key in COMPLETION_READ_TARGET_KEYS {
     const value = args[key]
     if value != nil {
