@@ -83,6 +83,7 @@ mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
+mod provider_catalog_sources;
 mod provider_dispatch_audit;
 mod providers_dispatch;
 mod replay_session_cli;
