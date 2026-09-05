@@ -62,7 +62,13 @@ fn __completion_claim_registry_has_name(registry: any, name: string) -> bool {
   return false
 }
 
-/** Add the one Harn-owned explicit completion affordance to a tool registry. */
+/**
+ * Add the one Harn-owned explicit completion affordance to a tool registry.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @api_stability: experimental
+ */
 pub fn agent_completion_claim_tool(registry: ToolRegistry? = nil) -> ToolRegistry {
   const tools: ToolRegistry = registry ?? tool_registry()
   if __completion_claim_registry_has_name(tools, __COMPLETION_CLAIM_TOOL_NAME) {
@@ -122,8 +128,14 @@ pub fn agent_completion_claim_tool(registry: ToolRegistry? = nil) -> ToolRegistr
   )
 }
 
-/** Opt in to the explicit completion tool. The default path is inert. */
-pub fn agent_completion_claim_apply_options(options: dict? = nil) {
+/**
+ * Opt in to the explicit completion tool. The default path is inert.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @api_stability: experimental
+ */
+pub fn agent_completion_claim_apply_options(options: dict? = nil) -> dict {
   const opts = options ?? {}
   const enabled = opts?.completion_tool ?? false
   if type_of(enabled) != "bool" {
@@ -311,7 +323,13 @@ fn __completion_claim_validate_requirements(
   return {kind: "valid", claim: claim}
 }
 
-/** Validate the explicit claim before any completion judge is called. */
+/**
+ * Validate the explicit claim before any completion judge is called.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn agent_completion_claim_disposition(
   messages: any,
   dispatch: AgentToolDispatch,
@@ -361,10 +379,24 @@ pub fn agent_completion_claim_disposition(
   )
 }
 
+/**
+ * Build the compatibility claim used when a tool-free completion is accepted.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn completion_claim_implicit() -> CompletionClaim {
   return {schema: "harn.completion_claim.v1", requirements: [], source: "implicit"}
 }
 
+/**
+ * Return the unique evidence references carried by a completion claim.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn completion_claim_evidence_refs(claim: CompletionClaim?) -> list<string> {
   let refs: list<string> = []
   for requirement in claim?.requirements ?? [] {
