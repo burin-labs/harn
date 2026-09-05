@@ -18,7 +18,7 @@
 //! preconditions for porting each are filed as #2348 (`harn bench` →
 //! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
 use harn_vm::bytecode_cache::{CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use harn_parser::DiagnosticSeverity;
 use harn_vm::module_artifact::{ModuleArtifact, ModuleCompilationContext};
@@ -35,7 +35,7 @@ use crate::typecheck_imports::checker_with_resolved_imports;
 mod artifact_path;
 mod reuse;
 use artifact_path::output_path;
-use reuse::{artifact_keys, ArtifactKeys, Outcome};
+use reuse::{artifact_keys, Outcome};
 
 /// Machine-readable per-source result the inner compiler writes to stdout for
 /// the `.harn` driver that spawned it. The driver's only other channel is the

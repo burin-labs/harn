@@ -432,6 +432,40 @@ fn editing_a_shared_dependency_recompiles_every_dependent() {
     );
 }
 
+/// A different compiler build must reuse nothing, even for identical sources.
+///
+/// The direction control for reuse itself. Source hashes and import hashes are
+/// unchanged here, so only the compiler identity folded into the key can refuse
+/// the artifacts; if it did not, a precompiled tree would be served to a
+/// compiler that would have emitted different bytecode for it. The failure this
+/// forbids is silent, because the reused artifact loads perfectly well.
+#[test]
+fn a_different_compiler_build_reuses_nothing() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    write_graph(workdir.path());
+
+    let cold = run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
+    assert_eq!(cold.exit_code, 0, "stderr={}", cold.stderr);
+    assert!(
+        cold.stderr.contains("5 compiled, 0 reused, 0 failed"),
+        "got: {}",
+        cold.stderr
+    );
+
+    let other_build = run_precompile(
+        &[workdir.path().to_string_lossy().as_ref()],
+        &[("HARN_DISABLE_OPTIMIZATIONS", "1")],
+    );
+    assert_eq!(other_build.exit_code, 0, "stderr={}", other_build.stderr);
+    assert!(
+        other_build
+            .stderr
+            .contains("5 compiled, 0 reused, 0 failed"),
+        "artifacts from another compiler build must all be refused; got: {}",
+        other_build.stderr
+    );
+}
+
 /// Five sources: `dep` imported by `a`, `b` and `c`, and `leaf` imported by
 /// nobody. Two disjoint invalidation sets, so a fix that recompiles everything
 /// and a fix that recompiles nothing both fail one of the tests above.
