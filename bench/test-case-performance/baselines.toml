@@ -36,7 +36,7 @@ fs_outputs = 0
 # profile, never the hosted one, so a faster host cannot pass vacuously.
 [platform.macos_owned_arm64]
 measured_at = "2026-09-05T19:05:00Z"
-source_commit = "bec20a36b0d1a6e3c9f7c6b1a2f4e5d6c7b8a9f0"
+source_commit = "bec20a36b8925f5cb285b4a3901070b872b6e926"
 host = "self-hosted Apple Silicon runner (macos-arm64), shared host"
 sample_count = 1
 regression_x = 2.0
@@ -47,6 +47,7 @@ sum_user_ms = 3280.0
 sum_sys_ms = 120.0
 setup_p50_ms = 20.0
 setup_p90_ms = 40.0
+execute_p90_ms = 30.0
 
 [platform.macos_owned_arm64.telemetry]
 max_rss_kb = 99616
