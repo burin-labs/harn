@@ -1,4 +1,4 @@
-name: Windows nightly
+name: Windows workspace tests
 
 # Runs the full workspace nextest surface on Windows once per night, plus
 # on-demand from the Actions tab. Complements the per-PR `windows` job in

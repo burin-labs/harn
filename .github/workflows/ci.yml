@@ -1758,7 +1758,7 @@ jobs:
         if: always()
         shell: bash
         run: ./scripts/ci/windows_storage_budget.sh report initial
-      # A short-retention artifact produced by the main Windows nightly is the
+      # A short-retention artifact produced by the main Windows workspace tests is the
       # provider-neutral warm path. It is attempted before rust-cache so an
       # internal Blacksmith run can reuse GitHub-hosted build output without
       # requiring compatible cache backends. A missing, stale, or incompatible
@@ -2134,7 +2134,7 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
-      # A short-retention artifact produced by the main macOS nightly is the
+      # A short-retention artifact produced by the main macOS workspace tests is the
       # warm path that actually survives. The Actions cache namespace is
       # capacity-bound at 10 GiB and turns over in under a day, so the nightly's
       # workspace-macos cache is evicted before any pull request reads it: this

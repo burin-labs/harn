@@ -1,0 +1,159 @@
+import { read_yaml } from "std/fs"
+import { path_visibility, visibility_failure, zero_scan_failure } from "./path_visibility.harn"
+
+const CHECK_NAME = "Scheduled workflow contract"
+
+const REGISTRY_PATH = "scripts/scheduled_workflows.toml"
+
+const WORKFLOW_GLOB = ".github/workflows/*.yml"
+
+fn repo_relative(path: string) -> string {
+  const marker = "/./"
+  const index = path.index_of(marker)
+  if index >= 0 {
+    return path.substring(index + len(marker), len(path))
+  }
+  return path
+}
+
+fn strings(values: any) -> list<string> {
+  return (values ?? []).map({ value -> return trim(to_string(value)) }).to_list()
+}
+
+fn scheduled_crons(document: dict) -> list<string> {
+  let result: list<string> = []
+  for row in document["on"]?.schedule ?? [] {
+    const cron = trim(to_string(row?.cron ?? ""))
+    if cron != "" {
+      result = result + [cron]
+    }
+  }
+  return result.sorted()
+}
+
+pub fn scheduled_workflow_errors(records: list, documents: dict) -> list<string> {
+  let errors: list<string> = []
+  let registered: dict = {}
+  let claims: dict = {}
+  let cadences: dict = {}
+  for record in records {
+    const path = trim(to_string(record?.path ?? ""))
+    const name = trim(to_string(record?.name ?? ""))
+    const claim = trim(to_string(record?.claim ?? ""))
+    const reason = trim(to_string(record?.cadence_reason ?? ""))
+    const expected_crons = strings(record?.crons).sorted()
+    const expected_jobs = strings(record?.job_ids)
+    if path == "" {
+      errors = errors + ["registry row has no path"]
+      continue
+    }
+    if registered[path] ?? false {
+      errors = errors + ["duplicate registry path: " + path]
+    }
+    registered[path] = true
+    if claim == "" {
+      errors = errors + [path + ": claim is empty"]
+    } else if claims[claim] ?? false {
+      errors = errors + [path + ": duplicate claim: " + claim]
+    } else {
+      claims[claim] = true
+    }
+    if reason == "" {
+      errors = errors + [path + ": cadence reason is empty"]
+    }
+    if len(expected_crons) == 0 {
+      errors = errors + [path + ": registry names no scheduled cadence"]
+    }
+    for cron in expected_crons {
+      if cadences[cron] ?? false {
+        errors = errors + [path + ": cadence duplicates another controller: " + cron]
+      } else {
+        cadences[cron] = true
+      }
+    }
+    if len(expected_jobs) == 0 {
+      errors = errors + [path + ": registry names no stable job identifiers"]
+    }
+    const document = documents[path]
+    if document == nil {
+      errors = errors + [path + ": registered workflow was not readable"]
+      continue
+    }
+    if trim(to_string(document?.name ?? "")) != name {
+      errors = errors
+        + [path + ": workflow name differs from registry (expected `" + name + "`)"]
+    }
+    const actual_crons = scheduled_crons(document)
+    if actual_crons != expected_crons {
+      errors = errors
+        + [path + ": cadence differs from registry (expected " + expected_crons.join(", ") + ")"]
+    }
+    const jobs = document?.jobs ?? {}
+    for job in expected_jobs {
+      if jobs[job] == nil {
+        errors = errors + [path + ": stable job identifier is missing: " + job]
+      }
+    }
+  }
+  for path in documents.keys().sorted() {
+    if len(scheduled_crons(documents[path])) > 0 && !(registered[path] ?? false) {
+      errors = errors + [path + ": scheduled workflow has no registered claim or cadence reason"]
+    }
+  }
+  return errors
+}
+
+fn main(harness: Harness) {
+  let denials: list<string> = []
+  for path in [REGISTRY_PATH, ".github/workflows"] {
+    const seen = path_visibility(harness.fs, CHECK_NAME, path)
+    if seen.denial != "" {
+      denials = denials + [seen.denial]
+    } else if !seen.exists {
+      denials = denials + [CHECK_NAME + ": required path is missing: " + path]
+    }
+  }
+  const denied = visibility_failure(CHECK_NAME, denials)
+  if denied != "" {
+    harness.stdio.eprintln(denied)
+    harness.runtime.exit(1)
+  }
+  const parsed = toml_parse(harness.fs.read_text(REGISTRY_PATH))
+  if is_err(parsed) {
+    harness.stdio.eprintln(CHECK_NAME + ": invalid registry: " + to_string(unwrap_err(parsed)))
+    harness.runtime.exit(1)
+  }
+  const records = unwrap(parsed)?.workflow ?? []
+  let documents: dict = {}
+  let scanned = 0
+  for absolute in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+    const path = repo_relative(absolute)
+    const document = read_yaml(harness.fs, absolute, nil)
+    if document == nil {
+      harness.stdio.eprintln(CHECK_NAME + ": YAML parser returned no document for " + path)
+      harness.runtime.exit(1)
+    }
+    documents[path] = document
+    if len(scheduled_crons(document)) > 0 {
+      scanned = scanned + 1
+    }
+  }
+  const empty = zero_scan_failure(CHECK_NAME, "scheduled workflows", scanned)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
+  }
+  const errors = scheduled_workflow_errors(records, documents)
+  if len(errors) > 0 {
+    harness.stdio.eprintln(CHECK_NAME + " failed:")
+    for error in errors {
+      harness.stdio.eprintln("  " + error)
+    }
+    harness.runtime.exit(1)
+  }
+  harness.stdio.println(
+    CHECK_NAME + ": OK (" + to_string(scanned) + " scheduled workflows, "
+      + to_string(len(records))
+      + " registered claims)",
+  )
+}

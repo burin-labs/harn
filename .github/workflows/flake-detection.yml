@@ -1,4 +1,4 @@
-name: Flake detection
+name: Touched-test repeatability
 
 on:
   schedule:
@@ -157,7 +157,7 @@ jobs:
 
           summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
           {
-            echo "## Flake detection"
+            echo "## Touched-test repeatability"
             echo ""
             echo "- Filter: \`${NEXTEST_FILTER}\`"
             echo "- Budget: ${FLAKE_JOB_BUDGET_MINUTES} min wall-clock from job start"
@@ -182,7 +182,7 @@ jobs:
                 # the remaining budget cannot cover the rest of the floor.
                 needed=$(( (floor - completed) * est ))
                 if (( remaining < needed )); then
-                  echo "::error::Flake detection cannot reach its ${floor}-iteration floor within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (completed ${completed}; slowest iteration ${est}s; ${remaining}s left). The touched-test surface is too large for this budget — shard the nextest filter or raise FLAKE_JOB_BUDGET_MINUTES (and timeout-minutes) for this run."
+                  echo "::error::Touched-test repeatability cannot reach its ${floor}-iteration floor within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (completed ${completed}; slowest iteration ${est}s; ${remaining}s left). The touched-test surface is too large for this budget — shard the nextest filter or raise FLAKE_JOB_BUDGET_MINUTES (and timeout-minutes) for this run."
                   {
                     echo "- Iterations completed: ${completed}/${ceiling}"
                     echo "- Slowest iteration: ${max_iter_secs}s"
@@ -194,7 +194,7 @@ jobs:
                 # Floor met: keep pursuing the ceiling only while a full
                 # iteration still fits. Otherwise stop with degraded coverage.
                 if (( remaining < est )); then
-                  echo "::warning::Flake detection stopped at ${completed}/${ceiling} iterations to stay within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (slowest iteration ${est}s; ${remaining}s left). Coverage is degraded but above the ${floor}-iteration floor; consider sharding the touched-test surface or raising the budget."
+                  echo "::warning::Touched-test repeatability stopped at ${completed}/${ceiling} iterations to stay within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (slowest iteration ${est}s; ${remaining}s left). Coverage is degraded but above the ${floor}-iteration floor; consider sharding the touched-test surface or raising the budget."
                   break
                 fi
               fi
@@ -234,9 +234,9 @@ jobs:
           } >> "$summary"
 
           if (( completed >= ceiling )); then
-            echo "Flake detection completed all ${ceiling} iterations with no flake."
+            echo "Touched-test repeatability completed all ${ceiling} iterations with no flake."
             echo "- Result: PASSED — ${completed}/${ceiling} iterations, no flake detected." >> "$summary"
           else
-            echo "Flake detection passed with degraded coverage: ${completed}/${ceiling} iterations within budget."
+            echo "Touched-test repeatability passed with degraded coverage: ${completed}/${ceiling} iterations within budget."
             echo "- Result: PASSED (degraded) — ${completed}/${ceiling} iterations within budget; floor of ${floor} met." >> "$summary"
           fi

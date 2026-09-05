@@ -13,7 +13,9 @@ name: CLI cold-start budget
 
 on:
   schedule:
-    - cron: '17 11 * * *'
+    # Offset from the Actions vulnerability audit so two independent daily
+    # claims do not compete for a runner at the same minute.
+    - cron: '47 11 * * *'
   workflow_dispatch:
 
 permissions:

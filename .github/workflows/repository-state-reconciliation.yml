@@ -1,0 +1,112 @@
+name: Repository state reconciliation
+
+# These two checks reconcile repository state rather than testing source code.
+# Running them in one five-minute controller halves scheduled workflow starts
+# while preserving each job's existing check name and independent authority.
+on:
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    # Five minutes is the recovery objective: a released main branch should not
+    # remain on a stable version, and superseded merge-group work should not
+    # occupy scarce runners, for longer than one polling interval.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A scheduled reconciliation and a merge-group cancellation establish
+  # different claims. Let each supersede only older work of its own event type
+  # so one controller cannot cancel the other before its proof runs.
+  group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  cancel-obsolete-runs:
+    name: Cancel obsolete speculative workflows
+    if: github.event_name == 'merge_group'
+    permissions:
+      actions: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      # This controller has Actions write authority, so it always executes the
+      # trusted default-branch script rather than code from a speculative ref.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Cancel superseded exact merge-group heads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPO: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.event.merge_group.head_sha || '' }}
+        run: |
+          set -euo pipefail
+          args=(--repo "$TARGET_REPO" --apply)
+          if [[ -n "$EXPECTED_SHA" ]]; then
+            args+=(--expected-sha "$EXPECTED_SHA")
+          fi
+          ./scripts/cancel_superseded_merge_groups.sh "${args[@]}"
+
+  check:
+    name: Check post-release development cutover
+    if: github.repository == 'burin-labs/harn' && github.event_name != 'merge_group'
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      # The scheduled controller shares this runner with the cutover check.
+      # A merge-group event uses the dedicated job above so its exact head can
+      # still be supplied as the cancellation fence.
+      - name: Cancel superseded speculative workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPO: ${{ github.repository }}
+        run: ./scripts/cancel_superseded_merge_groups.sh --repo "$TARGET_REPO" --apply
+
+      - name: Measure development cutover state
+        id: cutover
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/check_development_cutover.sh
+
+      - name: Publish development cutover status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CHECK_OUTCOME: ${{ steps.cutover.outcome }}
+          DESCRIPTION: ${{ steps.cutover.outputs.description }}
+          TARGET_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse origin/main)"
+          state=success
+          if [[ "$CHECK_OUTCOME" != success ]]; then
+            state=failure
+          fi
+          description="${DESCRIPTION:-development cutover measurement failed}"
+          gh api "repos/$GH_REPO/statuses/$sha" -X POST \
+            -f state="$state" \
+            -f context="development cutover" \
+            -f description="${description:0:139}" \
+            -f target_url="$TARGET_URL" >/dev/null
+          if [[ "$state" == failure ]]; then
+            echo "::error::$description"
+            exit 1
+          fi
