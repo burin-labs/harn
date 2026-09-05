@@ -98,6 +98,9 @@ fn __enqueue_mock_cell(llm: HarnessLlm, arm: string, evidence: string) {
       ),
     },
   )
+  if arm == "treatment" {
+    llm.mock_enqueue({text: "The status is ready. Evidence: " + evidence})
+  }
 }
 
 fn __request_failure(stdio: HarnessStdio, started_ms: int, clock: HarnessClock, message: string) {
@@ -182,7 +185,6 @@ fn main(harness: Harness) -> int {
         loop_until_done: true,
         max_iterations: 6,
         max_tokens: max_tokens,
-        final_wrapup: false,
         verify_completion: __status_evidence_verifier(evidence),
         verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
       },
