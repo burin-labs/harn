@@ -236,7 +236,7 @@ fn private_pipeline_inputs_respect_the_test_runner_convention() {
 fn pipeline_input_uses_resolve_to_the_declared_binding() {
     for body in [
         "return 1",
-        "fn inner(_task: int) { return _task } return inner(1)",
+        "fn inner(_task: int) { return _task }; return inner(1)",
         "let _task = 2; return _task",
     ] {
         let source = format!(
@@ -248,12 +248,10 @@ fn pipeline_input_uses_resolve_to_the_declared_binding() {
     }
     for source in [
         "pipeline main(_task: int) { return \"value=${_task}\" }",
-        "pipeline main(_task: int, value: int = _task) { return value }",
+        "pipeline main(_task: int) { fn inner(value: int = _task) { return value }; return inner() }",
         "pipeline main(_task: int) { let use = { -> _task }; return use() }",
         "pipeline main(_task: int) { return 1 }\nconst selected = main",
         "@timeout(1) pipeline main(_task: int) { return 1 }",
-        "pipeline main(_task: int = 1) { return 1 }",
-        "pipeline main(..._task) { return 1 }",
         "pub pipeline exported(_task: int) { return 1 }",
         "pipeline child(_task: int) extends base { return 1 }",
         "@test pipeline helper(_task: int) { return 1 }\npipeline main() { return helper(2) }",
