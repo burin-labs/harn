@@ -36,6 +36,13 @@ pub type CompletionEvidenceAction = {
   observation: string,
   result_facts: string,
   has_error_result: bool,
+  // True when this call has results but every one was written by the harness.
+  // Such a call was never dispatched, so it is evidence of nothing and never
+  // enters the packet.
+  harness_authored_only?: bool,
+  // Every harness-authored result removed from this action. This can be nonzero
+  // even when a real dispatched result keeps the action in the packet.
+  omitted_harness_authored_result_count?: int,
 }
 
 /**
@@ -89,6 +96,11 @@ pub type CompletionEvidencePacket = {
   // carry one are represented, not omitted, and are not counted here.
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
+  // Calls whose every result was written by the harness rather than returned by
+  // a tool, so the call was never dispatched and its "result" is injected
+  // feedback. Dropped from `actions`, counted here, so a judge that sees fewer
+  // actions than the run made can tell why (harn#7757).
+  omitted_harness_authored_result_count?: int,
   lifecycle_issue_count: int,
   lifecycle_issues: list<CompletionEvidenceIssue>,
   actions: list<CompletionEvidenceAction>,
@@ -112,6 +124,7 @@ pub type CompletionEvidenceProjectionStats = {
   included_read_only_call_count: int,
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
+  omitted_harness_authored_result_count: int,
   lifecycle_issue_count: int,
   serialized_chars: int,
   raw_transcript_digest: string,
@@ -122,6 +135,32 @@ pub type CompletionEvidenceProjection = {
   packet: CompletionEvidencePacket,
   serialized: string,
   stats: CompletionEvidenceProjectionStats,
+}
+
+/**
+ * Attach measurable authorship omissions to one projected action.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_evidence_action_authorship(
+  action: CompletionEvidenceAction,
+  total_result_count: int,
+  dispatched_result_count: int,
+) -> CompletionEvidenceAction {
+  const omitted = total_result_count - dispatched_result_count
+  return action
+    + if omitted > 0 {
+      {omitted_harness_authored_result_count: omitted}
+    } else {
+      {}
+    }
+    + if total_result_count > 0 && dispatched_result_count == 0 {
+      {harness_authored_only: true}
+    } else {
+      {}
+    }
 }
 
 pub type CompletionEvidenceSnapshot = {
@@ -212,7 +251,7 @@ const COMPLETION_READ_TARGET_KEYS = [
  */
 fn completion_read_target(args: dict) -> string {
   for key in COMPLETION_READ_TARGET_KEYS {
-    const value = args[key] ?? nil
+    const value = args[key]
     if value != nil {
       const rendered = trim(
         completion_evidence_clip_to(value, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT),

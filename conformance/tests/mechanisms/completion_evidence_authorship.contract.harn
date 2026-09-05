@@ -1,0 +1,83 @@
+// MECHANISM CONTRACT: COMPLETION-EVIDENCE AUTHORSHIP.
+//
+//   trigger  — a tool-result row explicitly authored by the harness closes an
+//              orphaned mutation call;
+//   effect   — neither its text nor its structured artifact data enters the
+//              evidence a completion authority weighs, and the omission is
+//              counted;
+//   negative — an otherwise identical dispatched result remains evidence.
+//
+// Rust tests at the writer seam prove orphan repair synthesis emits the typed
+// origin. This contract binds the public transcript reader and every parallel
+// completion-evidence projection to that receipt without matching veto prose.
+import { __judge_evidence_projection } from "std/agent/judge"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn assistant_calling(call_id: string) -> dict {
+  return {
+    role: "assistant",
+    content: "Applying the change.",
+    _harn: {
+      kind: "assistant",
+      tool_calls: [{id: call_id, function: {name: "edit", arguments: {path: "src/app.py"}}}],
+    },
+  }
+}
+
+fn result(call_id: string, origin: string, text: string) -> dict {
+  return {
+    role: "user",
+    content: text,
+    _harn: {
+      kind: "tool_result",
+      tool_call_id: call_id,
+      tool_name: "edit",
+      outcome: "ok",
+      origin: origin,
+      data: {mutation_status: "applied", changed_paths: ["src/app.py"]},
+    },
+  }
+}
+
+const OPTS = {
+  tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}],
+}
+
+pipeline default(harness: Harness) {
+  const marker = "CONTRACT-HARNESS-REPAIR"
+  const repaired = __judge_evidence_projection(
+    [assistant_calling("repair-1"), result("repair-1", "harness_repair", marker)],
+    OPTS,
+  )
+  contract_effect(
+    harness.stdio,
+    "repair_is_counted",
+    repaired.packet.omitted_harness_authored_result_count == 1,
+  )
+  contract_effect(harness.stdio, "repair_action_is_absent", len(repaired.packet.actions) == 0)
+  contract_effect(
+    harness.stdio,
+    "repair_requirement_evidence_is_absent",
+    len(repaired.packet.requirement_evidence) == 0,
+  )
+  contract_negative(
+    harness.stdio,
+    "repair_text_does_not_reach_judge",
+    contains(repaired.serialized, marker),
+  )
+  const dispatched = __judge_evidence_projection(
+    [assistant_calling("dispatch-1"), result("dispatch-1", "dispatch", "write applied")],
+    OPTS,
+  )
+  contract_effect(harness.stdio, "real_action_survives", len(dispatched.packet.actions) == 1)
+  contract_effect(
+    harness.stdio,
+    "real_requirement_evidence_survives",
+    len(dispatched.packet.requirement_evidence) == 1,
+  )
+  contract_negative(
+    harness.stdio,
+    "real_result_is_not_counted_as_repair",
+    (dispatched.packet.omitted_harness_authored_result_count ?? 0) > 0,
+  )
+}

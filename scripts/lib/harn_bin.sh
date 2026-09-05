@@ -526,9 +526,9 @@ harn_resolve_binary() (
         && -n "$installed_lease_runner" \
         && ! "$installed_lease_runner" -ef "$predicted_bin" \
         && -x "$installed_lease_runner" ]]; then
-    # Required mode is the capability probe: an older or unrelated executable
-    # fails closed when asked to supervise the build. Do not run a separate
-    # help invocation whose startup policy can differ from the actual command.
+    # The Cargo wrapper owns the behavioral compatibility proof for every
+    # runner source. Required mode keeps this build serialized or refuses it;
+    # an ambient stale runner must never turn setup into an unleased build.
     export HARN_CARGO_LEASE_RUNNER="$installed_lease_runner"
     export HARN_CARGO_LEASE_MODE=required
   elif [[ "${HARN_CARGO_LEASE_MODE:-}" != "off" \
