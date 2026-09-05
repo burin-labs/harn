@@ -80,11 +80,13 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
   const terminal_error = state.terminal_error
   const wrapup_enabled = opts?.final_wrapup ?? true
   // A no-tool terminal normally skips wrap-up (nothing to summarize), but a
-  // host that supplied its own directive is explicitly asking for sad-path
-  // coverage — including the zero-write terminals where the user is most owed
-  // a truthful closing message — so honor it even at last_tool_count == 0.
+  // host directive explicitly asks for a closing report. An accepted explicit
+  // completion claim does too: the verification judge is the last call before
+  // finalization and does not count as a tool turn, while the preceding
+  // `task_complete` turn cannot itself carry a user response.
   const wrapup_tools_ok = state.last_tool_count > 0
     || __agent_loop_has_host_wrapup_directive(opts)
+    || stop_reason == "explicit_completion_claim"
   if wrapup_enabled
     && suspend_result == nil
     && terminal_error == nil
