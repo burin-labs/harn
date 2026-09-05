@@ -30,13 +30,18 @@ impl SandboxBackend for Backend {
         "linux"
     }
 
+    fn filesystem_mechanism() -> &'static str {
+        "linux_landlock"
+    }
+
     fn available() -> bool {
-        // Both seccomp and Landlock are runtime-detected — the syscalls
-        // either work or return a documented errno. `available()` is
-        // the OR of the two so a kernel without Landlock but with
-        // seccomp still passes; the per-mechanism setup below decides
-        // independently whether to install each filter.
         true
+    }
+
+    fn filesystem_available() -> bool {
+        // Seccomp may constrain syscalls when Landlock is absent, but it cannot
+        // deny an out-of-workspace write or count as filesystem confinement.
+        landlock_abi_version() > 0
     }
 
     fn prepare_std_command(

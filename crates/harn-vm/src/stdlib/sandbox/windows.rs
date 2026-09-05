@@ -72,6 +72,10 @@ impl SandboxBackend for Backend {
         "windows"
     }
 
+    fn filesystem_mechanism() -> &'static str {
+        "windows_app_container"
+    }
+
     fn available() -> bool {
         true
     }
