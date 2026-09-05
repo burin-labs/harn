@@ -33,6 +33,10 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      # The nextest config decides what this lane runs and what budget it runs
+      # it under, so a change to it changes what the run proves. Without this
+      # the lane skips the very pull request that retimes it.
+      - ".config/nextest.toml"
       - ".github/workflows/windows-nightly.yml"
       - ".github/workflows/macos-nightly.yml"
 
