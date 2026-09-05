@@ -14,17 +14,14 @@ fn main(harness: Harness) -> int {
   }
   const valid = receipt?.schema == "harn.completion_claim_eval_receipt.v1"
     && receipt?.case_id
-    == case_id
+      == case_id
     && receipt?.pass == true
     && receipt?.status == "done"
     && receipt?.inspected == true
     && receipt?.evidence_reported == true
     && receipt?.exit_contract_met == true
     && receipt?.completion_judge_cap_reached == false
-    && contains(
-    ["baseline", "treatment"],
-    receipt?.arm,
-  )
+    && contains(["baseline", "treatment"], receipt?.arm)
   return if valid {
     0
   } else {
