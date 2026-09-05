@@ -114,6 +114,29 @@ pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown
   assert_eq(disposition.reason, "completion_claim_evidence_ref_invalid")
 }
 
+pipeline test_completion_claim_cannot_share_a_batch_with_new_work(
+  harness: Harness,
+  task: unknown,
+) {
+  const disposition = agent_completion_claim_disposition(
+    evidence_messages(),
+    completion_dispatch(claim("task", ["edit-1"]))
+      + [
+        {
+          ok: true,
+          status: "ok",
+          tool_name: "edit",
+          tool_call_id: "edit-2",
+          result: {mutation_status: "applied"},
+        },
+      ],
+    {completion_tool: true},
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_not_alone")
+  assert(disposition.feedback.contains("after the tool calls it cites have finished"))
+}
+
 pipeline test_claim_cannot_cite_harness_authored_feedback(harness: Harness, task: unknown) {
   const messages = [
     assistant_calling("edit", "edit-1"),

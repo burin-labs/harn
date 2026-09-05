@@ -402,12 +402,11 @@ pub fn completion_evidence_id(
   verification: CompletionVerificationState? = nil,
   obligations_digest: string = "",
 ) -> string {
-  const base = {
+  let base = {
     task: task,
     trigger: stop_reason,
     candidate_text: text,
     actions: packet.actions,
-    completion_claim: packet.completion_claim,
     // A turn that only researched changes no action, so without this key two
     // decisions taken on different research share an identity and the second
     // judge call dedupes onto the first.
@@ -417,6 +416,11 @@ pub fn completion_evidence_id(
     lifecycle_issues: packet.lifecycle_issues,
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: verification,
+  }
+  // Keep the default, opt-out path byte-identical. A nil optional field would
+  // still serialize as a new key and churn every existing evidence identity.
+  if packet.completion_claim != nil {
+    base = base + {completion_claim: packet.completion_claim}
   }
   // Two decisions that differ only in accepted steering were decided under
   // different obligations and must not share an evidence identity. An unsteered

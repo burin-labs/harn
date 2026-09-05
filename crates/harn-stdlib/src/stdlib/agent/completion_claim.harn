@@ -138,7 +138,7 @@ pub fn agent_completion_claim_apply_options(options: dict? = nil) {
     {
       id: "completion_claim",
       source: "std/agent/completion_claim",
-      body: "When the task is complete, call task_complete exactly once. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: "
+      body: "When the task is complete, call task_complete exactly once and by itself, after the tool calls it cites have finished. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: "
         + json_stringify(
         requirement_ids,
       )
@@ -331,6 +331,12 @@ pub fn agent_completion_claim_disposition(
     return __completion_claim_invalid(
       "completion_claim_ambiguous",
       "Call task_complete exactly once in a completion turn.",
+    )
+  }
+  if len(__dispatch_results_list(dispatch)) != 1 {
+    return __completion_claim_invalid(
+      "completion_claim_not_alone",
+      "Call task_complete by itself, after the tool calls it cites have finished. Do not combine new work with the completion claim.",
     )
   }
   const result = matches[0]
