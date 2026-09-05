@@ -969,45 +969,18 @@ struct ParsedHeader {
 /// `expected_context` is `None` for entry chunks, which decide validity from
 /// the artifact's own manifest before they are willing to pay for the
 /// context hash. Every other field is checked the same way for both families.
-fn read_header_if_matches(
-    path: &Path,
-    key: &CacheKey,
-    expected_context: Option<&[u8; 32]>,
-) -> io::Result<Option<ParsedHeader>> {
-    let Some((kind, context_hash, mut file)) =
-        read_header_prefix_if_matches(path, key, expected_context)?
-    else {
-        return Ok(None);
-    };
-    let mut payload = Vec::new();
-    if file.read_to_end(&mut payload).is_err() {
-        return Ok(None);
-    }
-    Ok(Some(ParsedHeader {
-        kind,
-        context_hash,
-        payload,
-    }))
-}
-
-/// True when the artifact stored at `path` was written for exactly `key` and
-/// carries `expected_kind`.
+/// True when the artifact at `path` was written for exactly `key` and carries
+/// `expected_kind`.
 ///
-/// `harn precompile` writes to an explicit destination rather than to a
-/// key-derived filename, so it cannot ask the shared-cache lookups whether the
-/// work it is about to do has already been done. This answers that question
-/// through the same header comparison every cache read uses, so a reuse
-/// decision can never accept an artifact a load would reject. It stops before
-/// the payload: the answer is in the header, and deserializing a chunk only to
-/// throw it away would cost more than the compile it is trying to skip.
-///
-/// Deliberately not gated on [`cache_enabled`]. `store_at` and
-/// `store_module_at` are not gated either, because a precompile that was asked
-/// for an artifact writes one whether or not this process would read the shared
-/// cache. Gating the read half alone would make the two disagree.
+/// `harn precompile` writes to an explicit destination rather than a
+/// key-derived filename, so it cannot ask the shared-cache lookups whether its
+/// work is already done. Answering through the same header comparison every
+/// cache read uses means a reuse can never accept an artifact a load would
+/// reject. Not gated on [`cache_enabled`], because `store_at` is not either:
+/// gating only the read half would make the two disagree.
 fn artifact_at_matches(path: &Path, key: &CacheKey, expected_kind: u8) -> bool {
-    match read_header_prefix_if_matches(path, key, Some(&key.context_hash)) {
-        Ok(Some((kind, _, _))) => kind == expected_kind,
+    match read_header_if_matches(path, key, Some(&key.context_hash)) {
+        Ok(Some(header)) => header.kind == expected_kind,
         _ => false,
     }
 }
@@ -1022,16 +995,14 @@ pub fn module_artifact_at_matches(path: &Path, key: &CacheKey) -> bool {
     artifact_at_matches(path, key, KIND_MODULE_ARTIFACT)
 }
 
-/// Parse and validate everything in a cache header that precedes the payload,
-/// returning the artifact kind, its context hash, and the file positioned at
-/// the payload. Every field this checks is a reason a stored artifact does not
-/// describe `key`, so both the reading and the reuse paths must check all of
-/// them; keeping that list in one function is what stops the two from drifting.
-fn read_header_prefix_if_matches(
+/// Parse a cache header and validate every field that could mean the stored
+/// artifact does not describe `key`. Both the reading and the reuse paths go
+/// through it, so that list has one owner and cannot drift between them.
+fn read_header_if_matches(
     path: &Path,
     key: &CacheKey,
     expected_context: Option<&[u8; 32]>,
-) -> io::Result<Option<(u8, [u8; 32], fs::File)>> {
+) -> io::Result<Option<ParsedHeader>> {
     let mut file = match fs::File::open(path) {
         Ok(f) => f,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -1095,7 +1066,15 @@ fn read_header_prefix_if_matches(
     if expected_context.is_some_and(|expected| *expected != context_hash) {
         return Ok(None);
     }
-    Ok(Some((kind, context_hash, file)))
+    let mut payload = Vec::new();
+    if file.read_to_end(&mut payload).is_err() {
+        return Ok(None);
+    }
+    Ok(Some(ParsedHeader {
+        kind,
+        context_hash,
+        payload,
+    }))
 }
 
 /// A candidate entry artifact whose header matches everything except the

@@ -26,26 +26,22 @@ use harn_vm::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 use crate::cli::PrecompileArgs;
 use crate::command_error;
 use crate::commands::collect_harn_files;
-use crate::compiler_context::{
-    ensure_builtin_signatures_installed, imported_symbols_for_source, SourceCompilerAuthority,
-};
+use crate::compiler_context::{ensure_builtin_signatures_installed, SourceCompilerAuthority};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
 use crate::typecheck_imports::checker_with_resolved_imports;
 
 mod artifact_path;
+mod reuse;
 use artifact_path::output_path;
+use reuse::{artifact_keys, ArtifactKeys, Outcome};
 
 /// Machine-readable per-source result the inner compiler writes to stdout for
-/// the `.harn` driver that spawned it.
-///
-/// The driver's only other channel is the child's exit status, which already
-/// means succeeded-or-failed and cannot carry a third state without redefining
-/// what a nonzero exit from this command means. A line on a stream the driver
-/// captures and never forwards adds the state without touching that contract,
-/// and without a flag: the driver reads it unconditionally because there is no
-/// configuration under which it would not want to know.
+/// the `.harn` driver that spawned it. The driver's only other channel is the
+/// child's exit status, which already means succeeded-or-failed and cannot
+/// carry a third state without redefining a nonzero exit. A line on a stream
+/// the driver captures and never forwards adds it without a flag.
 pub const PRECOMPILE_OUTCOME_PREFIX: &str = "precompile-outcome:";
 
 /// Env var the embedded `cli/precompile` script reads to find the
@@ -163,19 +159,23 @@ pub fn run_inner_compile(args: PrecompileArgs) {
         let result = precompile_one(source, source_root.as_deref(), args.out.as_deref());
         match result {
             Ok(outcome) => {
-                let (label, out_path) = match &outcome {
-                    Outcome::Compiled(path) => {
+                let label = match outcome {
+                    Outcome::Compiled(_) => {
                         stats.compiled += 1;
-                        ("compiled", path)
+                        "compiled"
                     }
-                    Outcome::Reused(path) => {
+                    Outcome::Reused(_) => {
                         stats.reused += 1;
-                        ("reused", path)
+                        "reused"
                     }
                 };
                 println!("{PRECOMPILE_OUTCOME_PREFIX} {label}");
                 if !args.quiet {
-                    println!("{} -> {}", source.display(), out_path.display());
+                    println!(
+                        "{} -> {}",
+                        source.display(),
+                        outcome.destination().display()
+                    );
                 }
             }
             Err(err) => {
@@ -207,37 +207,23 @@ fn precompile_one(
     let source = std::fs::read_to_string(source_path).map_err(|e| format!("read: {e}"))?;
     let path_str = source_path.to_string_lossy();
 
-    // The parse below needs the builtin signature table, and so does the import
-    // resolution the keys are derived from, so it is installed before the reuse
-    // check rather than as a side effect of parsing.
+    // Installed here rather than as a side effect of parsing, because both the
+    // parse below and the import resolution the keys come from need it.
     ensure_builtin_signatures_installed();
     let authority = SourceCompilerAuthority::for_source(source_path);
 
-    // Both destination artifacts, and both keys that describe them, are known
-    // before any compile work happens: the entry key from this file's source
-    // and its transitive import hashes, the module key from the same import
-    // graph this file's compilation would be given. If artifacts carrying
-    // exactly those keys are already on disk, recompiling reproduces them byte
-    // for byte, so the whole typecheck-and-compile pass is dead work.
-    //
-    // This is the property the tree-level stamp could not express. A stamp over
-    // every source in a tree makes one edited file invalidate every artifact in
-    // it; a per-file key makes an edited file invalidate itself and its
-    // dependents, because a dependency's hash is folded into every dependent's
-    // context hash.
+    // Recompiling a source whose artifacts already carry its keys reproduces
+    // them byte for byte, so everything below this point would be dead work.
     let (keys, compilation_context) = artifact_keys(source_path, &source, source_root, &authority);
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
     let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
-    if harn_vm::bytecode_cache::entry_artifact_at_matches(&entry_dest, &keys.entry)
-        && harn_vm::bytecode_cache::module_artifact_at_matches(&module_dest, &keys.module)
-    {
+    if keys.match_artifacts_at(&entry_dest, &module_dest) {
         return Ok(Outcome::Reused(entry_dest));
     }
 
-    // Parsed only once the reuse check has failed. A source whose stored
-    // artifacts carry its own hash parsed cleanly when they were written, so
-    // parsing it again to reach a decision already made would be the largest
-    // remaining cost on a path whose entire purpose is to do no work.
+    // Parsed only once reuse has been ruled out. A source whose stored
+    // artifacts carry its own hash parsed cleanly when they were written, so on
+    // the hit path this is the largest cost there was left to skip.
     let (parsed_source, program) = parse_source_file(&path_str);
     debug_assert_eq!(parsed_source, source);
 
@@ -280,61 +266,11 @@ fn precompile_one(
     Ok(Outcome::Compiled(entry_dest))
 }
 
-/// The keys the two artifacts for `source_path` will be stored under.
-///
-/// Derived exactly as the writers below derive them, from one call site, so a
-/// reuse decision and the write it skips cannot disagree about what identifies
-/// an artifact. The module compilation context is the import graph projection
-/// the module compiler is handed, so computing it here costs the graph walk the
-/// compile would have paid anyway rather than adding one.
-fn artifact_keys(
-    source_path: &Path,
-    source: &str,
-    source_root: Option<&Path>,
-    authority: &SourceCompilerAuthority,
-) -> (ArtifactKeys, ModuleCompilationContext) {
-    let entry = if source_root.is_some() {
-        harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, source)
-    } else {
-        harn_vm::bytecode_cache::CacheKey::from_source(source_path, source)
-    };
-    // Returned rather than recomputed inside the compile below. It is the one
-    // expensive input the reuse check and the compile share, and walking the
-    // import graph twice for the same file would hand back on the miss path
-    // some of what the hit path saves.
-    let compilation_context = imported_symbols_for_source(source_path, source);
-    let module_source = harn_vm::module_source::ModuleSource::from_text(source);
-    let module = harn_vm::bytecode_cache::CacheKey::from_module_source(
-        &module_source,
-        &compilation_context,
-        authority.module_provenance(),
-    );
-    (ArtifactKeys { entry, module }, compilation_context)
-}
-
-struct ArtifactKeys {
-    entry: harn_vm::bytecode_cache::CacheKey,
-    module: harn_vm::bytecode_cache::CacheKey,
-}
-
-/// What one source cost this invocation.
-///
-/// `Reused` is a success that did no compile work. It is distinct from
-/// `Compiled` rather than folded into it because "the tree is up to date" and
-/// "the tree was rebuilt" are the two states a caller of an incremental
-/// compiler needs told apart, and because a reuse count is the only direct
-/// evidence that the reuse path was reached at all.
-enum Outcome {
-    Compiled(PathBuf),
-    Reused(PathBuf),
-}
-
-/// Compile both the entry-chunk view and the module-artifact view of the
-/// same source. A `.harn` file with a `pipeline default { ... }` block is
-/// callable as both an entry and an importable module; one without is
-/// importable but produces an entry chunk that just returns `nil`. We
-/// emit both artifacts unconditionally so the runtime loader hits the
-/// cache regardless of how the user invokes the file.
+/// Compile both the entry-chunk view and the module-artifact view of the same
+/// source. A `.harn` file with a `pipeline default { ... }` block is callable
+/// as both an entry and an importable module; one without is importable but
+/// produces an entry chunk that returns `nil`. Both are emitted so the runtime
+/// loader hits the cache however the user invokes the file.
 fn compile_artifacts(
     source_path: &Path,
     source: &str,
