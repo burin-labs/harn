@@ -759,7 +759,17 @@ fn __judge_directive(
     action: action,
     trigger: verdict?.trigger ?? payload.stop_reason,
     source: verdict?.source ?? "policy",
-    outcome: verdict?.judge_outcome ?? verdict?.verdict ?? action,
+    // A cap over a passed oracle still has a judge that said no. `action` is
+    // the loop's decision; `outcome` is the judge's, and collapsing the second
+    // into the first is exactly how a refusal would get laundered by the stop
+    // that overrode it.
+    outcome: if trim(to_string(verdict?.judge_outcome ?? verdict?.verdict ?? "")) != "" {
+      verdict?.judge_outcome ?? verdict?.verdict
+    } else if verified_at_cap && verdict.vetoed {
+      "continue"
+    } else {
+      action
+    },
     reason: reason,
     invoked: invoked,
     feedback_delivery: feedback_delivery,
