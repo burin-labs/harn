@@ -98,9 +98,14 @@ The target passes `--run-ignored all`, so tests marked `#[ignore]` because they
 are slow binary-surface coverage still run in this suite.
 Runs on:
 
+- Every push to `main` (`.github/workflows/e2e.yml`), on a self-hosted big
+  runner when the fleet has one online, and on a hosted runner otherwise
 - Schedule: nightly at 3 AM UTC (`.github/workflows/e2e.yml`)
 - `e2e` PR label: add the label to opt in before merge
 - Merge queue: the `e2e` job in `ci.yml` runs before a PR lands
+
+A failing unattended run (main push or nightly) opens a deduplicated tracking
+issue, so main is never called green while its last executed slow run is red.
 
 ### Preferred Rust test path
 

@@ -2,11 +2,21 @@ name: CLI end-to-end behavior
 
 # Slow E2E / smoke suite — subprocess-spawning binary surface tests.
 # Runs:
+#   - on every push to main
 #   - nightly (3 AM UTC)
 #   - when the `e2e` label is added to a pull request and after every later push
 #   - manually via workflow_dispatch
+#
+# Running on every main push is the point, not an optimization. This tier is
+# opt-in for pull requests, so before it also ran on push the only evidence
+# main had was the nightly: a job that reported `skipped` on a head sha is
+# indistinguishable from a job that reported green, and a regression could sit
+# on main for a hundred commits before a nightly named it. A push run makes
+# every main head sha carry its own executed result.
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 3 * * *"
   pull_request:
@@ -19,7 +29,10 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   # A new commit invalidates the old E2E result for an opted-in PR. Cancel
-  # only on synchronize so adding the label cannot turn its own run red.
+  # only on synchronize so adding the label cannot turn its own run red. Main
+  # pushes are never cancelled: a cancelled run leaves that head sha with no
+  # executed result, which is the gap this tier is here to close, so they
+  # queue behind each other instead.
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 env:
@@ -28,10 +41,41 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Where the main-push runs are allowed to land. Read for its `capacity`
+  # counts rather than its per-lane booleans: those booleans go false both when
+  # the fleet is switched off and when it is merely busy, and a busy fleet is a
+  # reason to queue, not a reason to send this suite somewhere else.
+  runner-availability:
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d924b47e5f445468454904f2bb32c6f9b4f050eb
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   e2e:
     name: Slow E2E suite
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    # Main pushes prefer the big self-hosted rung: 24 cores at no cost, and
+    # this suite compiles the whole workspace before it runs a single test.
+    # `online` rather than `idle` is the deliberate part. A main push is not
+    # racing anyone, so waiting for a busy box costs queue time and nothing
+    # else, while routing to a hosted runner on every busy day would quietly
+    # halve the evidence this tier exists to produce. Hosted stays the last
+    # rung for the one case it answers: no self-hosted capacity exists at all,
+    # or self-hosted routing is retired org-wide.
+    #
+    # Every other event keeps hosted runners. Pull-request and dispatch runs
+    # are watched live by whoever triggered them, and contending with local
+    # work on a shared box to serve them is the trade this repository already
+    # declined for its per-PR lanes.
+    runs-on: >-
+      ${{ (github.event_name == 'push'
+        && needs.runner-availability.outputs.selfhosted_disabled == ''
+        && needs.runner-availability.outputs.capacity != ''
+        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || 'ubuntu-latest' }}
     if: >
+      github.event_name == 'push' ||
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
@@ -67,18 +111,23 @@ jobs:
       - name: Postgres hostlib loadgen
         run: make loadgen-postgres
 
-  # Keep the nightly from rotting silently. A label-gated slow tier with a
-  # scheduled run but no failure signal is indistinguishable from no run at
-  # all — which is exactly how a broken `harn models batch prepare` sat on the
-  # nightly unnoticed. This job opens (and later auto-closes) a single tracking
-  # issue so a red nightly raises a durable, deduplicated alarm.
+  # Keep the unattended runs from rotting silently. A slow tier whose result
+  # nobody is watching is indistinguishable from no run at all — which is
+  # exactly how a broken `harn models batch prepare` sat on the nightly
+  # unnoticed. This job opens (and later auto-closes) a single tracking issue
+  # so a red main push or a red nightly raises a durable, deduplicated alarm,
+  # and main cannot be called green while its last executed slow run is red.
   notify:
-    name: Surface nightly result
+    name: Surface unattended result
     runs-on: ubuntu-latest
     needs: e2e
-    # Only the scheduled run manages the tracking issue. Label/dispatch runs
-    # are watched live by whoever triggered them and must not file issues.
-    if: always() && github.event_name == 'schedule' && github.repository == 'burin-labs/harn'
+    # Scheduled and main-push runs manage the tracking issue: nobody is
+    # watching either one live. Label/dispatch runs are watched by whoever
+    # triggered them and must not file issues.
+    if: >
+      always() &&
+      (github.event_name == 'schedule' || github.event_name == 'push') &&
+      github.repository == 'burin-labs/harn'
     permissions:
       contents: read
       issues: write
@@ -86,12 +135,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Open or resolve the nightly-failure tracking issue
+      - name: Open or resolve the unattended-failure tracking issue
         uses: ./.github/actions/scheduled-failure-issue
         with:
           # Unchanged: this string is the deduplication key, so any tracking
           # issue open right now must keep matching.
           title: Scheduled CLI end-to-end behavior is failing
           result: ${{ needs.e2e.result }}
-          details: The scheduled nightly E2E suite did not pass.
+          details: >-
+            The slow E2E suite did not pass on an unattended run
+            (${{ github.event_name }}, ${{ github.sha }}).
           owner-file: .github/workflows/e2e.yml
