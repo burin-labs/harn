@@ -6,7 +6,8 @@
 // tokens, so the schema asks for one discriminant and one brief detail instead
 // of several prose fields and arrays. The schema cannot reject a longer detail,
 // though: some provider dialects cannot express that limit, and the reader
-// already owns the tolerant 240-character clamp.
+// already owns the tolerant clamp. That clamp marks what it cuts, because a
+// silently amputated instruction reads exactly like a complete one (#8074).
 //
 // The verdict also has to be about the right thing. The judge decides whether
 // the work is complete and honestly reported; whether the response carries a
@@ -104,14 +105,16 @@ pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task
 }
 
 pipeline test_decoded_detail_is_clamped_to_the_contract(harness: Harness, task: unknown) {
-  const limit = 240
+  const limit = 1000
   // Replay data and responses produced through older transport versions must
   // not carry an unbounded string past the decode boundary into feedback and
-  // telemetry.
+  // telemetry. The bound is the guarantee; what changed in #8074 is only how
+  // much of one instruction fits inside it, and that a cut now says so.
   const overlong = __judge_completion_verdict_read(
     {verdict: "continue", detail: "gap. ".repeat(limit)},
   )
-  assert_eq(len(overlong.detail), limit)
+  assert(len(overlong.detail) <= limit)
+  assert(ends_with(overlong.detail, " [truncated]"))
 }
 
 pipeline test_out_of_contract_verdict_is_preserved_verbatim(harness: Harness, task: unknown) {

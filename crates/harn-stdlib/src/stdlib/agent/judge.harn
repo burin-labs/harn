@@ -49,6 +49,7 @@ import {
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
 pub import {
   CompletionJudgeVerdict,
+  __judge_clamp_completion_detail,
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,

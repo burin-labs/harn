@@ -777,8 +777,8 @@ pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
   harness: Harness,
   task: unknown,
 ) {
-  const detail = "Verified the requested behavior with the focused end-to-end test. ".repeat(6)
-  assert(len(detail) > 240)
+  const detail = "Verified the requested behavior with the focused end-to-end test. ".repeat(20)
+  assert(len(detail) > 1000)
   with_llm_script(
     harness.llm,
     [llm_done(), {text: json_stringify({verdict: "done", detail: detail})}],
@@ -807,7 +807,11 @@ pipeline test_completion_judge_accepts_then_clamps_overlong_detail(
         captured.events.filter({ event -> event.type == "judge_decision" }).to_list()
       assert_eq(len(decisions), 1)
       assert_eq(decisions[0].verdict, "done")
-      assert_eq(decisions[0].reasoning, substring(detail, 0, 240))
+      // Clamped, marked, and cut on a word boundary rather than mid-token, so a
+      // reader can tell a truncation from a judge that stopped there (#8074).
+      assert(len(decisions[0].reasoning) <= 1000)
+      assert(ends_with(decisions[0].reasoning, " [truncated]"))
+      assert(starts_with(decisions[0].reasoning, "Verified the requested behavior"))
     },
   )
 }
