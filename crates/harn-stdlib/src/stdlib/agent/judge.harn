@@ -81,9 +81,7 @@ pub type CompletionJudgeAction = "accept" | "continue"
  * the receipt rather than deciding the run. `stop_unverified` is every other
  * stop, including a cap reached over a `failed` or `not_run` oracle.
  */
-pub type CompletionDirectiveAction = CompletionJudgeAction \
-  | "stop_unverified" \
-  | "stop_verified"
+pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified" | "stop_verified"
 
 pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
 

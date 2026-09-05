@@ -202,14 +202,16 @@ pipeline test_the_cap_is_still_reported_as_reached(harness: Harness, task: unkno
   const run = __run_to_cap(harness, "passed", "passed")
   __assert_judge_ran(run, "cap-reported arm")
   assert(
-    (run?.result?.completion_judge?.cap_reached ?? false),
+    run?.result?.completion_judge?.cap_reached ?? false,
     "the cap was reached; sealing done must not erase that it was",
   )
 }
 
 // -------------------------------------------------------------------------------------------------
+
 // Direction controls. Without these the change is indistinguishable from one
 // that ends every capped turn cleanly.
+
 // -------------------------------------------------------------------------------------------------
 
 pipeline test_a_cap_over_a_failed_verifier_is_unchanged(harness: Harness, task: unknown) {
