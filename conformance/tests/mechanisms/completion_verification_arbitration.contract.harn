@@ -37,6 +37,13 @@
 // moved. These clauses read the judge's own acceptance, the conversion count,
 // the projection numbers, and the provider call count, which this change and
 // #7097 do not share.
+// FIXTURE NOTE. The gate reading below says `verified`, not
+// `verified_after_write`. On the after-write reading the runtime holds a typed
+// green terminal and answers the boundary itself, so no judge is called and this
+// contract's mechanism never gets a chance to fire (harn#8110). `verified` — a
+// green verifier with no source write behind it — is the reading that isolates
+// the mechanism under test from that skip. Every clause below and every line of
+// the `.expected` beside it is unchanged.
 import { agent_completion_gate } from "std/agent/completion_gate"
 import { agent_capture_events } from "std/agent/events"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
@@ -191,7 +198,7 @@ pipeline default(harness: Harness) {
     harness,
     "converted",
     working_script(judge_refusing("failed_verification", refusal)),
-    {verify_completion: gate_observing("passed", "verified_after_write")},
+    {verify_completion: gate_observing("passed", "verified")},
   )
   harness.stdio.println("converted_accepted=" + to_string(converted.accepted))
   harness.stdio.println("converted_conversions=" + to_string(converted.conversions))
@@ -210,7 +217,7 @@ pipeline default(harness: Harness) {
     working_script(
       judge_refusing("unmet_manner_clause", "the task forbade touching the vendored directory"),
     ),
-    {verify_completion: gate_observing("passed", "verified_after_write")},
+    {verify_completion: gate_observing("passed", "verified")},
   )
   harness.stdio.println("manner_accepted=" + to_string(manner.accepted))
   harness.stdio.println("manner_conversions=" + to_string(manner.conversions))

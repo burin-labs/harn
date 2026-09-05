@@ -43,6 +43,13 @@
 // them before, so a before/after keyed on a terminal's name reports this defect
 // fixed when only its label moved. These clauses read the judge's own
 // acceptance, the conversion count, and the re-ask count.
+// FIXTURE NOTE. The gate reading below says `verified`, not
+// `verified_after_write`. On the after-write reading the runtime holds a typed
+// green terminal and answers the boundary itself, so no judge is called and this
+// contract's mechanism never gets a chance to fire (harn#8110). `verified` — a
+// green verifier with no source write behind it — is the reading that isolates
+// the mechanism under test from that skip. Every clause below and every line of
+// the `.expected` beside it is unchanged.
 import { agent_capture_events } from "std/agent/events"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
@@ -165,7 +172,7 @@ fn run_case(harness: Harness, label: string, script: list, extra: dict) {
 }
 
 pipeline default(harness: Harness) {
-  const passing = {verify_completion: gate_observing("passed", "verified_after_write")}
+  const passing = {verify_completion: gate_observing("passed", "verified")}
   // TRIGGER + EFFECT: the contradiction survives, names nothing, and the gate
   // watched the verifier pass. One re-ask, one conversion, the run completes.
   const survived = run_case(

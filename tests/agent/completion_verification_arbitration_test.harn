@@ -358,7 +358,7 @@ pipeline test_failed_verification_continue_is_refused_against_a_passing_gate(
         "the required verification command has not been executed successfully in the provided evidence",
       ),
     ],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   // The conversion count comes first deliberately: it is counted by
   // `converted_from` alone, and it is the quantity this mechanism owns. Reverting
@@ -386,7 +386,7 @@ pipeline test_unmet_manner_clause_continue_still_vetoes(harness: Harness, task: 
       __judge_says("unmet_manner_clause", "the task forbade touching the vendored directory"),
       llm_done(),
     ],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   const receipts = __completion_receipts(captured.events)
   assert_eq(receipts[0].action, "continue")
@@ -399,7 +399,7 @@ pipeline test_absent_gap_class_continue_still_vetoes(harness: Harness, task: unk
     harness,
     "arbitration-unnamed",
     [llm_done(), __judge_says(nil, "verification has not been run"), llm_done()],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   assert_eq(__completion_receipts(captured.events)[0].action, "continue")
   assert_eq(__conversion_count(captured.events), 0)
@@ -489,5 +489,42 @@ pipeline test_red_verification_never_reaches_the_model_judge(harness: Harness, t
   const receipts = __completion_receipts(captured.events)
   assert_eq(receipts[0].action, "continue")
   assert(!receipts[0].invoked.verify_completion_judge, "no judge call is spent after a red gate")
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+/**
+ * WHY THE END-TO-END CASES ABOVE SAY `verified` AND NOT `verified_after_write`.
+ *
+ * They used to say `verified_after_write`, which is the reading their own real
+ * runs carried. On that reading the judge is no longer called at all: the
+ * runtime holds a typed green terminal and answers the boundary itself
+ * (harn#8110). The arbitration and the skip are alternatives, not complements —
+ * either the call is paid and a bad refusal is overruled, or the call is not
+ * paid — so a case that wants to exercise the arbitration has to pick a reading
+ * the skip does not cover, and `verified` (a green verifier with no source write
+ * behind it) is that reading.
+ *
+ * This pipeline pins the transition rather than letting the fixture edit hide
+ * it: on the ORIGINAL reading, the same scripted refusal never reaches a judge,
+ * and the run finishes anyway. Delete the skip and this fails while the cases
+ * above keep passing, which is what tells a reader the two are one decision.
+ */
+pipeline test_the_original_reading_now_skips_the_judge_entirely(harness: Harness, task: unknown) {
+  const captured = __run(
+    harness,
+    "arbitration-typed-green",
+    [
+      llm_done(),
+      __judge_says(
+        "failed_verification",
+        "the required verification command has not been executed successfully in the provided evidence",
+      ),
+    ],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()), 0)
+  assert_eq(__completion_receipts(captured.events)[0].outcome, "skipped_verified_after_write")
+  assert_eq(captured.result.status, "done")
+  // And nothing was converted, because nothing refused.
   assert_eq(__conversion_count(captured.events), 0)
 }
