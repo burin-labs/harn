@@ -530,19 +530,23 @@ pub fn __agent_loop_render_wrapup_context(context: dict) {
 }
 
 /**
- * True when the loop's terminal status is an exhaustion/cap (not a clean
- * `done`, a suspension, a scope alert, or a hard provider/terminal error).
- * These are the states where the model never produced a clean terminal
- * response and a wrap-up turn is warranted.
+ * True when the terminal turn cannot itself carry the final user response.
+ * Exhaustion/cap states need a closing report because the loop imposed the
+ * stop. An accepted explicit completion claim needs one for a different
+ * structural reason: `task_complete` is a tool-only turn, so the same turn
+ * cannot also contain the assistant response that session finalization
+ * surfaces. Natural `done` remains ineligible because its text is already the
+ * final response.
  *
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_wrapup_eligible_status(final_status: string) {
+pub fn __agent_loop_wrapup_eligible_status(final_status: string, stop_reason: string?) {
   return final_status == "budget_exhausted"
     || final_status == "completion_unverified"
     || final_status == "verify_exhausted"
     || final_status == "stuck"
+    || (final_status == "done" && stop_reason == "explicit_completion_claim")
 }
 
 /**

@@ -292,6 +292,10 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
         ],
       },
       {text: json_stringify({verdict: "done", detail: "The cited edit satisfies the task."})},
+      {
+        text: "<user_response>Implemented the requested edit and verified it.</user_response>\n<done>FINISHED</done>",
+        tool_calls: [],
+      },
     ],
     { ->
       const session = "explicit-completion-" + harness.random.uuid()
@@ -312,7 +316,8 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
       )
       assert_eq(captured.result.status, "done")
       assert_eq(captured.result.stop_reason, "explicit_completion_claim")
-      assert_eq(captured.result.provider_call_count, 3)
+      assert_eq(captured.result.provider_call_count, 4)
+      assert(contains(captured.result.text, "Implemented the requested edit and verified it."))
       assert_eq(
         len(captured.events.filter({ event -> event.type == "iteration_start" }).to_list()),
         2,
@@ -328,6 +333,10 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
       assert_eq(len(observations), 1)
       assert_eq(observations[0].checkpoint.source, "tool")
       assert_eq(observations[0].checkpoint.disposition, "valid")
+      assert_eq(
+        len(captured.events.filter({ event -> event.type == "final_wrapup" }).to_list()),
+        1,
+      )
     },
   )
 }
