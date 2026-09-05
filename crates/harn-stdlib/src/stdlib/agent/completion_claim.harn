@@ -73,31 +73,41 @@ pub fn agent_completion_claim_tool(registry: ToolRegistry? = nil) -> ToolRegistr
     __COMPLETION_CLAIM_TOOL_NAME,
     "Claim that the task is complete and cite the recorded tool calls that support each requirement.",
     {
-      parameters: {
-        requirements: {
-          type: "array",
-          minItems: 1,
-          items: {
-            type: "object",
-            properties: {
-              requirement_id: {type: "string", minLength: 1},
-              evidence_refs: {
-                type: "array",
-                minItems: 1,
-                maxItems: __COMPLETION_CLAIM_MAX_EVIDENCE_REFS,
-                items: {type: "string", minLength: 1},
+      inputSchema: {
+        type: "object",
+        properties: {
+          requirements: {
+            type: "array",
+            description: "Every required task outcome, paired with the tool calls that prove it.",
+            minItems: 1,
+            items: {
+              type: "object",
+              properties: {
+                requirement_id: {
+                  type: "string",
+                  description: "One of the requirement IDs named in the completion instruction.",
+                  minLength: 1,
+                },
+                evidence_refs: {
+                  type: "array",
+                  description: "Recorded tool_call_id values that support this requirement.",
+                  minItems: 1,
+                  maxItems: __COMPLETION_CLAIM_MAX_EVIDENCE_REFS,
+                  items: {type: "string", minLength: 1},
+                },
               },
+              required: ["requirement_id", "evidence_refs"],
+              additionalProperties: false,
             },
-            required: ["requirement_id", "evidence_refs"],
-            additionalProperties: false,
+          },
+          blocked_on: {
+            type: "string",
+            description:
+              "An external dependency that prevents completion; this does not claim completion.",
           },
         },
-        blocked_on: {
-          type: "string",
-          required: false,
-          description:
-            "An external dependency that prevents completion; this does not claim completion.",
-        },
+        required: ["requirements"],
+        additionalProperties: false,
       },
       returns: {type: "object"},
       handler: __completion_claim_handler,

@@ -18,6 +18,7 @@ fn main(harness: Harness) -> int {
     && receipt?.status == "done"
     && receipt?.inspected == true
     && receipt?.evidence_reported == true
+    && receipt?.exit_contract_met == true
     && receipt?.completion_judge_cap_reached == false
     && contains(["baseline", "treatment"], receipt?.arm)
   return if valid {

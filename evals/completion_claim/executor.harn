@@ -102,7 +102,7 @@ fn main(harness: Harness) -> int {
   const trial = request?.trial ?? 0
   const provider = to_string(request?.manifest?.metadata?.provider ?? "")
   const model = to_string(request?.manifest?.metadata?.model ?? "")
-  const max_tokens = request?.manifest?.metadata?.max_tokens ?? 512
+  const max_tokens = request?.manifest?.metadata?.max_tokens ?? 2048
   if regex_match("^[A-Za-z0-9_-]+$", case_id) == nil
     || !contains(["baseline", "treatment"], arm)
     || pair == ""
@@ -184,13 +184,24 @@ fn main(harness: Harness) -> int {
   const status_done = captured.result?.status == "done"
   const evidence_reported = contains(visible_text, evidence)
   const judge_cap_reached = captured.result?.completion_judge?.cap_reached ?? false
-  const pass = status_done && inspected && evidence_reported && !judge_cap_reached
+  const exit_contract_met = if arm == "treatment" {
+    explicit && !fallback
+  } else {
+    !explicit
+  }
+  const pass = status_done
+    && inspected
+    && evidence_reported
+    && exit_contract_met
+    && !judge_cap_reached
   const failure_bucket = if !status_done {
     "terminal_not_done"
   } else if !inspected {
     "inspection_missing"
   } else if !evidence_reported {
     "evidence_not_reported"
+  } else if !exit_contract_met {
+    "exit_contract_not_met"
   } else if judge_cap_reached {
     "completion_judge_cap_reached"
   } else {
@@ -215,6 +226,7 @@ fn main(harness: Harness) -> int {
     evidence_reported: evidence_reported,
     explicit_exit: explicit,
     fallback_exit: fallback,
+    exit_contract_met: exit_contract_met,
     completion_claim_observations: observations,
     completion_directives: completion_directives,
     inspection_call_ids: inspection_call_ids,
@@ -223,6 +235,7 @@ fn main(harness: Harness) -> int {
     terminal_error: to_string(captured.result?.error ?? ""),
     completion_judge_cap_reached: judge_cap_reached,
     provider_call_count: captured.result?.provider_call_count ?? 0,
+    max_tokens: max_tokens,
     known_cost_usd: captured.result?.known_cost_usd ?? 0.0,
     unpriced_calls: captured.result?.unpriced_calls ?? 0,
     usage_unknown_calls: captured.result?.usage_unknown_calls ?? 0,

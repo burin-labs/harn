@@ -2,6 +2,7 @@
 import {
   agent_completion_claim_apply_options,
   agent_completion_claim_disposition,
+  agent_completion_claim_tool,
 } from "std/agent/completion_claim"
 import { agent_capture_events } from "std/agent/events"
 import { __judge_evidence_projection } from "std/agent/judge"
@@ -69,6 +70,21 @@ fn evidence_messages() -> list {
     assistant_calling("edit", "edit-1"),
     dispatched_result("edit", "edit-1", "write applied"),
   ]
+}
+
+pipeline test_completion_tool_projects_one_required_object_schema(harness: Harness, task: unknown) {
+  const entry = agent_completion_claim_tool().tools[0]
+  assert_eq(entry.name, "task_complete")
+  assert_eq(entry?.inputSchema?.type, "object")
+  assert_eq(entry?.inputSchema?.required, ["requirements"])
+  assert_eq(entry?.inputSchema?.additionalProperties, false)
+  assert_eq(entry?.inputSchema?.properties?.requirements?.type, "array")
+  assert_eq(entry?.inputSchema?.properties?.requirements?.minItems, 1)
+  assert_eq(
+    entry?.inputSchema?.properties?.requirements?.items?.required,
+    ["requirement_id", "evidence_refs"],
+  )
+  assert(entry?.parameters == nil)
 }
 
 pipeline test_fabricated_ref_is_rejected_before_judging(harness: Harness, task: unknown) {

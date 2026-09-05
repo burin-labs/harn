@@ -7,10 +7,12 @@ five trials.
 
 The independent verifier requires the agent to call the inspection tool,
 report its exact evidence token, finish successfully, and avoid the completion
-judge cap. Trial receipts additionally record explicit-versus-fallback exit,
-provider-call count, known cost, unpriced calls, and unknown-usage calls. A
-zero cost is therefore never presented without the accounting-status fields
-that say whether it was actually measured.
+judge cap. A treatment cell must finish through a valid explicit claim without
+falling back to the tool-free exit; a baseline cell must not report an explicit
+exit. Trial receipts additionally record explicit-versus-fallback exit,
+provider-call count, known cost, unpriced calls, unknown-usage calls, and the
+output-token ceiling. A zero cost is therefore never presented without the
+accounting-status fields that say whether it was actually measured.
 
 For a live tune run:
 
