@@ -11,7 +11,7 @@ use crate::orchestration::{
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
-use super::convert::to_vm;
+use super::convert::{node_to_vm_with_raw, to_vm};
 
 #[derive(Debug)]
 pub(super) struct ExecutedStage {
@@ -384,37 +384,6 @@ struct HarnExecutedStage {
     attempts: Vec<RunStageAttemptRecord>,
     #[serde(default)]
     consumed_artifact_ids: Vec<String>,
-}
-
-/// Encode a node for the embedded stage loop, re-attaching the raw VmValue
-/// fields serde drops (`#[serde(skip)]`) so they survive the crossing and can
-/// be re-lifted by `__host_stage_execute_once` via `parse_workflow_node_value`.
-/// Without this the inverted loop would silently lose closure-carrying tools /
-/// model policies and the session-id that surfaces a stage transcript — fields
-/// the pre-inversion Rust loop passed through by reference.
-fn node_to_vm_with_raw(node: &crate::orchestration::WorkflowNode) -> Result<VmValue, VmError> {
-    let encoded = to_vm(node)?;
-    let VmValue::Dict(dict) = encoded else {
-        return Ok(encoded);
-    };
-    let mut dict = (*dict).clone();
-    for (key, raw) in [
-        ("tools", &node.raw_tools),
-        ("model_policy", &node.raw_model_policy),
-        ("context_assembler", &node.raw_context_assembler),
-        ("auto_compact", &node.raw_auto_compact),
-        // fn-verify: re-attach the live verifier closure so the embedded stage
-        // loop can invoke it against each attempt's result.
-        ("verify", &node.raw_verify),
-        // Inline executor: re-attach the caller-supplied leaf closure so the
-        // embedded stage loop can run it in place of the delegated worker.
-        ("executor", &node.raw_executor),
-    ] {
-        if let Some(value) = raw {
-            dict.insert(crate::value::intern_key(key), value.clone());
-        }
-    }
-    Ok(VmValue::dict(dict))
 }
 
 /// Build the raw retry-policy dict handed to the embedded stage loop. The

@@ -1,3 +1,4 @@
 verified_handoff=true
 cross_stage_repeat=true
 no_early_repeat=true
+workflow_lifetime=true
