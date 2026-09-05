@@ -4,7 +4,6 @@ import {
   __dispatch_results_list,
   __tool_result_ok,
 } from "std/agent/loop_result_status"
-import { CompletionRequirementContract } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import {
   AgentTranscriptToolLifecycle,
@@ -119,12 +118,7 @@ pub fn agent_completion_claim_apply_options(options: dict? = nil) {
   if !enabled {
     return opts
   }
-  const contract = __completion_claim_contract(opts)
-  const requirement_ids = if contract == nil {
-    ["task"]
-  } else {
-    contract.requirements.map({ requirement -> requirement.requirement_id }).to_list()
-  }
+  const requirement_ids = __completion_claim_requirement_ids(opts)
   return __with_prompt_fragment(
     opts + {tools: agent_completion_claim_tool(opts?.tools)},
     {
@@ -148,16 +142,20 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
   return matches
 }
 
-fn __completion_claim_contract(opts: dict) -> CompletionRequirementContract? {
+fn __completion_claim_requirement_ids(opts: dict) -> list<string> {
   const verification = opts?.verify_completion_judge
   if type_of(verification) == "dict" && verification?.requirement_contract != nil {
-    return completion_requirement_contract(verification.requirement_contract)
+    return completion_requirement_contract(verification.requirement_contract).requirements
+      .map({ requirement -> requirement.requirement_id })
+      .to_list()
   }
   const completion = opts?.turn_end_condition
   if type_of(completion) == "dict" && completion?.requirement_contract != nil {
-    return completion_requirement_contract(completion.requirement_contract)
+    return completion_requirement_contract(completion.requirement_contract).requirements
+      .map({ requirement -> requirement.requirement_id })
+      .to_list()
   }
-  return nil
+  return ["task"]
 }
 
 fn __completion_claim_lifecycle_by_id(messages: any) -> dict {
@@ -182,7 +180,7 @@ fn __completion_claim_validate_requirements(
   claim: CompletionClaim,
   own_call_id: string,
   lifecycle_by_id: dict,
-  contract: CompletionRequirementContract?,
+  expected_requirement_ids: list<string>,
 ) -> CompletionClaimDisposition {
   if len(claim.requirements) == 0 {
     return __completion_claim_invalid(
@@ -247,24 +245,22 @@ fn __completion_claim_validate_requirements(
       seen_requirement_refs = seen_requirement_refs + {[evidence_ref]: true}
     }
   }
-  if contract != nil {
-    let expected = {}
-    for requirement in contract.requirements {
-      expected = expected + {[requirement.requirement_id]: true}
-      if !(seen_requirements[requirement.requirement_id] ?? false) {
-        return __completion_claim_invalid(
-          "completion_claim_requirement_missing",
-          "The completion claim omitted required item `" + requirement.requirement_id + "`.",
-        )
-      }
+  let expected = {}
+  for requirement_id in expected_requirement_ids {
+    expected = expected + {[requirement_id]: true}
+    if !(seen_requirements[requirement_id] ?? false) {
+      return __completion_claim_invalid(
+        "completion_claim_requirement_missing",
+        "The completion claim omitted required item `" + requirement_id + "`.",
+      )
     }
-    for requirement_id in seen_requirements.keys() {
-      if !(expected[requirement_id] ?? false) {
-        return __completion_claim_invalid(
-          "completion_claim_requirement_unknown",
-          "The completion claim named unknown requirement `" + requirement_id + "`.",
-        )
-      }
+  }
+  for requirement_id in seen_requirements.keys() {
+    if !(expected[requirement_id] ?? false) {
+      return __completion_claim_invalid(
+        "completion_claim_requirement_unknown",
+        "The completion claim named unknown requirement `" + requirement_id + "`.",
+      )
     }
   }
   return {kind: "valid", claim: claim}
@@ -309,7 +305,7 @@ pub fn agent_completion_claim_disposition(
     claim,
     to_string(result?.tool_call_id ?? ""),
     __completion_claim_lifecycle_by_id(messages),
-    __completion_claim_contract(opts),
+    __completion_claim_requirement_ids(opts),
   )
 }
 
