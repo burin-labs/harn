@@ -1077,6 +1077,23 @@ fn capability_apply_resolves_shadowing_at_each_call_site() {
 }
 
 #[test]
+fn capability_apply_resolves_enum_payload_callback_bindings() {
+    let (result, updated) = apply_single(
+        "enum Handler {\n  Wrap(callback: fn() -> int)\n}\n\nfn invoke(handler: Handler) -> int {\n  match handler {\n    Handler.Wrap(call) -> { return call() }\n  }\n}\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("HarnessLlm"),
+        "an enum payload callback must not acquire ambient LLM authority:\n{updated}"
+    );
+    assert_eq!(call_arities(&updated, "call"), vec![0]);
+}
+
+#[test]
 fn capability_apply_respects_source_order_for_block_bindings() {
     let (result, updated) = apply_single(
         "fn ordered(call: fn() -> int) -> int {\n  if true {\n    const first = call()\n    const call = fn() -> int { return 4 }\n    return first * 10 + call()\n  }\n  return 0\n}\n\nfn ambient_before_binding() {\n  const first = call(\"mock\", \"before binding\")\n  const call = fn() -> int { return 4 }\n  return call()\n}\n",

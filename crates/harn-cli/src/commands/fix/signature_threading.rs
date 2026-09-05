@@ -16,7 +16,7 @@ use super::alias_widening::AliasWidening;
 use super::capability_arguments::type_expr_carries_capability;
 use super::capability_migrations::collect_callable_node_calls;
 use super::value_escape::FrozenCause;
-use super::{CallSite, CallableInfo};
+use super::{AmbientCapabilityCall, CallSite, CallableInfo};
 
 /// The attribute that declares an embedding host supplies the arguments.
 /// The type checker owns the vocabulary; `harn-lint` keeps the boundary policy.
@@ -59,6 +59,7 @@ pub(super) fn collect_callable_infos(
     // arity moves with it (#6153). Deciding that needs the whole file, so it is
     // decided once here rather than per callable.
     let widening = AliasWidening::analyze(program, source, referenced_by_value);
+    let match_patterns = harn_parser::lexical::module_match_pattern_catalog(program);
     let mut infos = Vec::new();
     for node in program {
         let (attributes, inner) = match &node.node {
@@ -101,6 +102,7 @@ pub(super) fn collect_callable_infos(
                     params,
                     body,
                     source,
+                    &match_patterns,
                     &mut calls,
                     &mut ambient_capability_calls,
                 );
@@ -153,6 +155,7 @@ pub(super) fn collect_callable_infos(
                     params,
                     body,
                     source,
+                    &match_patterns,
                     &mut calls,
                     &mut ambient_capability_calls,
                 );
@@ -205,11 +208,16 @@ fn retain_lexically_resolved_calls(
     params: &[TypedParam],
     body: &[SNode],
     source: &str,
+    match_patterns: &harn_parser::lexical::MatchPatternCatalog,
     calls: &mut Vec<CallSite>,
     ambient_calls: &mut Vec<AmbientCapabilityCall>,
 ) {
-    let lexical_references =
-        harn_parser::lexical::lexically_resolved_identifier_spans(params, body, source);
+    let lexical_references = harn_parser::lexical::lexically_resolved_identifier_spans(
+        params,
+        body,
+        source,
+        match_patterns,
+    );
     calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));
     ambient_calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));
 }

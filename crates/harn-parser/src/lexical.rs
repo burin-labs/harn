@@ -128,6 +128,27 @@ impl MatchPatternCatalog {
     }
 }
 
+/// Build the final enum catalog visible from module-owned callable bodies.
+///
+/// This mirrors the module scope shared by type checking and lowering. Nested
+/// block enums stay lexical to their body and are registered by the analysis
+/// as it walks that body.
+pub fn module_match_pattern_catalog(program: &[SNode]) -> MatchPatternCatalog {
+    let mut catalog = MatchPatternCatalog::default();
+    for nodes in module_scope_node_slices(program) {
+        for node in nodes {
+            let declaration = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
+                catalog.register_enum(name, variants);
+            }
+        }
+    }
+    catalog
+}
+
 impl BindingId {
     pub fn from_declaration(name: impl Into<String>, span: Span) -> Self {
         Self {
@@ -302,9 +323,9 @@ pub fn lexically_resolved_identifier_spans(
     params: &[TypedParam],
     body: &[SNode],
     source: &str,
+    match_patterns: &MatchPatternCatalog,
 ) -> HashSet<(usize, usize)> {
-    let mut analysis =
-        LexicalAnalysis::new_with_source(&MatchPatternCatalog::default(), Some(source));
+    let mut analysis = LexicalAnalysis::new_with_source(match_patterns, Some(source));
     // Parameter defaults execute left to right. An earlier parameter can
     // shadow a builtin in a later default, while the current and later
     // parameters are not visible yet.
