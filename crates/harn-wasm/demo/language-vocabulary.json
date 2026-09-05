@@ -869,6 +869,7 @@
     "tool_def",
     "tool_define",
     "tool_describe",
+    "tool_description_summary",
     "tool_find",
     "tool_format_result",
     "tool_hooks_emit_audit",
