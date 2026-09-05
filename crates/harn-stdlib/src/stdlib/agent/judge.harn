@@ -280,7 +280,7 @@ fn __judge_tool_descriptor(opts: dict, name: any) -> CompletionToolSemantics {
   const effect = lowercase(to_string(annotations?.side_effect_level ?? ""))
   const declared_role = __judge_declared_evidence_role(annotations?.completion_evidence_role)
   const evidence_role = __judge_evidence_role(declared_role, kind, effect, read_only)
-  return {
+  const action: CompletionEvidenceAction = {
     name: __judge_clip_evidence(name, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
     kind: __judge_clip_evidence(
       annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? "",
@@ -439,9 +439,19 @@ fn __judge_lifecycle_action(
     // True when this call has results but EVERY one of them was written by the
     // harness. The call itself was never dispatched, so it is not evidence of
     // work either; the projection drops it and counts it instead.
-    harness_authored_only: len(lifecycle.results) > 0 && len(dispatched) == 0,
-    omitted_harness_authored_result_count: len(lifecycle.results) - len(dispatched),
   }
+  const omitted = len(lifecycle.results) - len(dispatched)
+  return action
+    + if omitted > 0 {
+      {omitted_harness_authored_result_count: omitted}
+    } else {
+      {}
+    }
+    + if len(lifecycle.results) > 0 && len(dispatched) == 0 {
+      {harness_authored_only: true}
+    } else {
+      {}
+    }
 }
 
 fn __judge_latest(
@@ -515,8 +525,8 @@ fn __judge_evidence_projection_from_lifecycle(
   for call in lifecycle.calls {
     const action = __judge_lifecycle_action(call, opts)
     omitted_harness_authored_result_count = omitted_harness_authored_result_count
-      + action.omitted_harness_authored_result_count
-    if action.harness_authored_only {
+      + (action.omitted_harness_authored_result_count ?? 0)
+    if action.harness_authored_only ?? false {
       // Every result on this call was written by the harness, so the call was
       // never dispatched. Counted rather than silently dropped: a judge that
       // sees fewer actions than the run made must be able to tell why.
@@ -560,20 +570,23 @@ fn __judge_evidence_projection_from_lifecycle(
   const raw_digest = raw_transcript_digest
     ?? ("sha256:" + sha256(json_stringify(messages)))
   const research_summary = completion_research_summary(read_only_evidence)
-  const packet = {
+  let packet: CompletionEvidencePacket = {
     schema: "harn.completion_judge_evidence.v2",
     raw_message_count: len(messages),
     raw_transcript_digest: raw_digest,
     relevant_action_count: relevant_call_count,
     omitted_read_only_call_count: research_summary.omitted_count,
     omitted_older_action_count: max(relevant_call_count - len(selected), 0),
-    omitted_harness_authored_result_count: omitted_harness_authored_result_count,
     lifecycle_issue_count: lifecycle.invalid_count,
     lifecycle_issues: latest_issues,
     actions: selected,
     research_summary: research_summary,
     fallback_observations: observation_fallback,
     requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
+  }
+  if omitted_harness_authored_result_count > 0 {
+    packet = packet
+      + {omitted_harness_authored_result_count: omitted_harness_authored_result_count}
   }
   let selection: list<CompletionEvidenceSelection> = []
   for action in selected {

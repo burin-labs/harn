@@ -102,7 +102,8 @@ pipeline test_a_real_failed_call_is_still_evidence(harness: Harness, task: unkno
   const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
   assert_eq(len(projected.packet.actions), 1)
   assert_eq(projected.packet.actions[0].has_error_result, true)
-  assert_eq(projected.packet.omitted_harness_authored_result_count, 0)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, nil)
+  assert(!contains(projected.serialized, "omitted_harness_authored_result_count"))
   assert(contains(projected.serialized, "permission denied"))
 }
 

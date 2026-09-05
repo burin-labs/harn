@@ -42,7 +42,7 @@ pub type CompletionEvidenceAction = {
   harness_authored_only?: bool,
   // Every harness-authored result removed from this action. This can be nonzero
   // even when a real dispatched result keeps the action in the packet.
-  omitted_harness_authored_result_count: int,
+  omitted_harness_authored_result_count?: int,
 }
 
 /**
@@ -100,7 +100,7 @@ pub type CompletionEvidencePacket = {
   // a tool, so the call was never dispatched and its "result" is injected
   // feedback. Dropped from `actions`, counted here, so a judge that sees fewer
   // actions than the run made can tell why (harn#7757).
-  omitted_harness_authored_result_count: int,
+  omitted_harness_authored_result_count?: int,
   lifecycle_issue_count: int,
   lifecycle_issues: list<CompletionEvidenceIssue>,
   actions: list<CompletionEvidenceAction>,
