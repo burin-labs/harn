@@ -228,18 +228,27 @@ pub(super) fn run_imports_for(
         return Ok(empty_imports_response(&path));
     };
     let kind = imports::import_kind(&file.language).to_string();
-    let base_dir = imports::parent_dir(&file.relative_path);
     let resolved_ids: HashSet<FileId> = state.deps.imports_of(file_id).into_iter().collect();
     let mut entries: Vec<VmValue> = Vec::with_capacity(file.imports.len());
     for raw_import in &file.imports {
-        let resolved_path =
-            imports::resolve_module(raw_import, &file.language, &base_dir, &state.path_to_id)
-                .filter(|id| resolved_ids.contains(id))
-                .and_then(|id| state.files.get(&id).map(|f| f.relative_path.clone()));
+        // The importing file's own path, not its directory: Rust module
+        // resolution anchors on the crate root above it.
+        let resolved_path = imports::resolve_module(
+            raw_import,
+            &file.language,
+            &file.relative_path,
+            &state.path_to_id,
+        )
+        .filter(|id| resolved_ids.contains(id))
+        .and_then(|id| state.files.get(&id).map(|f| f.relative_path.clone()));
         entries.push(import_entry(raw_import, resolved_path.as_deref(), &kind));
     }
     Ok(build_dict([
         ("path", str_value(&file.relative_path)),
+        (
+            "resolution_strategy",
+            str_value(imports::strategy_for(&file.language).as_str()),
+        ),
         ("imports", VmValue::List(Arc::new(entries))),
     ]))
 }
@@ -1501,6 +1510,14 @@ fn empty_stats_response() -> VmValue {
 fn empty_imports_response(path: &str) -> VmValue {
     build_dict([
         ("path", str_value(path)),
+        // The file is unknown to the index, so no language and therefore
+        // no resolver applies. Saying "unresolved-by-design" keeps the
+        // required field honest rather than naming a strategy that was
+        // never selected.
+        (
+            "resolution_strategy",
+            str_value(super::imports::ResolutionStrategy::UnresolvedByDesign.as_str()),
+        ),
         ("imports", VmValue::List(Arc::new(Vec::new()))),
     ])
 }

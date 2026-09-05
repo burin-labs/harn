@@ -110,6 +110,21 @@ impl RefreshOutcome {
     }
 }
 
+/// One language's row in [`IndexState::import_census`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportCensusRow {
+    /// Language tag as the file table records it.
+    pub language: String,
+    /// The resolution strategy this language declares.
+    pub strategy: imports::ResolutionStrategy,
+    /// Indexed files of this language.
+    pub files: u64,
+    /// Files from which at least one import string was extracted.
+    pub files_with_imports: u64,
+    /// Files with at least one import resolved to a workspace file.
+    pub files_with_resolved_imports: u64,
+}
+
 impl IndexState {
     /// Build a fresh index over `root`. Returns the populated state plus a
     /// summary of how many files were indexed vs skipped.
@@ -495,6 +510,48 @@ impl IndexState {
         }
     }
 
+    /// Per-language import-resolution census.
+    ///
+    /// This exists because the aggregate number is the only one that
+    /// catches the failure it was written for. Every per-language unit
+    /// test passed while Rust, Swift, Go and Harn resolved nothing at
+    /// all across a real workspace, because each language's resolver was
+    /// declared `noop` and a zero from "no resolver" looked exactly like
+    /// a zero from "nothing to resolve".
+    ///
+    /// [`ImportCensusRow::strategy`] is therefore part of the answer, not
+    /// decoration: a row reading `unresolved-by-design` is reporting that
+    /// nothing was attempted, which is a different claim from a row that
+    /// tried and found no target.
+    pub fn import_census(&self) -> Vec<ImportCensusRow> {
+        let mut by_language: HashMap<&str, ImportCensusRow> = HashMap::new();
+        for file in self.files.values() {
+            let row = by_language
+                .entry(file.language.as_str())
+                .or_insert_with(|| ImportCensusRow {
+                    language: file.language.clone(),
+                    strategy: imports::strategy_for(&file.language),
+                    files: 0,
+                    files_with_imports: 0,
+                    files_with_resolved_imports: 0,
+                });
+            row.files += 1;
+            if !file.imports.is_empty() {
+                row.files_with_imports += 1;
+            }
+            if !self.deps.imports_of(file.id).is_empty() {
+                row.files_with_resolved_imports += 1;
+            }
+        }
+        let mut rows: Vec<ImportCensusRow> = by_language.into_values().collect();
+        rows.sort_by(|a, b| {
+            b.files
+                .cmp(&a.files)
+                .then_with(|| a.language.cmp(&b.language))
+        });
+        rows
+    }
+
     /// Look up a file by either its workspace-relative path or its
     /// absolute path inside the workspace root.
     pub fn lookup_path(&self, raw: &str) -> Option<FileId> {
@@ -687,9 +744,12 @@ mod tests {
         assert_eq!(state.files.len(), 2);
         let main_id = state.path_to_id["src/main.rs"];
         let util_id = state.path_to_id["src/util.rs"];
-        // Rust uses `noop` resolution, so dep graph is empty.
-        assert_eq!(state.deps.imports_of(main_id), Vec::<FileId>::new());
-        let _ = util_id;
+        // This assertion used to read "Rust uses `noop` resolution, so
+        // dep graph is empty", which encoded the defect rather than a
+        // requirement: `use crate::util::helper` names `src/util.rs` and
+        // always did. Rust module resolution now anchors on the crate
+        // root and says so.
+        assert_eq!(state.deps.imports_of(main_id), vec![util_id]);
     }
 
     #[test]
