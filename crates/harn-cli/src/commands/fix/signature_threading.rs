@@ -54,12 +54,14 @@ pub(super) fn collect_callable_infos(
     exported_names: &BTreeSet<String>,
     referenced_by_value: &BTreeSet<String>,
     manifest_handlers: &BTreeSet<String>,
+    visible_type_declarations: &[SNode],
 ) -> Vec<CallableInfo> {
     // A value-referenced callable is frozen unless the alias that fixes its
     // arity moves with it (#6153). Deciding that needs the whole file, so it is
     // decided once here rather than per callable.
     let widening = AliasWidening::analyze(program, source, referenced_by_value);
-    let match_patterns = harn_parser::lexical::module_match_pattern_catalog(program);
+    let mut match_patterns = harn_parser::lexical::module_match_pattern_catalog(program);
+    match_patterns.extend_declarations(visible_type_declarations);
     let mut infos = Vec::new();
     for node in program {
         let (attributes, inner) = match &node.node {
@@ -215,7 +217,7 @@ fn retain_lexically_resolved_calls(
     let lexical_references = harn_parser::lexical::lexically_resolved_identifier_spans(
         params,
         body,
-        source,
+        Some(source),
         match_patterns,
     );
     calls.retain(|call| !lexical_references.contains(&(call.span.start, call.span.end)));

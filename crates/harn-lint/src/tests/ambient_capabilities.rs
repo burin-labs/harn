@@ -6,6 +6,27 @@
 use super::*;
 
 #[test]
+fn lexical_callback_is_not_ambient_without_source_text() {
+    let source = "pub fn invoke(call: fn() -> int) -> int { return call() }\n";
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let diags = lint(&program);
+
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        0,
+        "AST-only lint must retain ordinary lexical call resolution: {diags:?}"
+    );
+    assert_eq!(
+        count_rule(&diags, "undefined-function"),
+        0,
+        "a lexical callback is not a missing module function: {diags:?}"
+    );
+}
+
+#[test]
 fn ambient_fs_call_inside_main_rewrites_to_harness_fs() {
     let source =
         "fn main(harness: Harness) {\n  let body = read_file(\"path.txt\")\n  harness.stdio.println(body)\n}\n";

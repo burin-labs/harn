@@ -113,6 +113,19 @@ impl MatchPatternCatalog {
         self.enum_names.contains(name)
     }
 
+    /// Add enum declarations visible through an enclosing module scope.
+    pub fn extend_declarations(&mut self, declarations: &[SNode]) {
+        for node in declarations {
+            let declaration = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
+                self.register_enum(name, variants);
+            }
+        }
+    }
+
     fn register_enum(&mut self, name: &str, variants: &[crate::ast::EnumVariant]) {
         for owners in self.variant_owners.values_mut() {
             owners.retain(|owner| owner != name);
@@ -136,15 +149,7 @@ impl MatchPatternCatalog {
 pub fn module_match_pattern_catalog(program: &[SNode]) -> MatchPatternCatalog {
     let mut catalog = MatchPatternCatalog::default();
     for nodes in module_scope_node_slices(program) {
-        for node in nodes {
-            let declaration = match &node.node {
-                Node::AttributedDecl { inner, .. } => inner.as_ref(),
-                _ => node,
-            };
-            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
-                catalog.register_enum(name, variants);
-            }
-        }
+        catalog.extend_declarations(nodes);
     }
     catalog
 }
@@ -316,16 +321,16 @@ pub fn resolved_identifier_bindings(
 /// Return identifier-use spans that resolve to any lexical binding.
 ///
 /// Unlike [`resolved_identifier_bindings`], this includes callable names whose
-/// declaration identity is immaterial to the consumer. `source` lets the same
-/// analysis reach expression holes inside interpolated strings while retaining
-/// their containing-file spans.
+/// declaration identity is immaterial to the consumer. When supplied, `source`
+/// lets the same analysis also reach expression holes inside interpolated
+/// strings while retaining their containing-file spans.
 pub fn lexically_resolved_identifier_spans(
     params: &[TypedParam],
     body: &[SNode],
-    source: &str,
+    source: Option<&str>,
     match_patterns: &MatchPatternCatalog,
 ) -> HashSet<(usize, usize)> {
-    let mut analysis = LexicalAnalysis::new_with_source(match_patterns, Some(source));
+    let mut analysis = LexicalAnalysis::new_with_source(match_patterns, source);
     // Parameter defaults execute left to right. An earlier parameter can
     // shadow a builtin in a later default, while the current and later
     // parameters are not visible yet.

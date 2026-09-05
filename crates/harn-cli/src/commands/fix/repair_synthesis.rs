@@ -23,6 +23,7 @@ pub(super) fn synthesize_ambient_capability_repair(
         exported_names,
         escape.referenced_by_value,
         escape.manifest_handlers,
+        &[],
     );
     let owner_idx = infos.iter().position(|info| {
         info.ambient_capability_calls.iter().any(|call| {
@@ -467,6 +468,7 @@ pub(super) fn synthesize_missing_harness_repair(
         exported_names,
         escape.referenced_by_value,
         escape.manifest_handlers,
+        &[],
     );
     let owner_idx = infos
         .iter()
@@ -529,6 +531,7 @@ pub(super) fn synthesize_missing_root_argument_repair(
         exported_names,
         escape.referenced_by_value,
         escape.manifest_handlers,
+        &[],
     );
     let owner_idx = infos
         .iter()

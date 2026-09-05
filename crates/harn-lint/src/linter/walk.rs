@@ -54,6 +54,7 @@ impl<'a> Linter<'a> {
                         fix: None,
                     });
                 }
+                let pushed_lexical_calls = self.push_lexical_call_spans(params, body);
                 self.push_scope();
                 let removal_allowed =
                     !*is_pub && extends.is_none() && self.test_pipeline_input_owned;
@@ -70,6 +71,7 @@ impl<'a> Linter<'a> {
                     self.test_pipeline_depth -= 1;
                 }
                 self.pop_scope();
+                self.pop_lexical_call_spans(pushed_lexical_calls);
             }
 
             Node::FnDecl {
@@ -138,6 +140,7 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(&clause.bound);
                 }
                 self.check_cyclomatic_complexity(name, body, snode.span);
+                let pushed_lexical_calls = self.push_lexical_call_spans(params, body);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
@@ -162,6 +165,7 @@ impl<'a> Linter<'a> {
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
+                self.pop_lexical_call_spans(pushed_lexical_calls);
             }
 
             Node::ToolDecl {
@@ -182,6 +186,7 @@ impl<'a> Linter<'a> {
                 });
                 self.record_callable_signature_type_references(params, return_type);
                 self.check_cyclomatic_complexity(name, body, snode.span);
+                let pushed_lexical_calls = self.push_lexical_call_spans(params, body);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
@@ -200,6 +205,7 @@ impl<'a> Linter<'a> {
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
+                self.pop_lexical_call_spans(pushed_lexical_calls);
             }
 
             Node::SkillDecl {
@@ -318,71 +324,76 @@ impl<'a> Linter<'a> {
                 type_args,
                 args,
             } => {
-                self.check_renamed_stdlib_symbol(name, snode.span);
-                self.check_ambient_clock_builtin(name, snode.span);
-                self.check_ambient_stdio_builtin(name, snode.span);
-                self.check_ambient_fs_builtin(name, snode.span);
-                self.check_ambient_env_builtin(name, snode.span);
-                self.check_ambient_random_builtin(name, args.len(), snode.span);
-                self.check_ambient_net_builtin(name, snode.span);
-                self.check_ambient_harness_method(name, args, snode.span);
-                self.references.insert(name.clone());
-                self.function_references.insert(name.clone());
-                self.function_calls.push((name.clone(), snode.span));
-                self.check_builtin_call_rules(snode);
-                if Self::is_assert_builtin(name) && !self.in_test_source() {
-                    self.diagnostics.push(LintDiagnostic {
-                        code: Code::LintAssertOutsideTest,
-                        rule: "assert-outside-test".into(),
-                        message: format!(
-                            "`{name}` is intended for test pipelines, not production control flow"
-                        ),
-                        span: snode.span,
-                        severity: LintSeverity::Warning,
-                        suggestion: Some(
-                            "use `require` for invariants in non-test code".to_string(),
-                        ),
-                        fix: None,
-                    });
+                let lexical_call = self.call_is_lexically_bound(snode.span);
+                if !lexical_call {
+                    self.check_renamed_stdlib_symbol(name, snode.span);
+                    self.check_ambient_clock_builtin(name, snode.span);
+                    self.check_ambient_stdio_builtin(name, snode.span);
+                    self.check_ambient_fs_builtin(name, snode.span);
+                    self.check_ambient_env_builtin(name, snode.span);
+                    self.check_ambient_random_builtin(name, args.len(), snode.span);
+                    self.check_ambient_net_builtin(name, snode.span);
+                    self.check_ambient_harness_method(name, args, snode.span);
                 }
-                if let Some(export) = self.connector_effect_export_stack.last() {
-                    if let Some(reason) =
-                        harn_vm::connector_export_denied_builtin_reason(export, name)
-                    {
+                self.references.insert(name.clone());
+                if !lexical_call {
+                    self.function_references.insert(name.clone());
+                    self.function_calls.push((name.clone(), snode.span));
+                    self.check_builtin_call_rules(snode);
+                    if Self::is_assert_builtin(name) && !self.in_test_source() {
                         self.diagnostics.push(LintDiagnostic {
-                            code: Code::LintConnectorEffectPolicy,
-                            rule: "connector-effect-policy".into(),
+                            code: Code::LintAssertOutsideTest,
+                            rule: "assert-outside-test".into(),
                             message: format!(
-                                "connector export `{export}` calls disallowed builtin `{name}`: {reason}"
+                                "`{name}` is intended for test pipelines, not production control flow"
                             ),
                             span: snode.span,
                             severity: LintSeverity::Warning,
-                            suggestion: Some(format!(
-                                "move `{name}` out of `{export}` or configure a trusted connector effect-policy override"
-                            )),
+                            suggestion: Some(
+                                "use `require` for invariants in non-test code".to_string(),
+                            ),
                             fix: None,
                         });
                     }
-                }
-                self.check_redundant_clone_args(name, args);
-                if let Some(target) = unnecessary_cast_target(name, args) {
-                    let inner = &args[0];
-                    let fix = unnecessary_cast_fix(self.source, snode.span, inner.span);
-                    let article = if matches!(target, "int") { "an" } else { "a" };
-                    self.diagnostics.push(LintDiagnostic {
-                        code: Code::LintUnnecessaryCast,
-                        rule: "unnecessary-cast".into(),
-                        message: format!(
-                            "`{name}` is a no-op here — its argument is already {article} {target}"
-                        ),
-                        span: snode.span,
-                        severity: LintSeverity::Warning,
-                        suggestion: Some(format!("remove the redundant `{name}(...)` wrapper")),
-                        fix,
-                    });
-                }
-                if Self::call_uses_background_flag(name, args) {
-                    self.warn_unmanaged_long_running_call(name, snode.span);
+                    if let Some(export) = self.connector_effect_export_stack.last() {
+                        if let Some(reason) =
+                            harn_vm::connector_export_denied_builtin_reason(export, name)
+                        {
+                            self.diagnostics.push(LintDiagnostic {
+                                code: Code::LintConnectorEffectPolicy,
+                                rule: "connector-effect-policy".into(),
+                                message: format!(
+                                    "connector export `{export}` calls disallowed builtin `{name}`: {reason}"
+                                ),
+                                span: snode.span,
+                                severity: LintSeverity::Warning,
+                                suggestion: Some(format!(
+                                    "move `{name}` out of `{export}` or configure a trusted connector effect-policy override"
+                                )),
+                                fix: None,
+                            });
+                        }
+                    }
+                    self.check_redundant_clone_args(name, args);
+                    if let Some(target) = unnecessary_cast_target(name, args) {
+                        let inner = &args[0];
+                        let fix = unnecessary_cast_fix(self.source, snode.span, inner.span);
+                        let article = if matches!(target, "int") { "an" } else { "a" };
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUnnecessaryCast,
+                            rule: "unnecessary-cast".into(),
+                            message: format!(
+                                "`{name}` is a no-op here — its argument is already {article} {target}"
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(format!("remove the redundant `{name}(...)` wrapper")),
+                            fix,
+                        });
+                    }
+                    if Self::call_uses_background_flag(name, args) {
+                        self.warn_unmanaged_long_running_call(name, snode.span);
+                    }
                 }
                 for type_arg in type_args {
                     self.record_type_expr_references(type_arg);
@@ -941,6 +952,7 @@ impl<'a> Linter<'a> {
 
             Node::Closure { params, body, .. } => {
                 self.record_param_type_references(params);
+                let pushed_lexical_calls = self.push_lexical_call_spans(params, body);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
@@ -953,6 +965,7 @@ impl<'a> Linter<'a> {
                 self.exit_long_running_body();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
+                self.pop_lexical_call_spans(pushed_lexical_calls);
             }
 
             Node::SpawnExpr { body } | Node::ScopeBlock { body } => {
