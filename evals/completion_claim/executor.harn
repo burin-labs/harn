@@ -1,5 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 fn __inspect_tools(evidence: string) {
@@ -118,6 +119,7 @@ fn __request_failure(stdio: HarnessStdio, started_ms: int, clock: HarnessClock, 
   return 0
 }
 
+@complexity(allow)
 fn main(harness: Harness) -> int {
   const started_ms = harness.clock.monotonic_ms()
   const raw = harness.stdio.read_stdin()
@@ -167,28 +169,24 @@ fn main(harness: Harness) -> int {
     + to_string(trial)
     + "-"
     + harness.random.uuid()
+  const agent_options: AgentSpec = {
+    provider: provider,
+    model: model,
+    session_id: session,
+    tools: __inspect_tools(evidence),
+    required_tools: ["inspect_status"],
+    tool_format: "native",
+    completion_tool: arm == "treatment",
+    loop_until_done: true,
+    max_iterations: 6,
+    max_tokens: max_tokens,
+    verify_completion: __status_evidence_verifier(evidence),
+    verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
+  }
   const captured = agent_capture_events(
     harness.agent,
     session,
-    fn() { return agent_loop(
-      harness,
-      task,
-      nil,
-      {
-        provider: provider,
-        model: model,
-        session_id: session,
-        tools: __inspect_tools(evidence),
-        required_tools: ["inspect_status"],
-        tool_format: "native",
-        completion_tool: arm == "treatment",
-        loop_until_done: true,
-        max_iterations: 6,
-        max_tokens: max_tokens,
-        verify_completion: __status_evidence_verifier(evidence),
-        verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
-      },
-    ) },
+    fn() { return agent_loop(harness, task, nil, agent_options) },
   )
   const observations = __checkpoint_events(captured.events, "harn.completion_claim_observation.v1")
   const completion_directives = __checkpoint_events(
