@@ -14,10 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
   contents: read
-  pull-requests: read
-  statuses: write
 
 concurrency:
   group: repository-state-reconciliation-${{ github.repository }}
@@ -27,6 +24,9 @@ jobs:
   cancel-obsolete-runs:
     name: Cancel obsolete speculative workflows
     if: github.event_name == 'merge_group'
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
       # This controller has Actions write authority, so it always executes the
@@ -51,6 +51,11 @@ jobs:
   check:
     name: Check post-release development cutover
     if: github.repository == 'burin-labs/harn' && github.event_name != 'merge_group'
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+      statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
