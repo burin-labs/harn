@@ -99,6 +99,18 @@ if [[ "$worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
   exit 1
 fi
 
+wrapped_worktree_blocked="$(
+  printf '%s' \
+    '{"tool_name":"Bash","tool_input":{"command":"/usr/bin/env -u GIT_DIR command git --no-pager worktree add ../unowned origin/main"}}' \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$wrapped_worktree_blocked" != *'"permissionDecision":"deny"'* ]] \
+  || [[ "$wrapped_worktree_blocked" != *'fleet-worktree-admit'* ]]; then
+  echo "adapter allowed worktree creation through process launchers" >&2
+  printf '%s\n' "$wrapped_worktree_blocked" >&2
+  exit 1
+fi
+
 admission_allowed="$(
   printf '%s' \
     '{"tool_name":"Bash","tool_input":{"command":"./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"}}' \

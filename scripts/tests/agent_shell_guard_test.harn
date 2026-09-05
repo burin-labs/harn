@@ -76,6 +76,8 @@ pipeline test_raw_git_worktree_add_is_denied_across_parser_shapes(harness: Harne
     "bash -lc 'git worktree add ../lane origin/main'",
     "bash --norc -c 'git worktree add ../lane origin/main'",
     "sh -c \"git -C /workspace worktree add ../lane\"",
+    "/usr/bin/env -u GIT_DIR command git --no-pager worktree add ../lane origin/main",
+    "nohup /usr/bin/git worktree add ../lane origin/main",
     "HARN_ALLOW_RAW_CARGO=1 git worktree add ../lane",
   ] {
     const violation = raw_worktree_add_violation(command)

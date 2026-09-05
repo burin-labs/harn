@@ -141,20 +141,63 @@ fn is_git_worktree_add(argv: list<string>) -> bool {
   return false
 }
 
-fn nested_shell_payload(stage: ShellCommandStage) -> string {
-  if !["bash", "dash", "sh", "zsh"].contains(stage_program(stage)) {
+fn argv_program(argv: list<string>) -> string {
+  if len(argv) == 0 {
+    return ""
+  }
+  const parts = to_string(argv[0] ?? "").split("/")
+  return parts[len(parts) - 1] ?? ""
+}
+
+/** Unwrap standard process launchers so policy follows the executed command. */
+fn launched_argv(argv: list<string>, depth: int) -> list<string> {
+  if depth >= 4 || len(argv) == 0 {
+    return argv
+  }
+  const program = argv_program(argv)
+  if program == "env" {
+    let consumes_next = false
+    for index in range(1, len(argv)) {
+      const token = to_string(argv[index] ?? "")
+      if consumes_next {
+        consumes_next = false
+        continue
+      }
+      if ["-u", "--unset", "-C", "--chdir", "-S", "--split-string"].contains(token) {
+        consumes_next = true
+        continue
+      }
+      if token.starts_with("-") || token.contains("=") {
+        continue
+      }
+      return launched_argv(argv.slice(index, len(argv)), depth + 1)
+    }
+  }
+  if ["command", "exec", "nohup"].contains(program) {
+    for index in range(1, len(argv)) {
+      const token = to_string(argv[index] ?? "")
+      if token.starts_with("-") {
+        continue
+      }
+      return launched_argv(argv.slice(index, len(argv)), depth + 1)
+    }
+  }
+  return argv
+}
+
+fn nested_shell_payload(argv: list<string>) -> string {
+  if !["bash", "dash", "sh", "zsh"].contains(argv_program(argv)) {
     return ""
   }
   let takes_payload = false
-  for token in stage.argv.slice(1, len(stage.argv)) {
+  for token in argv.slice(1, len(argv)) {
     if takes_payload {
       return token
     }
-    const option = token
-    const short_command_flag = option.starts_with("-")
-      && !option.starts_with("--")
-      && option.contains("c")
-    if option == "--command" || short_command_flag {
+    const short_command_flag = token.starts_with("-")
+      && !token.starts_with("--")
+      && token.contains("c")
+    if token == "--command" || short_command_flag {
       takes_payload = true
     }
   }
@@ -164,15 +207,14 @@ fn nested_shell_payload(stage: ShellCommandStage) -> string {
 fn raw_worktree_add_violation_at(command: string, depth: int) -> string {
   for group in command_groups(command) {
     for stage in group {
-      if stage_program(stage) == "git" {
-        if is_git_worktree_add(stage.argv) {
-          return "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
-            + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
-            + "and records the joined ledger and recovery receipts before returning success."
-        }
+      const argv = launched_argv(stage.argv, 0)
+      if argv_program(argv) == "git" && is_git_worktree_add(argv) {
+        return "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
+          + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
+          + "and records the joined ledger and recovery receipts before returning success."
       }
       if depth < 4 {
-        const nested = nested_shell_payload(stage)
+        const nested = nested_shell_payload(argv)
         if nested != "" {
           const violation = raw_worktree_add_violation_at(nested, depth + 1)
           if violation != "" {

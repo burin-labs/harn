@@ -23,6 +23,12 @@ pipeline default(harness: Harness) {
     direct.reason.contains("fleet-worktree-admit")
       && nested.reason.contains("fleet-worktree-admit"),
   )
+  const live_control = decision(payload("cargo build"))
+  contract_effect(
+    harness.stdio,
+    "live_control_raw_cargo_is_also_denied",
+    !live_control.allow && live_control.reason.contains("make build"),
+  )
   const wrapper = decision(
     payload("./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1"),
   )
