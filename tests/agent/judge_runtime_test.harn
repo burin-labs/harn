@@ -248,7 +248,12 @@ pipeline test_completion_evidence_keeps_source_content_after_a_later_test_edit(
   const messages = [
     __assistant_facts(
       "Sort the ready queue.",
-      [{id: "edit-src", function: {name: "edit", arguments: {path: "internal/engine/scheduler.go"}}}],
+      [
+        {
+          id: "edit-src",
+          function: {name: "edit", arguments: {path: "internal/engine/scheduler.go"}},
+        },
+      ],
     ),
     __result_facts(
       "edit",
