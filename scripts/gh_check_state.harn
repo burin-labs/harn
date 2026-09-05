@@ -1,0 +1,677 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { github_api_json_result } from "./github_api.harn"
+
+/**
+ * One check name's latest resolved verdict.
+ *
+ * `intentional_skip` is a skip the workflow's own routing chose. A skip on a
+ * check the changed paths required is classified `bad`, because a routing bug
+ * that skips the lane a change breaks is indistinguishable from a pass unless
+ * the reader separates the two.
+ */
+pub type CheckVerdict = "success" | "intentional_skip" | "pending" | "bad"
+
+pub type CheckSource = "check_run" | "commit_status"
+
+pub type CheckObservation = {
+  name: string,
+  verdict: CheckVerdict,
+  source: CheckSource,
+  raw_status: string,
+  raw_conclusion: string,
+  ordinal: int,
+}
+
+pub type ExpectationSource = "workflow_filters" | "explicit" | "unobservable"
+
+pub type CheckCensus = {
+  head_sha: string,
+  total: int,
+  success: int,
+  intentional_skip: int,
+  pending: int,
+  bad: int,
+  missing: int,
+  observed_names: list<string>,
+  pending_names: list<string>,
+  bad_names: list<string>,
+  missing_names: list<string>,
+  expected_names: list<string>,
+  path_required_names: list<string>,
+  expectation_source: ExpectationSource,
+  verdict: "green" | "bad" | "missing" | "pending",
+  exit_code: int,
+}
+
+/**
+ * Path-gated CI jobs whose `if:` condition is exactly
+ * `needs.changes.outputs.<filter> == 'true'`. The globs are NOT copied here;
+ * they are read from the workflow that owns them.
+ * `scripts/tests/gh_check_state_test.harn` fails when a workflow adds a
+ * path-gated job that no row maps, so this table cannot silently fall behind.
+ */
+pub const PATH_GATED_CHECKS = [
+  {filter: "portal", check_prefix: "Portal frontend"},
+  {filter: "vscode", check_prefix: "VS Code extension"},
+  {filter: "docs_site", check_prefix: "Docs site"},
+  {filter: "setup_action", check_prefix: "Setup Harn action"},
+  {filter: "release_contract", check_prefix: "Harn and release orchestrator agree"},
+]
+
+/** Checks that must report on every head, whatever the diff touched. */
+pub const ALWAYS_EXPECTED_CHECKS = ["CI status"]
+
+const EXIT_GREEN = 0
+
+const EXIT_BAD = 1
+
+const EXIT_PENDING = 2
+
+const EXIT_MISSING = 3
+
+const EXIT_USAGE = 64
+
+const MAX_PAGES = 10
+
+const PAGE_SIZE = 100
+
+/** Conclusions that mean the lane ran and reached a verdict we accept. */
+const PASSING_CONCLUSIONS = ["success", "neutral"]
+
+/**
+ * Conclusions that mean the lane reached a verdict we reject. Anything
+ * completed and unrecognized also fails closed.
+ */
+const FAILING_CONCLUSIONS = [
+  "failure",
+  "timed_out",
+  "cancelled",
+  "action_required",
+  "startup_failure",
+  "stale",
+]
+
+const RUNNING_STATUSES = ["queued", "in_progress", "waiting", "requested", "pending"]
+
+/** Classify one check run. Anything not completed is pending, never bad. */
+pub fn classify_check_run(status: string, conclusion: string) -> CheckVerdict {
+  if RUNNING_STATUSES.contains(status) {
+    return "pending"
+  }
+  if status != "completed" {
+    return "pending"
+  }
+  if conclusion == "skipped" {
+    return "intentional_skip"
+  }
+  if PASSING_CONCLUSIONS.contains(conclusion) {
+    return "success"
+  }
+  if FAILING_CONCLUSIONS.contains(conclusion) {
+    return "bad"
+  }
+  return "bad"
+}
+
+/** Classify one commit status context. */
+pub fn classify_commit_status(state: string) -> CheckVerdict {
+  if state == "pending" {
+    return "pending"
+  }
+  if state == "success" {
+    return "success"
+  }
+  return "bad"
+}
+
+/**
+ * Keep the highest-ordinal observation per check name.
+ *
+ * A rerun leaves the superseded FAILURE row beside the fresh SUCCESS row. Both
+ * are returned by the API; only the later one is the current verdict.
+ */
+pub fn latest_per_name(observations: list<CheckObservation>) -> list<CheckObservation> {
+  let latest = {}
+  for observation in observations ?? [] {
+    const prior = latest[observation.name]
+    if prior == nil || (to_int(observation.ordinal) ?? 0) > (to_int(prior.ordinal) ?? 0) {
+      latest = latest + {[observation.name]: observation}
+    }
+  }
+  let out: list<CheckObservation> = []
+  for name in keys(latest).sorted() {
+    out = out.appending(latest[name])
+  }
+  return out
+}
+
+fn wildcard_match(pattern: string, text: string) -> bool {
+  if !pattern.contains("*") {
+    return pattern == text
+  }
+  const parts = pattern.split("*")
+  let cursor = 0
+  let index = 0
+  for part in parts {
+    if index == 0 {
+      if !text.starts_with(part) {
+        return false
+      }
+      cursor = len(part)
+    } else if index == len(parts) - 1 {
+      if part == "" {
+        return true
+      }
+      if !text.ends_with(part) {
+        return false
+      }
+      if len(text) - len(part) < cursor {
+        return false
+      }
+    } else if part != "" {
+      const rest = text[cursor:]
+      const found = rest.index_of(part)
+      if found < 0 {
+        return false
+      }
+      cursor = cursor + found + len(part)
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn match_segments(patterns: list<string>, p_at: int, segments: list<string>, s_at: int) -> bool {
+  if p_at >= len(patterns) {
+    return s_at >= len(segments)
+  }
+  const head = patterns[p_at] ?? ""
+  if head == "**" {
+    let cursor = s_at
+    while cursor <= len(segments) {
+      if match_segments(patterns, p_at + 1, segments, cursor) {
+        return true
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+  if s_at >= len(segments) {
+    return false
+  }
+  if !wildcard_match(head, segments[s_at] ?? "") {
+    return false
+  }
+  return match_segments(patterns, p_at + 1, segments, s_at + 1)
+}
+
+/** Match one repository-relative path against one micromatch-style glob. */
+pub fn glob_match(pattern: string, path: string) -> bool {
+  return match_segments(pattern.split("/"), 0, path.split("/"), 0)
+}
+
+/** True when a changed-path set activates a `dorny/paths-filter` rule. */
+pub fn filter_matches_paths(patterns: list<string>, changed_paths: list<string>) -> bool {
+  for path in changed_paths ?? [] {
+    let included = false
+    let excluded = false
+    for pattern in patterns ?? [] {
+      if pattern.starts_with("!") {
+        if glob_match(pattern[1:], path) {
+          excluded = true
+        }
+      } else if glob_match(pattern, path) {
+        included = true
+      }
+    }
+    if included && !excluded {
+      return true
+    }
+  }
+  return false
+}
+
+/** Check-name prefixes the changed paths require to have reported. */
+pub fn path_required_check_names(
+  filters: any,
+  changed_paths: list<string>,
+  rows: list = PATH_GATED_CHECKS,
+) -> list<string> {
+  let out: list<string> = []
+  for row in rows ?? [] {
+    const patterns = filters?.[row.filter]
+    if type_of(patterns) != "list" {
+      continue
+    }
+    let as_strings: list<string> = []
+    for pattern in patterns {
+      as_strings = as_strings.appending(to_string(pattern))
+    }
+    if filter_matches_paths(as_strings, changed_paths) {
+      out = out.appending(to_string(row.check_prefix))
+    }
+  }
+  return out.sorted()
+}
+
+fn observation_covers(name: string, expected: string) -> bool {
+  return name == expected || name.starts_with(expected + " (")
+}
+
+fn names_covering(observations: list<CheckObservation>, expected: string) -> list<string> {
+  let out: list<string> = []
+  for observation in observations ?? [] {
+    if observation_covers(observation.name, expected) {
+      out = out.appending(observation.name)
+    }
+  }
+  return out
+}
+
+/**
+ * Fold latest-per-name observations plus expectations into one typed census.
+ *
+ * `total` is the observed count and equals
+ * `success + intentional_skip + pending + bad`. `missing` counts expected names
+ * with no observation at all; it is reported beside the verdict rather than
+ * folded into it so an unreported check can never read as a satisfied one.
+ */
+pub fn build_census(
+  head_sha: string,
+  observations: list<CheckObservation>,
+  expected_names: list<string>,
+  path_required_names: list<string>,
+  expectation_source: ExpectationSource,
+) -> CheckCensus {
+  const latest = latest_per_name(observations)
+  let success = 0
+  let intentional_skip = 0
+  let pending = 0
+  let bad = 0
+  let observed_names: list<string> = []
+  let pending_names: list<string> = []
+  let bad_names: list<string> = []
+  for observation in latest {
+    observed_names = observed_names.appending(observation.name)
+    let verdict = observation.verdict
+    if verdict == "intentional_skip" {
+      for required in path_required_names ?? [] {
+        if observation_covers(observation.name, required) {
+          verdict = "bad"
+        }
+      }
+    }
+    if verdict == "success" {
+      success = success + 1
+    } else if verdict == "intentional_skip" {
+      intentional_skip = intentional_skip + 1
+    } else if verdict == "pending" {
+      pending = pending + 1
+      pending_names = pending_names.appending(observation.name)
+    } else {
+      bad = bad + 1
+      bad_names = bad_names.appending(observation.name)
+    }
+  }
+  let missing_names: list<string> = []
+  for expected in expected_names ?? [] {
+    if len(names_covering(latest, expected)) == 0 {
+      missing_names = missing_names.appending(expected)
+    }
+  }
+  const missing = len(missing_names)
+  const verdict = if bad > 0 {
+    "bad"
+  } else if expectation_source == "unobservable" || missing > 0 {
+    "missing"
+  } else if pending > 0 {
+    "pending"
+  } else {
+    "green"
+  }
+  const exit_code = if verdict == "bad" {
+    EXIT_BAD
+  } else if verdict == "missing" {
+    EXIT_MISSING
+  } else if verdict == "pending" {
+    EXIT_PENDING
+  } else {
+    EXIT_GREEN
+  }
+  return {
+    head_sha: head_sha,
+    total: len(latest),
+    success: success,
+    intentional_skip: intentional_skip,
+    pending: pending,
+    bad: bad,
+    missing: missing,
+    observed_names: observed_names,
+    pending_names: pending_names,
+    bad_names: bad_names,
+    missing_names: missing_names.sorted(),
+    expected_names: (expected_names ?? []).sorted(),
+    path_required_names: (path_required_names ?? []).sorted(),
+    expectation_source: expectation_source,
+    verdict: verdict,
+    exit_code: exit_code,
+  }
+}
+
+/** Turn one check-runs API page into observations. */
+pub fn check_run_observations(page: any) -> list<CheckObservation> {
+  let out: list<CheckObservation> = []
+  for run in page?.check_runs ?? [] {
+    const status = to_string(run?.status ?? "")
+    const conclusion = to_string(run?.conclusion ?? "")
+    out = out.appending(
+      {
+        name: to_string(run?.name ?? ""),
+        verdict: classify_check_run(status, conclusion),
+        source: "check_run",
+        raw_status: status,
+        raw_conclusion: conclusion,
+        ordinal: to_int(run?.id) ?? 0,
+      },
+    )
+  }
+  return out
+}
+
+/** Turn the combined commit-status payload into observations. */
+pub fn commit_status_observations(payload: any) -> list<CheckObservation> {
+  let out: list<CheckObservation> = []
+  let ordinal = len(payload?.statuses ?? [])
+  for status in payload?.statuses ?? [] {
+    const state = to_string(status?.state ?? "")
+    out = out.appending(
+      {
+        name: to_string(status?.context ?? ""),
+        verdict: classify_commit_status(state),
+        source: "commit_status",
+        raw_status: state,
+        raw_conclusion: state,
+        ordinal: ordinal,
+      },
+    )
+    ordinal = ordinal - 1
+  }
+  return out
+}
+
+/** Read the `dorny/paths-filter` rules a workflow step owns. */
+pub fn workflow_surface_filters(workflow: any, step_id: string) -> any {
+  for job_name in keys(workflow?.jobs ?? {}) {
+    const job = workflow?.jobs?.[job_name]
+    for step in job?.steps ?? [] {
+      if to_string(step?.id ?? "") != step_id {
+        continue
+      }
+      const raw = step?.with?.filters
+      if type_of(raw) != "string" {
+        continue
+      }
+      return try {
+        yaml_parse(to_string(raw))
+      } catch (_err) {
+        nil
+      }
+    }
+  }
+  return nil
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "gh_check_state",
+      args: [
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", default: ""},
+        {kind: "flag", name: "sha", long: "--sha", parse: "string", default: ""},
+        {kind: "flag", name: "base", long: "--base", parse: "string", default: "main"},
+        {
+          kind: "flag",
+          name: "workflow",
+          long: "--workflow",
+          parse: "string",
+          default: ".github/workflows/ci.yml",
+        },
+        {kind: "flag", name: "expect", long: "--expect", parse: "string", multi: true, default: []},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn usage() -> string {
+  return join(
+    [
+      "usage: harn run scripts/gh_check_state.harn -- --repo OWNER/NAME --sha <40-hex>",
+      "                                              [--base REF] [--workflow PATH]",
+      "                                              [--expect NAME ...] [--json]",
+      "",
+      "Reports the latest verdict per check name for one head commit, resolved from",
+      "both the commit's check runs and its commit statuses, and refuses when an",
+      "expected check never reported.",
+      "",
+      "Exit codes:",
+      "  0  every expected check reported and passed",
+      "  1  at least one check is failing",
+      "  3  at least one expected check never reported, or expectations are",
+      "     unobservable",
+      "  2  at least one check is still queued or running",
+      "  64 usage error",
+    ],
+    "\n",
+  )
+}
+
+fn is_hex40(value: string) -> bool {
+  if len(value) != 40 {
+    return false
+  }
+  for character in value.chars() {
+    if !"0123456789abcdef".contains(character.lower()) {
+      return false
+    }
+  }
+  return true
+}
+
+fn api_json(process: HarnessProcess, clock: HarnessClock, path: string) -> any {
+  const receipt = github_api_json_result(process, clock, path)
+  if !receipt.ok {
+    return nil
+  }
+  return receipt.value
+}
+
+fn collect_observations(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  repo: string,
+  sha: string,
+) -> any {
+  let observations: list<CheckObservation> = []
+  let page = 1
+  let seen = 0
+  let total_count = -1
+  let ok = false
+  while page <= MAX_PAGES {
+    const payload = api_json(
+      process,
+      clock,
+      "/repos/${repo}/commits/${sha}/check-runs?per_page=${to_string(PAGE_SIZE)}&page=${to_string(page)}",
+    )
+    if payload == nil {
+      return {ok: false, observations: observations}
+    }
+    ok = true
+    total_count = to_int(payload?.total_count) ?? 0
+    const batch = check_run_observations(payload)
+    observations = observations + batch
+    seen = seen + len(batch)
+    if len(batch) == 0 || seen >= total_count {
+      break
+    }
+    page = page + 1
+  }
+  const statuses = api_json(
+    process,
+    clock,
+    "/repos/${repo}/commits/${sha}/status?per_page=${to_string(PAGE_SIZE)}",
+  )
+  if statuses == nil {
+    return {ok: false, observations: observations}
+  }
+  observations = observations + commit_status_observations(statuses)
+  return {ok: ok, observations: observations}
+}
+
+fn changed_paths(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  repo: string,
+  base: string,
+  sha: string,
+) -> any {
+  const payload = api_json(
+    process,
+    clock,
+    "/repos/${repo}/compare/${base}...${sha}?per_page=${to_string(PAGE_SIZE)}",
+  )
+  if payload == nil || type_of(payload?.files) != "list" {
+    return {ok: false, paths: []}
+  }
+  let paths: list<string> = []
+  for file in payload?.files ?? [] {
+    paths = paths.appending(to_string(file?.filename ?? ""))
+  }
+  return {ok: true, paths: paths}
+}
+
+fn read_workflow(io: {fs: HarnessFs, stdio: HarnessStdio}, path: string) -> any {
+  const status = io.fs.status(path)
+  if to_string(status?.status ?? "") != "present_file" {
+    io.stdio.eprintln(
+      "gh_check_state: cannot read ${path} (status=${to_string(status?.status ?? "unknown")})",
+    )
+    return nil
+  }
+  return try {
+    yaml_parse(io.fs.read_text(path))
+  } catch (_err) {
+    nil
+  }
+}
+
+fn render(census: CheckCensus) -> string {
+  let lines = [
+    "head: ${census.head_sha}",
+    "verdict: ${census.verdict} (exit ${to_string(census.exit_code)})",
+    "expectations: ${census.expectation_source}",
+    "total ${to_string(census.total)} = success ${to_string(census.success)}"
+      + " + intentional_skip ${to_string(census.intentional_skip)}"
+      + " + pending ${to_string(census.pending)}"
+      + " + bad ${to_string(census.bad)}",
+    "missing (expected but never reported): ${to_string(census.missing)}",
+  ]
+  if len(census.bad_names) > 0 {
+    lines = lines.appending("  failing: " + join(census.bad_names, ", "))
+  }
+  if len(census.pending_names) > 0 {
+    lines = lines.appending("  pending: " + join(census.pending_names, ", "))
+  }
+  if len(census.missing_names) > 0 {
+    lines = lines.appending("  missing: " + join(census.missing_names, ", "))
+  }
+  if len(census.path_required_names) > 0 {
+    lines = lines.appending(
+      "  required by changed paths: " + join(census.path_required_names, ", "),
+    )
+  }
+  return join(lines, "\n")
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(usage())
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln(usage())
+    harness.runtime.exit(EXIT_USAGE)
+  }
+  const parsed = unwrap(parsed_result).options
+  const repo = to_string(parsed?.repo ?? "")
+  const sha = to_string(parsed?.sha ?? "").lower()
+  const base = to_string(parsed?.base ?? "main")
+  const explicit_expected: list<string> = parsed?.expect ?? []
+  if !repo.contains("/") {
+    harness.stdio.eprintln("gh_check_state: --repo must be OWNER/NAME")
+    harness.runtime.exit(EXIT_USAGE)
+  }
+  if !is_hex40(sha) {
+    harness.stdio.eprintln("gh_check_state: --sha must be a 40-character commit sha")
+    harness.runtime.exit(EXIT_USAGE)
+  }
+  const collected = collect_observations(harness.process, harness.clock, repo, sha)
+  if !collected.ok {
+    harness.stdio.eprintln(
+      "gh_check_state: could not read check state for ${sha}; treating it as unobservable",
+    )
+    const census = build_census(sha, [], explicit_expected, [], "unobservable")
+    harness.stdio.println(
+      if parsed?.json ?? false {
+        json_stringify_pretty(census)
+      } else {
+        render(census)
+      },
+    )
+    harness.runtime.exit(EXIT_MISSING)
+  }
+  let path_required: list<string> = []
+  let expectation_source: ExpectationSource = "unobservable"
+  if len(explicit_expected) > 0 {
+    expectation_source = "explicit"
+  }
+  const workflow = read_workflow(
+    {fs: harness.fs, stdio: harness.stdio},
+    to_string(parsed?.workflow ?? ""),
+  )
+  if workflow != nil {
+    const filters = workflow_surface_filters(workflow, "surface_filter")
+    const diff = changed_paths(harness.process, harness.clock, repo, base, sha)
+    if filters != nil && diff.ok {
+      path_required = path_required_check_names(filters, diff.paths)
+      expectation_source = "workflow_filters"
+    }
+  }
+  let expected = explicit_expected
+  if expectation_source == "workflow_filters" {
+    expected = ALWAYS_EXPECTED_CHECKS + path_required
+    for name in explicit_expected {
+      if !expected.contains(name) {
+        expected = expected.appending(name)
+      }
+    }
+  }
+  const census = build_census(
+    sha,
+    collected.observations,
+    expected,
+    path_required,
+    expectation_source,
+  )
+  harness.stdio.println(
+    if parsed?.json ?? false {
+      json_stringify_pretty(census)
+    } else {
+      render(census)
+    },
+  )
+  harness.runtime.exit(census.exit_code)
+}

@@ -1,0 +1,300 @@
+import {
+  ALWAYS_EXPECTED_CHECKS,
+  PATH_GATED_CHECKS,
+  build_census,
+  check_run_observations,
+  classify_check_run,
+  classify_commit_status,
+  commit_status_observations,
+  filter_matches_paths,
+  glob_match,
+  latest_per_name,
+  path_required_check_names,
+  workflow_surface_filters,
+} from "../gh_check_state.harn"
+
+const CI_WORKFLOW = "../../.github/workflows/ci.yml"
+
+fn run(id: int, name: string, status: string, conclusion: string) -> dict {
+  return {id: id, name: name, status: status, conclusion: conclusion}
+}
+
+pipeline test_queued_and_running_checks_are_pending_never_bad(task: unknown) {
+  assert_eq(classify_check_run("queued", ""), "pending")
+  assert_eq(classify_check_run("in_progress", ""), "pending")
+  assert_eq(classify_check_run("waiting", ""), "pending")
+  assert_eq(classify_check_run("requested", ""), "pending")
+  assert_eq(classify_commit_status("pending"), "pending")
+}
+
+pipeline test_completed_conclusions_fail_closed(task: unknown) {
+  assert_eq(classify_check_run("completed", "success"), "success")
+  assert_eq(classify_check_run("completed", "neutral"), "success")
+  assert_eq(classify_check_run("completed", "skipped"), "intentional_skip")
+  assert_eq(classify_check_run("completed", "failure"), "bad")
+  assert_eq(classify_check_run("completed", "cancelled"), "bad")
+  assert_eq(classify_check_run("completed", "timed_out"), "bad")
+  assert_eq(classify_check_run("completed", "startup_failure"), "bad")
+  // An unrecognized terminal conclusion is a verdict we cannot read, so it
+  // must not be counted as a pass.
+  assert_eq(classify_check_run("completed", "invented_conclusion"), "bad")
+  assert_eq(classify_check_run("completed", ""), "bad")
+  assert_eq(classify_commit_status("failure"), "bad")
+  assert_eq(classify_commit_status("error"), "bad")
+  assert_eq(classify_commit_status("success"), "success")
+}
+
+pipeline test_stale_failure_beside_a_fresh_success_reads_as_success(task: unknown) {
+  const page = {
+    total_count: 3,
+    check_runs: [
+      run(11, "CI status", "completed", "failure"),
+      run(42, "CI status", "completed", "success"),
+      run(12, "Portal frontend", "completed", "success"),
+    ],
+  }
+  const census = build_census(
+    "a".repeat(40),
+    check_run_observations(page),
+    ["CI status"],
+    [],
+    "explicit",
+  )
+  assert_eq(census.total, 2)
+  assert_eq(census.success, 2)
+  assert_eq(census.bad, 0)
+  assert_eq(census.missing, 0)
+  assert_eq(census.verdict, "green")
+  assert_eq(census.exit_code, 0)
+}
+
+pipeline test_a_fresh_failure_beside_a_stale_success_still_reads_as_bad(task: unknown) {
+  // Negative control for the case above: the same two rows in the other
+  // direction must not collapse to green.
+  const page = {
+    total_count: 2,
+    check_runs: [
+      run(42, "CI status", "completed", "failure"),
+      run(11, "CI status", "completed", "success"),
+    ],
+  }
+  const census = build_census(
+    "b".repeat(40),
+    check_run_observations(page),
+    ["CI status"],
+    [],
+    "explicit",
+  )
+  assert_eq(census.bad, 1)
+  assert_eq(census.bad_names, ["CI status"])
+  assert_eq(census.exit_code, 1)
+}
+
+pipeline test_a_head_with_no_check_runs_refuses_instead_of_passing(task: unknown) {
+  const census = build_census("c".repeat(40), [], ALWAYS_EXPECTED_CHECKS, [], "workflow_filters")
+  assert_eq(census.total, 0)
+  assert_eq(census.success, 0)
+  assert_eq(census.missing, 1)
+  assert_eq(census.missing_names, ["CI status"])
+  assert_eq(census.verdict, "missing")
+  assert_eq(census.exit_code, 3)
+}
+
+pipeline test_unobservable_expectations_refuse(task: unknown) {
+  const page = {total_count: 1, check_runs: [run(1, "CI status", "completed", "success")]}
+  const census = build_census("d".repeat(40), check_run_observations(page), [], [], "unobservable")
+  assert_eq(census.success, 1)
+  assert_eq(census.missing, 0)
+  assert_eq(census.verdict, "missing")
+  assert_eq(census.exit_code, 3)
+}
+
+pipeline test_a_skip_on_a_path_required_check_is_bad_not_a_pass(task: unknown) {
+  const page = {
+    total_count: 2,
+    check_runs: [
+      run(1, "CI status", "completed", "success"),
+      run(2, "Portal frontend", "completed", "skipped"),
+    ],
+  }
+  const required = ["Portal frontend"]
+  const census = build_census(
+    "e".repeat(40),
+    check_run_observations(page),
+    ALWAYS_EXPECTED_CHECKS + required,
+    required,
+    "workflow_filters",
+  )
+  assert_eq(census.intentional_skip, 0)
+  assert_eq(census.bad, 1)
+  assert_eq(census.bad_names, ["Portal frontend"])
+  assert_eq(census.exit_code, 1)
+  // Control: the same skip on a check the diff did not require stays benign.
+  const benign = build_census(
+    "e".repeat(40),
+    check_run_observations(page),
+    ALWAYS_EXPECTED_CHECKS,
+    [],
+    "workflow_filters",
+  )
+  assert_eq(benign.intentional_skip, 1)
+  assert_eq(benign.bad, 0)
+  assert_eq(benign.exit_code, 0)
+}
+
+pipeline test_matrix_check_names_satisfy_their_prefix(task: unknown) {
+  const page = {
+    total_count: 3,
+    check_runs: [
+      run(1, "CI status", "completed", "success"),
+      run(2, "Setup Harn action (ubuntu-latest)", "completed", "success"),
+      run(3, "Setup Harn action (windows-latest)", "completed", "success"),
+    ],
+  }
+  const census = build_census(
+    "f".repeat(40),
+    check_run_observations(page),
+    ALWAYS_EXPECTED_CHECKS + ["Setup Harn action"],
+    ["Setup Harn action"],
+    "workflow_filters",
+  )
+  assert_eq(census.missing, 0)
+  assert_eq(census.exit_code, 0)
+}
+
+pipeline test_commit_statuses_are_folded_in_with_check_runs(task: unknown) {
+  const observations = check_run_observations(
+    {total_count: 1, check_runs: [run(1, "CI status", "completed", "success")]},
+  )
+    + commit_status_observations(
+      {
+        statuses: [
+          {context: "codecov/patch", state: "failure"},
+          {context: "codecov/project", state: "success"},
+        ],
+      },
+    )
+  const census = build_census("0".repeat(40), observations, ["CI status"], [], "explicit")
+  assert_eq(census.total, 3)
+  assert_eq(census.bad_names, ["codecov/patch"])
+  assert_eq(census.exit_code, 1)
+}
+
+pipeline test_latest_per_name_keeps_one_row_per_name(task: unknown) {
+  const observations = check_run_observations(
+    {
+      total_count: 4,
+      check_runs: [
+        run(1, "A", "completed", "failure"),
+        run(9, "A", "completed", "success"),
+        run(3, "B", "queued", ""),
+        run(2, "B", "completed", "success"),
+      ],
+    },
+  )
+  const latest = latest_per_name(observations)
+  assert_eq(len(latest), 2)
+  assert_eq(latest[0]?.name, "A")
+  assert_eq(latest[0]?.verdict, "success")
+  assert_eq(latest[1]?.name, "B")
+  assert_eq(latest[1]?.verdict, "pending")
+}
+
+pipeline test_glob_matching_follows_the_workflow_patterns(task: unknown) {
+  assert_eq(glob_match("crates/harn-cli/portal/**", "crates/harn-cli/portal/src/app.tsx"), true)
+  assert_eq(glob_match("crates/harn-cli/portal/**", "crates/harn-cli/src/main.rs"), false)
+  assert_eq(glob_match("*.md", "README.md"), true)
+  assert_eq(glob_match("*.md", "docs/src/x.md"), false)
+  assert_eq(glob_match("scripts/publish*", "scripts/publish.sh"), true)
+  assert_eq(glob_match("scripts/publish*", "scripts/release_ship.sh"), false)
+  assert_eq(glob_match(".github/workflows/ci.yml", ".github/workflows/ci.yml"), true)
+  assert_eq(glob_match("**/*", "a/b/c.txt"), true)
+  assert_eq(filter_matches_paths(["**/*", "!docs/**", "!**/*.md"], ["docs/src/a.md"]), false)
+  assert_eq(filter_matches_paths(["**/*", "!docs/**"], ["crates/harn-vm/src/lib.rs"]), true)
+}
+
+fn ci_workflow(fs: HarnessFs) -> any {
+  return yaml_parse(fs.read_text(CI_WORKFLOW))
+}
+
+pipeline test_registry_rows_resolve_against_the_live_workflow(harness: Harness, task: unknown) {
+  const workflow = ci_workflow(harness.fs)
+  const filters = workflow_surface_filters(workflow, "surface_filter")
+  assert_eq(type_of(filters), "dict")
+  for row in PATH_GATED_CHECKS {
+    // Every row's filter key must still exist in the workflow that owns the
+    // globs, or the row silently expects nothing.
+    assert_eq(type_of(filters?.[row.filter]), "list")
+  }
+  // A change under the portal directory must require the portal check.
+  assert_eq(
+    path_required_check_names(filters, ["crates/harn-cli/portal/src/main.tsx"]),
+    ["Portal frontend"],
+  )
+  // A change that touches nothing path-gated requires nothing extra.
+  assert_eq(path_required_check_names(filters, ["crates/harn-vm/src/vm/mod.rs"]), [])
+}
+
+pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: unknown) {
+  const workflow = ci_workflow(harness.fs)
+  let mapped: list<string> = []
+  for row in PATH_GATED_CHECKS {
+    mapped = mapped.appending(to_string(row.filter))
+  }
+  // Only the outputs the `changes` job forwards straight from the paths
+  // filter are pure path gates. An output routed through a resolver step can
+  // be zeroed for reasons the diff does not describe, so it is not one.
+  let direct_keys: list<string> = []
+  for output_key in keys(workflow?.jobs?.changes?.outputs ?? {}) {
+    const expression = to_string(workflow?.jobs?.changes?.outputs?.[output_key] ?? "")
+    if expression.contains("steps.surface_filter.outputs.") {
+      direct_keys = direct_keys.appending(to_string(output_key))
+    }
+  }
+  assert(len(direct_keys) > 0)
+  let unmapped: list<string> = []
+  for job_key in keys(workflow?.jobs ?? {}) {
+    const job = workflow?.jobs?.[job_key]
+    const condition = to_string(job?.if ?? "").trim()
+    for filter_key in direct_keys {
+      if condition == "needs.changes.outputs.${filter_key} == 'true'"
+        && !mapped.contains(filter_key) {
+        unmapped = unmapped.appending("${to_string(job_key)} (${filter_key})")
+      }
+    }
+  }
+  // A new path-gated job with no row would otherwise be expected by nothing,
+  // and a routing bug that skips it would read as a pass.
+  assert_eq(unmapped, [])
+}
+
+pipeline test_registry_prefixes_match_the_job_names_they_stand_for(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = ci_workflow(harness.fs)
+  for row in PATH_GATED_CHECKS {
+    let found = false
+    for job_key in keys(workflow?.jobs ?? {}) {
+      const job = workflow?.jobs?.[job_key]
+      if to_string(job?.if ?? "").trim() == "needs.changes.outputs.${row.filter} == 'true'" {
+        assert_eq(to_string(job?.name ?? "").starts_with(to_string(row.check_prefix)), true)
+        found = true
+      }
+    }
+    assert_eq(found, true)
+  }
+}
+
+pipeline test_always_expected_checks_name_real_jobs(harness: Harness, task: unknown) {
+  const workflow = ci_workflow(harness.fs)
+  for expected in ALWAYS_EXPECTED_CHECKS {
+    let found = false
+    for job_key in keys(workflow?.jobs ?? {}) {
+      if to_string(workflow?.jobs?.[job_key]?.name ?? "") == expected {
+        found = true
+      }
+    }
+    assert_eq(found, true)
+  }
+}
