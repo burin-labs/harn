@@ -10,6 +10,7 @@ import {
   CompletionEvidenceSnapshot,
   CompletionReadOnlyEvidence,
   CompletionToolSemantics,
+  completion_evidence_action_authorship,
   completion_evidence_id,
   completion_read_only_evidence,
   completion_requirement_evidence_packet,
@@ -354,7 +355,10 @@ fn __judge_mutation_artifact_ids(
       continue
     }
     for result in call.results {
-      if result.outcome != "ok" {
+      // Requirement evidence is consumed independently of `packet.actions`, so
+      // enforce the same authorship boundary here rather than relying on the
+      // action projection to have removed injected harness feedback already.
+      if result.origin == "harness_repair" || result.outcome != "ok" {
         continue
       }
       artifact_ids = __judge_push_artifact_ids(artifact_ids, canon_event_paths(result.data))
@@ -410,12 +414,22 @@ fn __judge_lifecycle_action(
   opts: dict,
 ) -> CompletionEvidenceAction {
   const descriptor = __judge_tool_descriptor(opts, lifecycle.name)
-  const result = lifecycle.result
+  // A `harness_repair` result is the harness's own injected feedback, written
+  // to close an orphaned `tool_use` block under that call's name and id. It is
+  // not an observation of anything, and reading it as one lets a completion
+  // veto cite itself as proof of the gap it asserted (harn#7757).
+  const dispatched = lifecycle.results.filter({ matched -> matched.origin != "harness_repair" })
+    .to_list()
+  const result = if len(dispatched) == 0 {
+    nil
+  } else {
+    dispatched[len(dispatched) - 1]
+  }
   let observations = []
-  for matched in lifecycle.results {
+  for matched in dispatched {
     observations = observations + [matched.text]
   }
-  return {
+  const action: CompletionEvidenceAction = {
     ordinal: lifecycle.ordinal,
     evidence_index: lifecycle.evidence_index,
     tool_call_id: __judge_clip_evidence(lifecycle.tool_call_id, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
@@ -425,8 +439,9 @@ fn __judge_lifecycle_action(
     arguments: __judge_clip_evidence(lifecycle.args, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     observation: __judge_clip_evidence(join(observations, "\n"), __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     result_facts: __judge_clip_evidence(result?.data ?? {}, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-    has_error_result: lifecycle.results.any({ matched -> matched.outcome == "error" }),
+    has_error_result: dispatched.any({ matched -> matched.outcome == "error" }),
   }
+  return completion_evidence_action_authorship(action, len(lifecycle.results), len(dispatched))
 }
 
 fn __judge_latest(
@@ -496,8 +511,17 @@ fn __judge_evidence_projection_from_lifecycle(
   let latest_verification = nil
   let latest_problem = nil
   let latest_observation = nil
+  let omitted_harness_authored_result_count = 0
   for call in lifecycle.calls {
     const action = __judge_lifecycle_action(call, opts)
+    omitted_harness_authored_result_count = omitted_harness_authored_result_count
+      + (action.omitted_harness_authored_result_count ?? 0)
+    if action.harness_authored_only ?? false {
+      // Every result on this call was written by the harness, so the call was
+      // never dispatched. Counted rather than silently dropped: a judge that
+      // sees fewer actions than the run made must be able to tell why.
+      continue
+    }
     if action.semantics.read_only {
       read_only_evidence = read_only_evidence + [completion_read_only_evidence(call, action)]
       latest_observation = __judge_latest(latest_observation, action)
@@ -536,7 +560,7 @@ fn __judge_evidence_projection_from_lifecycle(
   const raw_digest = raw_transcript_digest
     ?? ("sha256:" + sha256(json_stringify(messages)))
   const research_summary = completion_research_summary(read_only_evidence)
-  const packet = {
+  let packet: CompletionEvidencePacket = {
     schema: "harn.completion_judge_evidence.v2",
     raw_message_count: len(messages),
     raw_transcript_digest: raw_digest,
@@ -549,6 +573,10 @@ fn __judge_evidence_projection_from_lifecycle(
     research_summary: research_summary,
     fallback_observations: observation_fallback,
     requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
+  }
+  if omitted_harness_authored_result_count > 0 {
+    packet = packet
+      + {omitted_harness_authored_result_count: omitted_harness_authored_result_count}
   }
   let selection: list<CompletionEvidenceSelection> = []
   for action in selected {
@@ -574,6 +602,7 @@ fn __judge_evidence_projection_from_lifecycle(
       included_read_only_call_count: research_summary.included_count,
       omitted_read_only_call_count: research_summary.omitted_count,
       omitted_older_action_count: max(relevant_call_count - len(selected), 0),
+      omitted_harness_authored_result_count: omitted_harness_authored_result_count,
       lifecycle_issue_count: lifecycle.invalid_count,
       serialized_chars: len(serialized),
       raw_transcript_digest: packet.raw_transcript_digest,

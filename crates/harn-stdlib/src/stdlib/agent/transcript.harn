@@ -52,6 +52,22 @@ pub type AgentTranscriptUserRow = {
   raw?: unknown,
 }
 
+/**
+ * Who authored a tool result.
+ *
+ * `dispatch` is the ordinary case: the tool ran and this is what it returned.
+ * `harness_repair` is a result the harness wrote itself, to close an orphaned
+ * `tool_use` block that was never dispatched. Its text is injected harness
+ * feedback, and it rides under the orphaned call's own name and id, so without
+ * this it is indistinguishable from a real failed call of that tool.
+ *
+ * An unrecognized value reads as `dispatch`, which is the reading that keeps a
+ * result IN the evidence a completion authority weighs. A tagging bug therefore
+ * shows up as a judge that sees too much, never as one that silently drops real
+ * observations.
+ */
+pub type AgentTranscriptToolResultOrigin = "dispatch" | "harness_repair"
+
 pub type AgentTranscriptToolResultRow = {
   schema: "harn.agent.transcript.row.v1",
   kind: "tool_result",
@@ -62,6 +78,7 @@ pub type AgentTranscriptToolResultRow = {
   tool_call_id: string,
   text: string,
   outcome: AgentTranscriptToolResultOutcome,
+  origin: AgentTranscriptToolResultOrigin,
   data: dict,
   raw_type?: unknown,
   raw?: unknown,
@@ -594,6 +611,22 @@ fn __tool_result_outcome(record: dict? = nil) -> AgentTranscriptToolResultOutcom
   return "unknown"
 }
 
+// Read the authored-by tag off the storage-only `_harn` envelope. Anything
+// other than the one known non-default value reads as `dispatch`: an untagged
+// record predates the tag, and a value we do not understand is not evidence
+// that the harness wrote the result.
+fn __tool_result_origin(record: dict) -> AgentTranscriptToolResultOrigin {
+  const typed = if record?.schema == TRANSCRIPT_ROW_SCHEMA && record?.kind == "tool_result" {
+    record?.origin
+  } else {
+    record?._harn?.origin
+  }
+  if to_string(typed ?? "") == "harness_repair" {
+    return "harness_repair"
+  }
+  return "dispatch"
+}
+
 fn __tool_result_row(
   name: string,
   text: string,
@@ -616,6 +649,7 @@ fn __tool_result_row(
     tool_call_id: call_id,
     text: text,
     outcome: __tool_result_outcome(record),
+    origin: __tool_result_origin(record),
     data: if type_of(record?._harn?.data) == "dict" {
       record._harn.data
     } else if record?.schema == TRANSCRIPT_ROW_SCHEMA
