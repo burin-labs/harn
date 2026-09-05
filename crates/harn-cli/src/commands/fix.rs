@@ -767,6 +767,9 @@ fn collect_file_candidates(
     let ambient_context = AmbientRepairContext {
         cross_module_importer_count: module_graph.importers_of(file).len(),
     };
+    let imported_type_declarations = module_graph
+        .imported_type_declarations_for_file(file)
+        .unwrap_or_default();
     let deferred_capability_mismatches = if options.capability_migrations_only {
         deferred_capability_mismatch_spans(
             &output.diagnostics,
@@ -775,6 +778,7 @@ fn collect_file_candidates(
             &exported_names,
             escape.referenced_by_value,
             escape.manifest_handlers,
+            &imported_type_declarations,
         )
     } else {
         BTreeSet::new()
@@ -993,6 +997,7 @@ fn deferred_capability_mismatch_spans(
     exported_names: &BTreeSet<String>,
     referenced_by_value: &BTreeSet<String>,
     manifest_handlers: &BTreeSet<String>,
+    visible_type_declarations: &[SNode],
 ) -> BTreeSet<(usize, usize)> {
     let calls = collect_callable_infos(
         program,
@@ -1000,6 +1005,7 @@ fn deferred_capability_mismatch_spans(
         exported_names,
         referenced_by_value,
         manifest_handlers,
+        visible_type_declarations,
     )
     .into_iter()
     .flat_map(|callable| callable.calls)
