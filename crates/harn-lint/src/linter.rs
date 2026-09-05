@@ -100,9 +100,8 @@ pub(crate) struct Linter<'a> {
     pub(crate) externally_imported_names: HashSet<String>,
     /// Track whether the current traversal is inside a test pipeline body.
     pub(super) test_pipeline_depth: usize,
-    /// Whether a bare `@test` declaration owns this pipeline's inputs.
-    /// Owned inputs may be removed when no caller survives the full walk.
-    pub(super) test_pipeline_input_owned: bool,
+    /// None for unattributed declarations; only a bare `@test` owns attributed inputs.
+    pub(super) pipeline_input_attribute_owner: Option<bool>,
     /// Track type declarations for the `unused-type` lint rule.
     pub(super) type_declarations: Vec<TypeDeclaration>,
     /// Track type names referenced anywhere in the file.
@@ -202,7 +201,7 @@ impl<'a> Linter<'a> {
             connector_runtime_module: false,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
-            test_pipeline_input_owned: false,
+            pipeline_input_attribute_owner: None,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),

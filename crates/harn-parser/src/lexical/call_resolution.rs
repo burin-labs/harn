@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{SNode, TypedParam};
 
 use super::{
-    module_scope_node_slices, parameter_scope, BindingOwner, LexicalAnalysis, MatchPatternCatalog,
-    Scope,
+    module_scope_node_slices, parameter_scope, BindingId, BindingOwner, LexicalAnalysis,
+    MatchPatternCatalog, Scope,
 };
 
 /// Build the enum catalog with declarations imported into module scope.
@@ -32,6 +32,25 @@ pub fn lexically_resolved_identifier_spans(
     source: Option<&str>,
     match_patterns: &MatchPatternCatalog,
 ) -> HashSet<(usize, usize)> {
+    analyze_callable(params, body, source, match_patterns).lexically_resolved
+}
+
+/// Resolve exact declarations, including defaults and interpolated expressions.
+pub fn resolved_identifier_bindings_with_source(
+    params: &[TypedParam],
+    body: &[SNode],
+    source: Option<&str>,
+    match_patterns: &MatchPatternCatalog,
+) -> HashMap<(usize, usize), BindingId> {
+    analyze_callable(params, body, source, match_patterns).resolved
+}
+
+fn analyze_callable<'source>(
+    params: &[TypedParam],
+    body: &[SNode],
+    source: Option<&'source str>,
+    match_patterns: &MatchPatternCatalog,
+) -> LexicalAnalysis<'source> {
     let mut analysis = LexicalAnalysis::new_with_source(match_patterns, source);
     // Defaults execute left to right: only earlier parameters are visible.
     let mut visible_params = Scope::new();
@@ -56,5 +75,5 @@ pub fn lexically_resolved_identifier_spans(
         BindingOwner::Current,
         parameter_scope(params, &BindingOwner::Current),
     );
-    analysis.lexically_resolved
+    analysis
 }
