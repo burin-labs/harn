@@ -268,12 +268,15 @@ fn lint_full(
         return Vec::new();
     }
     let mut linter = Linter::new(source);
-    linter.match_patterns = harn_parser::lexical::module_match_pattern_catalog(program);
-    if let Some((module_graph, file_path)) = module_graph {
-        if let Some(imported) = module_graph.imported_type_declarations_for_file(file_path) {
-            linter.match_patterns.extend_declarations(&imported);
-        }
-    }
+    let imported_type_declarations = module_graph
+        .and_then(|(module_graph, file_path)| {
+            module_graph.imported_type_declarations_for_file(file_path)
+        })
+        .unwrap_or_default();
+    linter.match_patterns = harn_parser::lexical::module_match_pattern_catalog_with_visible(
+        program,
+        &imported_type_declarations,
+    );
     if let Some(source) = source {
         let facts = harn_parser::TypeChecker::new().check_with_facts(program, source);
         linter.install_binding_types(facts.binding_types);

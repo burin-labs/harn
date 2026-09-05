@@ -60,8 +60,10 @@ pub(super) fn collect_callable_infos(
     // arity moves with it (#6153). Deciding that needs the whole file, so it is
     // decided once here rather than per callable.
     let widening = AliasWidening::analyze(program, source, referenced_by_value);
-    let mut match_patterns = harn_parser::lexical::module_match_pattern_catalog(program);
-    match_patterns.extend_declarations(visible_type_declarations);
+    let match_patterns = harn_parser::lexical::module_match_pattern_catalog_with_visible(
+        program,
+        visible_type_declarations,
+    );
     let mut infos = Vec::new();
     for node in program {
         let (attributes, inner) = match &node.node {

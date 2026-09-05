@@ -7,7 +7,7 @@ use super::*;
 
 #[test]
 fn lexical_callback_is_not_ambient_without_source_text() {
-    let source = "pub fn invoke(call: fn() -> int) -> int { return call() }\n";
+    let source = "enum Handler {\n  Wrap(callback: fn() -> int)\n}\n\npub fn invoke(handler: Handler) -> int {\n  match handler {\n    Handler.Wrap(call) -> { return call() }\n  }\n}\n";
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);

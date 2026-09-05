@@ -2,7 +2,24 @@ use std::collections::HashSet;
 
 use crate::ast::{SNode, TypedParam};
 
-use super::{parameter_scope, BindingOwner, LexicalAnalysis, MatchPatternCatalog, Scope};
+use super::{
+    module_scope_node_slices, parameter_scope, BindingOwner, LexicalAnalysis, MatchPatternCatalog,
+    Scope,
+};
+
+/// Build the enum catalog with declarations imported into module scope.
+/// Local declarations are registered last because they shadow imported types.
+pub fn module_match_pattern_catalog_with_visible(
+    program: &[SNode],
+    visible_type_declarations: &[SNode],
+) -> MatchPatternCatalog {
+    let mut catalog = MatchPatternCatalog::default();
+    catalog.extend_declarations(visible_type_declarations);
+    for nodes in module_scope_node_slices(program) {
+        catalog.extend_declarations(nodes);
+    }
+    catalog
+}
 
 /// Return identifier-use spans that resolve to any lexical binding.
 ///

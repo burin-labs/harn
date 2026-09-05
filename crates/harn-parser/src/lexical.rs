@@ -12,7 +12,9 @@ use harn_lexer::Span;
 use crate::ast::{is_discard_name, BindingPattern, Node, SNode, TypedParam};
 
 mod call_resolution;
-pub use call_resolution::lexically_resolved_identifier_spans;
+pub use call_resolution::{
+    lexically_resolved_identifier_spans, module_match_pattern_catalog_with_visible,
+};
 
 /// Stable identity for a source binding. Patterns do not carry individual
 /// spans, so the declaration span plus the bound name is the narrowest source
@@ -150,11 +152,7 @@ impl MatchPatternCatalog {
 /// block enums stay lexical to their body and are registered by the analysis
 /// as it walks that body.
 pub fn module_match_pattern_catalog(program: &[SNode]) -> MatchPatternCatalog {
-    let mut catalog = MatchPatternCatalog::default();
-    for nodes in module_scope_node_slices(program) {
-        catalog.extend_declarations(nodes);
-    }
-    catalog
+    module_match_pattern_catalog_with_visible(program, &[])
 }
 
 impl BindingId {
@@ -835,7 +833,7 @@ impl<'source> LexicalAnalysis<'source> {
         inside_nested_callable: bool,
     ) {
         let resolved = resolve(scopes, name);
-        if self.source.is_some() && resolved.is_some() {
+        if resolved.is_some() {
             self.lexically_resolved.insert((span.start, span.end));
         }
         match resolved {
