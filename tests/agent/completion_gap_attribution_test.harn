@@ -1,0 +1,137 @@
+// Run: harn test tests/agent/completion_gap_attribution_test.harn
+//
+// #8104. A refusal now itemizes every gap it holds (#8100), but nothing said
+// WHICH acceptance row each gap was against. A re-ask could not target one row,
+// and a receipt could not say which row was open, so the only way to connect a
+// gap to a row was to match the gap's prose against the row's prose.
+//
+// The attribution is typed instead. The judge may name a row only from the ids
+// the ledger handed it, the schema enumerates exactly those ids, and anything
+// else normalizes to unattributed and is COUNTED. A judge that cannot name a
+// row says nothing, which is a fact the receipt carries rather than a silence
+// the reader has to notice.
+import {
+  __judge_completion_gaps_read,
+  __judge_completion_verdict_read,
+  __judge_completion_verdict_schema,
+  __judge_gaps_unattributed_count,
+} from "std/agent/judge_verdict"
+import { CompletionRequirementContract } from "std/agent/options"
+
+fn ledger() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {
+        requirement_id: "median-op",
+        name: "The aggregation supports median.",
+        evidence_roles: ["deterministic_verification"],
+      },
+      {
+        requirement_id: "parser-accepts",
+        name: "The parser accepts the median aggregation.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+}
+
+fn gap(criterion: string, requirement_id: string = "") -> dict {
+  const row = {criterion: criterion, gap_class: "missing_artifact", detail: "add it"}
+  guard requirement_id != "" else {
+    return row
+  }
+  return row + {requirement_id: requirement_id}
+}
+
+pipeline test_the_schema_offers_only_the_ledgers_own_ids(harness: Harness, task: unknown) {
+  const schema = __judge_completion_verdict_schema(ledger())
+  const item_properties = schema.properties.gaps.items.properties
+  assert(
+    item_properties.keys().contains("requirement_id"),
+    "a gap must be able to name the row it is against",
+  )
+  assert_eq(
+    item_properties.requirement_id.enum,
+    ["median-op", "parser-accepts"],
+    "and it may name ONLY the rows the ledger handed the judge",
+  )
+}
+
+pipeline test_no_ledger_means_no_attribution_field(harness: Harness, task: unknown) {
+  // The direction control on the schema half. With nothing to attribute to,
+  // offering the field would invite a made-up id whose only possible reading is
+  // a free-text row name, which is the thing this replaces.
+  const schema = __judge_completion_verdict_schema()
+  assert(
+    !schema.properties.gaps.items.properties.keys().contains("requirement_id"),
+    "with no ledger there is no row to name, so the field must be absent",
+  )
+}
+
+pipeline test_a_named_row_survives_the_read(harness: Harness, task: unknown) {
+  const gaps = __judge_completion_gaps_read(
+    {gaps: [gap("median missing", "median-op")]},
+    ["median-op", "parser-accepts"],
+  )
+  assert_eq(len(gaps), 1, "the gap must decode")
+  assert_eq(gaps[0].requirement_id, "median-op", "and keep the row it named")
+  assert_eq(__judge_gaps_unattributed_count(gaps), 0, "so nothing is unattributed")
+}
+
+pipeline test_an_unknown_row_is_unattributed_not_repaired(harness: Harness, task: unknown) {
+  // THE LOAD-BEARING CASE. An id the ledger never handed out is not a near miss
+  // to be matched to the closest row. It is an attribution the run cannot stand
+  // behind, and the gap itself must survive so the refusal is not weakened.
+  const gaps = __judge_completion_gaps_read(
+    {gaps: [gap("median missing", "median_op"), gap("parser", "invented-row")]},
+    ["median-op", "parser-accepts"],
+  )
+  assert_eq(len(gaps), 2, "both gaps must still be raised; attribution is not a filter")
+  assert_eq(gaps[0].requirement_id, "", "a near-miss id is dropped, not corrected to the close one")
+  assert_eq(gaps[1].requirement_id, "", "and an invented id is dropped too")
+  assert_eq(
+    __judge_gaps_unattributed_count(gaps),
+    2,
+    "and the count is what makes that visible instead of silent",
+  )
+}
+
+pipeline test_an_omitted_row_is_unattributed(harness: Harness, task: unknown) {
+  const gaps = __judge_completion_gaps_read({gaps: [gap("something else")]}, ["median-op"])
+  assert_eq(len(gaps), 1, "a gap that names no row is still a gap")
+  assert_eq(gaps[0].requirement_id, "", "it is simply unattributed")
+  assert_eq(__judge_gaps_unattributed_count(gaps), 1, "and counted as such")
+}
+
+pipeline test_the_verdict_read_constrains_against_its_own_contract(
+  harness: Harness,
+  task: unknown,
+) {
+  // The reader must take its allowed set from the contract it was given, not
+  // from whatever the reply asserts. A reply naming a row from a DIFFERENT
+  // task's ledger is unattributed here.
+  const verdict = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "not done",
+      gaps: [gap("median missing", "median-op"), gap("other", "some-other-tasks-row")],
+    },
+    ledger(),
+  )
+  assert_eq(len(verdict.gaps), 2, "both gaps decode")
+  assert_eq(verdict.gaps[0].requirement_id, "median-op", "the in-contract row is kept")
+  assert_eq(verdict.gaps[1].requirement_id, "", "the foreign row is not")
+  assert_eq(__judge_gaps_unattributed_count(verdict.gaps), 1, "and one gap is unattributed")
+}
+
+pipeline test_a_reply_predating_the_field_still_decodes(harness: Harness, task: unknown) {
+  // Cached and replayed judge responses outlive the schema that produced them.
+  // They carry no attribution, and must read as unattributed rather than
+  // failing to decode.
+  const verdict = __judge_completion_verdict_read(
+    {verdict: "continue", detail: "not done", gaps: [gap("median missing")]},
+    ledger(),
+  )
+  assert_eq(len(verdict.gaps), 1, "the older reply still decodes")
+  assert_eq(verdict.gaps[0].requirement_id, "", "as unattributed")
+}

@@ -54,6 +54,7 @@ pub import {
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_gaps_unattributed_count,
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import {
@@ -778,6 +779,12 @@ fn __judge_directive(
     pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
     converted_from: verdict?.converted_from,
     gap_class: verdict?.gap_class,
+    // Attribution coverage for this refusal, so a set of gaps that names no
+    // acceptance row is visible instead of silently absent. A non-zero count
+    // means either the ledger does not cover what the judge objected to, or the
+    // judge objected outside the contract (#8104).
+    gap_count: len(verdict?.gaps ?? []),
+    gaps_unattributed: __judge_gaps_unattributed_count(verdict?.gaps ?? []),
     verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,

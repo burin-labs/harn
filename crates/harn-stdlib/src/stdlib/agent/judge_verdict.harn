@@ -3,6 +3,7 @@ import {
   CompletionRequirementReport,
   completion_requirement_assessments_schema,
   completion_requirement_contract,
+  completion_requirement_ids,
   completion_requirement_report,
 } from "std/agent/completion_requirements"
 import {
@@ -29,6 +30,12 @@ pub type CompletionJudgeGapItem = {
   gap_class: CompletionJudgeGapClass,
   detail: string,
   evidence_quote: string,
+  // The requirement-ledger row this gap is against, or "" for unattributed.
+  // Constrained at the schema to the ids the ledger handed the judge, and
+  // normalized to "" here for anything else, so this is never the product of
+  // matching the gap's prose against a row's prose. A judge that cannot name a
+  // row says nothing and the run counts it (#8104).
+  requirement_id: string,
 }
 
 pub type CompletionJudgeVerdict = {
@@ -235,6 +242,30 @@ pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil
       },
     },
   }
+  // Attribution is offered ONLY when there is a ledger to attribute to, and it
+  // is an enum of that ledger's own ids rather than a free string, so the model
+  // cannot invent a row and nothing downstream has to match prose to prose.
+  const requirement_ids = completion_requirement_ids(contract)
+  if len(requirement_ids) > 0 {
+    properties = properties
+      + {
+        gaps: properties.gaps
+          + {
+            items: properties.gaps.items
+              + {
+                properties: properties.gaps.items.properties
+                  + {
+                    requirement_id: {
+                      type: "string",
+                      enum: requirement_ids,
+                      description: "The acceptance row this gap is against. Omit it if no single row covers "
+                        + "the gap; do not guess, an omitted row is recorded as unattributed.",
+                    },
+                  },
+              },
+          },
+      }
+  }
   const assessments = completion_requirement_assessments_schema(contract)
   if assessments != nil {
     properties = properties + {requirement_report: assessments}
@@ -287,14 +318,15 @@ pub fn __judge_completion_verdict_read(
   // display and for the arbitration ladder but wrong for this one question:
   // did the reply say anything here at all?
   const gap_declared = trim(to_string(result?.gap_class ?? "")) != ""
+  const contract = completion_requirement_contract(raw_requirement_contract)
   return {
     verdict: verdict,
     detail: clamped,
     gap_class: __completion_judge_gap_class(result?.gap_class),
-    gaps: __judge_completion_gaps_read(result),
+    gaps: __judge_completion_gaps_read(result, completion_requirement_ids(contract)),
     gap_declared: gap_declared,
     requirement_report: completion_requirement_report(
-      completion_requirement_contract(raw_requirement_contract),
+      contract,
       result?.requirement_report,
       evidence_packet,
     ),
@@ -314,7 +346,10 @@ pub fn __judge_completion_verdict_read(
  * @api_stability: experimental
  * @example: __judge_completion_gaps_read({gaps: []})
  */
-pub fn __judge_completion_gaps_read(result: dict) -> list<CompletionJudgeGapItem> {
+pub fn __judge_completion_gaps_read(
+  result: dict,
+  known_requirement_ids: list<string> = [],
+) -> list<CompletionJudgeGapItem> {
   const raw = result?.gaps
   guard type_of(raw) == "list" else {
     return []
@@ -329,6 +364,15 @@ pub fn __judge_completion_gaps_read(result: dict) -> list<CompletionJudgeGapItem
     if criterion == "" || detail == "" {
       continue
     }
+    // An id the ledger did not hand out is not a near miss to be repaired, it
+    // is an attribution the run cannot stand behind. Drop it to unattributed
+    // and let the count say so.
+    const claimed_id = trim(to_string(entry?.requirement_id ?? ""))
+    const requirement_id = if (known_requirement_ids ?? []).contains(claimed_id) {
+      claimed_id
+    } else {
+      ""
+    }
     out = out
       + [
         {
@@ -336,10 +380,34 @@ pub fn __judge_completion_gaps_read(result: dict) -> list<CompletionJudgeGapItem
           gap_class: __completion_judge_gap_class(entry?.gap_class),
           detail: detail,
           evidence_quote: trim(to_string(entry?.evidence_quote ?? "")),
+          requirement_id: requirement_id,
         },
       ]
   }
   return out
+}
+
+/**
+ * How many itemized gaps name no acceptance row.
+ *
+ * Reported on the receipt rather than left implicit, because a refusal set that
+ * attributes nothing is the finding: either the ledger does not cover what the
+ * judge is objecting to, or the judge is objecting outside the contract. Both
+ * are worth seeing, and neither is visible if absence is silent.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_gaps_unattributed_count([])
+ */
+pub fn __judge_gaps_unattributed_count(gaps: list<CompletionJudgeGapItem>) -> int {
+  let unattributed = 0
+  for gap in gaps ?? [] {
+    if trim(to_string(gap?.requirement_id ?? "")) == "" {
+      unattributed = unattributed + 1
+    }
+  }
+  return unattributed
 }
 
 /**
