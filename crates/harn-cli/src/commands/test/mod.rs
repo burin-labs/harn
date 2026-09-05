@@ -875,9 +875,12 @@ pub(crate) async fn run_user_tests(
     let filter = args.filter;
     let summary = run_user_test_paths_once(&paths, args).await;
 
-    // A case count is only evidence beside the denominator it was drawn from.
+    // A case count is only evidence beside the denominator it was drawn from,
+    // so this belongs next to the summary on stdout. stderr stays reserved for
+    // problems: an explicitly allowed empty run is a normal outcome and must
+    // not write there.
     let census = discovery::census_targets(&paths);
-    eprintln!(
+    println!(
         "{}",
         discovery::coverage_line(path_strs, &census, summary.total)
     );

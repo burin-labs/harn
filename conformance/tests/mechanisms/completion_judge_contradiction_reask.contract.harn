@@ -1,0 +1,272 @@
+// MECHANISM CONTRACT (onramp tier): COMPLETION-JUDGE CONTRADICTION RE-ASK.
+//
+//   CONTRACT: a `done` verdict that also populates `gap_class` is re-asked
+//   ONCE, with the contradiction named. If the re-ask resolves it, that reply
+//   is the reply of record. If it survives AND names nothing AND the
+//   deterministic gate observed the verifier passing, the refusal is overruled
+//   rather than spent. A NAMED gap is never overruled, at either step.
+//
+// WHY THIS EXISTS. harn#7910 made `done` beside any populated `gap_class` a
+// self-contradiction and rewrote it to `continue`. Refusing it once is right.
+// Nothing re-asked it, though, and the prompt is unchanged between invocations,
+// so a judge whose reply is stable returned the identical contradiction every
+// time. The `continue` fed the actor the judge's own "the work is finished"
+// text as its next step, which no turn can answer, and the run spent its whole
+// invocation budget and died at the judge cap having never actually been
+// refused by anyone.
+//
+// Measured on two hosted coding cells at harn v0.10.129: ten of ten judge
+// invocations returned `{"verdict":"done","gap_class":"other"}` with a detail
+// naming a passing verifier, ten of ten were inverted, and both runs ended
+// `completion_unverified` over a declared verifier that had passed and a
+// clean-checkout re-execution that had passed (harn#8060, harn#8058).
+//
+//   trigger  — a run whose gate observed a PASSING verifier, whose judge
+//              returns `done` with `gap_class` populated;
+//   effect   — exactly one re-ask receipt is emitted, and a judge that takes an
+//              exit is believed: dropping the field accepts with NO conversion,
+//              naming a real gap refuses;
+//   negative — (a) a contradiction that survives naming `unresolved_authorization`
+//              still refuses, which is harn#7910's own run;
+//              (b) the same surviving `other` contradiction against an UNRUN
+//              verifier still refuses;
+//              (c) nothing is ever overruled before the re-ask has happened.
+//
+// Clause (a) is the load-bearing one. The whole value of harn#7910 is that a
+// blocked run cannot launder itself to `done`; a fix that converted every
+// surviving contradiction would hand that escape straight back, and would look
+// identical to a working one from the positive case alone.
+//
+// The clauses deliberately avoid the terminal LABEL. The two judge slots reach
+// the cap under different wire values (`turn_end_judge_cap_reached` and
+// `completion_judge_cap_reached`), and relabelling work on this path has moved
+// them before, so a before/after keyed on a terminal's name reports this defect
+// fixed when only its label moved. These clauses read the judge's own
+// acceptance, the conversion count, and the re-ask count.
+import { agent_capture_events } from "std/agent/events"
+import { agent_completion_adjudicator_declared } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+const CONVERSION = "gap_contradicts_done_survived_reask_over_passing_verifier"
+
+const RETRY_SCHEMA = "harn.completion_judge_contradiction_retry.v1"
+
+/**
+ * A gate that reports exactly one reading. The real `agent_completion_gate`
+ * owns deriving these from host facts; a case that needs a specific reading
+ * states it directly so the clause under test is the arbitration and not the
+ * ladder.
+ */
+fn gate_observing(observed: string, reason: string) {
+  return { _payload ->
+    {
+      confirm: true,
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+/** The reply shape measured in the field: an acceptance that names a gap anyway. */
+fn judge_done_with_gap(gap_class: string?) -> dict {
+  const detail =
+    "Median is implemented across lexer, AST, parser, and aggregation logic. The required verifier passed all 3 tests with 0 failures."
+  const body = if gap_class == nil {
+    {verdict: "done", detail: detail}
+  } else {
+    {verdict: "done", detail: detail, gap_class: gap_class}
+  }
+  return {text: json_stringify(body)}
+}
+
+fn judge_refusing(gap_class: string, detail: string) -> dict {
+  return {text: json_stringify({verdict: "continue", detail: detail, gap_class: gap_class})}
+}
+
+fn completion_receipts(events: list) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/**
+ * Conversions, counted by `converted_from` alone. A completion directive
+ * receipt's `trigger` names whichever adjudicator ANSWERED, not the boundary
+ * that asked, so a count keyed on the boundary reads zero while the mechanism
+ * works perfectly.
+ */
+fn conversions(receipts: list) -> int {
+  let n = 0
+  for receipt in receipts {
+    if to_string(receipt?.converted_from ?? "") == CONVERSION {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+/** Re-asks, counted by their own receipt and never by judge-call arithmetic. */
+fn reasks(events: list) -> int {
+  return len(
+    events.filter(
+      { event -> event.type == "typed_checkpoint" && event?.checkpoint?.schema == RETRY_SCHEMA },
+    )
+      .to_list(),
+  )
+}
+
+fn base_opts(session: string) {
+  return {
+    provider: "mock",
+    session_id: session,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 4,
+    final_wrapup: false,
+    verify_completion_judge: {provider: "mock", max_invocations: 2},
+  }
+}
+
+fn run_case(harness: Harness, label: string, script: list, extra: dict) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = base_opts(session) + extra
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Apply the requested change.", nil, opts) },
+      )
+      const receipts = completion_receipts(captured.events)
+      const first = receipts[0]
+      return {
+        declared: agent_completion_adjudicator_declared(opts, "sentinel"),
+        accepted: len(receipts) > 0 && to_string(first?.action ?? "") == "accept",
+        conversions: conversions(receipts),
+        reasks: reasks(captured.events),
+      }
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const passing = {verify_completion: gate_observing("passed", "verified_after_write")}
+  // TRIGGER + EFFECT: the contradiction survives, names nothing, and the gate
+  // watched the verifier pass. One re-ask, one conversion, the run completes.
+  const survived = run_case(
+    harness,
+    "survived",
+    [
+      llm_done(),
+      judge_done_with_gap("other"),
+      judge_done_with_gap("other"),
+      llm_done(),
+      judge_done_with_gap("other"),
+      llm_done(),
+    ],
+    passing,
+  )
+  harness.stdio.println("survived_accepted=" + to_string(survived.accepted))
+  harness.stdio.println("survived_conversions=" + to_string(survived.conversions))
+  harness.stdio.println("survived_reasks=" + to_string(survived.reasks))
+  // EFFECT: the judge drops the field on the re-ask. That reply is believed, so
+  // the run completes with NOTHING overruled.
+  const dropped = run_case(
+    harness,
+    "dropped",
+    [llm_done(), judge_done_with_gap("other"), judge_done_with_gap(nil), llm_done()],
+    passing,
+  )
+  harness.stdio.println("dropped_accepted=" + to_string(dropped.accepted))
+  harness.stdio.println("dropped_conversions=" + to_string(dropped.conversions))
+  harness.stdio.println("dropped_reasks=" + to_string(dropped.reasks))
+  // EFFECT: the judge takes the other exit and names a real gap. Believed too,
+  // and that refusal stands.
+  const honest = run_case(
+    harness,
+    "honest",
+    [
+      llm_done(),
+      judge_done_with_gap("other"),
+      judge_refusing("unmet_manner_clause", "the task forbade touching the vendored directory"),
+      llm_done(),
+      judge_refusing("unmet_manner_clause", "the vendored directory is still modified"),
+      llm_done(),
+    ],
+    passing,
+  )
+  harness.stdio.println("honest_accepted=" + to_string(honest.accepted))
+  harness.stdio.println("honest_conversions=" + to_string(honest.conversions))
+  // NEGATIVE (a): harn#7910's own run. A named gap is never overruled, however
+  // many times it survives.
+  const named = run_case(
+    harness,
+    "named",
+    [
+      llm_done(),
+      judge_done_with_gap("unresolved_authorization"),
+      judge_done_with_gap("unresolved_authorization"),
+      llm_done(),
+      judge_done_with_gap("unresolved_authorization"),
+      llm_done(),
+    ],
+    passing,
+  )
+  harness.stdio.println("named_accepted=" + to_string(named.accepted))
+  harness.stdio.println("named_conversions=" + to_string(named.conversions))
+  // NEGATIVE (b): no positive reading behind the acceptance, so there is
+  // nothing to prefer it over.
+  const unrun = run_case(
+    harness,
+    "unrun",
+    [
+      llm_done(),
+      judge_done_with_gap("other"),
+      judge_done_with_gap("other"),
+      llm_done(),
+      judge_done_with_gap("other"),
+      llm_done(),
+    ],
+    {verify_completion: gate_observing("not_run", "no_workspace_write")},
+  )
+  harness.stdio.println("unrun_accepted=" + to_string(unrun.accepted))
+  harness.stdio.println("unrun_conversions=" + to_string(unrun.conversions))
+  // Every case declares an adjudicator, so the cases differ by ONE variable.
+  contract_effect(
+    harness.stdio,
+    "every_case_declares_an_adjudicator",
+    survived.declared && dropped.declared && honest.declared && named.declared && unrun.declared,
+  )
+  // EFFECT: the re-ask happens, exactly once, and only once.
+  contract_effect(harness.stdio, "contradiction_is_reasked_once", survived.reasks == 1)
+  contract_effect(harness.stdio, "resolved_contradiction_is_reasked_once", dropped.reasks == 1)
+  // EFFECT: a surviving unnamed contradiction is overruled, on the record.
+  contract_effect(harness.stdio, "surviving_unnamed_contradiction_converts", survived.accepted)
+  contract_effect(harness.stdio, "conversion_is_receipted_once", survived.conversions == 1)
+  // EFFECT: a judge that took an exit is believed, and nothing is overruled.
+  contract_effect(harness.stdio, "dropped_gap_accepts_without_conversion", dropped.accepted)
+  contract_negative(harness.stdio, "dropped_gap_needs_no_conversion", dropped.conversions > 0)
+  contract_negative(harness.stdio, "honest_refusal_on_reask_stands", honest.accepted)
+  contract_negative(harness.stdio, "honest_refusal_does_not_convert", honest.conversions > 0)
+  // NEGATIVE (a): the harn#7910 escape stays closed.
+  contract_negative(harness.stdio, "named_gap_does_not_convert", named.conversions > 0)
+  contract_negative(harness.stdio, "named_gap_refusal_stands", named.accepted)
+  // NEGATIVE (b): no passing verifier, no conversion.
+  contract_negative(harness.stdio, "unrun_verifier_does_not_convert", unrun.conversions > 0)
+  contract_negative(harness.stdio, "unrun_verifier_refusal_stands", unrun.accepted)
+}
