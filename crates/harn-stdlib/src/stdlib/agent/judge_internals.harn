@@ -47,6 +47,11 @@ pub type JudgeCheckpointRequest = {
   system: string,
   user: string,
   schema: dict,
+  // Extra user turns sent after `user`. A caller with more to say to the same
+  // judge adds a turn here rather than growing `user`: the route caches whole
+  // messages, so a changed `user` costs a full re-read of the transcript it
+  // carries. Empty for a first ask, which keeps that request unchanged.
+  follow_up_turns: list = [],
 }
 
 /**
@@ -477,6 +482,8 @@ pub fn __judge_run_checkpoint(
     user,
     schema,
     llm_opts,
+    nil,
+    request.follow_up_turns ?? [],
   )
   const duration_ms = harness.clock.monotonic_ms() - started
   if checkpoint_name == "agent.completion_judge" {

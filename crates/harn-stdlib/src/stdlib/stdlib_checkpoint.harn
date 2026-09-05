@@ -271,6 +271,25 @@ fn __typed_checkpoint_attempt_record(index: int, result: dict, validator_errors:
   }
 }
 
+/**
+ * Render the turns as an explicit message list, or nothing when there is only
+ * one. A single-turn checkpoint keeps sending its prompt the way it always
+ * has, so its request is byte-identical to before this seam existed.
+ */
+fn __typed_checkpoint_turn_messages(turns: list) -> dict {
+  if len(turns) <= 1 {
+    return {}
+  }
+  return {messages: turns.map({ turn -> {role: "user", content: to_string(turn)} }).to_list()}
+}
+
+/** Append the validator's correction to the last turn, never the first. */
+fn __typed_checkpoint_corrected_turns(name: any, turns: list, errors: list) -> list {
+  const last = len(turns) - 1
+  return turns[0:last]
+    + [__typed_checkpoint_correction_prompt(name, to_string(turns[last]), errors)]
+}
+
 fn __typed_checkpoint_correction_prompt(name: any, prompt: string, errors: list) {
   return prompt + "\n\nTyped-output checkpoint '" + name
     + "' rejected the previous JSON after parsing. Return a corrected JSON object only.\n"
@@ -362,6 +381,19 @@ fn __typed_checkpoint_envelope(args: dict) {
  * outputs are re-prompted with those correction messages before any
  * caller-owned side effects run.
  *
+ * `follow_up_turns` are extra user turns sent after `prompt`. A caller that
+ * has more to say to the same checkpoint passes them here instead of
+ * concatenating onto `prompt`, because a provider that caches whole messages
+ * re-reads and re-writes any turn whose bytes changed. Measured on
+ * gpt-5.6-luna with a 7,701-token prompt: concatenating a one-line instruction
+ * read back 1,454 tokens, and sending the same instruction as a second turn
+ * read back 7,698.
+ *
+ * The validator correction follows the same rule, appending to the last turn
+ * rather than rewriting the first. With no follow-up turns the request is a
+ * single user message and the correction is `prompt + correction`, which is
+ * what it has always been.
+ *
  * @effects: []
  * @errors: []
  */
@@ -373,6 +405,7 @@ pub fn typed_output_checkpoint(
   schema: any,
   options: dict? = nil,
   validator: any = nil,
+  follow_up_turns: list = [],
 ) {
   const opts = options ?? {}
   const max_validator_retries = opts?.validator_retries ?? 1
@@ -381,16 +414,18 @@ pub fn typed_output_checkpoint(
   let raw_outputs = []
   let trace = []
   let validator_failures = []
-  let current_prompt = prompt
+  // The conversation the checkpoint sends, as turns. Index 0 is `prompt`; a
+  // correction rewrites the LAST turn so every earlier one stays cacheable.
+  let turns: list = [prompt] + (follow_up_turns ?? []).map({ turn -> to_string(turn) })
   let any_repaired = false
   let any_extracted = false
   let last_result = nil
   while checkpoint_attempt <= max_validator_retries {
     checkpoint_attempt = checkpoint_attempt + 1
     const result = llm.call_structured_result(
-      current_prompt,
+      turns[0],
       schema,
-      __typed_checkpoint_options(opts),
+      __typed_checkpoint_options(opts) + __typed_checkpoint_turn_messages(turns),
     )
     last_result = result
     const result_attempts = result?.attempts ?? 0
@@ -466,7 +501,7 @@ pub fn typed_output_checkpoint(
       __typed_checkpoint_emit(agent, opts, envelope)
       return envelope
     }
-    current_prompt = __typed_checkpoint_correction_prompt(name, prompt, errors)
+    turns = __typed_checkpoint_corrected_turns(name, turns, errors)
   }
   const envelope = __typed_checkpoint_envelope(
     {

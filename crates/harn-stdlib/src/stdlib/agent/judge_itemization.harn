@@ -15,8 +15,13 @@ pub type JudgeItemizationResolution = {data: dict, omitted: bool, reasked: bool}
  *
  * The ledger binds the judge, so an absent `requirement_report` is the judge's
  * failure to answer, not the actor's failure to work. Re-ask the judge exactly
- * once with an explicit itemization instruction. The instruction rides on the
- * user turn, leaving the cached stable system prefix byte-identical.
+ * once with an explicit itemization instruction.
+ *
+ * The instruction is a SECOND user turn, not an addition to the first. The
+ * route caches whole messages, so growing the first turn re-reads and re-writes
+ * the entire transcript it carries: measured on gpt-5.6-luna, the re-ask read
+ * back 19% of the first ask and re-wrote the rest, against 99.96% when the same
+ * bytes arrive as their own turn.
  *
  * `approved` is the first response's verdict read by the caller, which owns the
  * verdict vocabulary. Only an approval that skipped the ledger is re-asked: a
@@ -44,7 +49,11 @@ pub fn __judge_resolve_itemization(
   }
   const reask = __judge_run_checkpoint(
     harness,
-    request + {user: request.user + completion_requirement_itemization_retry_prompt(contract)},
+    request
+      + {
+        follow_up_turns: (request.follow_up_turns ?? [])
+          + [completion_requirement_itemization_retry_prompt(contract)],
+      },
   )
   const reask_data = reask.checkpoint?.data ?? {}
   const itemized = (reask.checkpoint?.ok ?? false)

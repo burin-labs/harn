@@ -16,8 +16,18 @@ pub fn agent_typed_output_checkpoint(
   schema: any,
   options: any = nil,
   validator: any = nil,
+  follow_up_turns: list = [],
 ) {
-  return typed_output_checkpoint(agent, llm, name, prompt, schema, options, validator)
+  return typed_output_checkpoint(
+    agent,
+    llm,
+    name,
+    prompt,
+    schema,
+    options,
+    validator,
+    follow_up_turns,
+  )
 }
 
 /**
