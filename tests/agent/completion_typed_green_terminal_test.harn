@@ -112,6 +112,10 @@ fn __green_reading() {
   return {
     deterministic_invoked: true,
     deterministic_reason: "verified_after_write",
+    // A verifier command was actually declared. Without this the reading says a
+    // pass came from a verifier that never existed, which three runs on a
+    // downstream host were accepted on before the clause existed.
+    oracle_expected: true,
     observed: "passed",
     stop_reason: "sentinel",
     final_text: "Implemented the selector and the verifier passed.",
@@ -120,7 +124,11 @@ fn __green_reading() {
 }
 
 pipeline test_typed_green_terminal_requires_every_clause(harness: Harness, task: unknown) {
-  assert(__completion_typed_green_terminal(__green_reading()), "all six clauses hold")
+  assert(__completion_typed_green_terminal(__green_reading()), "all seven clauses hold")
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {oracle_expected: false}),
+    "a pass with no declared verifier is an answer about nothing and skips no judge",
+  )
   assert(
     !__completion_typed_green_terminal(__green_reading() + {deterministic_invoked: false}),
     "a gate that never ran leaves the judge as the only authority",
