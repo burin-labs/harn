@@ -171,17 +171,17 @@ fn __completion_claim_payload(result: dict) {
 fn __completion_claim_requirement_ids(opts: dict) -> list<string> {
   const verification = opts?.verify_completion_judge
   if type_of(verification) == "dict" && verification?.requirement_contract != nil {
-    return completion_requirement_contract(verification.requirement_contract).requirements.map(
-      { requirement -> requirement.requirement_id },
-    )
-      .to_list()
+    const contract = completion_requirement_contract(verification.requirement_contract)
+    if contract != nil {
+      return contract.requirements.map({ requirement -> requirement.requirement_id }).to_list()
+    }
   }
   const completion = opts?.turn_end_condition
   if type_of(completion) == "dict" && completion?.requirement_contract != nil {
-    return completion_requirement_contract(completion.requirement_contract).requirements.map(
-      { requirement -> requirement.requirement_id },
-    )
-      .to_list()
+    const contract = completion_requirement_contract(completion.requirement_contract)
+    if contract != nil {
+      return contract.requirements.map({ requirement -> requirement.requirement_id }).to_list()
+    }
   }
   return ["task"]
 }
@@ -209,9 +209,11 @@ fn __completion_claim_supported_ref_ids(
   let refs: list<string> = []
   for tool_call_id in lifecycle_by_id.keys() {
     const matches: list<AgentTranscriptToolLifecycle> = lifecycle_by_id[tool_call_id] ?? []
+    const only_match = matches[0]
     if tool_call_id != own_call_id
       && len(matches) == 1
-      && __completion_claim_has_supporting_result(matches[0]) {
+      && only_match != nil
+      && __completion_claim_has_supporting_result(only_match) {
       refs = refs + [tool_call_id]
     }
   }
@@ -283,7 +285,8 @@ fn __completion_claim_validate_requirements(
             + "Do not answer in prose instead of retrying the tool.",
         )
       }
-      if !__completion_claim_has_supporting_result(matches[0]) {
+      const only_match = matches[0]
+      if only_match == nil || !__completion_claim_has_supporting_result(only_match) {
         return __completion_claim_invalid(
           "completion_claim_evidence_ref_unsupported",
           "Completion evidence ref `" + evidence_ref
