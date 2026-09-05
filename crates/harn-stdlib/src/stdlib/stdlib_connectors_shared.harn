@@ -7,6 +7,57 @@ pub import {
 } from "std/connectors/http"
 import { JsonParseFailure, merge } from "std/json"
 
+/** Bind connector lifecycle state to one provider and its owned reset keys. */
+pub fn connector_lifecycle(
+  provider: string,
+  state_key: string,
+  reset_keys: list<string> = [],
+) -> dict {
+  fn state(runtime: HarnessRuntime) {
+    return runtime.store_get(state_key)
+      ?? {initialized: false, active: false, bindings: {}, ctx: {}}
+  }
+  fn update(runtime: HarnessRuntime, changes: dict) {
+    const next = state(runtime) + changes
+    runtime.store_set(state_key, next)
+    return next
+  }
+  fn init(runtime: HarnessRuntime, ctx: any = nil) {
+    return update(runtime, {initialized: true, ctx: ctx ?? {}})
+  }
+  fn activate(runtime: HarnessRuntime, bindings: list? = []) {
+    let by_id = {}
+    let seen_paths = {}
+    for binding in bindings ?? [] {
+      const binding_id = binding?.binding_id ?? binding?.id
+        ?? ("binding-" + to_string(len(by_id.keys())))
+      const path = binding?.path ?? binding?.match?.path
+      if path != nil && path != "" {
+        if seen_paths.get(path) {
+          return Err(
+            {
+              code: "activation",
+              message: provider + " connector path `" + path
+                + "` is configured by multiple bindings",
+            },
+          )
+        }
+        seen_paths[path] = true
+      }
+      by_id[binding_id] = binding + {binding_id: binding_id}
+    }
+    update(runtime, {bindings: by_id, active: true})
+    return {provider: provider, bindings: len(by_id.keys())}
+  }
+  fn shutdown(runtime: HarnessRuntime) {
+    for key in [state_key] + reset_keys {
+      runtime.store_delete(key)
+    }
+    return {provider: provider, active: false}
+  }
+  return {state: state, init: init, activate: activate, shutdown: shutdown}
+}
+
 const GIT_FORGE_PULL_REQUEST_TOPIC = "connectors.git_forge.pull_request"
 
 type GitForgeRepositoryRef = {provider: string, full_name?: string, id?: string, web_url?: string}
