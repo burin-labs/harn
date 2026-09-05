@@ -1226,14 +1226,14 @@ mod tests {
         assert!(store.hooks().redaction.is_some());
         assert!(store.hooks().change_observer.is_some());
         assert_eq!(
-            super::session_wal_watch::watcher_count_for(store.path()),
+            crate::stdlib::session_wal_watch::watcher_count_for(store.path()),
             1,
             "canonical maintenance handle owns one live WAL watcher"
         );
         let database = store.path().to_path_buf();
         drop(store);
         assert_eq!(
-            super::session_wal_watch::watcher_count_for(&database),
+            crate::stdlib::session_wal_watch::watcher_count_for(&database),
             0,
             "dropping maintenance handle releases its watcher"
         );
