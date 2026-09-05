@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "reserved_host_cores": 1,
+  "e2e_max_compilers": 2
+}
