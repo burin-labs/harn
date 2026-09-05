@@ -3,6 +3,10 @@ Iteration: {{ iteration }}
 
 Bounded effect and verification evidence:
 {{ judge_evidence }}
+{{ if completion_claim }}
+Completion claim source: {{ completion_claim.source }}
+For `source: "tool"`, the bounded packet contains only the recorded tool calls cited by the claim: decide whether those calls support each named requirement, without substituting uncited activity. For `source: "implicit"`, apply the ordinary compatibility-fallback policy to the evidence packet and latest assistant text.
+{{ end }}
 {{ if verification }}
 Deterministic verification (established by the runtime, not by you):
 - verifier expected for this task: {{ verification.oracle_expected }}

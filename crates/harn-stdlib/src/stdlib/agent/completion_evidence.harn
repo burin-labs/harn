@@ -1,3 +1,4 @@
+import { CompletionClaim } from "std/agent/completion_claim"
 // std/agent/completion_evidence — typed, bounded terminal evidence contracts.
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
 import { CompletionVerificationState } from "std/agent/judge_internals"
@@ -95,6 +96,7 @@ pub type CompletionEvidencePacket = {
   research_summary: CompletionResearchSummary,
   fallback_observations: list<CompletionEvidenceAction>,
   requirement_evidence: list<CompletionRequirementEvidenceRecord>,
+  completion_claim?: CompletionClaim,
 }
 
 pub type CompletionEvidenceSelection = {
@@ -149,6 +151,7 @@ pub type CompletionEvidenceSnapshot = {
   pending_tool_batch_effect_count: int,
   // Absent until a deterministic gate actually ran and reported.
   verification?: CompletionVerificationState?,
+  completion_claim?: CompletionClaim,
   // The completion target as amended by accepted mid-run user steering,
   // derived once at the judge payload seam. Every exit authority shown this
   // snapshot — the LLM judge, a `verify_completion` closure, the completion
@@ -365,6 +368,7 @@ pub fn completion_evidence_id(
     trigger: stop_reason,
     candidate_text: text,
     actions: packet.actions,
+    completion_claim: packet.completion_claim,
     // A turn that only researched changes no action, so without this key two
     // decisions taken on different research share an identity and the second
     // judge call dedupes onto the first.

@@ -1,0 +1,296 @@
+// Run: harn test tests/agent/completion_claim_test.harn
+import {
+  agent_completion_claim_apply_options,
+  agent_completion_claim_disposition,
+} from "std/agent/completion_claim"
+import { agent_capture_events } from "std/agent/events"
+import { __judge_evidence_projection } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_done, with_llm_script } from "std/testing"
+
+fn assistant_calling(tool_name: string, call_id: string) -> dict {
+  return {
+    role: "assistant",
+    content: "",
+    _harn: {
+      kind: "assistant",
+      tool_calls: [{id: call_id, function: {name: tool_name, arguments: {}}}],
+    },
+  }
+}
+
+fn dispatched_result(tool_name: string, call_id: string, content: string) -> dict {
+  return {
+    role: "user",
+    content: content,
+    _harn: {kind: "tool_result", tool_call_id: call_id, tool_name: tool_name, outcome: "ok"},
+  }
+}
+
+fn claim(requirement_id: string, refs: list<string>) -> dict {
+  return {
+    schema: "harn.completion_claim.v1",
+    requirements: [{requirement_id: requirement_id, evidence_refs: refs}],
+    source: "tool",
+  }
+}
+
+fn completion_dispatch(value: dict, call_id: string = "complete-1") -> list {
+  return [
+    {ok: true, status: "ok", tool_name: "task_complete", tool_call_id: call_id, result: value},
+  ]
+}
+
+fn evidence_messages() -> list {
+  return [
+    assistant_calling("look", "look-1"),
+    dispatched_result("look", "look-1", "source read"),
+    assistant_calling("edit", "edit-1"),
+    dispatched_result("edit", "edit-1", "write applied"),
+  ]
+}
+
+pipeline test_fabricated_ref_is_rejected_before_judging(harness: Harness, task: unknown) {
+  const disposition = agent_completion_claim_disposition(
+    evidence_messages(),
+    completion_dispatch(claim("implementation", ["invented-404"])),
+    {},
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_evidence_ref_unresolved")
+}
+
+pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown) {
+  const disposition = agent_completion_claim_disposition(
+    evidence_messages(),
+    completion_dispatch(claim("implementation", ["complete-1"])),
+    {},
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_evidence_ref_invalid")
+}
+
+pipeline test_claim_must_cover_the_declared_requirement_contract(harness: Harness, task: unknown) {
+  const opts = {
+    turn_end_condition: {
+      requirement_contract: {
+        requirements: [
+          {requirement_id: "implementation", name: "Implement the change."},
+          {requirement_id: "verification", name: "Verify the change."},
+        ],
+      },
+    },
+  }
+  const disposition = agent_completion_claim_disposition(
+    evidence_messages(),
+    completion_dispatch(claim("implementation", ["edit-1"])),
+    opts,
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_requirement_missing")
+}
+
+pipeline test_judge_packet_contains_only_explicitly_cited_calls(harness: Harness, task: unknown) {
+  const value = claim("implementation", ["edit-1"])
+  const disposition = agent_completion_claim_disposition(
+    evidence_messages(),
+    completion_dispatch(value),
+    {},
+  )
+  assert_eq(disposition.kind, "valid")
+  const projected = __judge_evidence_projection(
+    evidence_messages(),
+    {
+      _completion_claim: disposition.claim,
+      tools: {
+        tools: [
+          {name: "look", annotations: {kind: "read", side_effect_level: "none"}},
+          {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+        ],
+      },
+    },
+  )
+  assert_eq(projected.packet.completion_claim, value)
+  assert_eq(len(projected.packet.actions), 1)
+  assert_eq(projected.packet.actions[0].tool_call_id, "edit-1")
+  assert(!contains(projected.serialized, "look-1"))
+}
+
+pipeline test_disabled_completion_tool_is_exactly_inert(harness: Harness, task: unknown) {
+  const base = {provider: "mock", loop_until_done: true}
+  assert_eq(agent_completion_claim_apply_options(base), base)
+  assert_eq(
+    agent_completion_claim_apply_options(base + {completion_tool: false}),
+    base + {completion_tool: false},
+  )
+  const without = __judge_evidence_projection(evidence_messages(), {})
+  const disabled = __judge_evidence_projection(evidence_messages(), {completion_tool: false})
+  assert_eq(disabled.serialized, without.serialized)
+}
+
+pipeline test_unavailable_tool_keeps_the_actual_judge_prompt_byte_identical(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The answer is complete."})},
+      llm_done(),
+      {text: json_stringify({verdict: "done", detail: "The answer is complete."})},
+    ],
+    { ->
+      const absent: AgentSpec = {
+        provider: "mock",
+        session_id: "completion-claim-absent-" + harness.random.uuid(),
+        loop_until_done: true,
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
+      }
+      const disabled: AgentSpec = {
+        provider: "mock",
+        session_id: "completion-claim-disabled-" + harness.random.uuid(),
+        loop_until_done: true,
+        completion_tool: false,
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
+      }
+      const _without = agent_loop(harness, "Answer the question.", nil, absent)
+      const _disabled = agent_loop(harness, "Answer the question.", nil, disabled)
+      const judges = harness.llm.mock_calls().filter(
+        { call -> contains(to_string(call?.system ?? ""), "Stable completion goal") },
+      )
+        .to_list()
+      assert_eq(len(judges), 2)
+      assert_eq(judges[0].system, judges[1].system)
+      assert_eq(judges[0].prompt, judges[1].prompt)
+    },
+  )
+}
+
+fn edit_tools() {
+  return tool_define(
+    tool_registry(),
+    "edit",
+    "Apply the requested edit.",
+    {
+      handler: { _args ->
+        agent_tool_handler_result(
+          "write applied",
+          {mutation_status: "applied", changed_paths: ["src/app.harn"]},
+        )
+      },
+      parameters: {content: {type: "string", required: true}},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "implementation"}}],
+      },
+      {
+        text: "",
+        tool_calls: [
+          {
+            id: "complete-1",
+            name: "task_complete",
+            arguments: {
+              requirements: [{requirement_id: "implementation", evidence_refs: ["edit-1"]}],
+            },
+          },
+        ],
+      },
+    ],
+    { ->
+      const session = "explicit-completion-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: edit_tools(),
+        tool_format: "native",
+        completion_tool: true,
+        loop_until_done: true,
+        max_iterations: 4,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Implement the requested change.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      assert_eq(captured.result.stop_reason, "explicit_completion_claim")
+      assert_eq(captured.result.provider_call_count, 2)
+      const observations = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+              == "harn.completion_claim_observation.v1"
+        },
+      )
+        .to_list()
+      assert_eq(len(observations), 1)
+      assert_eq(observations[0].checkpoint.source, "tool")
+      assert_eq(observations[0].checkpoint.disposition, "valid")
+    },
+  )
+}
+
+pipeline test_invalid_claim_continues_without_calling_a_judge(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [
+          {
+            id: "complete-1",
+            name: "task_complete",
+            arguments: {
+              requirements: [{requirement_id: "implementation", evidence_refs: ["fabricated"]}],
+            },
+          },
+        ],
+      },
+      llm_done(),
+    ],
+    { ->
+      const session = "invalid-completion-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        completion_tool: true,
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 3,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Implement the requested change.", nil, opts) },
+      )
+      assert_eq(captured.result.provider_call_count, 2)
+      assert_eq(
+        len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()),
+        0,
+      )
+      const observations = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+              == "harn.completion_claim_observation.v1"
+        },
+      )
+        .map({ event -> event.checkpoint })
+        .to_list()
+      assert_eq(observations.map({ item -> item.disposition }).to_list(), ["invalid", "valid"])
+      assert_eq(observations.map({ item -> item.source }).to_list(), ["tool", "implicit"])
+    },
+  )
+}

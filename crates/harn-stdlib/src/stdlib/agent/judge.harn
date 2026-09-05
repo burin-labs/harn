@@ -1,4 +1,5 @@
 import { canon_event_paths } from "std/agent/canon"
+import { CompletionClaim, completion_claim_evidence_refs } from "std/agent/completion_claim"
 import {
   COMPLETION_VERIFICATION_EVIDENCE_INDEX,
   CompletionEvidenceAction,
@@ -125,6 +126,7 @@ pub type CompletionDirectiveReceipt = {
   admission?: CompletionJudgeAdmission?,
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
+  completion_claim?: CompletionClaim,
 }
 
 pub type CompletionDirective = {
@@ -490,13 +492,23 @@ fn __judge_evidence_projection_from_lifecycle(
   opts: dict,
   raw_transcript_digest: any = nil,
 ) -> CompletionEvidenceProjection {
+  const claim_refs = completion_claim_evidence_refs(opts?._completion_claim)
+  const evidence_lifecycle = if len(claim_refs) == 0 {
+    lifecycle
+  } else {
+    lifecycle
+      + {
+        calls: lifecycle.calls.filter({ call -> claim_refs.contains(call.tool_call_id) }).to_list(),
+      }
+  }
   let relevant_call_count = 0
   let read_only_evidence: list<CompletionReadOnlyEvidence> = []
   let latest_mutation = nil
   let latest_verification = nil
   let latest_problem = nil
   let latest_observation = nil
-  for call in lifecycle.calls {
+  let claimed_actions: list<CompletionEvidenceAction> = []
+  for call in evidence_lifecycle.calls {
     const action = __judge_lifecycle_action(call, opts)
     if action.semantics.read_only {
       read_only_evidence = read_only_evidence + [completion_read_only_evidence(call, action)]
@@ -504,6 +516,9 @@ fn __judge_evidence_projection_from_lifecycle(
       continue
     }
     relevant_call_count = relevant_call_count + 1
+    if len(claim_refs) > 0 {
+      claimed_actions = claimed_actions + [action]
+    }
     if __judge_descriptor_is_observation(action.semantics) {
       latest_observation = __judge_latest(latest_observation, action)
     }
@@ -525,9 +540,11 @@ fn __judge_evidence_projection_from_lifecycle(
   for issue in issue_tail {
     latest_issues = latest_issues + [__judge_issue_evidence(issue)]
   }
-  const selected = __judge_unique_slot_actions(
-    [latest_mutation, latest_verification, latest_problem],
-  )
+  const selected = if len(claim_refs) > 0 {
+    claimed_actions
+  } else {
+    __judge_unique_slot_actions([latest_mutation, latest_verification, latest_problem])
+  }
   const observation_fallback = if len(selected) == 0 && latest_observation != nil {
     [latest_observation]
   } else {
@@ -536,7 +553,7 @@ fn __judge_evidence_projection_from_lifecycle(
   const raw_digest = raw_transcript_digest
     ?? ("sha256:" + sha256(json_stringify(messages)))
   const research_summary = completion_research_summary(read_only_evidence)
-  const packet = {
+  let packet = {
     schema: "harn.completion_judge_evidence.v2",
     raw_message_count: len(messages),
     raw_transcript_digest: raw_digest,
@@ -548,7 +565,10 @@ fn __judge_evidence_projection_from_lifecycle(
     actions: selected,
     research_summary: research_summary,
     fallback_observations: observation_fallback,
-    requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
+    requirement_evidence: __judge_mutation_requirement_evidence(evidence_lifecycle, opts),
+  }
+  if opts?._completion_claim != nil {
+    packet = packet + {completion_claim: opts._completion_claim}
   }
   let selection: list<CompletionEvidenceSelection> = []
   for action in selected {
@@ -651,7 +671,7 @@ fn __judge_payload(
     nil,
     completion_obligations_digest(obligations),
   )
-  return {
+  let payload = {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
     session_id: session.session_id,
@@ -673,6 +693,10 @@ fn __judge_payload(
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: nil,
   }
+  if opts?._completion_claim != nil {
+    payload = payload + {completion_claim: opts._completion_claim}
+  }
+  return payload
 }
 
 /** Bind a gate reading onto the snapshot the remaining stages will be shown. */
@@ -1138,6 +1162,7 @@ fn __judge_directive(
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
     requirements: verdict?.requirement_report,
+    completion_claim: payload?.completion_claim,
   }
   return {
     action: action,
@@ -1157,7 +1182,7 @@ fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
   if !due {
     return false
   }
-  return contains(["sentinel", "natural", "stalled"], stop_reason)
+  return contains(["sentinel", "natural", "stalled", "explicit_completion_claim"], stop_reason)
 }
 
 /** Build the one ordered plan for a completion boundary. */

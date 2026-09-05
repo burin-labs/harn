@@ -352,6 +352,8 @@ pub type AgentExecutionSpec = {
    * convicted. Default empty, which checks nothing and costs nothing.
    */
   require_artifacts?: list<string>,
+  /** Add Harn's typed `task_complete` claim tool. Default off. */
+  completion_tool?: bool,
   exit_when_verified?: bool,
   deadline_ms?: int,
   verify_completion?: any,
