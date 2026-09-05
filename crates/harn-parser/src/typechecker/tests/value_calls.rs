@@ -36,12 +36,12 @@ fn apply() -> int { return (make_callback())("wrong") }"#,
 #[test]
 fn callable_parameter_shadows_same_named_module_function() {
     let shadowed = errors(
-        r#"fn transform(value: string, suffix: string) -> string {
+        r"fn transform(value: string, suffix: string) -> string {
   return value + suffix
 }
 fn apply(transform: fn(int) -> int) -> int {
   return transform(41)
-}"#,
+}",
     );
     assert!(
         shadowed.is_empty(),
@@ -65,13 +65,13 @@ fn apply() -> string {
 #[test]
 fn non_callable_local_shadow_does_not_fall_through_to_module_function() {
     let diagnostics = errors(
-        r#"fn transform(value: string) -> string {
+        r"fn transform(value: string) -> string {
   return value
 }
 fn apply() -> int {
   const transform = 41
   return transform(1)
-}"#,
+}",
     );
     assert!(
         diagnostics
