@@ -47,8 +47,8 @@ if ! grep -Fq \
 fi
 
 performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" | cut -d: -f1)"
-performance_command_line="$(grep -Fn 'run: make check-test-case-performance' "$workflow" | cut -d: -f1)"
-performance_binary_line="$(grep -Fn "HARN_BIN: \${{ env.CARGO_TARGET_DIR || './target' }}/debug/harn" "$workflow" | cut -d: -f1)"
+performance_command_line="$(grep -Fn 'make check-test-case-performance' "$workflow" | cut -d: -f1)"
+performance_binary_line="$(grep -Fn 'export HARN_BIN="${CARGO_TARGET_DIR:-./target}/debug/harn"' "$workflow" | cut -d: -f1)"
 performance_profile_line="$(grep -Fn 'HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64' "$workflow" | cut -d: -f1)"
 nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' "$workflow" | cut -d: -f1)"
 
