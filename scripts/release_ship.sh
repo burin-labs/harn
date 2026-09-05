@@ -667,13 +667,13 @@ require_main_anchored_tag_at_head() {
   local tag="$1"
   local head_commit remote_commit
   head_commit="$(git rev-parse HEAD)"
-  "$ROOT_DIR/scripts/verify_release_tag_main_ancestry.sh" --repo "$ROOT_DIR" --tag "$tag"
+  "$SCRIPT_DIR/verify_release_tag_main_ancestry.sh" --repo "$ROOT_DIR" --tag "$tag"
   remote_commit="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
   if [[ "$remote_commit" != "$head_commit" ]]; then
     echo "error: origin/$tag selects $remote_commit, but finalization checkout is $head_commit"
     exit 1
   fi
-  echo "Verified main-anchored release tag at HEAD: $tag"
+  echo "Verified trusted release tag at HEAD: $tag"
 }
 
 BUMP="patch"
