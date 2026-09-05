@@ -1,6 +1,4 @@
 // Check local links in docs/src Markdown files resolve to repository files.
-import { scan_glob } from "./path_visibility.harn"
-
 //
 // Ported from scripts/check_docs_links.py — behavior-identical: same three
 // link regexes (inline, reference, HTML href/src), same fenced-code-block
@@ -11,6 +9,8 @@ import { scan_glob } from "./path_visibility.harn"
 //
 // Usage:
 //   harn run scripts/check_docs_links.harn   # exit 1 on any dead local link
+import { scan_glob } from "./path_visibility.harn"
+
 const DOCS_DIR = "docs/src"
 
 // Inline `[text](target ...)` / `![alt](target ...)` links. Group 1 is the

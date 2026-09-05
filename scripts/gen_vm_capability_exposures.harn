@@ -1,6 +1,4 @@
 // Project every `harness.<capability>.<method>` that `harn-vm` declares into a
-import { scan_glob } from "./path_visibility.harn"
-
 // static table the parser can read without the VM.
 //
 // `harn-capability-contracts` is the dependency-leaf owner of capability method
@@ -20,6 +18,8 @@ import { scan_glob } from "./path_visibility.harn"
 // Usage:
 //   harn run scripts/gen_vm_capability_exposures.harn            # write
 //   harn run scripts/gen_vm_capability_exposures.harn -- --check # drift gate
+import { scan_glob } from "./path_visibility.harn"
+
 const SOURCE_GLOB = "crates/harn-vm/src/**/*.rs"
 
 const OUTPUT = "crates/harn-capability-contracts/src/vm_declared.rs"

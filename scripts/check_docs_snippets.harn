@@ -1,6 +1,4 @@
 // Verify every fenced code block in active documentation that claims to be Harn
-import { require_scanned } from "./path_visibility.harn"
-
 // source or a Harn prompt template is valid, by handing it to the real
 // binary rather than approximating either grammar here.
 //
@@ -47,6 +45,8 @@ import { require_scanned } from "./path_visibility.harn"
 //
 // Usage:
 //   harn run scripts/check_docs_snippets.harn
+import { require_scanned } from "./path_visibility.harn"
+
 const DOCS_GLOBS = [
   "docs/src/**/*.md",
   "docs/llm/*.md",

@@ -1,11 +1,11 @@
 // Structural contracts for optional dependency feature sets.
-import { require_scanned } from "./path_visibility.harn"
-
 //
 // Catches incomplete feature subsets when a crate disables upstream defaults —
 // for example `ort` with `download-binaries` but no TLS feature (#5690). That
 // failure mode only appears under `--features neural` / `--all-features`, which
 // default CI does not compile, so a cheap TOML contract is the durable ratchet.
+import { require_scanned } from "./path_visibility.harn"
+
 const ORT_TLS_FEATURES = [
   "tls-rustls",
   "tls-rustls-no-provider",

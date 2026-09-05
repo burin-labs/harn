@@ -1,11 +1,11 @@
 // Guard published manifests from resolving stale Harn workspace siblings.
-import { require_scanned } from "./path_visibility.harn"
-
 //
 // Cargo strips local `path` entries when publishing crates.io packages, leaving
 // the `version` requirement as the only coupling between sibling crates. That
 // requirement must be exact, or a downstream pinning one Harn crate can resolve
 // older siblings from the same semver line.
+import { require_scanned } from "./path_visibility.harn"
+
 const SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*)\}\s*$"
 
 const VERSION_RE = r#"version\s*=\s*"([^"]+)""#

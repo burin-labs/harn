@@ -1,9 +1,9 @@
 // CI ratchet: fail if the number of `@xfail:` markers across the
-import { require_scanned } from "./path_visibility.harn"
-
 // conformance suite exceeds the threshold checked into
 // scripts/xfail_threshold.txt. Catches "fix one, regress one" drift
 // without forcing a clean-up sprint every time a flake is muted.
+import { require_scanned } from "./path_visibility.harn"
+
 /** Count occurrences of `needle` in `haystack`. */
 pub fn count_substring(haystack: string, needle: string) -> int {
   if needle == "" {

@@ -1,6 +1,4 @@
 // Turn-end / measurement boundary gate.
-import { require_scanned } from "./path_visibility.harn"
-
 //
 // The product loop's terminal check (`turn_end_condition`, and its LLM-backed
 // turn-end judge) decides one thing: may this turn end? Measurement surfaces
@@ -25,6 +23,8 @@ import { require_scanned } from "./path_visibility.harn"
 // is only trustworthy when the same path has just returned a non-zero.
 //
 // Source-tier: reads committed files only.
+import { require_scanned } from "./path_visibility.harn"
+
 const PRODUCT_MODULE = "crates/harn-stdlib/src/stdlib/agent/turn_end.harn"
 
 /**
