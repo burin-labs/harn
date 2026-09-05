@@ -1069,7 +1069,7 @@ jobs:
           fi
           IFS= read -r marker < "$receipt"
           case "$marker" in
-            HARN_SANDBOX_ENFORCEMENT*) ;;
+            harn.sandbox_enforcement*) ;;
             *) echo "sandbox enforcement probe produced an invalid receipt" >&2; exit 1 ;;
           esac
           {

@@ -79,7 +79,7 @@ fn process_filesystem_sandbox_report_matches_live_escape() {
     };
 
     let marker = format!(
-        "HARN_SANDBOX_ENFORCEMENT schema=harn.ci.sandbox_enforcement.v1 backend={} filesystem_mechanism={} active={} outside_write={outcome}",
+        "harn.sandbox_enforcement schema=harn.ci.sandbox_enforcement.v1 backend={} filesystem_mechanism={} active={} outside_write={outcome}",
         active_backend_name(),
         active_backend_filesystem_mechanism(),
         active,
