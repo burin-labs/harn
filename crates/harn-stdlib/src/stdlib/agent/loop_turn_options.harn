@@ -629,6 +629,11 @@ pub fn __completion_stop_reason(verdict: dict) -> string {
  * Callers break on this and take the terminal status from
  * `__completion_stop_status`, so the two stop actions cannot drift apart at one
  * call site and not another.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_directive_stops({action: "stop_verified"})
  */
 pub fn __completion_directive_stops(verdict: dict) -> bool {
   return verdict?.action == "stop_unverified" || verdict?.action == "stop_verified"
@@ -642,6 +647,11 @@ pub fn __completion_directive_stops(verdict: dict) -> bool {
  * `completion_unverified`. One owner for this mapping: five call sites break on
  * a completion directive, and a per-site conditional is how the verified case
  * would end up honoured in some of them and not the rest.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_stop_status({action: "stop_verified"})
  */
 pub fn __completion_stop_status(verdict: dict) -> string {
   if verdict?.action == "stop_verified" {
@@ -650,7 +660,17 @@ pub fn __completion_stop_status(verdict: dict) -> string {
   return "completion_unverified"
 }
 
-/** Why undispatched tool calls were closed when a completion directive stopped the loop. */
+/**
+ * __completion_stop_call_note.
+ *
+ * Why undispatched tool calls were closed when a completion directive stopped
+ * the loop.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_stop_call_note({action: "stop_verified"})
+ */
 pub fn __completion_stop_call_note(verdict: dict) -> string {
   if verdict?.action == "stop_verified" {
     return "stopped after the verifier passed; the completion judge did not concur"
