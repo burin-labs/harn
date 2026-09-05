@@ -41,9 +41,39 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Where the main-push runs are allowed to land. Read for its `capacity`
+  # counts rather than its per-lane booleans: those booleans go false both when
+  # the fleet is switched off and when it is merely busy, and a busy fleet is a
+  # reason to queue, not a reason to send this suite somewhere else.
+  runner-availability:
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d924b47e5f445468454904f2bb32c6f9b4f050eb
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   e2e:
     name: Slow E2E suite
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    # Main pushes prefer the big self-hosted rung: 24 cores at no cost, and
+    # this suite compiles the whole workspace before it runs a single test.
+    # `online` rather than `idle` is the deliberate part. A main push is not
+    # racing anyone, so waiting for a busy box costs queue time and nothing
+    # else, while routing to a hosted runner on every busy day would quietly
+    # halve the evidence this tier exists to produce. Hosted stays the last
+    # rung for the one case it answers: no self-hosted capacity exists at all,
+    # or self-hosted routing is retired org-wide.
+    #
+    # Every other event keeps hosted runners. Pull-request and dispatch runs
+    # are watched live by whoever triggered them, and contending with local
+    # work on a shared box to serve them is the trade this repository already
+    # declined for its per-PR lanes.
+    runs-on: >-
+      ${{ (github.event_name == 'push'
+        && needs.runner-availability.outputs.selfhosted_disabled == ''
+        && needs.runner-availability.outputs.capacity != ''
+        && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
+        || 'ubuntu-latest' }}
     if: >
       github.event_name == 'push' ||
       github.event_name == 'schedule' ||
