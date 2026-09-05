@@ -1,5 +1,5 @@
-import { agent_completion_claim_apply_options } from "std/agent/completion_claim"
 // @harn-entrypoint-category agent.stdlib
+import { agent_completion_claim_apply_options } from "std/agent/completion_claim"
 import { AgentLoopTerminalError, AgentResult } from "std/agent/contracts"
 import { __agent_loop_run } from "std/agent/loop_run"
 import "std/agent/loop_support"
