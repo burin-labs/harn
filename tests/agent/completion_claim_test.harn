@@ -287,7 +287,7 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
         session,
         fn() { return agent_loop(harness, "Implement the requested change.", nil, opts) },
       )
-      println(json_stringify({result: captured.result, events: captured.events}))
+      throw json_stringify({result: captured.result, events: captured.events})
       assert_eq(captured.result.status, "done")
       assert_eq(captured.result.stop_reason, "explicit_completion_claim")
       assert_eq(captured.result.provider_call_count, 2)
