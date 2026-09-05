@@ -1,5 +1,6 @@
 import { canon_event_paths } from "std/agent/canon"
 import {
+  COMPLETION_MUTATION_TARGET_LIMIT,
   COMPLETION_VERIFICATION_EVIDENCE_INDEX,
   CompletionEvidenceAction,
   CompletionEvidenceIssue,
@@ -13,6 +14,7 @@ import {
   completion_evidence_action_authorship,
   completion_evidence_id,
   completion_read_only_evidence,
+  completion_read_target,
   completion_requirement_evidence_packet,
   completion_research_summary,
 } from "std/agent/completion_evidence"
@@ -441,6 +443,62 @@ fn __judge_unique_slot_actions(
   return selected
 }
 
+/**
+ * The latest mutation for EACH touched path, not the latest mutation overall.
+ *
+ * A single `latest_mutation` slot cannot represent a two-file change. The
+ * second edit displaces the first, so a task that asks for a production change
+ * plus a test hands the judge exactly one of them and reports the other as
+ * absent — and the judge, reasoning from the packet, refuses work that is
+ * present and verified (#8090).
+ *
+ * Keyed by the call's own locator, so the packet describes workspace STATE
+ * ("what does each touched file look like now") rather than narrative ("what
+ * happened last"). Chronological, because the calls arrive that way and a
+ * judge reads a sequence of edits more easily than a set.
+ *
+ * Bounded by `COMPLETION_MUTATION_TARGET_LIMIT` distinct paths, keeping the
+ * most recently touched, so a wide refactor degrades to fewer files rather
+ * than to an unbounded packet. Whatever is dropped is still counted in
+ * `omitted_older_action_count`, so the judge is never shown a window narrower
+ * than it believes.
+ */
+fn __judge_latest_mutation_per_target(
+  calls: list<AgentTranscriptToolLifecycle>,
+  opts: dict,
+) -> list<CompletionEvidenceAction> {
+  let latest_by_target = {}
+  for call in calls {
+    const action = __judge_lifecycle_action(call, opts)
+    if (action.harness_authored_only ?? false)
+      || action.semantics.read_only
+      || !__judge_descriptor_is_mutation(action.semantics) {
+      continue
+    }
+    const target = completion_read_target(call.args)
+    latest_by_target = latest_by_target + {[target]: __judge_latest(latest_by_target[target] ?? nil, action)}
+  }
+  // Second pass so the result is chronological without sorting: a call is the
+  // one to keep exactly when it IS its target's latest.
+  let ordered: list<CompletionEvidenceAction> = []
+  for call in calls {
+    const action = __judge_lifecycle_action(call, opts)
+    if (action.harness_authored_only ?? false)
+      || action.semantics.read_only
+      || !__judge_descriptor_is_mutation(action.semantics) {
+      continue
+    }
+    const winner = latest_by_target[completion_read_target(call.args)] ?? nil
+    if winner != nil && winner.evidence_index == action.evidence_index {
+      ordered = ordered + [action]
+    }
+  }
+  if len(ordered) > COMPLETION_MUTATION_TARGET_LIMIT {
+    return ordered.slice(len(ordered) - COMPLETION_MUTATION_TARGET_LIMIT, len(ordered))
+  }
+  return ordered
+}
+
 fn __judge_issue_evidence(issue: AgentTranscriptIssue) -> CompletionEvidenceIssue {
   return {
     code: __judge_clip_evidence(issue.code, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
@@ -472,7 +530,6 @@ fn __judge_evidence_projection_from_lifecycle(
 ) -> CompletionEvidenceProjection {
   let relevant_call_count = 0
   let read_only_evidence: list<CompletionReadOnlyEvidence> = []
-  let latest_mutation = nil
   let latest_verification = nil
   let latest_problem = nil
   let latest_observation = nil
@@ -496,9 +553,6 @@ fn __judge_evidence_projection_from_lifecycle(
     if __judge_descriptor_is_observation(action.semantics) {
       latest_observation = __judge_latest(latest_observation, action)
     }
-    if __judge_descriptor_is_mutation(action.semantics) {
-      latest_mutation = __judge_latest(latest_mutation, action)
-    }
     if __judge_descriptor_is_verifier(action.semantics) {
       latest_verification = __judge_latest(latest_verification, action)
     }
@@ -514,8 +568,12 @@ fn __judge_evidence_projection_from_lifecycle(
   for issue in issue_tail {
     latest_issues = latest_issues + [__judge_issue_evidence(issue)]
   }
+  // Every touched path, then the verifier and the latest problem. State first,
+  // narrative second: the judge is being asked what the workspace looks like
+  // now, not which call happened last (#8090).
   const selected = __judge_unique_slot_actions(
-    [latest_mutation, latest_verification, latest_problem],
+    __judge_latest_mutation_per_target(lifecycle.calls, opts)
+      + [latest_verification, latest_problem],
   )
   const observation_fallback = if len(selected) == 0 && latest_observation != nil {
     [latest_observation]
