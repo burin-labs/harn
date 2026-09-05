@@ -174,12 +174,25 @@ pipeline test_a_cap_over_a_passed_verifier_stops_verified(harness: Harness, task
       + to_string(receipt?.reason ?? "<none>"),
   )
   // The dissent is RECORDED, not discarded. This is the half that keeps the
-  // change from being a way to launder a refusal: the judge still said no, and
-  // the receipt still says so.
+  // change from being a way to launder a refusal.
+  //
+  // It is recorded on the refusal's OWN receipt, not copied onto this one. The
+  // capping turn does not invoke the model judge at all — that is what the cap
+  // means — so the stopping receipt reads `source: "deterministic"` and has no
+  // fresh verdict to carry. What the run must not do is end with no refusal on
+  // the record anywhere, which is what this asserts.
+  const refusals = __completion_receipts(run.events).filter(
+    { candidate -> to_string(candidate?.action ?? "") == "continue" },
+  )
+    .to_list()
   assert(
-    to_string(receipt?.outcome ?? "") == "continue",
-    "the judge's refusal stays on the receipt as its outcome, got: "
-      + to_string(receipt?.outcome ?? "<none>"),
+    len(refusals) > 0,
+    "the judge's refusals must still be on the run's receipts; a verified cap may not erase them",
+  )
+  assert(
+    to_string(refusals[0]?.source ?? "") == "llm",
+    "and the recorded refusal must be the MODEL judge's, not the deterministic gate's, got: "
+      + to_string(refusals[0]?.source ?? "<none>"),
   )
   assert(
     to_string(receipt?.verification?.observed ?? "") == "passed",
