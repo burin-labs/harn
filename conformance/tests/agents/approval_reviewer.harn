@@ -66,6 +66,9 @@ pipeline default(harness: Harness) {
       llm_text(
         "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
       ),
+      llm_text(
+        "{\"risk\":\"low\",\"authorization\":\"high\",\"rationale\":\"the goal names the action\"}",
+      ),
     ],
     { _ ->
       const reviewer = approval_reviewer_for(
@@ -84,10 +87,19 @@ pipeline default(harness: Harness) {
         permitted.approved == true,
         "the projected verdict thresholds must approve low risk with high authorization",
       )
+      const empty_policy_reviewer = approval_reviewer_for(
+        harness,
+        {},
+        "Read the requested source file.",
+      )
+      assert(
+        empty_policy_reviewer({tool: "read_file", category: "read_a_source_file"}).approved == true,
+        "an empty caller policy must inherit the bundled verdict thresholds",
+      )
       const calls = harness.llm.mock_calls()
       assert(
-        len(calls) == 1,
-        "the floor case must not call the model; the ordinary case must call it exactly once",
+        len(calls) == 2,
+        "the floor case must not call the model; both ordinary cases must call it exactly once",
       )
       assert(
         contains(calls[0].system, "Use the stated goal as the authorization boundary."),
