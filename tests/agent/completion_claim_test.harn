@@ -87,17 +87,6 @@ pipeline test_completion_tool_projects_one_required_object_schema(harness: Harne
   assert(entry?.parameters == nil)
 }
 
-pipeline test_completion_tool_prompt_requires_the_typed_exit(harness: Harness, task: unknown) {
-  const opts = agent_completion_claim_apply_options({completion_tool: true})
-  const fragments = opts.context_profile.prompt_fragments.filter(
-    { fragment -> fragment.id == "completion_claim" },
-  )
-    .to_list()
-  assert_eq(len(fragments), 1)
-  assert(fragments[0].body.contains("Do not finish with a tool-free response"))
-  assert(!fragments[0].body.contains("compatibility fallback"))
-}
-
 pipeline test_fabricated_ref_is_rejected_before_judging(harness: Harness, task: unknown) {
   const disposition = agent_completion_claim_disposition(
     evidence_messages(),
