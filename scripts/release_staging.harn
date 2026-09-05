@@ -2,6 +2,8 @@ import { read_yaml } from "std/fs"
 
 pub type ReleaseStagingConsumer = {workflow: string, job: string, directory: string}
 
+type WorkflowFilters = dict<string, list<string>>
+
 pub const RELEASE_STAGING_CONSUMERS = [
   {workflow: "build-release-binaries.yml", job: "release", directory: "release-provenance-policy"},
   {workflow: "publish-release.yml", job: "publish", directory: "release-tools"},
@@ -62,7 +64,14 @@ pub fn release_rehearsal_ci_errors(workflow: dict) -> list<string> {
   const filter = (workflow?.jobs?.changes?.steps ?? []).find(
     { step -> step?.id == "surface_filter" },
   )
-  const filters = yaml_parse(to_string(filter?.with?.filters ?? ""))
+  const loaded = schema_check(
+    yaml_parse(to_string(filter?.with?.filters ?? "")),
+    schema_of(WorkflowFilters),
+  )
+  guard is_ok(loaded) else {
+    return ["ci.yml job changes: release rehearsal filter is missing or invalid"]
+  }
+  const filters: WorkflowFilters = unwrap(loaded)
   for path in [
     ".github/workflows/ci.yml",
     ".github/workflows/release*",

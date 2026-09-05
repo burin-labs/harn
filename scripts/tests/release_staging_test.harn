@@ -20,16 +20,16 @@ pipeline rehearsal_cannot_skip_main_or_disappear_from_the_required_gate(
   assert_eq(release_rehearsal_ci_errors(workflow), [])
   let main_skip = json_parse(json_stringify(workflow))
   main_skip.jobs["release-contract"]["if"] = "needs.changes.outputs.release_contract == 'true'"
-  assert(release_rehearsal_ci_errors(main_skip)[0].contains("job release-contract"))
+  assert(join(release_rehearsal_ci_errors(main_skip), "\n").contains("job release-contract"))
   let missing = json_parse(json_stringify(workflow))
   missing.jobs["release-contract"].steps = []
-  assert(release_rehearsal_ci_errors(missing)[0].contains("job release-contract"))
+  assert(join(release_rehearsal_ci_errors(missing), "\n").contains("job release-contract"))
   let optional = json_parse(json_stringify(workflow))
   optional.jobs["ci-status"].needs = []
-  assert(release_rehearsal_ci_errors(optional)[0].contains("job ci-status"))
+  assert(join(release_rehearsal_ci_errors(optional), "\n").contains("job ci-status"))
   let paths = json_parse(json_stringify(workflow))
   paths.jobs.changes.steps = []
-  assert(release_rehearsal_ci_errors(paths)[0].contains("job changes"))
+  assert(join(release_rehearsal_ci_errors(paths), "\n").contains("job changes"))
 }
 
 @test
@@ -64,7 +64,7 @@ pipeline canonical_staging_is_required_in_each_real_consumer(harness: Harness, t
         consumer,
       )
       assert(len(errors) > 0)
-      assert(errors[0].contains("job " + consumer.job))
+      assert(join(errors, "\n").contains("job " + consumer.job))
       harness.stdio.println(
         "negative control ${consumer.workflow}/${consumer.job} ${mutation.name}: rejected",
       )
