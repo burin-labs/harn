@@ -2430,8 +2430,8 @@ jobs:
           harn --version
 
   # The Slow E2E suite lives in its own workflow (`.github/workflows/e2e.yml`),
-  # which owns the nightly schedule, the `e2e`-label PR trigger, and manual
-  # dispatch. It is a slow subprocess-spawning tier, not a per-PR gate, so it
+  # which owns the main-push trigger, the nightly schedule, the `e2e`-label PR
+  # trigger, and manual dispatch. It is a slow subprocess-spawning tier, not a per-PR gate, so it
   # is intentionally NOT part of the required `ci-status` aggregate below. A
   # duplicate copy of this job used to live here and feed `ci-status`, which
   # meant applying the `e2e` label blocked the PR on the slow tier while the
