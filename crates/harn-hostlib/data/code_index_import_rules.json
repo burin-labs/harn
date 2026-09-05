@@ -53,7 +53,7 @@
     },
     "go": {
       "kind": "import",
-      "strategy": "unresolved-by-design"
+      "strategy": "go-package"
     },
     "harn": {
       "candidateExtensions": [

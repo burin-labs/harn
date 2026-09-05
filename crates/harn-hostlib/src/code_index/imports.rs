@@ -21,8 +21,9 @@ use harn_vm::text::case::to_snake_case;
 use serde::Deserialize;
 
 use super::file_table::FileId;
+use super::imports_go::extract_go_imports;
 use super::imports_swift::swift_module_name;
-pub(crate) use super::imports_swift::ModuleIndex;
+pub(crate) use super::module_index::ModuleIndex;
 
 const RULES_JSON: &str = include_str!("../../data/code_index_import_rules.json");
 
@@ -66,6 +67,11 @@ pub(crate) fn import_keywords(language: &str) -> &'static [&'static str] {
 /// Extract every import-like statement from `source`, one entry per line
 /// the matcher fires on.
 pub(crate) fn extract_imports(source: &str, language: &str) -> Vec<String> {
+    // Go writes almost every import inside a parenthesised block, so the
+    // line-oriented matcher below sees only the `import (` opener.
+    if language == "go" {
+        return extract_go_imports(source);
+    }
     let keywords = import_keywords(language);
     if keywords.is_empty() {
         return Vec::new();
@@ -119,6 +125,10 @@ pub enum ResolutionStrategy {
     /// import statement at all. Both halves are the same fact about
     /// modules, so both are answered from [`ModuleIndex`].
     SwiftTarget,
+    /// Go packages. An import names a package, a package is a directory,
+    /// and the mapping from import path to directory comes from the
+    /// `module` line of the `go.mod` that declares it.
+    GoPackage,
     /// The language declares no resolver. **Not** the same as resolving
     /// to nothing: nothing was attempted, so a zero here is a measured
     /// nothing rather than a measured zero.
@@ -134,6 +144,7 @@ impl ResolutionStrategy {
             ResolutionStrategy::Relative => "relative",
             ResolutionStrategy::RustModule => "rust-module",
             ResolutionStrategy::SwiftTarget => "swift-target",
+            ResolutionStrategy::GoPackage => "go-package",
             ResolutionStrategy::UnresolvedByDesign => "unresolved-by-design",
         }
     }
@@ -148,6 +159,7 @@ impl ResolutionStrategy {
             "relative" => Some(ResolutionStrategy::Relative),
             "rust-module" => Some(ResolutionStrategy::RustModule),
             "swift-target" => Some(ResolutionStrategy::SwiftTarget),
+            "go-package" => Some(ResolutionStrategy::GoPackage),
             "unresolved-by-design" => Some(ResolutionStrategy::UnresolvedByDesign),
             _ => None,
         }
@@ -273,14 +285,24 @@ pub(crate) fn resolve(
         if trimmed.is_empty() {
             continue;
         }
-        if strategy_for(language) == ResolutionStrategy::SwiftTarget {
-            let roots = swift_module_name(trimmed)
-                .map(|name| modules.roots_named(&name))
-                .unwrap_or(&[]);
+        // Both module strategies name a whole module, so both store the
+        // module root rather than one edge per file it contains.
+        let module_roots: Option<Vec<String>> = match strategy_for(language) {
+            ResolutionStrategy::SwiftTarget => Some(
+                swift_module_name(trimmed)
+                    .map(|name| modules.roots_named(&name).to_vec())
+                    .unwrap_or_default(),
+            ),
+            ResolutionStrategy::GoPackage => {
+                Some(modules.go_root_for_import(trimmed).into_iter().collect())
+            }
+            _ => None,
+        };
+        if let Some(roots) = module_roots {
             if roots.is_empty() {
                 out.unresolved.push(raw.clone());
             } else {
-                out.modules.extend(roots.iter().cloned());
+                out.modules.extend(roots);
             }
             continue;
         }
@@ -360,6 +382,7 @@ pub(crate) fn resolve_target(
         ResolutionStrategy::SwiftTarget => swift_module_name(raw.trim())
             .map(|name| modules.files_named(&name))
             .unwrap_or_default(),
+        ResolutionStrategy::GoPackage => modules.go_files_for_import(raw.trim()),
         _ => apply_rule(rule, raw.trim(), &base_dir, path_to_id)
             .map(|id| vec![id])
             .unwrap_or_default(),
@@ -869,12 +892,15 @@ mod tests {
         let mut paths: HashMap<String, FileId> = HashMap::new();
         paths.insert("src/util.rs".to_string(), 2);
 
-        // Go still declares no resolver, so it is the language that
-        // distinguishes "never tried" from "tried and matched nothing".
+        // Every language in the rules file now declares a real
+        // resolver, so the unattempted verdict belongs to a file type
+        // that is not a language with imports at all. That is still the
+        // distinction this test exists for: "never tried" has to read
+        // differently from "tried and matched nothing".
         let unattempted = resolve_target(
-            "import \"fmt\"",
-            "go",
-            "src/a.go",
+            "anything at all",
+            "markdown",
+            "docs/a.md",
             &paths,
             &ModuleIndex::build(&paths),
         );

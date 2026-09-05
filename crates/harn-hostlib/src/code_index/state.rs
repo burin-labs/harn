@@ -26,6 +26,7 @@ use super::agents::AgentRegistry;
 use super::file_table::{fnv1a64, FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports;
+use super::imports_go::GoModules;
 use super::overlay::OverlayState;
 use super::symbol_graph::SymbolGraph;
 use super::trigram::TrigramIndex;
@@ -453,7 +454,44 @@ impl IndexState {
     /// Recompute module membership from the current path table. O(paths),
     /// so it runs once per path-set change rather than once per file.
     fn refresh_module_index(&mut self) {
-        self.modules = imports::ModuleIndex::build(&self.path_to_id);
+        // `go.mod` is the one input that is not derivable from the path
+        // table: an import path only maps onto a directory through the
+        // module path a manifest declares. It is also not in the path
+        // table, because the index does not track manifests, so the
+        // ancestors of every Go file are probed on disk instead. That is
+        // a handful of reads, once per path-set change.
+        let mut manifest_dirs: HashSet<String> = HashSet::new();
+        for rel in self.path_to_id.keys() {
+            if !rel.ends_with(".go") {
+                continue;
+            }
+            let mut cursor = rel.as_str();
+            while let Some((head, _)) = cursor.rsplit_once('/') {
+                manifest_dirs.insert(head.to_string());
+                cursor = head;
+            }
+            manifest_dirs.insert(String::new());
+        }
+        let mut manifests: Vec<(String, String)> = manifest_dirs
+            .into_iter()
+            .filter_map(|dir| {
+                let rel = if dir.is_empty() {
+                    "go.mod".to_string()
+                } else {
+                    format!("{dir}/go.mod")
+                };
+                std::fs::read_to_string(self.root.join(&rel))
+                    .ok()
+                    .map(|contents| (rel, contents))
+            })
+            .collect();
+        manifests.sort();
+        let go_modules = GoModules::from_manifests(
+            manifests
+                .iter()
+                .map(|(path, contents)| (path.as_str(), contents.as_str())),
+        );
+        self.modules = imports::ModuleIndex::build(&self.path_to_id).with_go_modules(go_modules);
     }
 
     /// [`Self::refresh_module_index`] for the snapshot-restore path,
@@ -966,5 +1004,100 @@ mod tests {
         // Membership is derived, so removing a file must remove it from
         // every answer without anyone re-resolving an import statement.
         assert_eq!(state.imports_of(main_id).len(), 1);
+    }
+
+    #[test]
+    fn go_imports_resolve_through_the_manifests_module_path() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("internal/store")).unwrap();
+        fs::create_dir_all(dir.path().join("internal/runtime")).unwrap();
+        fs::write(
+            dir.path().join("go.mod"),
+            "module github.com/acme/tool\n\ngo 1.26.1\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("internal/store/state.go"),
+            "package store\n\ntype State struct{}\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("internal/store/keys.go"),
+            "package store\n\nfunc Key() string { return \"\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("internal/runtime/net.go"),
+            "package runtime\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/acme/tool/internal/store\"\n)\n\nvar _ = fmt.Sprintf\n",
+        )
+        .unwrap();
+
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let net = state.path_to_id["internal/runtime/net.go"];
+        let keys = state.path_to_id["internal/store/keys.go"];
+        let stateful = state.path_to_id["internal/store/state.go"];
+
+        // The block form is what Go actually writes, and every path
+        // inside it has to be extracted, not just the `import (` line.
+        assert_eq!(
+            state.files[&net].imports,
+            vec![
+                "fmt".to_string(),
+                "github.com/acme/tool/internal/store".to_string()
+            ]
+        );
+
+        // The import path only maps onto a directory through the module
+        // path the manifest declares, so this is the falsifier for the
+        // manifest being read at all.
+        assert_eq!(state.deps.module_imports_of(net), ["internal/store"]);
+        assert_eq!(state.imports_of(net), {
+            let mut want = vec![keys, stateful];
+            want.sort_unstable();
+            want
+        });
+
+        // `fmt` is the standard library. A real strategy ran and matched
+        // nothing, which is not the same as never having tried.
+        assert!(state
+            .deps
+            .unresolved_imports(net)
+            .contains(&"fmt".to_string()));
+
+        // Same package, no import statement between them.
+        assert_eq!(state.imports_of(keys), vec![stateful]);
+    }
+
+    #[test]
+    fn go_imports_resolve_to_nothing_without_a_manifest() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("internal/store")).unwrap();
+        fs::create_dir_all(dir.path().join("internal/runtime")).unwrap();
+        fs::write(
+            dir.path().join("internal/store/state.go"),
+            "package store\n\ntype State struct{}\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("internal/runtime/net.go"),
+            "package runtime\n\nimport (\n\t\"github.com/acme/tool/internal/store\"\n)\n",
+        )
+        .unwrap();
+
+        // The negative control for the test above. With no `go.mod`
+        // there is no module path, so the same import names nothing,
+        // and the census must not report it as resolved just because
+        // the file has package peers elsewhere.
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let net = state.path_to_id["internal/runtime/net.go"];
+        assert!(state.deps.module_imports_of(net).is_empty());
+        assert!(state.imports_of(net).is_empty());
+        let go_row = state
+            .import_census()
+            .into_iter()
+            .find(|row| row.language == "go")
+            .expect("go row");
+        assert_eq!(go_row.files_with_imports, 1);
+        assert_eq!(go_row.files_with_resolved_imports, 0);
     }
 }
