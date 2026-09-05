@@ -1,3 +1,4 @@
+import { completion_requirement_assessments_schema } from "std/agent/completion_requirements"
 // Run: harn test tests/agent/completion_gap_attribution_test.harn
 //
 // #8104. A refusal now itemizes every gap it holds (#8100), but nothing said
@@ -74,7 +75,7 @@ pipeline test_a_named_row_survives_the_read(harness: Harness, task: unknown) {
     ["median-op", "parser-accepts"],
   )
   assert_eq(len(gaps), 1, "the gap must decode")
-  assert_eq(gaps[0].requirement_id, "median-op", "and keep the row it named")
+  assert_eq(gaps[0]?.requirement_id, "median-op", "and keep the row it named")
   assert_eq(__judge_gaps_unattributed_count(gaps), 0, "so nothing is unattributed")
 }
 
@@ -87,8 +88,12 @@ pipeline test_an_unknown_row_is_unattributed_not_repaired(harness: Harness, task
     ["median-op", "parser-accepts"],
   )
   assert_eq(len(gaps), 2, "both gaps must still be raised; attribution is not a filter")
-  assert_eq(gaps[0].requirement_id, "", "a near-miss id is dropped, not corrected to the close one")
-  assert_eq(gaps[1].requirement_id, "", "and an invented id is dropped too")
+  assert_eq(
+    gaps[0]?.requirement_id,
+    "",
+    "a near-miss id is dropped, not corrected to the close one",
+  )
+  assert_eq(gaps[1]?.requirement_id, "", "and an invented id is dropped too")
   assert_eq(
     __judge_gaps_unattributed_count(gaps),
     2,
@@ -99,7 +104,7 @@ pipeline test_an_unknown_row_is_unattributed_not_repaired(harness: Harness, task
 pipeline test_an_omitted_row_is_unattributed(harness: Harness, task: unknown) {
   const gaps = __judge_completion_gaps_read({gaps: [gap("something else")]}, ["median-op"])
   assert_eq(len(gaps), 1, "a gap that names no row is still a gap")
-  assert_eq(gaps[0].requirement_id, "", "it is simply unattributed")
+  assert_eq(gaps[0]?.requirement_id, "", "it is simply unattributed")
   assert_eq(__judge_gaps_unattributed_count(gaps), 1, "and counted as such")
 }
 
@@ -119,8 +124,8 @@ pipeline test_the_verdict_read_constrains_against_its_own_contract(
     ledger(),
   )
   assert_eq(len(verdict.gaps), 2, "both gaps decode")
-  assert_eq(verdict.gaps[0].requirement_id, "median-op", "the in-contract row is kept")
-  assert_eq(verdict.gaps[1].requirement_id, "", "the foreign row is not")
+  assert_eq(verdict.gaps[0]?.requirement_id, "median-op", "the in-contract row is kept")
+  assert_eq(verdict.gaps[1]?.requirement_id, "", "the foreign row is not")
   assert_eq(__judge_gaps_unattributed_count(verdict.gaps), 1, "and one gap is unattributed")
 }
 
@@ -133,5 +138,108 @@ pipeline test_a_reply_predating_the_field_still_decodes(harness: Harness, task: 
     ledger(),
   )
   assert_eq(len(verdict.gaps), 1, "the older reply still decodes")
-  assert_eq(verdict.gaps[0].requirement_id, "", "as unattributed")
+  assert_eq(verdict.gaps[0]?.requirement_id, "", "as unattributed")
+}
+
+// The two replays. Both use vocabulary lifted from real runs rather than
+// invented strings, because the thing being tested is whether the constraint
+// holds against ids a real ledger actually produced.
+fn packet_ledger() -> CompletionRequirementContract {
+  // Verbatim from the acceptance rejection the run emitted three times, ids and
+  // names both. The ids are hash-suffixed, which is precisely the shape prose
+  // matching would fail on and a typed constraint does not care about.
+  return {
+    requirements: [
+      {
+        requirement_id: "acceptance-the-owning-test-file--6d2a72d8",
+        name: "The owning test file stays green and gains cases for the read profile.",
+        evidence_roles: ["assistant_output", "deterministic_verification"],
+      },
+      {
+        requirement_id: "climb-semantics-are-unchanged-d6a95eef",
+        name: "Climb semantics are unchanged.",
+        evidence_roles: ["assistant_output", "deterministic_verification"],
+      },
+      {
+        requirement_id: "run-profile-help-lists-the-serve-08475d24",
+        name: "Run-profile help lists the served inventory.",
+        evidence_roles: ["assistant_output", "deterministic_verification"],
+      },
+    ],
+  }
+}
+
+pipeline test_the_three_captured_items_attribute_to_their_own_ids(harness: Harness, task: unknown) {
+  const contract = packet_ledger()
+  const schema = __judge_completion_verdict_schema(contract)
+  assert_eq(
+    schema.properties.gaps.items.properties.requirement_id.enum,
+    [
+      "acceptance-the-owning-test-file--6d2a72d8",
+      "climb-semantics-are-unchanged-d6a95eef",
+      "run-profile-help-lists-the-serve-08475d24",
+    ],
+    "the judge is offered exactly the three rows the capture's ledger held",
+  )
+  const verdict = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "three items still pending",
+      gaps: [
+        gap("owning test file", "acceptance-the-owning-test-file--6d2a72d8"),
+        gap("climb semantics", "climb-semantics-are-unchanged-d6a95eef"),
+        gap("run-profile help", "run-profile-help-lists-the-serve-08475d24"),
+      ],
+    },
+    contract,
+  )
+  assert_eq(len(verdict.gaps), 3, "all three gaps decode")
+  assert_eq(
+    __judge_gaps_unattributed_count(verdict.gaps),
+    0,
+    "and every one names the row it is against, so nothing is unattributed",
+  )
+}
+
+pipeline test_a_run_whose_packet_carried_no_ledger_attributes_nothing(
+  harness: Harness,
+  task: unknown,
+) {
+  // The other replay, and the uncomfortable half. The capped run's judge packet
+  // carried no acceptance ledger at all: no requirement ids were offered, so
+  // every refusal it made was unattributable by construction, not by the
+  // judge's choice. Under this change that state is a counted zero rather than
+  // an absent field nobody reads.
+  const schema = __judge_completion_verdict_schema()
+  assert(
+    !schema.properties.gaps.items.properties.keys().contains("requirement_id"),
+    "with no ledger the judge is offered no row to name",
+  )
+  const verdict = __judge_completion_verdict_read(
+    {verdict: "continue", detail: "the verifier has not reported a pass", gaps: [gap("verifier")]},
+    nil,
+  )
+  assert_eq(len(verdict.gaps), 1, "the refusal still stands")
+  assert_eq(
+    __judge_gaps_unattributed_count(verdict.gaps),
+    1,
+    "and the whole of it is unattributed, which is the finding the count exists to surface",
+  )
+}
+
+pipeline test_the_assessment_schema_is_constrained_to_the_same_ids(
+  harness: Harness,
+  task: unknown,
+) {
+  // The other half of the same class. The report reader already refuses a row
+  // naming an id the ledger never issued, but only after the fact, by turning
+  // it into a pending item that blocks a completion. Constraining the schema
+  // means the judge is never offered the chance.
+  const schema = completion_requirement_assessments_schema(ledger())
+  assert(schema != nil, "a ledger with rows produces an assessment schema")
+  assert_eq(
+    schema?.items.properties.requirement_id.enum,
+    ["median-op", "parser-accepts"],
+    "and it may name only the ledger's own rows, like the gap side",
+  )
 }

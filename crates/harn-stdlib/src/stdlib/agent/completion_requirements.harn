@@ -245,7 +245,16 @@ pub fn completion_requirement_assessments_schema(
     items: {
       type: "object",
       properties: {
-        requirement_id: {type: "string"},
+        requirement_id: {
+          type: "string",
+          // Constrained to the ledger's own ids for the same reason the gap
+          // side is (#8104). The reader already rejects a row naming an id
+          // the ledger never issued, but it can only do so after the fact,
+          // by adding "Unknown requirement" to the pending set and blocking
+          // a completion the judge may otherwise have been right about. The
+          // schema is where that is cheap to prevent.
+          enum: completion_requirement_ids(contract),
+        },
         met: {type: "boolean"},
         evidence_refs: {type: "array", items: {type: "integer"}},
       },

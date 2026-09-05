@@ -402,8 +402,8 @@ pub fn __judge_completion_gaps_read(
  */
 pub fn __judge_gaps_unattributed_count(gaps: list<CompletionJudgeGapItem>) -> int {
   let unattributed = 0
-  for gap in gaps ?? [] {
-    if trim(to_string(gap?.requirement_id ?? "")) == "" {
+  for gap in gaps {
+    if trim(gap.requirement_id) == "" {
       unattributed = unattributed + 1
     }
   }
