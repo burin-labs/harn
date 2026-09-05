@@ -155,16 +155,14 @@ fn main(harness: Harness) -> int {
     captured.events,
     "harn.completion_directive_receipt.v1",
   )
-  const inspection_call_ids = captured.events
-    .filter(
-      { event -> event.type == "tool_call" && event?.tool_name == "inspect_status" },
-    )
+  const inspection_call_ids = captured.events.filter(
+    { event -> event.type == "tool_call" && event?.tool_name == "inspect_status" },
+  )
     .map({ event -> event.tool_call_id })
     .to_list()
-  const completion_attempts = captured.events
-    .filter(
-      { event -> event.type == "tool_call" && event?.tool_name == "task_complete" },
-    )
+  const completion_attempts = captured.events.filter(
+    { event -> event.type == "tool_call" && event?.tool_name == "task_complete" },
+  )
     .map({ event -> {tool_call_id: event.tool_call_id, input: event.raw_input} })
     .to_list()
   const explicit = observations.any(
