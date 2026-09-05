@@ -14,6 +14,7 @@ use crate::ast::{is_discard_name, BindingPattern, Node, SNode, TypedParam};
 mod call_resolution;
 pub use call_resolution::{
     lexically_resolved_identifier_spans, module_match_pattern_catalog_with_visible,
+    resolved_identifier_bindings_with_source,
 };
 
 /// Stable identity for a source binding. Patterns do not carry individual
@@ -308,15 +309,7 @@ pub fn resolved_identifier_bindings(
     params: &[TypedParam],
     body: &[SNode],
 ) -> HashMap<(usize, usize), BindingId> {
-    let mut analysis = LexicalAnalysis::new(&MatchPatternCatalog::default());
-    analysis.walk_body_with_bindings(
-        body,
-        Vec::new(),
-        false,
-        BindingOwner::Current,
-        parameter_scope(params, &BindingOwner::Current),
-    );
-    analysis.resolved
+    resolved_identifier_bindings_with_source(params, body, None, &MatchPatternCatalog::default())
 }
 
 /// Resolve a property receiver to its root binding and ordered property path.

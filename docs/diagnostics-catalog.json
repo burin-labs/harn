@@ -2459,7 +2459,7 @@
     {
       "code": "HARN-LNT-074",
       "category": "LNT",
-      "summary": "explicitly unused test pipeline input can be removed",
+      "summary": "explicitly unused private pipeline input can be removed",
       "repairs": [
         {
           "id": "bindings/remove-unused-pipeline-input",

@@ -15,15 +15,14 @@ impl Linter<'_> {
             .iter()
             .filter_map(|declaration| {
                 let candidate = declaration.removable_pipeline.as_ref()?;
-                (!self.references.contains(&declaration.name)
-                    && !self.function_references.contains(&candidate.owner))
-                .then(|| (candidate.owner.clone(), declaration.name.clone()))
+                (!self.function_references.contains(&candidate.owner))
+                    .then(|| (candidate.owner.clone(), declaration.name.clone()))
             })
             .collect();
 
         for decl in &self.param_declarations {
-            if (decl.name.starts_with('_') && decl.removable_pipeline.is_none())
-                || self.references.contains(&decl.name)
+            if decl.removable_pipeline.is_none()
+                && (decl.name.starts_with('_') || self.references.contains(&decl.name))
             {
                 continue;
             }
@@ -56,7 +55,7 @@ impl Linter<'_> {
                 (
                     Code::LintUnusedPipelineInput,
                     "unused-pipeline-input",
-                    "remove the unused test pipeline input; tests declare only the inputs they use"
+                    "remove the unused private pipeline input after reviewing external callers"
                         .to_string(),
                     Some(fix.clone()),
                 )

@@ -323,7 +323,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-071`](#harn-lnt-071) | global builtin has moved to a Harness capability method | `bindings/thread-harness-method` | `scope-local` |
 | [`HARN-LNT-072`](#harn-lnt-072) | call names a builtin whose declared exposure keeps Harn source from naming it | — | — |
 | [`HARN-LNT-073`](#harn-lnt-073) | parameter carrying a narrow capability handle is not named for that capability | `bindings/name-capability-parameter` | `surface-changing` |
-| [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused test pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
+| [`HARN-LNT-074`](#harn-lnt-074) | explicitly unused private pipeline input can be removed | `bindings/remove-unused-pipeline-input` | `surface-changing` |
 | [`HARN-LNT-075`](#harn-lnt-075) | tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type | — | — |
 
 ## FMT — Formatter
@@ -3997,24 +3997,22 @@ shape is unchanged.
 
 **Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
 
-explicitly unused test pipeline input can be removed
+explicitly unused private pipeline input can be removed
 
 - **Repair:** `bindings/remove-unused-pipeline-input` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Remove an explicitly unused test pipeline input
 
 #### What it means
 
-An underscore-prefixed input on a private pipeline structurally marked with a
-bare `@test` is not used by its body or a local caller and is not bound by a
-fixture or table-driven case. The Harn test runner derives its invocation from
-that declaration, but another host can still select any named pipeline.
+An underscore-prefixed input on a private, unextended pipeline is unused and
+has no default, rest, or caller-owned contract. Unattributed host and operational
+pipelines and bare `@test` declarations qualify. Unattributed `test_*` pipelines
+and other attributes retain their runner, fixture, and table-owned inputs.
 
 #### How to fix
 
 Review external host callers, then apply the surface-changing fix explicitly to
-remove the input. Keep and type a named input when the test uses the value.
-Unattributed, extended, called, fixture-bound, and table-bound pipelines preserve
-their positional contracts.
+remove the input. Keep and type a named input when the pipeline uses the value.
 
 ### `HARN-LNT-075`
 

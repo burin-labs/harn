@@ -212,37 +212,55 @@ greet("hi", "there")
 }
 
 #[test]
-fn unused_runtime_pipeline_slot_is_removed_instead_of_renamed() {
-    let source = r#"@test
-pipeline test_runtime(harness: Harness, _task: unknown) {
-  harness.stdio.println("ready")
-}"#;
-    let diagnostics = lint_source(source);
-    assert!(
-        has_rule(&diagnostics, "unused-pipeline-input"),
-        "legacy underscore slots should participate in pipeline removal: {diagnostics:?}"
-    );
-    assert_eq!(
-        apply_fixes(source, &diagnostics),
-        r#"@test
-pipeline test_runtime(harness: Harness) {
-  harness.stdio.println("ready")
-}"#
-    );
-}
-
-#[test]
-fn externally_selectable_pipeline_slots_keep_positional_arity() {
+fn private_pipeline_inputs_respect_the_test_runner_convention() {
     for name in ["default", "main", "auto", "helper", "test_helper"] {
         let source = format!(
             "pipeline {name}(harness: Harness, _task: unknown) {{\n  harness.stdio.println(\"ready\")\n}}"
         );
         let diagnostics = lint_source(&source);
-        assert!(
-            !has_rule(&diagnostics, "unused-pipeline-input"),
-            "host-selected pipeline `{name}` must retain its out-of-band argument contract: {diagnostics:?}"
+        assert_eq!(
+            has_rule(&diagnostics, "unused-pipeline-input"),
+            name != "test_helper",
+            "only test-runner convention owns this unused input: {diagnostics:?}"
         );
-        assert_eq!(apply_fixes(&source, &diagnostics), source);
+        let expected = if name == "test_helper" {
+            source.clone()
+        } else {
+            source.replace(", _task: unknown", "")
+        };
+        assert_eq!(apply_fixes(&source, &diagnostics), expected);
+    }
+}
+
+#[test]
+fn pipeline_input_uses_resolve_to_the_declared_binding() {
+    for body in [
+        "return 1",
+        "fn inner(_task: int) { return _task }; return inner(1)",
+        "let _task = 2; return _task",
+    ] {
+        let source = format!(
+            "pipeline dead(_task: int) {{ {body} }}\npipeline used(_task: int) {{ return _task }}"
+        );
+        let fixed = apply_fixes(&source, &lint_source(&source));
+        assert!(fixed.contains("pipeline dead()"), "{fixed}");
+        assert!(fixed.contains("pipeline used(_task: int)"), "{fixed}");
+    }
+    for source in [
+        "pipeline main(_task: int) { return \"value=${_task}\" }",
+        "pipeline main(_task: int) { fn inner(value: int = _task) { return value }; return inner() }",
+        "pipeline main(_task: int) { let use = { -> _task }; return use() }",
+        "pipeline main(_task: int) { return 1 }\nconst selected = main",
+        "@timeout(1) pipeline main(_task: int) { return 1 }",
+        "pub pipeline exported(_task: int) { return 1 }",
+        "pipeline child(_task: int) extends base { return 1 }",
+        "@test pipeline helper(_task: int) { return 1 }\npipeline main() { return helper(2) }",
+        "@test(cases: [{name: \"one\", args: [1]}]) pipeline test_case(_task: int) { return 1 }",
+    ] {
+        assert!(
+            !has_rule(&lint_source(source), "unused-pipeline-input"),
+            "{source}"
+        );
     }
 }
 
@@ -345,57 +363,6 @@ pipeline test_ready(_task: unknown) {
 pipeline test_ready() {
   assert(true)
 }"
-    );
-}
-
-#[test]
-fn caller_and_table_bound_pipeline_slots_keep_positional_arity() {
-    let called = r"@test
-pipeline test_helper(_value: int) {
-  return 1
-}
-
-pipeline default() {
-  return test_helper(2)
-}";
-    assert_eq!(
-        apply_fixes(called, &lint_source(called)),
-        called,
-        "a local caller owns the helper's positional slot and its binding name"
-    );
-
-    let table = r#"@test(cases: [{name: "one", args: [1]}])
-pipeline test_case(value: int) {
-  assert(true)
-}"#;
-    assert_eq!(
-        apply_fixes(table, &lint_source(table)),
-        table,
-        "table rows own the test pipeline's positional slots and binding names"
-    );
-}
-
-#[test]
-fn extended_pipeline_slots_keep_positional_arity() {
-    let extended = r"pipeline child(value: int) extends base {
-  return 1
-}";
-    assert_eq!(
-        apply_fixes(extended, &lint_source(extended)),
-        extended,
-        "an extended pipeline inherits an opaque positional contract"
-    );
-}
-
-#[test]
-fn public_pipeline_slots_keep_positional_arity() {
-    let source = r"pub pipeline exported(value: int) {
-  return 1
-}";
-    assert_eq!(
-        apply_fixes(source, &lint_source(source)),
-        source,
-        "external callers may depend on a public pipeline's full declaration contract"
     );
 }
 

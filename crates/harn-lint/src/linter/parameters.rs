@@ -1,7 +1,10 @@
 //! Declaration policy for removable pipeline inputs.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::TypedParam;
+use harn_parser::{
+    lexical::{resolved_identifier_bindings_with_source, BindingId},
+    SNode, TypedParam,
+};
 
 use super::Linter;
 use crate::decls::{ParamDeclaration, RemovablePipelineParam};
@@ -11,13 +14,38 @@ impl Linter<'_> {
     pub(super) fn declare_pipeline_parameters(
         &mut self,
         params: &[TypedParam],
+        body: &[SNode],
         owner: &str,
         removal_allowed: bool,
     ) {
+        let removal_allowed = removal_allowed
+            && self
+                .pipeline_input_attribute_owner
+                .unwrap_or(!Self::is_test_pipeline_name(owner));
+        let used: std::collections::HashSet<_> = if removal_allowed
+            && params
+                .iter()
+                .any(|parameter| parameter.name.starts_with('_'))
+        {
+            resolved_identifier_bindings_with_source(
+                params,
+                body,
+                self.source,
+                &self.match_patterns,
+            )
+            .into_values()
+            .collect()
+        } else {
+            Default::default()
+        };
         for (index, parameter) in params.iter().enumerate() {
             let removable = removal_allowed
                 && !parameter.rest
                 && parameter.default_value.is_none()
+                && !used.contains(&BindingId::from_declaration(
+                    &parameter.name,
+                    parameter.span,
+                ))
                 && parameter.name.starts_with('_');
             let removal = removable
                 .then(|| pipeline_parameter_removal_fix(self.source, params, index))
@@ -43,7 +71,7 @@ impl Linter<'_> {
         }
     }
 
-    /// Declare an explicitly unused test-runner input whose positional slot can
+    /// Declare an explicitly unused pipeline input whose positional slot can
     /// be deleted when no caller reference survives the full walk.
     pub(super) fn declare_removable_pipeline_parameter(
         &mut self,
