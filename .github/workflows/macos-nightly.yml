@@ -73,14 +73,37 @@ jobs:
     # The paid M4 class requires an explicit release-incident opt-in. The 30
     # minute budget would have timed out the hosted lane's p90 of 47 minutes,
     # which the evidence reader would then have read as red rather than slow.
-    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}
-    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 30 || 75 }}
+    # Exact-source dispatches (release certification) run on the organization's
+    # own Apple Silicon runners (label `macos-arm64`), which keep a persistent
+    # workspace target between runs so the lane pays a warm build instead of
+    # the hosted runner's cold one. The paid M4 class stays available as an
+    # explicit opt-in for when those runners are offline. Scheduled and
+    # pull-request runs stay on the hosted runner, which is also the sole
+    # writer of the hosted warm cache.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 'blacksmith-12vcpu-macos-15' || 'macos-arm64') || 'macos-latest' }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && (vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && 30 || 45) || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
+      # A self-hosted runner keeps one workspace target per host across runs.
+      # Cargo's fingerprints keep it exact-source: every crate whose inputs
+      # changed (embedded stdlib sources included, through dep-info) rebuilds,
+      # and CARGO_INCREMENTAL=0 leaves no incremental state to go stale. Two
+      # runners on one host share the directory and serialize on Cargo's own
+      # lock rather than duplicating it.
+      - name: Use the host's persistent workspace target
+        if: ${{ runner.environment == 'self-hosted' }}
+        shell: bash
+        run: |
+          target="${HOME}/harn-ci/target/macos-workspace"
+          mkdir -p "${target}"
+          echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"
+      # The hosted cache restores a whole target directory; on a self-hosted
+      # runner that would replace the persistent one with a colder copy.
       - uses: ./.github/actions/rust-cache
+        if: ${{ runner.environment != 'self-hosted' }}
         continue-on-error: true
         with:
           # This scheduled default-branch job is the sole writer for the
@@ -151,16 +174,17 @@ jobs:
         shell: bash
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          ./target/debug/harn run smoke.harn
+          "${CARGO_TARGET_DIR:-./target}/debug/harn" run smoke.harn
       # Release certification dispatches this workflow at an immutable
-      # release-certify/<sha> ref. Keep the wall-clock ratchet on this hosted,
-      # otherwise-idle machine: a contributor workstation can be shared by
-      # unrelated worktrees whose builds make the same measurement meaningless.
+      # release-certify/<sha> ref. The wall-clock ratchet re-measures up to
+      # three rounds and judges the best, which is what lets it run on a
+      # shared self-hosted host; a contributor workstation with unrelated
+      # builds in flight is still the wrong place for it.
       - name: Verify release test-case performance
         id: release-test-case-performance
         shell: bash
         env:
-          HARN_BIN: ./target/debug/harn
+          HARN_BIN: ${{ env.CARGO_TARGET_DIR || './target' }}/debug/harn
           HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64
         run: make check-test-case-performance
       # Artifact name and retention are owned by .github/cache-policy.json
