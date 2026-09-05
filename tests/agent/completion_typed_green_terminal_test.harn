@@ -66,6 +66,11 @@ fn __gate_reporting(confirm: bool, reason: string, observed: string) {
   }
 }
 
+/** The verification slot's judge, which runs BEFORE the completion slot's. */
+fn __verification_judge_opts() -> dict {
+  return {verify_completion_judge: {provider: "mock", max_invocations: 1}}
+}
+
 fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
   return with_llm_script(
     harness.llm,
@@ -231,4 +236,90 @@ pipeline test_no_deterministic_gate_still_calls_the_judge(harness: Harness, task
   const receipts = __completion_receipts(captured.events)
   assert(!receipts[0].invoked.deterministic)
   assert_eq(receipts[0].action, "continue")
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The other judge seam. `verify_completion_judge` runs first and had its own
+// skip rule, catalog-declared and blind to the verification. One predicate now
+// answers for both slots.
+
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_the_verification_judge_is_skipped_on_the_same_terminal(
+  harness: Harness,
+  task: unknown,
+) {
+  const captured = __run(
+    harness,
+    "typed-green-verification",
+    [llm_done(), __judge_refuses("the fixture does not satisfy the required case")],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")}
+      + __verification_judge_opts(),
+  )
+  assert_eq(__judge_calls(captured.events), 0)
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(receipts[0].outcome, SKIP_OUTCOME)
+  assert_eq(receipts[0].source, "gate")
+  assert(
+    !receipts[0].invoked.verify_completion_judge,
+    "the verification judge is not recorded as invoked",
+  )
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_both_judges_configured_and_neither_is_called(harness: Harness, task: unknown) {
+  // The two slots are evaluated in order, so a skip that reached only one of
+  // them would still spend a call. Both are declared here and the count is zero.
+  const captured = __run(
+    harness,
+    "typed-green-both",
+    [llm_done(), __judge_refuses("still not right"), __judge_refuses("still not right")],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")}
+      + __verification_judge_opts(),
+  )
+  assert_eq(__judge_calls(captured.events), 0)
+  const receipts = __completion_receipts(captured.events)
+  assert(
+    !receipts[0].invoked.verify_completion_judge && !receipts[0].invoked.turn_end_condition,
+    "neither judge is recorded as invoked",
+  )
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_the_verification_judge_keeps_every_other_boundary(harness: Harness, task: unknown) {
+  // The same three controls the completion slot has, on this slot. A green
+  // verifier with no source write behind it, an unrun verifier, and no gate at
+  // all each still spend the call.
+  const no_write = __run(
+    harness,
+    "verification-no-write",
+    [llm_done(), __judge_refuses("no artifact was produced"), llm_done()],
+    {verify_completion: __gate_reporting(true, "verified", "passed")} + __verification_judge_opts(),
+  )
+  assert(
+    __completion_receipts(no_write.events)[0].invoked.verify_completion_judge,
+    "a prose completion keeps the VERIFICATION judge specifically, not merely some judge",
+  )
+  const unrun = __run(
+    harness,
+    "verification-unrun",
+    [llm_done(), __judge_refuses("run the verifier before finishing"), llm_done()],
+    {verify_completion: __gate_reporting(true, "no_workspace_write", "not_run")}
+      + __verification_judge_opts(),
+  )
+  assert(
+    __completion_receipts(unrun.events)[0].invoked.verify_completion_judge,
+    "an unverified path keeps the verification judge",
+  )
+  const no_gate = __run(
+    harness,
+    "verification-no-gate",
+    [llm_done(), __judge_refuses("nothing verified this run"), llm_done()],
+    __verification_judge_opts(),
+  )
+  assert(
+    __completion_receipts(no_gate.events)[0].invoked.verify_completion_judge,
+    "with no gate the judge is the only authority",
+  )
 }

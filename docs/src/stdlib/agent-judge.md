@@ -166,8 +166,8 @@ it only over the one question a deterministic oracle has already answered.
 
 ### When the judge is not called at all
 
-On the `turn_end_condition` seam the judge is skipped outright when the runtime
-already holds the answer. All six of these must hold:
+Neither judge seam is called when the runtime already holds the answer. All six
+of these must hold:
 
 | Clause | Required reading |
 | --- | --- |
@@ -187,6 +187,14 @@ false, so a reader can tell a judge that never ran from one that ran and agreed.
 source write behind it is an ordinary prose completion and still calls the
 judge, as do an unverified path, a red or unrun verifier, a non-sentinel
 boundary, and a run with no deterministic gate.
+
+One predicate answers for both slots, read at the single point where the plan
+decides whether to announce a judge. The catalog-declared `completion_review`
+light-scrutiny skip is subordinate to it: that rule never reads the verification
+at all, so on a typed green terminal it was deciding, from a model's catalog row,
+a question the oracle had already answered. It now decides only what the
+verification did not, and its receipt still carries `source: "catalog"` so a
+reader can tell the two skips apart.
 
 Projection receipts name their selected actions and resolved evidence roles in
 `selected_actions`, so a host whose verifier declares no

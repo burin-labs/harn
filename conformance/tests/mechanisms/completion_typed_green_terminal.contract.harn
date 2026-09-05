@@ -25,8 +25,10 @@
 //              the provider call count drops by exactly the judge's call;
 //   negative — (a) the same green reading with NO source write behind it
 //              (`verified`) still calls the judge and its refusal stands;
-//              (b) an unrun verifier still calls the judge; and (c) a run with
-//              no deterministic gate at all still calls the judge.
+//              (b) an unrun verifier still calls the judge; (c) a run with
+//              no deterministic gate at all still calls the judge; and (d) the
+//              same holds with BOTH judge seams declared, so the skip is keyed
+//              on the reading rather than on which seam asked.
 //
 // Clause (a) is the load-bearing one. `verified` and `verified_after_write`
 // differ by one derived fact and read almost identically, and a mechanism keyed
@@ -140,6 +142,11 @@ fn base_opts(session: string) {
   }
 }
 
+/** The other judge seam, which runs BEFORE the completion one. */
+fn verification_judge() -> dict {
+  return {verify_completion_judge: {provider: "mock", max_invocations: 1}}
+}
+
 fn run_case(harness: Harness, label: string, script: list, extra: dict) {
   return with_llm_script(
     harness.llm,
@@ -212,6 +219,26 @@ pipeline default(harness: Harness) {
   const no_gate = run_case(harness, "no-gate", working_script(judge_refusing(refusal)), {})
   harness.stdio.println("no_gate_accepted=" + to_string(no_gate.accepted))
   harness.stdio.println("no_gate_judge_calls=" + to_string(no_gate.judge_calls))
+  // THE OTHER SEAM. `verify_completion_judge` is evaluated first and had its own
+  // skip rule, catalog-declared and blind to the verification. One predicate now
+  // answers for both, so declaring both spends no call at all.
+  const both = run_case(
+    harness,
+    "both-judges",
+    working_script(judge_refusing(refusal)),
+    {verify_completion: gate_observing("passed", "verified_after_write")} + verification_judge(),
+  )
+  harness.stdio.println("both_accepted=" + to_string(both.accepted))
+  harness.stdio.println("both_judge_calls=" + to_string(both.judge_calls))
+  harness.stdio.println("both_provider_calls=" + to_string(both.provider_calls))
+  const both_no_write = run_case(
+    harness,
+    "both-no-write",
+    working_script(judge_refusing(refusal)),
+    {verify_completion: gate_observing("passed", "verified")} + verification_judge(),
+  )
+  harness.stdio.println("both_no_write_accepted=" + to_string(both_no_write.accepted))
+  harness.stdio.println("both_no_write_judge_calls=" + to_string(both_no_write.judge_calls))
   // Every case declares an adjudicator, so the cases differ by ONE variable.
   contract_effect(
     harness.stdio,
@@ -241,4 +268,15 @@ pipeline default(harness: Harness) {
   // NEGATIVE (c): with no gate the judge is the only authority there is.
   contract_negative(harness.stdio, "no_gate_skips_the_judge", no_gate.judge_calls == 0)
   contract_negative(harness.stdio, "no_gate_accepts", no_gate.accepted)
+  // EFFECT on the other seam: both judges declared, neither asked.
+  contract_effect(harness.stdio, "both_seams_skip_on_a_typed_green", both.judge_calls == 0)
+  contract_effect(harness.stdio, "both_seams_accept", both.accepted)
+  // NEGATIVE: the same pair on a green verifier with no write behind it still
+  // spends a call, so the skip is keyed on the reading and not on the seam.
+  contract_negative(
+    harness.stdio,
+    "both_seams_skip_without_a_write",
+    both_no_write.judge_calls == 0,
+  )
+  contract_negative(harness.stdio, "both_seams_accept_without_a_write", both_no_write.accepted)
 }

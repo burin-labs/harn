@@ -225,7 +225,7 @@ pipeline test_a_contradiction_is_reasked_exactly_once(harness: Harness, task: un
     harness,
     "contradiction-reask-resolves",
     [llm_done(), __judge_done_with_gap("other"), __judge_done_with_gap(nil), llm_done()],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   assert_eq(__reask_count(captured.events), 1)
   assert_eq(__conversion_count(captured.events), 0)
@@ -259,7 +259,7 @@ pipeline test_a_reask_that_names_a_real_gap_is_believed(harness: Harness, task: 
       __judge_done_with_gap("unmet_manner_clause"),
       llm_done(),
     ],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   assert(
     captured.result.status != "done",
@@ -295,7 +295,7 @@ pipeline test_a_surviving_unnamed_contradiction_cannot_reach_the_cap(
       __judge_done_with_gap("other"),
       llm_done(),
     ],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   // The conversion count comes first deliberately: it is counted by
   // `converted_from` alone. Reverting the arbitration must fail HERE, naming the
@@ -333,7 +333,7 @@ pipeline test_a_surviving_named_contradiction_still_refuses(harness: Harness, ta
       __judge_done_with_gap("unresolved_authorization"),
       llm_done(),
     ],
-    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
   )
   assert(
     captured.result.status != "done",
@@ -370,5 +370,29 @@ pipeline test_a_surviving_contradiction_without_a_passing_verifier_still_refuses
     "an unnamed contradiction converted with no passing verifier behind it: "
       + to_string(captured.result.status),
   )
+  assert_eq(__conversion_count(captured.events), 0)
+}
+
+/**
+ * WHY THE END-TO-END CASES ABOVE SAY `verified` AND NOT `verified_after_write`.
+ *
+ * On the after-write reading the judge is no longer called at all: the runtime
+ * holds a typed green terminal and answers the boundary itself (harn#8110). A
+ * re-ask cannot happen to a judge that never ran, so a case that wants to
+ * exercise the re-ask has to pick a reading the skip does not cover.
+ *
+ * This pipeline pins the transition rather than letting the fixture edit hide
+ * it: on the ORIGINAL reading, the contradiction the suite is built around never
+ * gets asked, and the run finishes on the runtime's own evidence.
+ */
+pipeline test_the_original_reading_never_asks_the_judge(harness: Harness, task: unknown) {
+  const captured = __run(
+    harness,
+    "contradiction-typed-green",
+    [llm_done(), __judge_done_with_gap("other"), __judge_done_with_gap("other")],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(len(captured.events.filter({ event -> event.type == "judge_started" }).to_list()), 0)
+  assert_eq(captured.result.status, "done")
   assert_eq(__conversion_count(captured.events), 0)
 }
