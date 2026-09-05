@@ -80,7 +80,12 @@ ignorable_dir_anywhere='(^|/)(tests?|conformance|bench|evals|examples|experiment
 ignorable_doc_file_anywhere='(^|/)(README(\.md)?|AGENTS\.md|CLAUDE\.md|CONTRIBUTING\.md)$'
 #   3. Genuinely repo-root-only infrastructure (a nested `.github/` or
 #      `.gitignore` is not a thing; keep these anchored at the root).
-ignorable_root_only='^(\.github/|\.githooks/|tree-sitter-harn/|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|changelog\.d/(\.gitkeep|README\.md)$)'
+#      `.config/nextest.toml` is named rather than the whole `.config/` tree:
+#      it configures how the suite is RUN — filters, budgets, groups — and
+#      cannot reach a shipped artifact, which is the "test/CI path" this gate's
+#      own pass message already describes. A future `.config/` entry is not
+#      covered by that argument and should be judged on its own.
+ignorable_root_only='^(\.github/|\.githooks/|tree-sitter-harn/|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|\.config/nextest\.toml$|changelog\.d/(\.gitkeep|README\.md)$)'
 ignored_pattern="($ignorable_dir_anywhere|$ignorable_doc_file_anywhere|$ignorable_root_only)"
 nontrivial=$(printf '%s\n' "$changed_files" | grep -Ev "$ignored_pattern" || true)
 if [ -z "$nontrivial" ]; then
