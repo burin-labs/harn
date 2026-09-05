@@ -2,11 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/code_index/rebuild.request.json",
   "title": "code_index.rebuild request",
-  "description": "Rebuild the code index from scratch. `force` skips the modification-time short-circuit.",
+  "description": "Bring the code index up to date with the workspace. An index already anchored at `root` is reconciled file by file against disk; a cold slot or a different root is built from scratch. `force` demands the full walk-read-parse pass even when an index is already live, which is the escape hatch for a change that left both mtime and size untouched.",
   "type": "object",
   "properties": {
-    "root": { "type": "string", "description": "Project root to index. Defaults to the current workspace root." },
-    "force": { "type": "boolean", "default": false }
+    "root": {
+      "type": "string",
+      "description": "Project root to index. Defaults to the current workspace root."
+    },
+    "force": {
+      "type": "boolean",
+      "default": false,
+      "description": "Rebuild wholesale instead of reconciling. Needed only when a file changed without its mtime or size changing."
+    }
   },
   "additionalProperties": false
 }

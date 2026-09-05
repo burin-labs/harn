@@ -53,7 +53,13 @@ pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, deprecated_js
 pub(crate) fn load_catalog_for_docs(
     empirical_paths: &[PathBuf],
 ) -> Result<ProviderCatalogArtifact, String> {
-    let mut catalog = harn_vm::provider_catalog::artifact();
+    catalog_with_empirical(harn_vm::provider_catalog::artifact(), empirical_paths)
+}
+
+pub(crate) fn catalog_with_empirical(
+    mut catalog: ProviderCatalogArtifact,
+    empirical_paths: &[PathBuf],
+) -> Result<ProviderCatalogArtifact, String> {
     for path in empirical_paths {
         let overlay = tool_mode_parity::read_overlay(path)?;
         apply_empirical_parity_overlay(&mut catalog, &overlay);
@@ -149,6 +155,13 @@ pub(crate) fn generate_markdown(
 
 pub(crate) fn filtered_rows(filter: Option<&str>) -> Vec<ProviderCapabilityMatrixRow> {
     let rows = harn_vm::llm::capabilities::matrix_rows();
+    filter_rows(rows, filter)
+}
+
+pub(crate) fn filter_rows(
+    rows: Vec<ProviderCapabilityMatrixRow>,
+    filter: Option<&str>,
+) -> Vec<ProviderCapabilityMatrixRow> {
     let Some(feature) = filter else {
         return rows;
     };

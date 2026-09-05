@@ -2,12 +2,31 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/code_index/rebuild.response.json",
   "title": "code_index.rebuild response",
+  "description": "Reported identically whether the call reconciled an existing index or built a new one, so a consumer never has to infer which path ran. `mode` says which it was.",
   "type": "object",
   "properties": {
-    "files_indexed": { "type": "integer", "minimum": 0 },
-    "files_skipped": { "type": "integer", "minimum": 0 },
+    "mode": {
+      "type": "string",
+      "enum": ["built", "refreshed"],
+      "description": "`refreshed` reconciled the live index against disk; `built` walked, read, and parsed the whole workspace."
+    },
+    "files_indexed": { "type": "integer", "minimum": 0, "description": "Files in the index after the call." },
+    "files_skipped": { "type": "integer", "minimum": 0, "description": "Files the walk offered that could not be ingested." },
+    "files_reindexed": { "type": "integer", "minimum": 0, "description": "Files read from disk during the call. Zero on an unchanged tree." },
+    "files_unchanged": { "type": "integer", "minimum": 0, "description": "Files recognised as current from mtime and size, never opened. Zero in `built` mode." },
+    "files_added": { "type": "integer", "minimum": 0, "description": "Files new to the index." },
+    "files_removed": { "type": "integer", "minimum": 0, "description": "Files dropped because they no longer exist or no longer pass the filters." },
     "elapsed_ms": { "type": "integer", "minimum": 0 }
   },
-  "required": ["files_indexed", "files_skipped", "elapsed_ms"],
+  "required": [
+    "mode",
+    "files_indexed",
+    "files_skipped",
+    "files_reindexed",
+    "files_unchanged",
+    "files_added",
+    "files_removed",
+    "elapsed_ms"
+  ],
   "additionalProperties": false
 }
