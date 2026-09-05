@@ -59,6 +59,9 @@ chmod +x "$fake_bin/cygpath"
 cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" = "host lease run cargo --help" ]]; then
+  exit 0
+fi
 if [[ "$*" = "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" ]]; then
   mkdir -p "$HARN_HOST_LEASE_ROOT"
   : > "$HARN_HOST_LEASE_ROOT/host-leases.wake"
@@ -362,15 +365,15 @@ rm -f "$auto_harn"
 
 : > "$record"
 : > "$lease_record"
-explicit_harn=/usr/bin/true
+explicit_harn="$fake_bin/harn-lease"
 env -u HARN_CARGO_LEASE_MODE -u CI \
   HARN_BIN="$explicit_harn" \
-  PATH="$fake_bin:/usr/bin:/bin" \
+  PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm
-if [[ -s "$record" || -s "$lease_record" ]]; then
+if [[ -s "$record" || ! -s "$lease_record" ]]; then
   echo "wrapper did not route through the explicit compatible Harn lease runner" >&2
   cat "$record" "$lease_record" >&2
   exit 1
@@ -397,6 +400,50 @@ chmod +x "$fake_bin/harn"
 
 : > "$record"
 stale_harn_record="$tmp_root/stale-harn-record.txt"
+: > "$stale_harn_record"
+if HARN_CARGO_LEASE_MODE=required \
+  HARN_BIN="$fake_bin/harn" \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_STALE_HARN_RECORD="$stale_harn_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+    > "$tmp_root/harn-bin-stale-stdout.txt" \
+    2> "$tmp_root/harn-bin-stale-stderr.txt"; then
+  echo "HARN_BIN lease selection accepted a runner without idle waits" >&2
+  exit 1
+fi
+if ! grep -Fq "no compatible prebuilt Harn binary" \
+    "$tmp_root/harn-bin-stale-stderr.txt" \
+  || grep -Fq "host lease run cargo --owner" "$stale_harn_record" \
+  || [[ -s "$record" ]]; then
+  echo "stale HARN_BIN did not fail before workload execution" >&2
+  cat "$stale_harn_record" "$record" "$tmp_root/harn-bin-stale-stderr.txt" >&2
+  exit 1
+fi
+
+: > "$stale_harn_record"
+if HARN_CARGO_LEASE_MODE=required \
+  HARN_CARGO_LEASE_RUNNER=harn \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_STALE_HARN_RECORD="$stale_harn_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+    > "$tmp_root/explicit-stale-stdout.txt" \
+    2> "$tmp_root/explicit-stale-stderr.txt"; then
+  echo "explicit lease selection accepted a runner without idle waits" >&2
+  exit 1
+fi
+if ! grep -Fq "must provide the idle host-lease wait contract" \
+    "$tmp_root/explicit-stale-stderr.txt" \
+  || grep -Fq "host lease run cargo --owner" "$stale_harn_record" \
+  || [[ -s "$record" ]]; then
+  echo "explicit stale lease runner did not fail before workload execution" >&2
+  cat "$stale_harn_record" "$record" "$tmp_root/explicit-stale-stderr.txt" >&2
+  exit 1
+fi
+
 : > "$stale_harn_record"
 env -u HARN_CARGO_LEASE_MODE -u CI \
   PATH="$fake_bin:/usr/bin:/bin" \

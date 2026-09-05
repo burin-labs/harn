@@ -44,6 +44,11 @@ enum SessionMessageFacts {
         tool_call_id: String,
         tool_name: String,
         outcome: ToolResultOutcome,
+        /// Who authored this result. Omitted for the ordinary dispatch case, so
+        /// every existing message is byte-identical and a reader that does not
+        /// know the field behaves as it always did.
+        #[serde(skip_serializing_if = "ToolResultOrigin::is_dispatch")]
+        origin: ToolResultOrigin,
         #[serde(skip_serializing_if = "Option::is_none")]
         data: Option<serde_json::Value>,
     },
@@ -54,6 +59,30 @@ enum SessionMessageFacts {
 enum ToolResultOutcome {
     Ok,
     Error,
+}
+
+/// Who produced a tool result.
+///
+/// A result the harness synthesized carries the ORIGINAL tool's name and call
+/// id, because that is what pairs it to the orphaned `tool_use` block. Without
+/// this field it is therefore indistinguishable from a real failed call of that
+/// tool, and a completion authority reads the harness's own injected feedback
+/// back as an observation of the workspace (harn#7757).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ToolResultOrigin {
+    /// The tool ran and this is what it returned.
+    #[default]
+    Dispatch,
+    /// The harness wrote this to close an orphaned `tool_use` block. Its
+    /// content is injected harness feedback, not a tool observation.
+    HarnessRepair,
+}
+
+impl ToolResultOrigin {
+    fn is_dispatch(&self) -> bool {
+        matches!(self, Self::Dispatch)
+    }
 }
 
 fn attach_session_message_facts(message: VmValue, facts: &SessionMessageFacts) -> VmValue {
@@ -103,6 +132,7 @@ pub(crate) fn attach_tool_result_facts(
     tool_name: &str,
     ok: bool,
     data: Option<&VmValue>,
+    origin: ToolResultOrigin,
 ) -> VmValue {
     attach_session_message_facts(
         message,
@@ -114,6 +144,7 @@ pub(crate) fn attach_tool_result_facts(
             } else {
                 ToolResultOutcome::Error
             },
+            origin,
             data: data.map(crate::llm::helpers::vm_value_to_json),
         },
     )

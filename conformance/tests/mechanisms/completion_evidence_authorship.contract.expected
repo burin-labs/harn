@@ -1,0 +1,7 @@
+repair_is_counted=true
+repair_action_is_absent=true
+repair_requirement_evidence_is_absent=true
+repair_text_does_not_reach_judge=true
+real_action_survives=true
+real_requirement_evidence_survives=true
+real_result_is_not_counted_as_repair=true
