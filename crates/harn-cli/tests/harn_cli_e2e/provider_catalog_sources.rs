@@ -41,6 +41,29 @@ fn catalog_renderers_read_source_changes_without_rebuilding() {
             "{surface} ignored the source row: {text}"
         );
         assert!(!text.contains("source-falsifier-8063"));
+        if surface == "matrix" {
+            let artifact = root.path().join("matrix.md");
+            let check = || {
+                harn_e2e_command()
+                    .current_dir(root.path())
+                    .args(["provider", "catalog", "matrix", "--check", "--output"])
+                    .arg(&artifact)
+                    .output()
+                    .unwrap()
+            };
+            fs::write(&artifact, "stale matrix\n").unwrap();
+            assert!(
+                !check().status.success(),
+                "stale matrix must fail the canonical gate"
+            );
+            fs::write(&artifact, &text).unwrap();
+            let current = check();
+            assert!(
+                current.status.success(),
+                "{}",
+                String::from_utf8_lossy(&current.stderr)
+            );
+        }
     }
     let support = harn_e2e_command()
         .current_dir(root.path())
