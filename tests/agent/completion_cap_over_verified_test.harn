@@ -63,11 +63,21 @@ fn __always_refuses() -> dict {
   }
 }
 
-/** A gate reporting exactly one verifier reading. */
+/**
+ * A gate that reports one verifier reading and vetoes nothing.
+ *
+ * `confirm` is TRUE in every arm, including the `failed` one, and that is
+ * load-bearing rather than sloppy. A deterministic veto never reaches the model
+ * judge at all — the arbitration suite pins that separately — so a gate
+ * returning `confirm: false` here means the judge is never invoked, the actor
+ * consumes its scripted reply, and every case dies `parse_dropped` while
+ * appearing to be about the terminal. The only variable these cases may change
+ * is `observed`, which is the reading the cap decision reads.
+ */
 fn __gate_observing(observed: string) {
   return { _payload ->
     {
-      confirm: false,
+      confirm: true,
       message: "the completion judge should decide",
       reason: "judge_owns_this",
       verification: {
