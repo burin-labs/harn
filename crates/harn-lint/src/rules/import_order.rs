@@ -39,8 +39,9 @@ pub(crate) fn check_import_order(
 
     let first = imports.first().unwrap();
     let last = imports.last().unwrap();
+    let replace_start = import_source_start(source, first).unwrap_or(first.span.start);
     let replace_span = Span::with_offsets(
-        first.span.start,
+        replace_start,
         last.span.end,
         first.span.line,
         first.span.column,
@@ -51,12 +52,14 @@ pub(crate) fn check_import_order(
         let replacement = sorted
             .iter()
             .map(|n| render_import_source(source, n))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Some(vec![FixEdit {
-            span: replace_span,
-            replacement,
-        }])
+            .collect::<Option<Vec<_>>>()
+            .map(|imports| imports.join("\n"));
+        replacement.map(|replacement| {
+            vec![FixEdit {
+                span: replace_span,
+                replacement,
+            }]
+        })
     };
     diagnostics.push(LintDiagnostic {
         code: Code::LintImportOrder,
@@ -102,12 +105,37 @@ fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
     }
 }
 
-/// Slice the raw source covered by an import node's span.
-fn render_import_source(source: &str, node: &SNode) -> String {
-    source
-        .get(node.span.start..node.span.end)
-        .unwrap_or("")
-        .to_string()
+/// Slice the complete import declaration. Parser spans begin at `import`, so a
+/// public declaration must deliberately reclaim its preceding `pub` token.
+/// Refuse the fix when that ownership cannot be proven instead of silently
+/// changing the module's exported surface.
+fn render_import_source(source: &str, node: &SNode) -> Option<String> {
+    let start = import_source_start(source, node)?;
+    Some(source.get(start..node.span.end)?.to_string())
+}
+
+fn import_source_start(source: &str, node: &SNode) -> Option<usize> {
+    if !import_is_public(&node.node) {
+        return Some(node.span.start);
+    }
+    let source_before_import = source.get(..node.span.start)?;
+    let line_start = source_before_import
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+    let prefix = source.get(line_start..node.span.start)?;
+    let pub_offset = prefix.find("pub")?;
+    let before_pub = prefix.get(..pub_offset)?;
+    let after_pub = prefix.get(pub_offset + "pub".len()..)?;
+    (before_pub.trim().is_empty() && after_pub.trim().is_empty()).then_some(line_start + pub_offset)
+}
+
+fn import_is_public(node: &Node) -> bool {
+    match node {
+        Node::ImportDecl { is_pub, .. }
+        | Node::NamespaceImport { is_pub, .. }
+        | Node::SelectiveImport { is_pub, .. } => *is_pub,
+        _ => false,
+    }
 }
 
 fn import_block_has_comments(source: &str, start: usize, end: usize) -> bool {

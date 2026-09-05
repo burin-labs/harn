@@ -4,7 +4,7 @@ use clap::Args;
 pub(crate) struct DoctorArgs {
     /// Emit a single JSON document instead of human-readable output. The
     /// document conforms to the `harn --json-schemas --command doctor`
-    /// envelope (`schemaVersion: 2`).
+    /// envelope (`schemaVersion: 3`).
     #[arg(long)]
     pub json: bool,
     /// Actively probe every configured provider over the network

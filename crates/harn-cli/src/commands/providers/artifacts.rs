@@ -291,6 +291,20 @@ mod tests {
     }
 
     #[test]
+    fn generated_catalog_roundtrips_without_field_loss() {
+        let artifacts = generated_artifacts(None, None).expect("artifacts generate");
+        let source = &artifacts
+            .iter()
+            .find(|artifact| artifact.relative_path == "provider-catalog.json")
+            .expect("catalog artifact")
+            .body;
+        let catalog: ProviderCatalogArtifact = serde_json::from_str(source).unwrap();
+        assert!(!catalog.models.is_empty());
+        let expected: serde_json::Value = serde_json::from_str(source).unwrap();
+        assert_eq!(serde_json::to_value(catalog).unwrap(), expected);
+    }
+
+    #[test]
     fn generated_catalog_validates_against_schema() {
         let schema = harn_vm::provider_catalog::schema_value();
         let artifact =

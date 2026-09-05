@@ -17,6 +17,11 @@ pub struct DepGraph {
     forward: HashMap<FileId, HashSet<FileId>>,
     reverse: HashMap<FileId, HashSet<FileId>>,
     unresolved: HashMap<FileId, Vec<String>>,
+    /// Module roots each file imports wholesale, plus the reverse.
+    /// Kept as roots rather than expanded files so a module of N files
+    /// imported by M others costs N plus M, not N times M.
+    module_imports: HashMap<FileId, Vec<String>>,
+    module_importers: HashMap<String, HashSet<FileId>>,
 }
 
 impl DepGraph {
@@ -73,6 +78,7 @@ impl DepGraph {
             }
         }
         self.unresolved.remove(&file);
+        self.set_module_imports(file, Vec::new());
         // Anyone who imported us keeps their forward edge but it now
         // dangles. They'll re-resolve on their next reindex.
         if let Some(rev) = self.reverse.remove(&file) {
@@ -82,6 +88,45 @@ impl DepGraph {
                 }
             }
         }
+    }
+
+    /// Replace the module roots `file` imports wholesale.
+    pub fn set_module_imports(&mut self, file: FileId, roots: Vec<String>) {
+        if let Some(old) = self.module_imports.remove(&file) {
+            for root in old {
+                if let Some(set) = self.module_importers.get_mut(&root) {
+                    set.remove(&file);
+                    if set.is_empty() {
+                        self.module_importers.remove(&root);
+                    }
+                }
+            }
+        }
+        for root in &roots {
+            self.module_importers
+                .entry(root.clone())
+                .or_default()
+                .insert(file);
+        }
+        if !roots.is_empty() {
+            self.module_imports.insert(file, roots);
+        }
+    }
+
+    /// Module roots `file` imports wholesale.
+    pub fn module_imports_of(&self, file: FileId) -> &[String] {
+        self.module_imports
+            .get(&file)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Files that import the module rooted at `root` wholesale.
+    pub fn module_importers_of(&self, root: &str) -> Vec<FileId> {
+        self.module_importers
+            .get(root)
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default()
     }
 
     /// Forward edges: every file `file` imports.

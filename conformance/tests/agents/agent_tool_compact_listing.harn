@@ -13,7 +13,7 @@ const TAIL = "SENTINEL_TAIL"
 
 fn describe(kind: string) {
   return "Return a deterministic " + kind + " result for this turn. Callers use "
-    + "it to prove the catalog rendered. "
+    + "it to prove the catalog rendered! "
     + TAIL
     + ": this trailing sentence "
     + "exists only so a test can prove it was dropped."
