@@ -589,7 +589,19 @@ pub fn agent_loop_post_turn_transition(
       should_continue = true
     }
     if !should_continue {
-      return {action: "break", state: next + {stop_reason: outcome.stop_reason}}
+      // An accepted explicit claim is a clean completion, not an unattributed
+      // empty status for session finalization to infer later. Seal it here,
+      // where the claim and its judge verdict are both still typed, so terminal
+      // projection and wrap-up eligibility read the same decision.
+      const settled_status = if completion_claim.kind == "valid" {
+        "done"
+      } else {
+        next.final_status
+      }
+      return {
+        action: "break",
+        state: next + {final_status: settled_status, stop_reason: outcome.stop_reason},
+      }
     }
   }
   if should_continue && post_edit_reverify_confirmed && context.iteration >= next.current_max {

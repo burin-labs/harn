@@ -333,10 +333,10 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
       assert_eq(len(observations), 1)
       assert_eq(observations[0].checkpoint.source, "tool")
       assert_eq(observations[0].checkpoint.disposition, "valid")
-      assert_eq(
-        len(captured.events.filter({ event -> event.type == "final_wrapup" }).to_list()),
-        1,
-      )
+      const wrapups = captured.events.filter({ event -> event.type == "final_wrapup" }).to_list()
+      assert_eq(len(wrapups), 1)
+      assert_eq(wrapups[0].final_status, "done")
+      assert_eq(wrapups[0].stop_reason, "explicit_completion_claim")
     },
   )
 }
