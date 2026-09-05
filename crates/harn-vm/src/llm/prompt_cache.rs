@@ -20,6 +20,14 @@ pub(crate) fn apply_prompt_cache_breakpoint(
         CacheBreakpointStyle::LastBlock => {
             insert_last_message_cache_control(body, &marker);
         }
+        // A route that caches automatically takes no marker, and on OpenAI an
+        // unexpected `cache_control` is a hard 400 (`Unknown parameter:
+        // 'cache_control'.`), not a field the provider ignores. Refuse to emit
+        // one here rather than leaving it to whether a provider row happens to
+        // omit `cache_breakpoint_style`: every caller shares this arm, so a new
+        // OpenAI-compatible provider cannot pick up the Anthropic-shaped marker
+        // its adapter passes just by sitting next to a row that declares a
+        // style.
         CacheBreakpointStyle::None => {}
     }
 }
@@ -89,5 +97,102 @@ fn insert_message_cache_control(
             true
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn caps(style: CacheBreakpointStyle) -> Capabilities {
+        Capabilities {
+            prompt_caching: true,
+            cache_breakpoint_style: style,
+            ..Capabilities::default()
+        }
+    }
+
+    fn body() -> serde_json::Value {
+        serde_json::json!({
+            "model": "m",
+            "messages": [{"role": "user", "content": "hello"}],
+        })
+    }
+
+    fn marker() -> serde_json::Value {
+        serde_json::json!({"type": "ephemeral"})
+    }
+
+    /// A route that caches automatically must not receive a marker. OpenAI
+    /// rejects an unexpected `cache_control` with
+    /// `Unknown parameter: 'cache_control'.` rather than ignoring it, so this
+    /// is the difference between prompt caching working and every
+    /// cache-requesting call failing.
+    #[test]
+    fn none_style_emits_no_marker() {
+        let mut value = body();
+        apply_prompt_cache_breakpoint(
+            &mut value,
+            true,
+            &caps(CacheBreakpointStyle::None),
+            marker(),
+        );
+        assert_eq!(value, body(), "automatic-cache routes take no marker");
+        assert!(!body_contains_cache_control(&value));
+    }
+
+    /// Direction control. If `none_style_emits_no_marker` passed because the
+    /// marker never reaches the body at all, this fails and says so.
+    #[test]
+    fn top_level_style_still_emits_the_marker() {
+        let mut value = body();
+        apply_prompt_cache_breakpoint(
+            &mut value,
+            true,
+            &caps(CacheBreakpointStyle::TopLevel),
+            marker(),
+        );
+        assert_eq!(value["cache_control"], marker());
+    }
+
+    /// Second direction control, for the other marker placement.
+    #[test]
+    fn last_block_style_still_marks_the_final_message() {
+        let mut value = body();
+        apply_prompt_cache_breakpoint(
+            &mut value,
+            true,
+            &caps(CacheBreakpointStyle::LastBlock),
+            marker(),
+        );
+        assert!(
+            body_contains_cache_control(&value),
+            "last_block must mark the final message"
+        );
+        assert!(value.get("cache_control").is_none());
+    }
+
+    /// The flag is the outer gate: a route that does not declare prompt
+    /// caching gets no marker whatever its style says.
+    #[test]
+    fn prompt_caching_off_suppresses_every_style() {
+        for style in [
+            CacheBreakpointStyle::TopLevel,
+            CacheBreakpointStyle::LastBlock,
+            CacheBreakpointStyle::None,
+        ] {
+            let mut value = body();
+            let off = Capabilities {
+                prompt_caching: false,
+                cache_breakpoint_style: style,
+                ..Capabilities::default()
+            };
+            apply_prompt_cache_breakpoint(&mut value, true, &off, marker());
+            assert_eq!(
+                value,
+                body(),
+                "{style:?} must stay inert while caching is off"
+            );
+        }
     }
 }

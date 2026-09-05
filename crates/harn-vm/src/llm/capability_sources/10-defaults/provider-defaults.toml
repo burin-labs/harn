@@ -35,6 +35,15 @@ reasoning_round_trip = "echo_signed"
 [provider_defaults.openai]
 advanced_generation_options = ["logprobs", "logit_bias"]
 supports_parallel_tool_calls = true
+# OpenAI caches automatically on any prompt at or above 1024 tokens and accepts
+# no request-side marker: a top-level `cache_control` on
+# `/v1/chat/completions` is rejected with `Unknown parameter: 'cache_control'.`
+# (probed 2026-09-04). State that here rather than relying on the omission of
+# the field. The Rust enum default is also `None`, so this row changes no
+# behavior today; it exists so the invariant is a declaration a reader can find
+# and not the accident of `[provider_defaults.anthropic]` above declaring
+# `top_level` a few lines earlier in this same file.
+cache_breakpoint_style = "none"
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
