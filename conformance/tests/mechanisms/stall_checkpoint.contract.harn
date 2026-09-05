@@ -1,6 +1,7 @@
 import { agent_loop } from "std/agent/loop"
 import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
 import { llm_text, with_llm_script } from "std/testing"
+import { workflow_execute } from "std/workflow/execute"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 fn call(name: string, id: string) {
@@ -13,6 +14,18 @@ fn stage(harness: Harness, options: dict, script: list) {
     script,
     { -> agent_loop(harness, "Continue the task", nil, options) },
   )
+}
+
+fn scripted_node(node: dict, name: string) {
+  return node
+    + {
+      model_policy: node.model_policy
+        + {
+          llm_caller: { _request ->
+            return {ok: true, value: call(name, name) + {text: "", provider: "mock", model: "mock"}}
+          },
+        },
+    }
 }
 
 pipeline default(harness: Harness) {
@@ -156,7 +169,85 @@ pipeline default(harness: Harness) {
     [llm_text("Done. ##DONE##")],
   )
   require disabled.stall_checkpoint == nil, "disabled detector must not report measured state"
+  const workflow_session = "workflow-" + harness.random.uuid()
+  const other_session = "other-" + harness.random.uuid()
+  const inherited = workflow_graph(
+    {provider: "mock", act: {model_policy: {session_id: workflow_session}}},
+  )
+  require inherited.nodes.act.model_policy.provider == "mock"
+    && inherited.nodes.act.model_policy.session_id == workflow_session,
+    "live policy preservation must retain normalized workflow defaults"
+  const node = {
+    kind: "agent",
+    prompt: "Continue the task",
+    tools: tools,
+    model_policy: options + {session_id: workflow_session, max_iterations: 1},
+  }
+  const graph = workflow_graph(
+    {
+      entry: "edit",
+      nodes: {
+        edit: scripted_node(node, "edit"),
+        other: scripted_node(
+          node + {model_policy: node.model_policy + {session_id: other_session}},
+          "look",
+        ),
+        verify: scripted_node(node, "verify"),
+        fresh: scripted_node(node + {model_policy: node.model_policy + {session_id: nil}}, "look"),
+      },
+      edges: [
+        {from: "edit", to: "other"},
+        {from: "other", to: "verify"},
+        {from: "verify", to: "fresh"},
+      ],
+    },
+  )
+  const before_workflow = len(calls)
+  const workflow = workflow_execute(
+    harness,
+    "Edit, inspect separately, then verify",
+    graph,
+    [],
+    {max_steps: 4},
+  )
+  require calls.slice(before_workflow, len(calls)) == ["edit", "look", "verify", "look"],
+    "workflow must execute the declared tools in stage order: ${json_stringify(calls.slice(before_workflow, len(calls)))}"
+  const workflow_checkpoint = workflow.stall_checkpoints[workflow_session]
+  require workflow_checkpoint != nil,
+    "workflow must return A's checkpoint under its declared session identity"
+  const workflow_state = agent_stall_checkpoint_state(harness.agent, workflow_checkpoint)
+  require workflow_state.write_epoch == 1 && workflow_state.verified_write_epoch == 1,
+    "workflow must preserve A's edit across B before A's final verification"
+  require workflow_checkpoint.dispatch_position
+    == workflow_checkpoint.consumed_dispatch_position + 1,
+    "workflow return must preserve its final pending verification"
+  require len(keys(workflow.stall_checkpoints)) == 3,
+    "unnamed stage must own a fresh session checkpoint"
+  for id in keys(workflow.stall_checkpoints) {
+    if id != workflow_session {
+      require agent_stall_checkpoint_state(harness.agent, workflow.stall_checkpoints[id])
+        .write_epoch
+        == 0,
+        "unrelated sessions must not inherit A's edit"
+    }
+  }
+  const chained = workflow_execute(
+    harness,
+    "Continue A",
+    workflow_graph({entry: "continue", nodes: {continue: scripted_node(node, "look")}, edges: []}),
+    [],
+    {max_steps: 1, stall_checkpoints: workflow.stall_checkpoints},
+  )
+  const chained_state = agent_stall_checkpoint_state(
+    harness.agent,
+    chained.stall_checkpoints[workflow_session],
+  )
+  require chained_state.write_epoch == 1 && chained_state.verified_write_epoch == 1,
+    "explicitly chained workflow must retain verified evidence without double-counting"
+  require calls.slice(before_workflow, len(calls)) == ["edit", "look", "verify", "look", "look"],
+    "chained workflow must actually execute its read"
   contract_effect(harness.stdio, "verified_handoff", committed.verified_write_epoch == 1)
   contract_effect(harness.stdio, "cross_stage_repeat", len(repeated.stall_warnings) > 0)
   contract_negative(harness.stdio, "no_early_repeat", len(inspected.stall_warnings) > 0)
+  contract_effect(harness.stdio, "workflow_lifetime", chained_state.verified_write_epoch == 1)
 }
