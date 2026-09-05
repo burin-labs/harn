@@ -148,22 +148,29 @@ fn marginal_per_iter(make: impl Fn(usize) -> String) -> f64 {
     marginal as f64 / (n2 - n1) as f64
 }
 
-/// Execute while a sibling thread makes `allocation_count` observable heap
-/// allocations inside the same measured window.
-fn execute_with_sibling_allocations(
-    source: &str,
+/// Measure this thread while a sibling makes `allocation_count` observable heap
+/// allocations inside the same window.
+///
+/// Synchronization inside the window must itself be allocation-free. A blocking
+/// barrier can take different allocation paths depending on which thread
+/// arrives first, contaminating the counter this helper is meant to verify.
+fn measure_with_sibling_allocations(
     allocation_count: usize,
+    during_measurement: impl FnOnce(),
 ) -> (usize, usize, usize) {
-    use std::sync::{Arc, Barrier};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
-    let start = Arc::new(Barrier::new(2));
-    let done = Arc::new(Barrier::new(2));
+    let start = Arc::new(AtomicBool::new(false));
+    let done = Arc::new(AtomicBool::new(false));
     let sibling_allocations = Arc::new(AtomicUsize::new(0));
     let sibling_start = Arc::clone(&start);
     let sibling_done = Arc::clone(&done);
     let sibling_count = Arc::clone(&sibling_allocations);
     let sibling = std::thread::spawn(move || {
-        sibling_start.wait();
+        while !sibling_start.load(Ordering::Acquire) {
+            std::hint::spin_loop();
+        }
         let before = allocs_on_this_thread();
         let mut sink: Vec<Box<[u8; 64]>> = Vec::with_capacity(allocation_count);
         for _ in 0..allocation_count {
@@ -171,14 +178,17 @@ fn execute_with_sibling_allocations(
         }
         std::hint::black_box(&sink);
         sibling_count.store(allocs_on_this_thread() - before, Ordering::Relaxed);
-        sibling_done.wait();
+        sibling_done.store(true, Ordering::Release);
     });
 
     let process_before = PROCESS_ALLOCS.load(Ordering::Relaxed);
-    let measured = allocs_during_execute_after(source, || {
-        start.wait();
-        done.wait();
-    });
+    let before = allocs_on_this_thread();
+    start.store(true, Ordering::Release);
+    during_measurement();
+    while !done.load(Ordering::Acquire) {
+        std::hint::spin_loop();
+    }
+    let measured = allocs_on_this_thread() - before;
     let process_measured = PROCESS_ALLOCS.load(Ordering::Relaxed) - process_before;
     sibling.join().expect("sibling allocation thread");
     let sibling_count = sibling_allocations.load(Ordering::Relaxed);
@@ -219,13 +229,14 @@ fn user_fn_call_allocates_at_most_twice() {
 /// agreement.
 #[test]
 fn a_concurrent_allocator_does_not_move_the_measurement() {
-    let source = user_fn_loop(2000);
-    // First execution pays one-time initialization; measure after it.
-    let _warmup = allocs_during_execute(&source);
     let (quiet, quiet_sibling_allocations, quiet_process_allocations) =
-        execute_with_sibling_allocations(&source, 0);
+        measure_with_sibling_allocations(0, || {});
     let (noisy, noise_allocations, noisy_process_allocations) =
-        execute_with_sibling_allocations(&source, 20_000);
+        measure_with_sibling_allocations(20_000, || {});
+    let (direct, _, _) = measure_with_sibling_allocations(20_000, || {
+        let allocation = Vec::<u8>::with_capacity(1);
+        std::hint::black_box(&allocation);
+    });
 
     assert_eq!(
         quiet_sibling_allocations, 0,
@@ -246,5 +257,11 @@ fn a_concurrent_allocator_does_not_move_the_measurement() {
         quiet, noisy,
         "a sibling thread's {noise_allocations} allocations moved the measured \
          count from {quiet} to {noisy}"
+    );
+    assert_eq!(
+        direct,
+        noisy + 1,
+        "one deliberate allocation on the measured thread moved the count from \
+         {noisy} to {direct}, rather than by exactly one"
     );
 }
