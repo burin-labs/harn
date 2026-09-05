@@ -113,19 +113,21 @@ fn generated_stdlib_provider_names(config: &harn_vm::llm_config::ProvidersConfig
     body
 }
 
-struct GeneratedProviderConfig {
+pub(super) struct GeneratedProviderConfig {
     body: String,
     fragment_count: usize,
-    config: harn_vm::llm_config::ProvidersConfig,
+    pub(super) config: harn_vm::llm_config::ProvidersConfig,
 }
 
-struct GeneratedProviderCapabilities {
+pub(super) struct GeneratedProviderCapabilities {
     body: String,
     fragment_count: usize,
-    capabilities: harn_vm::llm::capabilities::CapabilitiesFile,
+    pub(super) capabilities: harn_vm::llm::capabilities::CapabilitiesFile,
 }
 
-fn generated_provider_config(source_dir: &Path) -> Result<GeneratedProviderConfig, String> {
+pub(super) fn generated_provider_config(
+    source_dir: &Path,
+) -> Result<GeneratedProviderConfig, String> {
     let mut fragments = Vec::new();
     collect_toml_fragments(source_dir, &mut fragments)?;
     fragments.sort();
@@ -200,7 +202,7 @@ fn generated_provider_config(source_dir: &Path) -> Result<GeneratedProviderConfi
     })
 }
 
-fn generated_provider_capabilities(
+pub(super) fn generated_provider_capabilities(
     source_dir: &Path,
 ) -> Result<GeneratedProviderCapabilities, String> {
     let mut fragments = Vec::new();

@@ -64,9 +64,15 @@ copy_tree_cow() {
   # Unit tests need deterministic coverage on filesystems without reflinks.
   # Production has no byte-copy fallback: paying several GiB of I/O and disk
   # to make setup look warm defeats this module's resource contract.
+  #
+  # `-p` is load-bearing, not tidiness. Both production clones below preserve
+  # timestamps (`cp -cRp`, `cp -a`), and a restored tree inheriting the seed's
+  # mtimes is exactly the behaviour `stamp_restored_tree` exists to correct. A
+  # test copy that silently refreshed every timestamp could not exercise that at
+  # all, and would report green for a restore that had lost the property.
   if [[ "${HARN_CARGO_TARGET_SEED_TEST_COPY:-0}" == "1" ]]; then
     mkdir -p "${destination}"
-    cp -R "${source}/." "${destination}"
+    cp -Rp "${source}/." "${destination}"
     return
   fi
 
@@ -117,6 +123,30 @@ cleanup_stage() {
     "${allowed_parent}"/.harn-cargo-seed-stage-*) rm -rf -- "${stage}" ;;
     *) echo "refusing to clean unexpected Cargo seed staging path: ${stage}" >&2 ;;
   esac
+}
+
+# Give a restored tree this tree's age, not the seed's.
+#
+# `copy_tree_cow` reproduces the seed's timestamps exactly, so a target restored
+# seconds ago carries mtimes from whenever the seed was published, which can be
+# weeks earlier. The target-cache GC ranks entries by when they were last built
+# in, so a freshly restored tree read as long-idle and was retired as a cold
+# cache before its first build ever started. The restore is what lays those
+# timestamps down, so it is what corrects them.
+#
+# Only the directories the GC reads are stamped. The artifacts inside keep the
+# seed's mtimes on purpose: Cargo's own freshness checks compare them against
+# source files, and touching them would invalidate the very reuse the seed
+# exists to provide.
+stamp_restored_tree() {
+  local target_dir="$1"
+  local sub
+  touch "${target_dir}" 2>/dev/null || true
+  for sub in debug release; do
+    if [[ -d "${target_dir}/${sub}" ]]; then
+      touch "${target_dir}/${sub}" 2>/dev/null || true
+    fi
+  done
 }
 
 restore_seed() (
@@ -176,6 +206,7 @@ restore_seed() (
   fi
   if mv "${stage}" "${target_dir}" 2>/dev/null; then
     stage=""
+    stamp_restored_tree "${target_dir}"
     echo "Restored Cargo target seed -> ${target_dir}"
   else
     cleanup_stage "${stage}" "${target_parent}"

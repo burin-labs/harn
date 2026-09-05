@@ -482,9 +482,14 @@ harn provider catalog refresh --check
 # Regenerate the checked-in capability matrix docs.
 harn provider catalog matrix
 
-# CI gate: compare the capability matrix docs with capabilities.toml.
+# CI gate: compare the capability matrix docs with source fragments.
 harn provider catalog matrix --check
 ```
+
+Matrix and support generation read the same on-disk catalog and capability
+fragments as `generate`. Run them from the repository root; fragment edits
+don't require rebuilding the CLI. Outside a checkout, missing source directories
+use embedded defaults. Present but invalid sources fail instead of falling back.
 
 Matrix generation is hermetic by default. To inspect local coding-agent parity
 receipts without changing checked-in output, pass them explicitly:

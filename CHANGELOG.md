@@ -9,6 +9,160 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.130
+
+### Added
+
+- **The deterministic completion gate now sees an accepted steer (#7795).**
+  `CompletionGateContext` carried `task` as written at session start, so a
+  mid-run steer that narrowed, redirected or withdrew work reached the LLM
+  completion judge and never reached the deterministic ladder. A user steering
+  "revert that and stop", complied with, could still be vetoed against the work
+  they withdrew. The context now also carries `obligations`, the opening task
+  amended by every accepted steer, derived once where the context is built
+  rather than by each host. `task` is unchanged, so a host reading it behaves
+  exactly as before; a host that wants the amended target reads `obligations`.
+  An unsteered run derives an empty steer list, so this is a no-op for every
+  gate that exists today.
+
+### Changed
+
+- Release automation now consumes a typed Harn-owned contract for version,
+  changelog, tag, workflow, job, input, and observed-step semantics. Contract
+  drift fails Harn CI before a live release.
+- Default public-repository CI and release jobs to free GitHub-hosted runners;
+  Blacksmith capacity now requires an explicit repository opt-in.
+- `pattern_learning_context` and `pattern_learning_skill_matches` now accept
+  `options.task_domain_words`, an optional list of terms the host's own
+  task-intent or language matcher already decided the current task is
+  genuinely about. When present, a learned skill only serves its
+  `<learned_context>` card when at least one of its matched words is a
+  supplied domain term, so a learned skill whose only lexical overlap with
+  the task is a generic word no longer serves an irrelevant card. Omitting
+  the field keeps today's lexical-overlap ranking unchanged.
+
+### Fixed
+
+- ACP clients now receive each committed assistant reply instead of seeing an empty turn after the provider completed successfully.
+- Exported Harn functions now advertise a closed input object, so an unknown named
+  argument is rejected as a schema violation instead of being silently dropped on
+  its way to the handler.
+
+  A tool registry that declares shared `components.schemas` now executes as well as
+  it publishes. A tool whose schema references a component no longer fails when the
+  registry is built, and the generated CLI reads the resolved property type instead
+  of meeting an unresolved reference, so the same component-backed registry runs
+  through both the generated CLI and MCP.
+- **A host-lease worker that dies before acquiring is now replaced instead of
+  ending the run (#7829).** A queued worker could exit roughly 47 minutes into
+  a 180-minute wait and the wrapper reported an infrastructure failure, so
+  raising the wait limit could not repair it. The supervisor now owns the run
+  until it acquires, is cancelled, or reaches its configured wait, replacing a
+  worker that dies before acquiring and saying on stderr how many it replaced.
+  Cancellation is never answered with a replacement, a run that already
+  acquired is never given a second worker, and queue position is unchanged
+  because the waiter is keyed by run rather than by worker process.
+- **A version-0 mock fixture no longer drops an unknown key in silence
+  (#7864).** At schema version 0 the closed-field check was skipped entirely,
+  so every top-level field the parser does not read was accepted and discarded.
+  The author saw no error and the value never reached the response, which made
+  a fixture that was never applied indistinguishable from one that was. That is
+  the surface the inline `llm_mock` builtin uses, so it was open for every
+  inline-authored entry. An unknown key is now rejected with the key named and,
+  where one is close enough to guess, the field the author probably meant. The
+  versioned contract shares that message, so a v1 typo gets the same help
+  instead of a bare rejection. A v1-only field in a headerless document is
+  called out as such rather than guessed at, since the author did not misspell
+  anything — they wrote a v1 entry into a v0 document. A census across every
+  repository in the organization that authors these fixtures found no entry
+  carrying a stray key, so nothing needs migrating and no deprecation window
+  was warranted.
+  Keys beginning with an underscore are an author-annotation namespace at every
+  schema version and every depth, so a note explaining why a fixture exists
+  stays in the fixture instead of a second file nothing keeps in sync. The same
+  check also closed the writer: a headerless document no longer serializes
+  `scope`, `id` or `consume`, which the headerless parser never read back, and
+  spells a one-shot glob with `consume_match` instead.
+- The completion judge now reads a run's accepted control words from the typed
+  record the session writes at acceptance, instead of inferring them from
+  delivered user messages. A stop delivers no user message, so the old reading
+  could not see one: a stopped run was still judged against its whole original
+  task and told to continue the work the person running it had just withdrawn.
+  An obligation snapshot now says which reading produced it, so a session with no
+  record cannot report "not stopped" when it only means "cannot tell".
+- Make test targets preserve toolchain diagnostics and honor focused E2E selectors instead of silently running the whole workspace.
+- **The orchestrator command dispatcher no longer carries every subcommand's
+  state in one stack frame (#7931).** `harn orchestrator` matched on its
+  subcommand and awaited each `async fn` inline, so the dispatch frame held all
+  thirteen futures' states at once and measured within five percent of the
+  stack size that aborts a tokio worker. One nesting level deeper was a killed
+  run with no diagnosis. Each arm is boxed before it is awaited, so the frame
+  holds a pointer and no longer grows with the number of subcommands.
+- **The supervisor command dispatcher no longer carries every subcommand's
+  state in one stack frame (#7931).** `harn orchestrator supervisor` matched on
+  its subcommand and awaited each `async fn` inline, so the dispatch frame held
+  all eleven futures' states at once and measured within five percent of the
+  stack size that aborts a tokio worker. Each arm is boxed before it is
+  awaited, so the frame holds a pointer and no longer grows with the number of
+  subcommands.
+- **A canonical session store stops being watched once nothing has it open
+  (#7960).** Opening a canonical store added its file to a process-wide list
+  that was never pruned, so a process that opened many stores over its life
+  attached a SQLite reader, a filesystem watcher and a thread to every database
+  it had ever touched, including ones whose handle was long gone. The claim now
+  belongs to the store handle: the watcher for a path starts while a handle is
+  open, and is stopped and joined when the last handle drops.
+- **Windows agent commands can see the host's installed toolchains again
+  (#7993).** A confined child on Windows runs under an AppContainer, which
+  reads a file only when that file's permissions admit it. The sandbox granted
+  read on the workspace and on toolchain directories under the user's home, so
+  anything installed system-wide was invisible: `node`, and any other tool on
+  `PATH` outside the home directory, failed with "'node' is not recognized as
+  an internal or external command" even though the command, the search path,
+  and the working directory were all correct. Directories on the launching
+  process's `PATH` that hold a runnable command, plus the standard system
+  prefixes and the hosted tool cache, are now part of the read set on every
+  profile rather than only when an embedder opts into the developer-toolchains
+  preset. Directories the host
+  already opens to sandboxed programs are detected and left untouched, so the
+  common case adds no work and changes no permissions, and the broad system
+  prefixes are never rewritten at all. A read grant that fails now leaves that
+  one directory unreadable and lets the command run, instead of failing the
+  whole command; grants the child actually depends on still fail loudly.
+  Writes are unchanged and still confined to the workspace.
+- **Windows agent commands no longer stall on every spawn, and now actually
+  reach the toolchain they were looking for (#8004).** Opening a system
+  toolchain directory to a confined child means rewriting that directory's
+  permissions, which on a Node install of roughly 2,400 files takes about a
+  second. The sandbox was doing that work for a directory named after a single
+  command run and then undoing it again when the command finished, so the cost
+  came back on every spawn; it also worked through the search path in order
+  under a fixed budget, and on a build machine that budget was spent entirely
+  on build output directories before the real toolchain was ever considered.
+  Commands timed out, and the toolchain stayed invisible anyway.
+
+  Two things changed. A directory is only considered when it actually contains
+  something Windows can run by name, so build output directories, which hold
+  object files and headers, no longer displace the directories that answer a
+  command. And when a directory does need opening, it is opened to sandboxed
+  programs generally, which is the same permission the rest of
+  `C:\Program Files` already carries, rather than to one command run. That
+  makes the work happen at most once on a machine instead of twice per command:
+  afterwards the sandbox's own check, which costs milliseconds, sees the
+  directory is already readable and does nothing.
+
+  Reads only. Nothing here grants a sandboxed command permission to write
+  anywhere new, and writes remain confined to the workspace.
+- Runtime bump workflows now regenerate a consumer's target-version files before
+  applying generic Harn migrations, preventing the migrator and the repository's
+  generator from competing over stale generated sources.
+
+  Swift provider-catalog bindings now initialize optional model data controls in
+  their custom decoder, so the generated source is compile-valid after a repin.
+- Release publication now recovers the certified candidate from signed tag
+  metadata after transient release refs are cleaned, and manual recovery no
+  longer repeats the post-release development bump.
+
 ## v0.10.129
 
 ### Breaking
