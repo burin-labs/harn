@@ -663,7 +663,7 @@ prepare_here() {
   echo "After merge, the release watcher tags the exact squash commit on main."
 }
 
-require_main_anchored_tag_at_head() {
+require_trusted_release_tag_at_head() {
   local tag="$1"
   local head_commit remote_commit
   head_commit="$(git rev-parse HEAD)"
@@ -873,8 +873,8 @@ BRANCH="$(git branch --show-current)"
 
 run_common_gates
 
-log_step "Verify main-anchored tag"
-require_main_anchored_tag_at_head "$TAG"
+log_step "Verify trusted release tag"
+require_trusted_release_tag_at_head "$TAG"
 
 log_step "Publish"
 "$RELEASE_GATE_SCRIPT" publish
