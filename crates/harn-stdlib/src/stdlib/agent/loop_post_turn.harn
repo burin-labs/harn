@@ -30,8 +30,10 @@ import {
   __agent_loop_post_edit_reverify_mandated,
   __agent_loop_state_budget_fields,
   __apply_post_turn_options,
+  __completion_directive_stops,
   __completion_judge_hit,
   __completion_stop_reason,
+  __completion_stop_status,
   __loop_progress_nudge_text,
   __next_progress_count,
   __next_text_only_count,
@@ -452,12 +454,12 @@ pub fn agent_loop_post_turn_transition(
         verify_completion_judge_invocations: next.verify_completion_judge_invocations
           + __completion_judge_hit(reverdict),
       }
-    if reverdict.action == "stop_unverified" {
+    if __completion_directive_stops(reverdict) {
       return {
         action: "break",
         state: next
           + {
-            final_status: "completion_unverified",
+            final_status: __completion_stop_status(reverdict),
             stop_reason: __completion_stop_reason(reverdict),
           },
       }
@@ -551,12 +553,12 @@ pub fn agent_loop_post_turn_transition(
         )
         next = next + {feedback_history: composed.history}
       }
-      if verdict.action == "stop_unverified" {
+      if __completion_directive_stops(verdict) {
         return {
           action: "break",
           state: next
             + {
-              final_status: "completion_unverified",
+              final_status: __completion_stop_status(verdict),
               stop_reason: __completion_stop_reason(verdict),
             },
         }

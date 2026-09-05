@@ -25,7 +25,10 @@ import { __judge_completion_verdict_read, __judge_completion_verdict_schema } fr
 
 pipeline test_verdict_schema_keeps_one_tolerant_detail_field(harness: Harness, task: unknown) {
   const schema = __judge_completion_verdict_schema()
-  assert_eq(schema.properties.keys().sorted(), ["detail", "gap_class", "verdict"])
+  // `gaps` joined the contract in #8100: a refusal itemizes every gap it holds
+  // rather than naming one in `detail`. `detail` stays the one-line summary,
+  // which is what the rest of this case pins.
+  assert_eq(schema.properties.keys().sorted(), ["detail", "gap_class", "gaps", "verdict"])
   assert_eq(schema.properties.detail.maxLength, nil)
   assert_eq(schema?.additionalProperties, false)
 }

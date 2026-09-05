@@ -1,0 +1,272 @@
+// Run: harn test tests/agent/completion_cap_over_verified_test.harn
+//
+// #8058. A run whose declared verifier already executed and PASSED could still
+// be sealed `completion_unverified` by the completion-judge cap, because the
+// terminal was taken from the judge verdict alone and never consulted the
+// verification payload that sat on the same evidence snapshot.
+//
+// The fixtures below replay the shape observed on 2026-09-05: a completion
+// judge that refuses every invocation until the cap fires, over a gate that
+// reports `observed: "passed"`. Five of that night's twenty-seven trials ended
+// this way, across three languages, each with its declared verifier green and
+// every downstream grader agreeing.
+//
+// The controls are the load-bearing half, and the issue names the risk in as
+// many words: a change that ended ANY capped turn cleanly would convert genuine
+// non-convergence into a clean stop, which is worse than the defect. So the
+// same judge and the same cap are replayed over `failed` and over `not_run`,
+// and both must keep today's terminal exactly.
+import { agent_capture_events } from "std/agent/events"
+import { agent_completion_adjudicator_declared } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+
+const VERIFIED_CAP_REASON = "judge_cap_reached_over_verified_pass"
+
+fn __completion_receipts(events: unknown) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/** The receipt that carried the stop, if any stop action was taken at all. */
+fn __stop_receipt(events: unknown) {
+  for receipt in __completion_receipts(events) {
+    if receipt?.action == "stop_verified" || receipt?.action == "stop_unverified" {
+      return receipt
+    }
+  }
+  return nil
+}
+
+/**
+ * A judge that refuses on every call, the way the observed runs did.
+ *
+ * The detail names no gap, which is the point: the actor has nothing to act on,
+ * so the refusal repeats until the cap fires.
+ */
+fn __always_refuses() -> dict {
+  return {
+    text: json_stringify(
+      {
+        verdict: "continue",
+        detail: "Not yet convinced the work is finished.",
+        gap_class: "unmet_manner_clause",
+      },
+    ),
+  }
+}
+
+/**
+ * A gate that reports one verifier reading and vetoes nothing.
+ *
+ * `confirm` is TRUE in every arm, including the `failed` one, and that is
+ * load-bearing rather than sloppy. A deterministic veto never reaches the model
+ * judge at all — the arbitration suite pins that separately — so a gate
+ * returning `confirm: false` here means the judge is never invoked, the actor
+ * consumes its scripted reply, and every case dies `parse_dropped` while
+ * appearing to be about the terminal. The only variable these cases may change
+ * is `observed`, which is the reading the cap decision reads.
+ */
+fn __gate_observing(observed: string) {
+  return { _payload ->
+    {
+      confirm: true,
+      message: "the completion judge should decide",
+      reason: "judge_owns_this",
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+/**
+ * One capped run over a given verifier reading.
+ *
+ * The script ALTERNATES actor turn and judge reply. Getting this wrong is not a
+ * quiet mistake: if the script runs short the actor consumes the judge's
+ * scripted reply as its own turn, the judge is never invoked at all, and the
+ * run ends `parse_dropped` — which looks like a failing assertion rather than a
+ * mis-scripted fixture. Every case here asserts the judge actually ran.
+ */
+fn __run_to_cap(harness: Harness, label: string, observed: string) {
+  return with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      __always_refuses(),
+      llm_done(),
+      __always_refuses(),
+      llm_done(),
+      __always_refuses(),
+      llm_done(),
+    ],
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 6,
+        verify_completion: __gate_observing(observed),
+        verify_completion_judge: {provider: "mock", max_invocations: 2},
+      }
+      assert(
+        agent_completion_adjudicator_declared(opts, "sentinel"),
+        "every case here must declare an adjudicator, or the arms differ by two variables",
+      )
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * The judge was actually invoked.
+ *
+ * Asserted in every case below. A short script makes the actor eat the judge's
+ * reply, the judge never runs, and the run dies `parse_dropped`; without this
+ * the cases would fail for a reason that has nothing to do with what they test.
+ */
+fn __assert_judge_ran(run: dict, label: string) {
+  const invoked = run?.result?.completion_judge?.invocations ?? 0
+  assert(
+    invoked > 0,
+    label
+      + ": the completion judge was never invoked ("
+      + to_string(invoked)
+      + "), so this case is measuring a mis-scripted fixture. status="
+      + to_string(run?.result?.status ?? "")
+      + " stop_reason="
+      + to_string(run?.result?.stop_reason ?? ""),
+  )
+}
+
+pipeline test_a_cap_over_a_passed_verifier_stops_verified(harness: Harness, task: unknown) {
+  const run = __run_to_cap(harness, "passed", "passed")
+  __assert_judge_ran(run, "passed arm")
+  const receipt = __stop_receipt(run.events)
+  assert(receipt != nil, "the cap must have produced a stopping completion directive")
+  assert(
+    to_string(receipt?.action ?? "") == "stop_verified",
+    "a cap over a passed verifier stops VERIFIED, got: " + to_string(receipt?.action ?? "<none>"),
+  )
+  assert(
+    to_string(receipt?.reason ?? "") == VERIFIED_CAP_REASON,
+    "the verified cap carries its own wire reason, not the bare cap label, got: "
+      + to_string(receipt?.reason ?? "<none>"),
+  )
+  // The dissent is RECORDED, not discarded. This is the half that keeps the
+  // change from being a way to launder a refusal.
+  //
+  // It is recorded on the refusal's OWN receipt, not copied onto this one. The
+  // capping turn does not invoke the model judge at all — that is what the cap
+  // means — so the stopping receipt reads `source: "deterministic"` and has no
+  // fresh verdict to carry. What the run must not do is end with no refusal on
+  // the record anywhere, which is what this asserts.
+  const refusals = __completion_receipts(run.events).filter(
+    { candidate -> to_string(candidate?.action ?? "") == "continue" },
+  )
+    .to_list()
+  assert(
+    len(refusals) > 0,
+    "the judge's refusals must still be on the run's receipts; a verified cap may not erase them",
+  )
+  assert(
+    to_string(refusals[0]?.source ?? "") == "llm",
+    "and the recorded refusal must be the MODEL judge's, not the deterministic gate's, got: "
+      + to_string(refusals[0]?.source ?? "<none>"),
+  )
+  assert(
+    to_string(receipt?.verification?.observed ?? "") == "passed",
+    "the reading the decision was taken on is on the receipt too",
+  )
+}
+
+pipeline test_the_run_reads_done_not_completion_unverified(harness: Harness, task: unknown) {
+  const run = __run_to_cap(harness, "passed", "passed")
+  __assert_judge_ran(run, "done arm")
+  // The finalized result exposes this as `status`; the loop state calls it
+  // `final_status`. Read both rather than guess, then assert an exact value so
+  // the tolerance cannot make the case pass vacuously.
+  const status = to_string(run.result?.status ?? run.result?.final_status ?? "")
+  assert(
+    status != "completion_unverified",
+    "the whole point of #8058: a green verifier must not seal completion_unverified",
+  )
+  assert(status == "done", "it seals done, got: " + status)
+  assert(
+    to_string(run.result?.stop_reason ?? "") == VERIFIED_CAP_REASON,
+    "and the stop reason says WHY it is done, got: " + to_string(run.result?.stop_reason ?? ""),
+  )
+}
+
+pipeline test_the_cap_is_still_reported_as_reached(harness: Harness, task: unknown) {
+  // A measured zero is not a measured nothing. If this were gated on
+  // `completion_unverified` alone, the runs that hit a cap would be exactly the
+  // ones reporting no cap.
+  const run = __run_to_cap(harness, "passed", "passed")
+  __assert_judge_ran(run, "cap-reported arm")
+  assert(
+    run.result?.completion_judge?.cap_reached,
+    "the cap was reached; sealing done must not erase that it was",
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Direction controls. Without these the change is indistinguishable from one
+// that ends every capped turn cleanly.
+
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_a_cap_over_a_failed_verifier_is_unchanged(harness: Harness, task: unknown) {
+  const run = __run_to_cap(harness, "failed", "failed")
+  __assert_judge_ran(run, "failed arm")
+  const receipt = __stop_receipt(run.events)
+  assert(receipt != nil, "the cap must still stop the run")
+  assert(
+    to_string(receipt?.action ?? "") == "stop_unverified",
+    "a red verifier keeps today's action, got: " + to_string(receipt?.action ?? "<none>"),
+  )
+  assert(
+    to_string(run.result?.status ?? run.result?.final_status ?? "") == "completion_unverified",
+    "and today's terminal, got: "
+      + to_string(run.result?.status ?? run.result?.final_status ?? ""),
+  )
+}
+
+pipeline test_a_cap_over_an_unrun_verifier_is_unchanged(harness: Harness, task: unknown) {
+  // `not_run` also covers "the gate could not read facts". Reading it as
+  // verified is the blanket weakening this test exists to refuse.
+  const run = __run_to_cap(harness, "not_run", "not_run")
+  __assert_judge_ran(run, "not_run arm")
+  const receipt = __stop_receipt(run.events)
+  assert(receipt != nil, "the cap must still stop the run")
+  assert(
+    to_string(receipt?.action ?? "") == "stop_unverified",
+    "an unrun verifier is not a passing one, got: " + to_string(receipt?.action ?? "<none>"),
+  )
+  assert(
+    to_string(run.result?.status ?? run.result?.final_status ?? "") == "completion_unverified",
+    "and today's terminal, got: "
+      + to_string(run.result?.status ?? run.result?.final_status ?? ""),
+  )
+}
