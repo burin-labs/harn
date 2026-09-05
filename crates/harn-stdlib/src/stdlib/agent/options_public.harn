@@ -608,10 +608,22 @@ pub fn __stack_sanitize_result(llm: HarnessLlm, options: any, policy: any = nil)
     const cache = __stack_strip_option_keys(
       out,
       stripped,
-      ["prompt_cache", "prompt_caching", "prompt_cache_ttl", "cache_control"],
+      ["prompt_cache", "prompt_caching", "prompt_cache_ttl"],
     )
     out = cache.options
     stripped = cache.stripped
+  }
+  // `cache_control` is a REQUEST MARKER, not a cache switch, so it is gated on
+  // where the route places a breakpoint rather than on whether it caches. A
+  // route that caches automatically places none: OpenAI rejects a marker with
+  // `Unknown parameter: 'cache_control'.` rather than ignoring it. Gating this
+  // on `prompt_caching` was equivalent only while every caching route was
+  // Anthropic-shaped; once an automatic-cache route declares `prompt_caching`
+  // that conflation forwards a caller's marker into a provider 400.
+  if (caps?.cache_breakpoint_style ?? "none") == "none" {
+    const marker = __stack_strip_option_keys(out, stripped, ["cache_control"])
+    out = marker.options
+    stripped = marker.stripped
   }
   return {options: out, stripped: stripped}
 }

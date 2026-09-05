@@ -1,6 +1,7 @@
 use super::{
-    apply_tool_search_native_injection_typed, defer_loading_registry, extract_deferred_tool_names,
-    json, sample_tool_registry, vm_dict, vm_list, vm_str, vm_tools_to_native,
+    apply_tool_search_native_injection_typed, collect_tool_schemas, defer_loading_registry,
+    extract_deferred_tool_names, json, sample_tool_registry, validate_tool_args, vm_dict, vm_list,
+    vm_str, vm_tools_to_native,
 };
 use crate::llm::provider::NativeToolSearchShape;
 use std::collections::BTreeMap;
@@ -289,6 +290,51 @@ fn vm_tools_to_native_preserves_mcp_camel_case_input_schema_for_anthropic() {
         schema.get("inputSchema").is_none(),
         "the schema itself must not be mistaken for a parameter map"
     );
+}
+
+#[test]
+fn vm_input_schema_drives_receipts_and_pre_dispatch_validation() {
+    let input_schema = vm_dict(&[
+        ("type", vm_str("object")),
+        (
+            "properties",
+            vm_dict(&[
+                (
+                    "requirements",
+                    vm_dict(&[
+                        ("type", vm_str("array")),
+                        ("description", vm_str("Evidence-backed requirements.")),
+                    ]),
+                ),
+                ("blocked_on", vm_dict(&[("type", vm_str("string"))])),
+            ]),
+        ),
+        ("required", vm_list(vec![vm_str("requirements")])),
+    ]);
+    let tool = vm_dict(&[
+        ("name", vm_str("task_complete")),
+        ("description", vm_str("Claim completion")),
+        ("inputSchema", input_schema),
+    ]);
+    let tools = vm_list(vec![tool]);
+
+    let schemas = collect_tool_schemas(Some(&tools), None);
+    let completion = schemas
+        .iter()
+        .find(|schema| schema.name == "task_complete")
+        .expect("completion schema");
+    assert_eq!(completion.params.len(), 2);
+    assert_eq!(completion.params[0].name, "requirements");
+    assert!(completion.params[0].required);
+    assert_eq!(
+        completion.params[0].description,
+        "Evidence-backed requirements."
+    );
+    assert_eq!(completion.params[1].name, "blocked_on");
+    assert!(!completion.params[1].required);
+    let error = validate_tool_args("task_complete", &json!({}), &schemas)
+        .expect_err("an empty call must fail before dispatch");
+    assert!(error.contains("requirements"), "unexpected error: {error}");
 }
 
 #[test]

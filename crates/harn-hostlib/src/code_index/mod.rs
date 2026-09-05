@@ -62,6 +62,7 @@
 //! but the mutex still serialises actual work.
 
 mod agents;
+mod builtin_args;
 mod builtins;
 mod cypher;
 mod file_table;
@@ -95,10 +96,11 @@ pub use builtins::SharedIndex;
 pub use cypher::{CypherError, CypherRow, CypherValue};
 pub use file_table::{FileId, IndexedFile, IndexedSymbol};
 pub use graph::DepGraph;
+pub use imports::{ModuleTarget, ResolutionStrategy};
 pub use overlay::{BranchOverlay, OverlayState};
 pub use readonly::ReadonlyRoots;
 pub use snapshot::{CodeIndexSnapshot, SnapshotMeta};
-pub use state::{BuildOutcome, IndexState, RefreshOutcome};
+pub use state::{BuildOutcome, ImportCensusRow, IndexState, RefreshOutcome};
 pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
 pub use trigram::TrigramIndex;
 pub use versions::{ChangeRecord, EditOp, VersionEntry, VersionLog, HISTORY_LIMIT};

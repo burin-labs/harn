@@ -14730,7 +14730,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -14766,6 +14766,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -14822,7 +14823,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -14858,6 +14859,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -14916,7 +14918,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -14952,6 +14954,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -15010,7 +15013,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15048,6 +15051,7 @@
         "tools",
         "vision",
         "audio",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -15104,7 +15108,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15142,6 +15146,7 @@
         "tools",
         "vision",
         "audio",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -15210,7 +15215,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15247,6 +15252,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15309,7 +15315,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15353,6 +15359,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15424,7 +15431,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15461,6 +15468,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15532,7 +15540,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15569,6 +15577,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15632,7 +15641,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15676,6 +15685,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15748,7 +15758,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15792,6 +15802,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15917,7 +15928,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15961,6 +15972,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16044,7 +16056,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16088,6 +16100,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16265,7 +16278,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16321,6 +16334,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16484,7 +16498,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16528,6 +16542,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16701,7 +16716,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16745,6 +16760,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16838,7 +16854,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16875,6 +16891,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16931,7 +16948,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16968,6 +16985,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -17025,7 +17043,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -17062,6 +17080,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -17122,7 +17141,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -17159,6 +17178,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -17221,7 +17241,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -17257,6 +17277,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -20178,7 +20199,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.75,
         "output_per_mtok": 4.5,
@@ -20195,6 +20216,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20259,7 +20281,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.25,
@@ -20276,6 +20298,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20338,7 +20361,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
@@ -20355,6 +20378,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20419,7 +20443,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
@@ -20436,6 +20460,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20500,7 +20525,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
@@ -20517,6 +20542,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20588,7 +20614,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.2,
@@ -20604,6 +20630,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20677,7 +20704,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.2,
@@ -20693,6 +20720,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20766,7 +20794,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
@@ -20794,6 +20822,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20865,7 +20894,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
@@ -20893,6 +20922,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20964,7 +20994,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
@@ -20980,6 +21010,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -21051,7 +21082,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
@@ -21067,6 +21098,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -25464,7 +25496,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.25,
@@ -25481,6 +25513,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -30169,6 +30202,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30188,6 +30222,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30207,6 +30242,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30227,6 +30263,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30247,6 +30284,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30270,6 +30308,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30293,6 +30332,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30316,6 +30356,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30339,6 +30380,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30362,6 +30404,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30385,6 +30428,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30408,6 +30452,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30431,6 +30476,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30454,6 +30500,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30477,6 +30524,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30500,6 +30548,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31225,6 +31274,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31247,6 +31297,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31269,6 +31320,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31291,6 +31343,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31313,6 +31366,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31335,6 +31389,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31356,6 +31411,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31377,6 +31433,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31398,6 +31455,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31419,6 +31477,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31440,6 +31499,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -32388,6 +32448,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",

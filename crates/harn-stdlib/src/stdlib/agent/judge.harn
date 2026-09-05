@@ -1,3 +1,4 @@
+import { CompletionClaim } from "std/agent/completion_claim"
 import {
   COMPLETION_VERIFICATION_EVIDENCE_INDEX,
   CompletionEvidenceProjection,
@@ -36,10 +37,12 @@ import { __judge_settle_reply } from "std/agent/judge_contradiction"
 import { __judge_evidence_projection_from_lifecycle } from "std/agent/judge_evidence"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
+  COMPLETION_VERIFIED_AFTER_WRITE_REASON,
   CompletionJudgeAdmission,
   CompletionJudgeGapClass,
   CompletionVerificationState,
   __completion_judge_gap_class,
+  __completion_typed_green_terminal,
   __completion_verification_state_read,
   __judge_checkpoint_unavailable,
   __judge_emit_decision,
@@ -113,6 +116,7 @@ pub type CompletionDirectiveReceipt = {
   admission?: CompletionJudgeAdmission?,
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
+  completion_claim?: CompletionClaim,
 }
 
 pub type CompletionDirective = {
@@ -243,7 +247,7 @@ fn __judge_payload(
     nil,
     completion_obligations_digest(obligations),
   )
-  return {
+  let payload = {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
     session_id: session.session_id,
@@ -265,6 +269,10 @@ fn __judge_payload(
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: nil,
   }
+  if opts?._completion_claim != nil {
+    payload = payload + {completion_claim: opts._completion_claim}
+  }
+  return payload
 }
 
 /** Bind a gate reading onto the snapshot the remaining stages will be shown. */
@@ -789,6 +797,7 @@ fn __judge_directive(
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
     requirements: verdict?.requirement_report,
+    completion_claim: payload?.completion_claim,
   }
   return {
     action: action,
@@ -808,7 +817,7 @@ fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
   if !due {
     return false
   }
-  return contains(["sentinel", "natural", "stalled"], stop_reason)
+  return contains(["sentinel", "natural", "stalled", "explicit_completion_claim"], stop_reason)
 }
 
 /** Build the one ordered plan for a completion boundary. */
@@ -964,6 +973,33 @@ fn __completion_policy_run_stage(
           }
         }
         Completion() -> {
+          // The deterministic oracle already answered this boundary's question:
+          // the declared verifier passed over a source write and the turn is the
+          // sealed final answer. A model call here can only agree, disagree with
+          // the runtime's own reading, or fail to return before the headless wall
+          // — and all three have been observed. See harn#8110.
+          if __completion_typed_green_terminal(
+            {
+              deterministic_invoked: evaluation.invoked.deterministic,
+              deterministic_reason: evaluation.deterministic_reason,
+              observed: to_string(payload.verification?.observed ?? "not_run"),
+              stop_reason: payload.stop_reason,
+              final_text: payload.text,
+              pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
+            },
+          ) {
+            const verified_terminal = {
+              vetoed: false,
+              verdict: "done",
+              source: "gate",
+              judge_outcome: "skipped_verified_after_write",
+              reason: COMPLETION_VERIFIED_AFTER_WRITE_REASON,
+              judge_duration_ms: 0,
+              trigger: trigger,
+            }
+            __judge_emit_decision(harness.agent, payload.session_id, iteration, verified_terminal)
+            return evaluation + {verdict: verified_terminal}
+          }
         }
       }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
