@@ -1,0 +1,21 @@
+[package]
+name = "harn-provider-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared provider catalog schema, model metadata, and presentation contracts."
+
+[dependencies]
+chrono = "0.4"
+harn-clock = { path = "../harn-clock", version = "=0.10.131-dev" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+
+toml = "1.1"
+
+[lints]
+workspace = true
