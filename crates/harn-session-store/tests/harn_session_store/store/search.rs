@@ -634,7 +634,7 @@ async fn soft_delete_marks_session_and_hard_delete_removes_it() {
 }
 
 #[tokio::test]
-async fn sweep_retention_preserves_old_open_sessions_and_deletes_closed_peers() {
+async fn sweep_retention_removes_dormant_resumable_and_closed_history() {
     run_retention_with_hooks(StoreHooks::default(), |store| async move {
         let open = store
             .create(CreateSession {
@@ -661,10 +661,10 @@ async fn sweep_retention_preserves_old_open_sessions_and_deletes_closed_peers() 
             .await
             .expect("sweep");
 
-        assert_eq!(report.soft_deleted, 1);
+        assert_eq!(report.soft_deleted, 2);
         assert_eq!(
             store.describe(&open.id).await.expect("open session").status,
-            SessionStatus::Open
+            SessionStatus::SoftDeleted
         );
         assert_eq!(
             store

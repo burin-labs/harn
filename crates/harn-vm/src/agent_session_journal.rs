@@ -974,8 +974,32 @@ mod tests {
         ));
 
         drop(writer);
-        harn_session_store::SqliteSessionStore::open_for_maintenance(&database)
+        let maintenance = harn_session_store::SqliteSessionStore::open_for_maintenance(&database)
             .expect("maintenance enters after live VM writer drops");
+        let dormant = maintenance
+            .describe("live-maintenance-race")
+            .await
+            .expect("resumable session remains after writer exits");
+        assert_eq!(dormant.status, harn_session_store::SessionStatus::Open);
+        let report = maintenance
+            .sweep_retention(
+                &harn_session_store::RetentionPolicy {
+                    max_age_seconds: Some(60),
+                    ..Default::default()
+                },
+                dormant.created_at_ms + 61_000,
+            )
+            .await
+            .expect("age dormant canonical history under maintenance ownership");
+        assert_eq!(report.soft_deleted, 1);
+        assert_eq!(
+            maintenance
+                .describe(&dormant.id)
+                .await
+                .expect("retained tombstone")
+                .status,
+            harn_session_store::SessionStatus::SoftDeleted
+        );
     }
 
     #[test]

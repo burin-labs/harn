@@ -16,12 +16,11 @@ use super::store::{SessionMeta, SessionStatus};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetentionPolicy {
-    /// Max wall-clock age for a closed session. Past this point the session
+    /// Max wall-clock age for a session. Past this point the session
     /// is soft-deleted, then hard-deleted after `grace_seconds`.
     ///
-    /// An open session is never inferred to be abandoned from elapsed time.
-    /// Stateful clients may legitimately pause between calls, so only an
-    /// explicit close establishes eligibility for automatic retention.
+    /// Open sessions can remain resumable after their writer exits. The
+    /// maintenance lease, rather than persisted status, excludes live writers.
     #[serde(default)]
     pub max_age_seconds: Option<u64>,
     /// Min age before a closed/idle session is archived. When archiving
@@ -53,7 +52,7 @@ impl RetentionPolicy {
     }
 
     pub fn should_soft_delete(&self, session: &SessionMeta, now_ms: i64) -> bool {
-        if !matches!(session.status, SessionStatus::Closed) {
+        if !matches!(session.status, SessionStatus::Open | SessionStatus::Closed) {
             return false;
         }
         let age_ms = now_ms.saturating_sub(session.created_at_ms);
@@ -63,7 +62,9 @@ impl RetentionPolicy {
             }
         }
         if let Some(min_age) = self.min_age_before_archive_seconds {
-            if age_ms as u64 >= min_age.saturating_mul(1_000) {
+            if matches!(session.status, SessionStatus::Closed)
+                && age_ms as u64 >= min_age.saturating_mul(1_000)
+            {
                 return true;
             }
         }
@@ -180,14 +181,15 @@ mod tests {
     }
 
     #[test]
-    fn max_age_never_infers_that_an_open_session_is_abandoned() {
+    fn max_age_applies_to_resumable_and_closed_history() {
         let policy = RetentionPolicy {
             max_age_seconds: Some(60),
             ..RetentionPolicy::default()
         };
         let open = meta(SessionStatus::Open, 0, None);
         let closed = meta(SessionStatus::Closed, 0, None);
-        assert!(!policy.should_soft_delete(&open, i64::MAX));
+        assert!(!policy.should_soft_delete(&open, 59_000));
+        assert!(policy.should_soft_delete(&open, 61_000));
         assert!(!policy.should_soft_delete(&closed, 59_000));
         assert!(policy.should_soft_delete(&closed, 61_000));
     }
