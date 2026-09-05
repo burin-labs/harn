@@ -298,3 +298,32 @@ pipeline test_always_expected_checks_name_real_jobs(harness: Harness, task: unkn
     assert_eq(found, true)
   }
 }
+
+pipeline test_an_in_flight_run_reads_pending_not_missing(harness: Harness, task: unknown) {
+  // The aggregate job has not started because the jobs it waits on are still
+  // running. That is not the same as a check that will never report.
+  const page = {total_count: 1, check_runs: [run(1, "Rust workspace tests", "in_progress", "")]}
+  const census = build_census(
+    "1".repeat(40),
+    check_run_observations(page),
+    ALWAYS_EXPECTED_CHECKS,
+    [],
+    "workflow_filters",
+  )
+  assert_eq(census.pending, 1)
+  assert_eq(census.missing, 1)
+  assert_eq(census.verdict, "pending")
+  assert_eq(census.exit_code, 2)
+  // Control: the same expectation with nothing left running is missing.
+  const settled = build_census(
+    "1".repeat(40),
+    check_run_observations(
+      {total_count: 1, check_runs: [run(1, "Rust workspace tests", "completed", "success")]},
+    ),
+    ALWAYS_EXPECTED_CHECKS,
+    [],
+    "workflow_filters",
+  )
+  assert_eq(settled.verdict, "missing")
+  assert_eq(settled.exit_code, 3)
+}

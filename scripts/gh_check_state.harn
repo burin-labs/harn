@@ -320,11 +320,17 @@ pub fn build_census(
     }
   }
   const missing = len(missing_names)
+  // A run still in flight has not reported its later checks yet, so an
+  // expected name with no row is not yet evidence of a routing failure. Only
+  // call it missing once nothing is left running. Both verdicts refuse, so the
+  // distinction changes the message rather than the decision.
   const verdict = if bad > 0 {
     "bad"
-  } else if expectation_source == "unobservable" || missing > 0 {
+  } else if expectation_source == "unobservable" {
     "missing"
-  } else if pending > 0 {
+  } else if missing > 0 && pending == 0 {
+    "missing"
+  } else if pending > 0 || missing > 0 {
     "pending"
   } else {
     "green"
@@ -457,9 +463,10 @@ fn usage() -> string {
       "Exit codes:",
       "  0  every expected check reported and passed",
       "  1  at least one check is failing",
-      "  3  at least one expected check never reported, or expectations are",
-      "     unobservable",
-      "  2  at least one check is still queued or running",
+      "  2  at least one check is still queued or running (an expected check with",
+      "     no row yet is pending, not missing, while anything is still running)",
+      "  3  every check settled and an expected one never reported, or",
+      "     expectations are unobservable",
       "  64 usage error",
     ],
     "\n",

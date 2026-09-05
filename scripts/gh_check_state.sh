@@ -11,8 +11,8 @@ set -euo pipefail
 # usage: scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex> [--base REF]
 #                                  [--workflow PATH] [--expect NAME ...] [--json]
 #
-# Exit codes: 0 green, 1 failing, 2 pending, 3 missing or unobservable,
-# 64 usage error.
+# Exit codes: 0 green, 1 failing, 2 pending, 3 settled with an expected check
+# missing or expectations unobservable, 64 usage error.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
