@@ -27,6 +27,24 @@ fn lexical_callback_is_not_ambient_without_source_text() {
 }
 
 #[test]
+fn lexically_called_nested_function_is_not_reported_unused() {
+    let source =
+        "pub fn invoke() -> int {\n  fn call() -> int {\n    return 7\n  }\n  return call()\n}\n";
+    let diags = lint_source(source);
+
+    assert_eq!(
+        count_rule(&diags, "ambient-harness-method"),
+        0,
+        "a nested function named `call` is not an ambient builtin: {diags:?}"
+    );
+    assert_eq!(
+        count_rule(&diags, "unused-function"),
+        0,
+        "the same lexical call must still count as use of its declaration: {diags:?}"
+    );
+}
+
+#[test]
 fn ambient_fs_call_inside_main_rewrites_to_harness_fs() {
     let source =
         "fn main(harness: Harness) {\n  let body = read_file(\"path.txt\")\n  harness.stdio.println(body)\n}\n";

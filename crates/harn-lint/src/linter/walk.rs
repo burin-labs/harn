@@ -333,8 +333,12 @@ impl<'a> Linter<'a> {
                     self.check_ambient_harness_method(name, args, snode.span);
                 }
                 self.references.insert(name.clone());
+                // A lexically resolved call can still target a nested named
+                // function. Keep declaration-use accounting independent from
+                // ambient-builtin classification so valid local calls do not
+                // make their declarations appear unused.
+                self.function_references.insert(name.clone());
                 if !lexical_call {
-                    self.function_references.insert(name.clone());
                     self.function_calls.push((name.clone(), snode.span));
                     self.check_builtin_call_rules(snode);
                     if Self::is_assert_builtin(name) && !self.in_test_source() {
