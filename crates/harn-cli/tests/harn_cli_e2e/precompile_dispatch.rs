@@ -538,11 +538,14 @@ fn absolute_and_relative_targets_produce_the_same_tree() {
     let from_relative = workdir.path().join("out-relative");
     write_same_named_in_two_directories(&tree);
 
-    let absolute = run_precompile(&[
-        tree.to_string_lossy().as_ref(),
-        "--out",
-        from_absolute.to_string_lossy().as_ref(),
-    ]);
+    let absolute = run_precompile(
+        &[
+            tree.to_string_lossy().as_ref(),
+            "--out",
+            from_absolute.to_string_lossy().as_ref(),
+        ],
+        &[],
+    );
     assert_eq!(absolute.exit_code, 0, "stderr={}", absolute.stderr);
 
     let relative = run_precompile_in(
