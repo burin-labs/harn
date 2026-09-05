@@ -175,6 +175,74 @@ fn openai_gpt_6_row_does_not_capture_gpt_5_6() {
     );
 }
 
+/// Every OpenAI route that caches must say so, because the catalog projects
+/// `model.prompt_cache` from this rule field and NOT from the `capabilities`
+/// list on the model row. Before 2026-09-04 no OpenAI rule set it, so rows that
+/// listed "prompt_caching" in `capabilities` still exported
+/// `prompt_cache: false` and downstream cost models could not see a cache hit
+/// they were already being billed for. Each id below was probed against the
+/// live API: an identical ~1578-token prefix sent twice returned a cache hit on
+/// the second call.
+#[test]
+fn openai_routes_that_cache_declare_prompt_caching() {
+    reset();
+    for model in [
+        "gpt-6-astra",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-4o-mini",
+        "o4-mini",
+    ] {
+        assert!(
+            lookup("openai", model).prompt_caching,
+            "{model} caches prompts and must declare prompt_caching"
+        );
+    }
+    // Gateway-prefixed ids resolve to the same contract.
+    assert!(lookup("openrouter", "openai/gpt-5.6-luna").prompt_caching);
+}
+
+/// Declaring `prompt_caching` must NOT start emitting a request marker on
+/// OpenAI routes. `apply_prompt_cache_breakpoint` is gated on
+/// `caps.prompt_caching`, so before this flag was set the OpenAI branch was
+/// unreachable and the breakpoint style never mattered. It matters now.
+///
+/// OpenAI caches automatically and accepts no marker: a top-level
+/// `cache_control` on `/v1/chat/completions` is rejected with
+/// `Unknown parameter: 'cache_control'.` (probed 2026-09-04). Anthropic's
+/// provider defaults set `top_level`; OpenAI's set nothing and fall back to
+/// `CacheBreakpointStyle::None`, which is what keeps the marker out of the
+/// request. If someone gives OpenAI a breakpoint style, every cache-requesting
+/// OpenAI call starts failing with that 400, and this is the test that says so.
+#[test]
+fn openai_prompt_caching_emits_no_request_marker() {
+    reset();
+    for model in ["gpt-6-astra", "gpt-5.6-luna", "gpt-4o-mini", "o4-mini"] {
+        let caps = lookup("openai", model);
+        assert!(caps.prompt_caching, "{model} caches");
+        assert_eq!(
+            caps.cache_breakpoint_style,
+            CacheBreakpointStyle::None,
+            "{model} caches automatically and rejects a cache_control marker"
+        );
+    }
+}
+
+/// Direction control for the row above. The two catch-all rules carry no
+/// `version_min` and exist to backstop pre-4o models that predate automatic
+/// caching, so they must NOT claim the capability. Without this, widening the
+/// flag to every rule in the file would still pass the assertions above.
+#[test]
+fn openai_legacy_catch_all_does_not_claim_prompt_caching() {
+    reset();
+    assert!(
+        !lookup("openai", "gpt-3.5-turbo").prompt_caching,
+        "the pre-4o catch-all must not claim prompt caching"
+    );
+}
+
 #[test]
 fn openrouter_inherits_openai() {
     reset();
