@@ -10,10 +10,6 @@ inputs:
     description: Repository-relative file containing the pinned Harn version.
     required: false
     default: .harn-version
-  repository:
-    description: GitHub repository that publishes Harn release assets.
-    required: false
-    default: burin-labs/harn
   max-attempts:
     description: Maximum attempts while release assets are still publishing.
     required: false
@@ -71,12 +67,10 @@ runs:
       env:
         HARN_BOOTSTRAP_VERSION: ${{ inputs.version }}
         HARN_BOOTSTRAP_VERSION_FILE: ${{ inputs.version-file }}
-        HARN_BOOTSTRAP_REPOSITORY: ${{ inputs.repository }}
         HARN_BOOTSTRAP_CACHE_DIR: ${{ inputs.cache-dir }}
         HARN_BOOTSTRAP_INSTALL_DIR: ${{ inputs.install-dir }}
-        NODE_USE_ENV_PROXY: "1"
       run: >-
-        node "$GITHUB_ACTION_PATH/../../../scripts/bootstrap_harn.mjs"
+        sh "$GITHUB_ACTION_PATH/../../../scripts/bootstrap-harn.sh"
         resolve --github-output "$GITHUB_OUTPUT"
 
     # `cache-path` is the resolved SHA256SUMS and release archive, not the
@@ -106,16 +100,14 @@ runs:
       shell: bash
       env:
         HARN_BOOTSTRAP_VERSION: ${{ steps.resolve.outputs.version }}
-        HARN_BOOTSTRAP_REPOSITORY: ${{ inputs.repository }}
         HARN_BOOTSTRAP_TARGET: ${{ steps.resolve.outputs.target }}
         HARN_BOOTSTRAP_CACHE_DIR: ${{ steps.resolve.outputs.cache-dir }}
         HARN_BOOTSTRAP_INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
         HARN_BOOTSTRAP_MAX_ATTEMPTS: ${{ inputs.max-attempts }}
         HARN_BOOTSTRAP_RETRY_DELAY_SECONDS: ${{ inputs.retry-delay-seconds }}
         HARN_BOOTSTRAP_TOKEN: ${{ inputs.token }}
-        NODE_USE_ENV_PROXY: "1"
       run: >-
-        node "$GITHUB_ACTION_PATH/../../../scripts/bootstrap_harn.mjs"
+        sh "$GITHUB_ACTION_PATH/../../../scripts/bootstrap-harn.sh"
         install --github-output "$GITHUB_OUTPUT"
         --github-path "$GITHUB_PATH"
         --github-summary "$GITHUB_STEP_SUMMARY"

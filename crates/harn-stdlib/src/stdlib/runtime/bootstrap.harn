@@ -1,0 +1,211 @@
+import { help_requested, parse_typed, parser, render_help } from "std/cli/argparse"
+import { RuntimeInstallRequest, install_runtime, runtime_plan } from "./install.harn"
+
+type BootstrapOptions = {
+  mode?: string,
+  version?: string,
+  version_file?: string,
+  target?: string,
+  cache_dir?: string,
+  install_dir?: string,
+  max_attempts?: int,
+  retry_delay_seconds?: int,
+  github_output?: string,
+  github_path?: string,
+  github_summary?: string,
+  offline: bool,
+}
+
+fn arguments() {
+  return parser(
+    {
+      name: "bootstrap-harn",
+      about: "Install an exact checksum-verified Harn release.",
+      args: [
+        {name: "mode", kind: "positional", required: false, default: "install"},
+        {name: "version", kind: "flag", long: "--version"},
+        {name: "version_file", kind: "flag", long: "--version-file"},
+        {name: "target", kind: "flag", long: "--target"},
+        {name: "cache_dir", kind: "flag", long: "--cache-dir"},
+        {name: "install_dir", kind: "flag", long: "--install-dir"},
+        {name: "max_attempts", kind: "flag", long: "--max-attempts", parse: "int"},
+        {name: "retry_delay_seconds", kind: "flag", long: "--retry-delay-seconds", parse: "int"},
+        {name: "github_output", kind: "flag", long: "--github-output"},
+        {name: "github_path", kind: "flag", long: "--github-path"},
+        {name: "github_summary", kind: "flag", long: "--github-summary"},
+        {name: "offline", kind: "switch", long: "--offline"},
+      ],
+    },
+  )
+}
+
+fn setting(env: HarnessEnv, name: string, explicit: string? = nil) -> string {
+  return trim(explicit ?? env.get("HARN_BOOTSTRAP_" + name) ?? "")
+}
+
+fn output(fs: HarnessFs, path: string, name: string, value: string) {
+  require !value.contains("\n") && !value.contains("\r"), "GitHub output contains a newline"
+  fs.append(path, name + "=" + value + "\n")
+}
+
+fn resolve_request(harness: Harness, cli: BootstrapOptions) -> RuntimeInstallRequest {
+  const explicit_version = setting(harness.env, "VERSION", cli.version)
+  const version_file = if cli.version_file != nil || explicit_version == "" {
+    setting(harness.env, "VERSION_FILE", cli.version_file)
+  } else {
+    ""
+  }
+  require explicit_version == "" || version_file == "",
+    "--version and --version-file are mutually exclusive"
+  const version = regex_replace(
+    r"^v",
+    "",
+    trim(
+      if explicit_version != "" {
+        explicit_version
+      } else {
+        harness.fs.read_text(
+          if version_file == "" {
+            ".harn-version"
+          } else {
+            version_file
+          },
+        )
+      },
+    ),
+  )
+  const platform = harness.system.platform()
+  const arch = if ["x64", "x86_64"].contains(platform.arch) {
+    "x86_64"
+  } else if ["arm64", "aarch64"].contains(platform.arch) {
+    "aarch64"
+  } else {
+    "unsupported"
+  }
+  const suffix = if ["darwin", "macos"].contains(platform.os) {
+    "apple-darwin"
+  } else if platform.os == "linux" {
+    "unknown-linux-gnu"
+  } else if ["windows", "win32"].contains(platform.os) {
+    "pc-windows-msvc"
+  } else {
+    "unsupported"
+  }
+  const requested_target = setting(harness.env, "TARGET", cli.target)
+  const target = if requested_target == "" {
+    arch + "-" + suffix
+  } else {
+    requested_target
+  }
+  const tools = harness.env.get("RUNNER_TOOL_CACHE") ?? ""
+  const cache_home = harness.env.get("XDG_CACHE_HOME")
+    ?? if platform.os == "windows" {
+      harness.env.get("LOCALAPPDATA") ?? ""
+    } else {
+      ""
+    }
+  const default_cache = if tools != "" {
+    path_join(tools, "harn-bootstrap")
+  } else if cache_home != "" {
+    path_join(cache_home, "harn", "bootstrap")
+  } else {
+    path_join(harness.env.get("HOME") ?? "", ".cache", "harn", "bootstrap")
+  }
+  const cache_override = setting(harness.env, "CACHE_DIR", cli.cache_dir)
+  const cache = path_join(
+    harness.fs.cwd(),
+    if cache_override == "" {
+      default_cache
+    } else {
+      cache_override
+    },
+  )
+  const install_override = setting(harness.env, "INSTALL_DIR", cli.install_dir)
+  const install_dir = path_join(
+    harness.fs.cwd(),
+    if install_override != "" {
+      install_override
+    } else if tools != "" {
+      path_join(tools, "harn", version, target)
+    } else {
+      path_join(cache, "installs", version, target)
+    },
+  )
+  const request: RuntimeInstallRequest = {
+    version: version,
+    target: target,
+    cache_dir: cache,
+    install_dir: install_dir,
+    installer: harness.env.get("HARN_EXT_BOOTSTRAP_INSTALLER") ?? "harn",
+    token: harness.env.get("HARN_EXT_BOOTSTRAP_TOKEN") ?? "",
+    attempts: cli.max_attempts ?? to_int(harness.env.get("HARN_BOOTSTRAP_MAX_ATTEMPTS") ?? "12"),
+    delay_ms: (cli.retry_delay_seconds
+        ?? to_int(harness.env.get("HARN_BOOTSTRAP_RETRY_DELAY_SECONDS") ?? "10"))
+      * 1000,
+    offline: cli.offline
+      || ["1", "true"].contains(harness.env.get("HARN_EXT_BOOTSTRAP_OFFLINE") ?? ""),
+  }
+  return request
+}
+
+/** Run the shared bootstrap command and emit its receipt and requested Actions outputs. */
+pub fn run_bootstrap(harness: Harness, args: list<string>) {
+  const spec = arguments()
+  if help_requested(args) {
+    harness.stdio.println(render_help(spec))
+    return
+  }
+  const cli = unwrap(parse_typed(spec, args, schema_of(BootstrapOptions))).options
+  const mode = cli.mode ?? "install"
+  require ["install", "resolve"].contains(mode), "unknown bootstrap command"
+  const request = resolve_request(harness, cli)
+  const resolved = runtime_plan(request)
+  const result = if mode == "resolve" {
+    resolved
+  } else {
+    install_runtime(harness, request)
+  }
+  harness.stdio.println(json_stringify(result))
+  if cli.github_output != nil {
+    for key in ["version", "target", "asset", "checksum"] {
+      if result[key] != nil {
+        output(harness.fs, cli.github_output, key, to_string(result[key]))
+      }
+    }
+    for mapping in [
+      {field: "cache_dir", key: "cache-dir"},
+      {field: "install_dir", key: "install-dir"},
+      {field: "binary_path", key: "path"},
+      {field: "source", key: "source-url"},
+      {field: "cache_hit", key: "cache-hit"},
+    ] {
+      if result[mapping.field] != nil {
+        output(harness.fs, cli.github_output, mapping.key, to_string(result[mapping.field]))
+      }
+    }
+    if mode == "resolve" {
+      for path in [resolved.metadata_path, resolved.archive_path] {
+        require !path.contains("\n") && !path.contains("\r")
+          && !path.contains("harn-bootstrap-output"),
+          "invalid cache output path"
+      }
+      harness.fs.append(
+        cli.github_output,
+        "cache-path<<harn-bootstrap-output\n" + resolved.metadata_path + "\n"
+          + resolved.archive_path
+          + "\nharn-bootstrap-output\n",
+      )
+    } else {
+      output(harness.fs, cli.github_output, "receipt", json_stringify(result))
+    }
+  }
+  if mode == "install" && cli.github_path != nil {
+    harness.fs.append(cli.github_path, resolved.install_dir + "\n")
+  }
+  if mode == "install" && cli.github_summary != nil {
+    harness.fs.append(
+      cli.github_summary,
+      "Installed checksum-verified Harn " + resolved.version + " for " + resolved.target + ".\n",
+    )
+  }
+}

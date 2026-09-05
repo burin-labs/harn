@@ -1,0 +1,180 @@
+import {
+  RuntimeInstallRequest,
+  checksum_for_asset,
+  install_runtime,
+  runtime_plan,
+} from "../../crates/harn-stdlib/src/stdlib/runtime/install.harn"
+
+fn fixture(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("runtime-install-")
+  const platform = harness.system.platform()
+  const windows = platform.os == "windows"
+  const target = if windows {
+    "x86_64-pc-windows-msvc"
+  } else if platform.os == "linux" {
+    "x86_64-unknown-linux-gnu"
+  } else {
+    "aarch64-apple-darwin"
+  }
+  const request: RuntimeInstallRequest = {
+    version: "0.10.999",
+    target: target,
+    cache_dir: path_join(root, "cache"),
+    install_dir: path_join(root, "install"),
+    installer: harness.env.get("HARN_EXT_BOOTSTRAP_INSTALLER") ?? harness.env.get("HARN_BIN")
+      ?? "harn",
+    attempts: 1,
+    delay_ms: 0,
+  }
+  const plan = runtime_plan(request)
+  const entries = [
+    {
+      path: if windows {
+        "harn.exe"
+      } else {
+        "harn"
+      },
+      content: "runtime fixture",
+      mode: 493,
+    },
+  ]
+  const archive = if windows {
+    zip_create(entries)
+  } else {
+    gzip_encode(tar_create(entries))
+  }
+  harness.fs.mkdir(dirname(plan.archive_path))
+  harness.fs.write_bytes(plan.archive_path, archive)
+  return {request: request, plan: plan, checksum: sha256_hex(archive)}
+}
+
+@test
+pipeline manifest_accepts_coreutils_checksum_and_rejects_ambiguous_metadata(
+  harness: Harness,
+  task: unknown,
+) {
+  const digest = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+  const valid = digest + "  *harn.tar.gz\r\n"
+  assert_eq(checksum_for_asset(valid, "harn.tar.gz"), digest)
+  assert_eq(checksum_for_asset(valid, "absent.zip"), nil)
+  for invalid in ["", "malformed", valid + valid, digest + "  ../harn.tar.gz"] {
+    assert(
+      is_err(
+        try {
+          checksum_for_asset(invalid, "harn.tar.gz")
+        },
+      ),
+    )
+  }
+}
+
+@test
+pipeline online_manifest_and_digest_pins_preserve_exact_release_integrity(
+  harness: Harness,
+  task: unknown,
+) {
+  const f = fixture(harness)
+  const manifest = f.checksum + "  " + f.plan.asset + "\n"
+  harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 200, body: manifest})
+  const installed = install_runtime(harness, f.request)
+  assert_eq(installed.checksum, f.checksum)
+  assert_eq(installed.checksum_source, "SHA256SUMS")
+  assert(installed.cache_hit)
+  assert_eq(harness.fs.read_text(installed.binary_path), "runtime fixture")
+  harness.fs.write_text(installed.binary_path, "damaged installation")
+  const offline = install_runtime(harness, f.request + {offline: true})
+  assert_eq(offline.binary_sha256, installed.binary_sha256)
+  assert_eq(harness.fs.read_text(offline.binary_path), "runtime fixture")
+  harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 200, body: manifest + "\n"})
+  assert(
+    is_err(
+      try {
+        install_runtime(harness, f.request)
+      },
+    ),
+  )
+  assert_eq(harness.fs.read_text(f.plan.metadata_path), manifest)
+  harness.fs.delete(f.plan.metadata_path)
+  harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 404, body: "missing"})
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.999",
+    {
+      status: 200,
+      body: json_stringify({assets: [{name: f.plan.asset, digest: "sha256:" + f.checksum}]}),
+    },
+  )
+  const pinned = install_runtime(harness, f.request)
+  assert_eq(pinned.checksum_source, "release asset digest")
+  assert_eq(
+    harness.fs.read_text(path_join(dirname(f.plan.metadata_path), f.plan.asset + ".sha256")),
+    f.checksum + "\n",
+  )
+  assert(
+    is_err(
+      try {
+        install_runtime(harness, f.request + {offline: true})
+      },
+    ),
+  )
+  const changed = "0000000000000000000000000000000000000000000000000000000000000000  "
+    + f.plan.asset
+  harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 200, body: changed})
+  assert(
+    is_err(
+      try {
+        install_runtime(harness, f.request)
+      },
+    ),
+  )
+  assert(!harness.fs.exists(f.plan.metadata_path))
+  assert_eq(harness.fs.read_text(pinned.binary_path), "runtime fixture")
+}
+
+@test
+pipeline mismatching_download_never_becomes_cache_or_install_state(
+  harness: Harness,
+  task: unknown,
+) {
+  const f = fixture(harness)
+  harness.fs.delete(f.plan.archive_path)
+  harness.testing.http_mock(
+    "GET",
+    f.plan.base + "SHA256SUMS",
+    {status: 200, body: f.checksum + "  " + f.plan.asset},
+  )
+  harness.testing.http_mock(
+    "GET",
+    f.plan.base + f.plan.asset,
+    {status: 200, body: "unverified archive bytes"},
+  )
+  const failure = try {
+    install_runtime(harness, f.request)
+  }
+  assert(is_err(failure))
+  assert(to_string(unwrap_err(failure)).contains("SHA256 mismatch"))
+  assert(!harness.fs.exists(f.plan.archive_path))
+  assert(!harness.fs.exists(f.request.install_dir))
+  assert_eq(len(harness.testing.http_mock_calls()), 2)
+}
+
+@test
+pipeline absent_release_exhausts_bounded_sources_without_inventing_success(
+  harness: Harness,
+  task: unknown,
+) {
+  const f = fixture(harness)
+  harness.testing.http_mock("GET", f.plan.base + "SHA256SUMS", {status: 404, body: "absent"})
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/burin-labs/harn/releases/tags/v0.10.999",
+    {status: 404, body: "absent"},
+  )
+  const failure = try {
+    install_runtime(harness, f.request)
+  }
+  assert(is_err(failure))
+  assert(to_string(unwrap_err(failure)).contains("release v0.10.999 is absent"))
+  assert_eq(len(harness.testing.http_mock_calls()), 2)
+  assert(!harness.fs.exists(f.request.install_dir))
+}

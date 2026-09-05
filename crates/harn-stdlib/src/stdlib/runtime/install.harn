@@ -1,0 +1,278 @@
+/** Exact release selection and cache orchestration over verified native archive installation. */
+pub type RuntimeInstallRequest = {
+  version: string,
+  target: string,
+  cache_dir: string,
+  install_dir: string,
+  installer: string,
+  offline?: bool,
+  token?: string,
+  attempts?: int,
+  delay_ms?: int,
+}
+
+type ReleaseAsset = {name: string, digest?: string}
+
+type ReleaseMetadata = {assets: list<ReleaseAsset>}
+
+type NativeReceipt = {
+  schema_version: "harn-install-v1",
+  version: string,
+  binary_path: string,
+  binary_sha256: string,
+  checksum: string,
+}
+
+type NativeEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data?: NativeReceipt,
+  error?: {message: string},
+}
+
+pub type RuntimeReceipt = {
+  schema_version: "harn-bootstrap-v1",
+  version: string,
+  target: string,
+  binary_path: string,
+  binary_sha256: string,
+  checksum: string,
+  source: string,
+  cache_hit: bool,
+  checksum_source: string,
+}
+
+pub fn checksum_for_asset(manifest: string, asset: string) -> string? {
+  let checksums: dict<string, string> = {}
+  for line in split(manifest, "\n") {
+    if trim(line) == "" {
+      continue
+    }
+    const fields = regex_captures(r"^([a-fA-F0-9]{64})[ \t]+\*?([^/\\\x00]+)$", trim(line))[0]
+    require fields != nil, "malformed SHA256SUMS line"
+    const name = fields.groups[1]
+    require checksums[name] == nil, "SHA256SUMS contains duplicate entry for " + name
+    checksums[name] = fields.groups[0].to_lower()
+  }
+  require len(checksums) > 0, "SHA256SUMS is empty"
+  return checksums[asset]
+}
+
+fn publish_immutable(fs: HarnessFs, path: string, text: string) {
+  if !fs.exists(path) {
+    // A competing writer may win creation; the read-back binds either outcome.
+    const publication = try {
+      fs.replace_text(
+        path,
+        text,
+        {create: true, overwrite: false, create_parents: true, durability: "flush"},
+      )
+    }
+    require is_ok(publication) || fs.exists(path), "cannot publish release metadata"
+  }
+  require fs.read_text(path) == text, "published checksum metadata changed for an exact release"
+}
+
+fn expected_checksum(
+  harness: Harness,
+  request: RuntimeInstallRequest,
+  metadata: string,
+  base: string,
+  asset: string,
+) -> {checksum: string, source: string} {
+  if request.offline ?? false {
+    require harness.fs.exists(metadata), "offline checksum metadata is unavailable"
+    const checksum = checksum_for_asset(harness.fs.read_text(metadata), asset)
+    require checksum != nil, "SHA256SUMS has no runtime asset"
+    return {checksum: checksum, source: "SHA256SUMS"}
+  }
+  const options = {timeout_ms: 60000}
+  const pin = path_join(dirname(metadata), asset + ".sha256")
+  const attempts = request.attempts ?? 12
+  let last_failure = ""
+  require attempts > 0 && (request.delay_ms ?? 10000) >= 0, "invalid runtime retry budget"
+  for attempt in range(0, attempts) {
+    const manifest = try {
+      const response = harness.net.request("GET", base + "SHA256SUMS", options)
+      require response.status == 200, "SHA256SUMS HTTP " + to_string(response.status)
+      const checksum = checksum_for_asset(response.body, asset)
+      require checksum != nil, "SHA256SUMS has no runtime asset"
+      {checksum: checksum, body: response.body}
+    }
+    if is_ok(manifest) {
+      const verified = unwrap(manifest)
+      require !harness.fs.exists(pin) || trim(harness.fs.read_text(pin)) == verified.checksum,
+        "SHA256SUMS disagrees with the verified asset digest"
+      publish_immutable(harness.fs, metadata, verified.body)
+      return {checksum: verified.checksum, source: "SHA256SUMS"}
+    }
+    const digest = try {
+      const response = harness.net.request(
+        "GET",
+        "https://api.github.com/repos/burin-labs/harn/releases/tags/v"
+          + request.version,
+        options
+          + {
+            headers: if (request.token ?? "") == "" {
+              {accept: "application/vnd.github+json"}
+            } else {
+              {
+                accept: "application/vnd.github+json",
+                authorization: "Bearer " + (request.token ?? ""),
+              }
+            },
+          },
+      )
+      require response.status != 404, "release v" + request.version + " is absent"
+      require response.status == 200, "release metadata HTTP " + to_string(response.status)
+      const release = schema_expect(json_parse(response.body), schema_of(ReleaseMetadata))
+      let checksum = ""
+      let found = false
+      for record in release.assets {
+        if record.name == asset {
+          found = true
+          checksum = record.digest ?? ""
+          break
+        }
+      }
+      require found, "release has no asset named " + asset
+      require regex_match(r"^sha256:[a-f0-9]{64}$", checksum) != nil,
+        "runtime release has no verified SHA256"
+      regex_replace(r"^sha256:", "", checksum)
+    }
+    if is_ok(digest) {
+      const checksum = unwrap(digest)
+      publish_immutable(harness.fs, pin, checksum + "\n")
+      return {checksum: checksum, source: "release asset digest"}
+    }
+    last_failure = to_string(unwrap_err(manifest)) + "; " + to_string(unwrap_err(digest))
+    if attempt + 1 < attempts {
+      harness.clock.sleep_ms(request.delay_ms ?? 10000)
+    }
+  }
+  throw "no runtime verification source after " + to_string(attempts) + " attempts: " + last_failure
+}
+
+pub type RuntimePlan = {
+  version: string,
+  target: string,
+  asset: string,
+  cache_dir: string,
+  install_dir: string,
+  archive_path: string,
+  metadata_path: string,
+  base: string,
+}
+
+pub fn runtime_plan(request: RuntimeInstallRequest) -> RuntimePlan {
+  const version = regex_replace(r"^v", "", request.version)
+  require regex_match(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$", version) != nil,
+    "invalid runtime version"
+  require [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+  ]
+    .contains(request.target),
+    "unsupported runtime target"
+  const extension = if request.target == "x86_64-pc-windows-msvc" {
+    "zip"
+  } else {
+    "tar.gz"
+  }
+  const asset = "harn-" + request.target + "." + extension
+  const base = "https://github.com/burin-labs/harn/releases/download/v" + version + "/"
+  const cache_dir = path_normalize(request.cache_dir)
+  const archive = path_join(cache_dir, "downloads", version, asset)
+  const metadata = path_join(cache_dir, "metadata", version, "SHA256SUMS")
+  return {
+    version: version,
+    target: request.target,
+    asset: asset,
+    cache_dir: cache_dir,
+    install_dir: path_normalize(request.install_dir),
+    archive_path: archive,
+    metadata_path: metadata,
+    base: base,
+  }
+}
+
+pub fn install_runtime(harness: Harness, request: RuntimeInstallRequest) -> RuntimeReceipt {
+  const plan = runtime_plan(request)
+  const version = plan.version
+  const asset = plan.asset
+  const base = plan.base
+  const archive = plan.archive_path
+  const metadata = plan.metadata_path
+  const verified = expected_checksum(harness, request + {version: version}, metadata, base, asset)
+  const checksum = verified.checksum
+  const options = {
+    retry: {max: request.attempts ?? 12, backoff_ms: request.delay_ms ?? 10000},
+    timeout_ms: 60000,
+    max_response_bytes: 1073741824,
+  }
+  let cached = harness.fs.exists(archive)
+  for attempt in [0, 1] {
+    const candidate = if cached {
+      archive
+    } else {
+      path_join(dirname(archive), ".harn-bootstrap-" + harness.random.uuid() + "-" + asset)
+    }
+    const attempt_result = try {
+      if !cached {
+        require !(request.offline ?? false), "offline runtime archive is unavailable"
+        harness.fs.mkdir(dirname(archive))
+        const response = harness.net.download(base + asset, candidate, options)
+        require response.status == 200, "runtime archive download failed"
+      }
+      const outcome = harness.process.run(
+        {
+          program: request.installer,
+          args: [
+            "upgrade",
+            "--archive",
+            candidate,
+            "--archive-sha256",
+            checksum,
+            "--install-dir",
+            plan.install_dir,
+            "--version",
+            version,
+            "--json",
+          ],
+          timeout_ms: 120000,
+        },
+      )
+      const receipt = schema_expect(json_parse(outcome.stdout), schema_of(NativeEnvelope))
+      require receipt.schemaVersion == 1, "unsupported native installer schema"
+      if outcome.success && receipt.ok {
+        require receipt.data != nil, "native installer returned no receipt"
+        if !cached {
+          harness.fs.rename(candidate, archive)
+        }
+        return receipt.data
+          + {
+            schema_version: "harn-bootstrap-v1",
+            target: request.target,
+            source: base + asset,
+            cache_hit: cached,
+            checksum_source: verified.source,
+          }
+      }
+      require cached && attempt == 0 && !(request.offline ?? false),
+        receipt.error?.message
+        ?? "runtime installation failed"
+      cached = false
+    } finally {
+      if candidate != archive && harness.fs.exists(candidate) {
+        harness.fs.delete(candidate)
+      }
+    }
+    if is_err(attempt_result) {
+      throw unwrap_err(attempt_result)
+    }
+  }
+  throw "runtime installation exhausted its cache recovery"
+}
