@@ -172,6 +172,52 @@ mod tests {
         assert!(value.get("cache_control").is_none());
     }
 
+    /// Wire-level falsifier for the default-on flip. Declaring
+    /// `prompt_caching` on the OpenAI rules also flips `cache` on by default,
+    /// because `cache` resolves to `caps.prompt_caching` when the caller sets
+    /// nothing. The whole flip rests on the serialized request still carrying
+    /// no `cache_control`: OpenAI rejects one with
+    /// `Unknown parameter: 'cache_control'.` rather than ignoring it, so a
+    /// marker here is a hard 400 on every OpenAI call, not a wasted field.
+    ///
+    /// This asserts on the real builder with the real resolved capabilities,
+    /// not on a hand-made `Capabilities`, which is the difference between
+    /// testing the policy and testing the route.
+    #[test]
+    fn openai_route_with_cache_on_sends_no_cache_control() {
+        for model in ["gpt-6-astra", "gpt-5.6-luna", "gpt-4o-mini"] {
+            let mut opts = crate::llm::api::options::base_opts("openai");
+            opts.model = model.to_string();
+            opts.cache = true;
+            let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+            let built =
+                crate::llm::providers::openai_compat::OpenAiCompatibleProvider::build_request_body(
+                    &payload,
+                );
+            assert!(
+                !body_contains_cache_control(&built),
+                "{model} must not carry cache_control anywhere in the request"
+            );
+        }
+    }
+
+    /// Positive control for the falsifier above. If the OpenAI assertion passed
+    /// because no builder emits a marker at all, or because `cache` never
+    /// reaches the builder, this fails and says which.
+    #[test]
+    fn anthropic_route_with_cache_on_does_send_cache_control() {
+        let mut opts = crate::llm::api::options::base_opts("anthropic");
+        opts.model = "claude-opus-4-5-20251101".to_string();
+        opts.cache = true;
+        let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+        let built =
+            crate::llm::providers::anthropic::AnthropicProvider::build_request_body(&payload);
+        assert!(
+            body_contains_cache_control(&built),
+            "an Anthropic route with caching on must still carry a cache_control marker"
+        );
+    }
+
     /// The flag is the outer gate: a route that does not declare prompt
     /// caching gets no marker whatever its style says.
     #[test]
