@@ -1,0 +1,31 @@
+// The repair scenarios share the same named effects; each scenario owns its
+// scripted failure, available mutation, and verification dispatch phase.
+pub fn repair_test_tools(error: string, with_edit: bool = true, kind: string = "read") {
+  let tools = tool_define(
+    tool_registry(),
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw error
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: kind, completion_evidence_role: "verification"},
+    },
+  )
+  if with_edit {
+    tools = tool_define(
+      tools,
+      "apply_fix",
+      "Apply a corrective edit",
+      {
+        handler: { _args -> "edit applied" },
+        parameters: {},
+        returns: {type: "string"},
+        annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      },
+    )
+  }
+  return tools
+}

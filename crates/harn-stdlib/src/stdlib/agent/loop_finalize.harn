@@ -166,7 +166,7 @@ pub fn __agent_loop_project_terminal_result(
   } else {
     agent_required_tools_enforce(harness.agent, harness.obs, result_with_stalls, opts)
   }
-  let final_result = enforced
+  let final_result = enforced + {stall_checkpoint: state.stall_checkpoint}
   if opts?.verify_completion_judge != nil {
     final_result = final_result
       + {

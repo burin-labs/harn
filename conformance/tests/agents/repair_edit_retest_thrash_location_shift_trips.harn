@@ -35,7 +35,7 @@ fn repair_tools() {
       },
       parameters: {loc: {type: "string", description: "file position"}},
       returns: {type: "string"},
-      annotations: {kind: "read"},
+      annotations: {kind: "read", completion_evidence_role: "verification"},
     },
   )
   tools = tool_define(

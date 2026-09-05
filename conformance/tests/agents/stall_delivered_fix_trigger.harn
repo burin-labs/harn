@@ -27,6 +27,10 @@ fn observe(agent: HarnessAgent, config: any, state: any, prev_dispatch: any) {
     "",
     false,
     false,
+    "",
+    nil,
+    false,
+    prev_dispatch,
   )
 }
 

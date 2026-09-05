@@ -62,6 +62,8 @@ fn observe_fail(agent: HarnessAgent, config: dict, state: any, error_text: strin
     false,
     "",
     {verify_score: 1},
+    false,
+    [{tool_name: "run", ok: false, error: error_text}],
   )
 }
 

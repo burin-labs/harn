@@ -26,6 +26,11 @@ import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 import { __agent_loop_turn_setup } from "std/agent/loop_turn_setup"
+import {
+  __agent_stall_validate_checkpoint,
+  __agent_stall_verification_dispatch,
+  agent_stall_initial_checkpoint,
+} from "std/agent/stall_checkpoint"
 
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
@@ -67,9 +72,15 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     let suspend_result = nil
     let abandonment = nil
     let declared_artifacts = nil
-    let stall_state = agent_stall_initial_state()
+    let stall_checkpoint = opts?.stall_checkpoint
+      ?? agent_stall_initial_checkpoint(session.session_id)
+    if stall_checkpoint.session_id != session.session_id {
+      throw "agent_loop: stall checkpoint belongs to a different session"
+    }
+    __agent_stall_validate_checkpoint(stall_checkpoint)
+    let stall_state = stall_checkpoint.state
     let stall_enabled_seen = false
-    let stall_prev_dispatch = nil
+    let stall_prev_dispatch = stall_checkpoint.dispatch
     let stall_hard_stop_rescues = 0
     // Evidence revision the last recovery acted on. Repeating `proceed` on the
     // identical revision is the same evidence seen twice, not new information.
@@ -302,7 +313,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           turn_end_judge_invocations,
           iteration_index + 1,
         )
-        const stall_prev_turn_made_edit = __turn_made_edit(stall_prev_dispatch, opts?.tools)
+        const stall_prev_turn_made_edit = stall_checkpoint.dispatch_made_edit
         // Raw emission, not sanitized visible text. Verdict JSON suffixes
         // strip to a shared prefix and would collide distinct turns.
         const stall_observation = agent_stall_observe_tool_calls(
@@ -323,8 +334,12 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             iteration: iteration_index + 1,
             session_id: session.session_id,
           },
+          stall_checkpoint.consumed_dispatch_position == stall_checkpoint.dispatch_position,
+          stall_checkpoint.verification_dispatch,
         )
         stall_state = stall_observation.state
+        stall_checkpoint = stall_checkpoint
+          + {state: stall_state, consumed_dispatch_position: stall_checkpoint.dispatch_position}
         stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
         if agent_stall_verified_write_satisfied(turn_opts?.stall_diagnostics, stall_state) {
           terminal_write_unverified = false
@@ -884,6 +899,19 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           },
         )
         stall_state = completed_observation.state
+        stall_checkpoint = stall_checkpoint
+          + {
+            state: stall_state,
+            dispatch: dispatch,
+            dispatch_position: stall_checkpoint.dispatch_position
+              + if dispatch != nil {
+                1
+              } else {
+                0
+              },
+            dispatch_made_edit: __turn_made_edit(dispatch, opts?.tools),
+            verification_dispatch: __agent_stall_verification_dispatch(dispatch, turn_opts),
+          }
         // Register long-running handles (`status=="running"` with a `handle_id`).
         // Awaited rows gate the next no-tool-call boundary into a hold; the
         // loop owns the decision cadence, so the model never polls.
@@ -992,6 +1020,11 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             budget: budget,
             bridge_step_delivered: bridge_step_delivered,
             completed_no_information_gain: completed_observation.no_information_gain,
+            stall_checkpoint: if stall_enabled_seen {
+              stall_checkpoint
+            } else {
+              nil
+            },
             consecutive_failure_count: consecutive_failure_count,
             dispatch: dispatch,
             dispatched_turn_opts: dispatched.turn_opts,
@@ -1131,6 +1164,11 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
       extensions_used: extensions_used,
       last_tool_count: last_tool_count,
       stall_state: stall_state,
+      stall_checkpoint: if stall_enabled_seen {
+        stall_checkpoint + {state: stall_state}
+      } else {
+        nil
+      },
       stall_enabled_seen: stall_enabled_seen,
       verify_completion_judge_invocations: verify_completion_judge_invocations,
       verify_completion_judge_vetoes: verify_completion_judge_vetoes,

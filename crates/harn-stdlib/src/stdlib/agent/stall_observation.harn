@@ -97,33 +97,6 @@ pub fn __agent_clip_head_tail(text: any, cap: int) {
   return head + "\n…[" + to_string(omitted) + " chars elided — middle of output]…\n" + tail
 }
 
-/**
- * Pick the representative verification result for a turn from its dispatch:
- * the FIRST failing result (the diagnostic the agent must fix) if any,
- * otherwise the first result (a "pass" turn). Returns nil when there is no
- * dispatch result to classify (the turn made no observed tool call), so the
- * caller leaves the current-failure model untouched.
- *
- * @effects: [agent]
- * @errors: []
- */
-pub fn __agent_stall_turn_result(prev_dispatch: AgentToolDispatch) {
-  if prev_dispatch == nil {
-    return nil
-  }
-  const results = __dispatch_results_list(prev_dispatch)
-  let first = nil
-  for result in results {
-    if !__agent_stall_result_ok(result) {
-      return result
-    }
-    if first == nil {
-      first = result
-    }
-  }
-  return first
-}
-
 pub fn __agent_stall_delta_previous(state: AgentStallState) {
   if state.last_diagnostic_class != "fail" {
     return nil
@@ -146,41 +119,11 @@ pub fn __agent_stall_gate_failure(gate: any) -> bool {
 }
 
 /**
- * __agent_stall_fold_diagnostic folds the current-failure model for one turn.
- * It is a PURE function of (state, prev_dispatch, turn_made_edit):
- *
- *  - It classifies the turn's representative verification result (the first
- *    failing dispatch result, else the first result) through
- *    std/verification's diagnostic-delta helper. That helper owns
- *    location/temp-path normalization and the stale/advisory gate contract.
- *  - On a successful workspace-mutating edit this turn it bumps `write_epoch`
- *    (which arms the post-edit re-verify mandate the loop honors).
- *  - The failure SIGNATURE is the progress signal: a productive edit changes
- *    the error (signature changes => streak resets — legitimate progress, no
- *    false positive); a flailing edit leaves the SAME error (signature
- *    identical => streak advances — real thrash). So the streak advances on the
- *    same signature REGARDLESS of intervening edits.
- *  - It advances/resets `same_diagnostic_streak`:
- *      same failure signature  => futile  (streak + 1), even across edits
- *      different signature      => reset to 1 (a different mistake, or progress)
- *      "pass"                   => clear streak, reverify_owed, edit_since_failure
- *
- * Result handling:
- *  - a FAILING result  => fold the streak as above; this is verification
- *    evidence, so any owed re-verify is satisfied (clear reverify_owed /
- *    edit_since_failure). A turn that BOTH edits and re-tests still classifies
- *    here: __agent_stall_turn_result returns the FIRST failing result, so the
- *    re-test's failure is seen past the edit's own "ok" (the edit bumps the
- *    epoch; the fail still advances the streak).
- *  - a non-failing result, NOT an edit turn => a genuine passing verification
- *    clears the current-failure model.
- *  - a non-failing result on an EDIT turn => the result is the edit's own
- *    success, NOT verification of the failure. Owe a re-verify and preserve the
- *    failure model (same as the no-result edit case).
- *  - no result (prev_dispatch nil/empty) => if this turn made an edit on top of
- *    a live failure, owe a re-verify (reverify_owed / edit_since_failure) and
- *    bump the epoch; otherwise leave the model untouched (epoch still bumps on
- *    an edit).
+ * Fold only declared verification evidence into the current-failure model.
+ * The dispatch owner selects the latest verification; unrelated successful
+ * tools cannot clear a failure. Successful writes advance the epoch, including
+ * an edit followed by verification in the same batch. Diagnostic normalization
+ * and stale/advisory classification remain owned by std/verification.
  *
  * @effects: [agent]
  * @errors: []
@@ -188,7 +131,7 @@ pub fn __agent_stall_gate_failure(gate: any) -> bool {
 pub fn __agent_stall_fold_diagnostic(
   agent: HarnessAgent,
   state: AgentStallState,
-  prev_dispatch: AgentToolDispatch,
+  verification_dispatch: AgentToolDispatch,
   turn_made_edit: bool,
 ) -> AgentStallState {
   // Edit bookkeeping first: a successful workspace mutation advances the epoch,
@@ -205,7 +148,12 @@ pub fn __agent_stall_fold_diagnostic(
   // `turns_since_clean_verify` knob is set, so this leaves default decisions
   // byte-identical.
   const new_turns_since_clean_verify = state.turns_since_clean_verify + 1
-  const result = __agent_stall_turn_result(prev_dispatch)
+  const results = verification_dispatch ?? []
+  const result = if len(results) > 0 {
+    results[len(results) - 1]
+  } else {
+    nil
+  }
   const result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
   const gate = if result_is_non_ok {
     __agent_stall_gate_input(agent, __agent_stall_delta_previous(state), result)
@@ -234,7 +182,7 @@ pub fn __agent_stall_fold_diagnostic(
       return state
         + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
-    if turn_made_edit {
+    if turn_made_edit && result == nil {
       if state.last_diagnostic_class == "fail" {
         return state
           + {
@@ -258,8 +206,8 @@ pub fn __agent_stall_fold_diagnostic(
     } else {
       __agent_stall_result_outcome(agent, result).signature
     }
-    const verified_epoch = if state.write_epoch > state.verified_write_epoch {
-      state.write_epoch
+    const verified_epoch = if new_write_epoch > state.verified_write_epoch {
+      new_write_epoch
     } else {
       state.verified_write_epoch
     }
@@ -1095,15 +1043,15 @@ pub fn __agent_stall_apply_repair(
   // independently gated on its own config, so folding here changes nothing when only
   // the knob is set beyond maintaining the counter and arming its floor.
   const clean_verify_floor_active = config.turns_since_clean_verify != nil
-  if !should_fold_current_failure && !clean_verify_floor_active {
-    return observation
-  }
   const folded = __agent_stall_fold_diagnostic(
     agent,
     observation.state,
     prev_dispatch,
     turn_made_edit,
   )
+  if !should_fold_current_failure && !clean_verify_floor_active {
+    return observation + {state: folded}
+  }
   const hard_cap_due = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
     && folded.failing_verify_turns
@@ -1330,6 +1278,10 @@ pub fn __agent_stall_observe_monologue_actuation(
  * actuation detectors. `turn_made_edit` describes the prior dispatch;
  * `payload` reaches configured host fact callbacks only. Completed-dispatch
  * actuation credit is owned by the loop after tool results exist.
+ * `verification_dispatch` contains only completed declared verification results,
+ * in execution order. Its empty default supplies no verification evidence;
+ * raw `prev_dispatch` remains the action/repetition input, never a passing check.
+ * `diagnostic_consumed` prevents committing the same dispatch twice on resume.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -1349,6 +1301,8 @@ pub fn agent_stall_observe_tool_calls(
   turn_made_edit: bool = false,
   turn_stop_reason: string = "",
   payload: any = nil,
+  diagnostic_consumed: bool = false,
+  verification_dispatch: list = [],
 ) -> AgentStallObservation {
   const observation = __agent_stall_observe_core(
     agent,
@@ -1373,8 +1327,16 @@ pub fn agent_stall_observe_tool_calls(
     observation.config,
     observation,
     iteration,
-    prev_dispatch,
-    turn_made_edit,
+    if diagnostic_consumed {
+      nil
+    } else {
+      verification_dispatch
+    },
+    if diagnostic_consumed {
+      false
+    } else {
+      turn_made_edit
+    },
     defer_feedback,
   )
   // Per-turn action-signal intake. Inert (returns `repaired`

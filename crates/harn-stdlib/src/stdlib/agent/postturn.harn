@@ -1049,6 +1049,7 @@ pub fn agent_compute_post_turn(
   const has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
   const payload = {
     session_id: session.session_id,
+    stall_checkpoint: opts?._stall_checkpoint,
     session: {id: session.session_id},
     iteration: iteration,
     has_tool_calls: has_tool_calls,

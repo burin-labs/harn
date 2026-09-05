@@ -1,0 +1,70 @@
+import { __judge_tool_descriptor } from "std/agent/judge_evidence"
+import { __tool_result_name } from "std/agent/loop_result_status"
+import { agent_stall_initial_state } from "std/agent/stall_config"
+import { __agent_stall_fold_diagnostic } from "std/agent/stall_observation"
+import { AgentStallCheckpoint, AgentStallState } from "std/agent/stall_types"
+
+/**
+ * Start an explicit detector lifetime shared by sequential stages of one session.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_stall_initial_checkpoint(session_id: string) -> AgentStallCheckpoint {
+  return {
+    session_id: session_id,
+    state: agent_stall_initial_state(),
+    dispatch: nil,
+    dispatch_position: 0,
+    consumed_dispatch_position: 0,
+    dispatch_made_edit: false,
+    verification_dispatch: [],
+  }
+}
+
+/**
+ * Inspect the latest completed dispatch without advancing the committed checkpoint.
+ * The next loop commits pending evidence through its normal pre-turn fold once.
+ * @effects: [agent]
+ * @errors: [agent_loop]
+ */
+pub fn agent_stall_checkpoint_state(
+  agent: HarnessAgent,
+  checkpoint: AgentStallCheckpoint,
+) -> AgentStallState {
+  __agent_stall_validate_checkpoint(checkpoint)
+  if checkpoint.consumed_dispatch_position == checkpoint.dispatch_position {
+    return checkpoint.state
+  }
+  return __agent_stall_fold_diagnostic(
+    agent,
+    checkpoint.state,
+    checkpoint.verification_dispatch,
+    checkpoint.dispatch_made_edit,
+  )
+}
+
+pub fn __agent_stall_validate_checkpoint(checkpoint: AgentStallCheckpoint) -> nil {
+  require checkpoint.consumed_dispatch_position >= 0
+    && checkpoint.dispatch_position >= checkpoint.consumed_dispatch_position
+    && checkpoint.dispatch_position <= checkpoint.consumed_dispatch_position + 1,
+    "agent_loop: invalid stall checkpoint dispatch position"
+  require checkpoint.consumed_dispatch_position == checkpoint.dispatch_position
+    || checkpoint.dispatch != nil,
+    "agent_loop: pending stall checkpoint has no dispatch"
+  return nil
+}
+
+// Completion and stall decisions share the declared verification role. Preserve
+// dispatch order: a later verification supersedes an earlier one in this turn.
+pub fn __agent_stall_verification_dispatch(dispatch: list?, opts: dict) -> list {
+  let latest = []
+  for result in dispatch ?? [] {
+    const semantics = __judge_tool_descriptor(opts, __tool_result_name(result))
+    if semantics.evidence_role == "verification"
+      && (result?.dispatch_receipt?.disposition ?? "executed") == "executed"
+      && result?.status != "running" {
+      latest = [result]
+    }
+  }
+  return latest
+}

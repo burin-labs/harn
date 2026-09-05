@@ -1,3 +1,4 @@
+import { AgentStallCheckpoint } from "std/agent/stall_types"
 // Canonical declarations for the typed agent-loop option surface.
 // `std/agent/options` is the public facade and re-exports these aliases.
 // Rust twins for the workflow-facing policies live in
@@ -404,6 +405,7 @@ pub type AgentCapabilitySpec = {
 
 /** Persistence, suspension, compaction, and daemon extensions. */
 pub type AgentLifecycleSpec = {
+  stall_checkpoint?: AgentStallCheckpoint,
   stall_diagnostics?: bool | StallDiagnostics,
   daemon?: bool,
   persist_path?: string,
