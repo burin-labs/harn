@@ -27,4 +27,16 @@ pub(crate) struct UpgradeArgs {
     /// See `docs/src/cli-json-contract.md` for the envelope shape.
     #[arg(long)]
     pub json: bool,
+
+    /// Install a locally supplied release archive without fetching or changing hook enrollment.
+    #[arg(long, requires_all = ["archive_sha256", "install_dir", "version"], conflicts_with_all = ["check", "no_verify"])]
+    pub archive: Option<std::path::PathBuf>,
+
+    /// Required SHA256 of the local archive, verified before extraction.
+    #[arg(long, requires = "archive")]
+    pub archive_sha256: Option<String>,
+
+    /// Destination for the verified local archive installation.
+    #[arg(long, requires = "archive")]
+    pub install_dir: Option<std::path::PathBuf>,
 }

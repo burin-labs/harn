@@ -85,6 +85,23 @@ pub fn atomic_write_with_mode(path: &Path, bytes: &[u8], mode: u32) -> io::Resul
     .map(|_| ())
 }
 
+/// Copy a file through the same bounded-memory, durable replacement boundary.
+/// The requested mode is applied before publication, so executables never
+/// appear at their destination before their permissions are ready.
+pub fn atomic_copy_with_mode(
+    source: &Path,
+    destination: &Path,
+    mode: u32,
+) -> io::Result<AtomicWriteReceipt> {
+    let mut source = File::open(source)?;
+    atomic_write_stream_with_durability_and_mode(
+        destination,
+        AtomicWriteDurability::Flush,
+        Some(mode),
+        |writer| io::copy(&mut source, writer).map(|_| ()),
+    )
+}
+
 /// Atomically write `bytes` with an explicit durability request.
 pub fn atomic_write_with_durability(
     path: &Path,

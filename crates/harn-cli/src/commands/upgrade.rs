@@ -9,7 +9,7 @@
 
 use std::env;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -62,6 +62,15 @@ pub(crate) enum UpgradeMode {
     Install,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct InstallReceipt {
+    schema_version: &'static str,
+    version: String,
+    binary_path: std::path::PathBuf,
+    binary_sha256: String,
+    checksum: String,
+}
+
 const REPO: &str = "burin-labs/harn";
 const RELEASES_BASE: &str = "https://github.com/burin-labs/harn/releases";
 const USER_AGENT: &str = concat!("harn-cli/", env!("CARGO_PKG_VERSION"));
@@ -74,274 +83,307 @@ enum ChecksumVerification {
     Unavailable(u16),
 }
 
-/// `harn upgrade` lives on tokio's blocking pool so the synchronous
-/// `reqwest::blocking` / `tar::Archive` / `fs::rename` calls below can
-/// share a single straight-line implementation. The CLI dispatcher
-/// runs inside a tokio multi-thread runtime, where dropping a nested
-/// blocking client on the async thread itself panics.
+/// Synchronous installation runs on the blocking pool; output is only a projection.
 pub(crate) async fn run(args: UpgradeArgs) -> Result<(), String> {
-    if args.json {
-        let exit = tokio::task::spawn_blocking(move || run_blocking_json(args))
-            .await
-            .map_err(|error| format!("upgrade task failed: {error}"))?;
-        if exit != 0 {
-            std::process::exit(exit);
-        }
-        return Ok(());
-    }
-    tokio::task::spawn_blocking(move || run_blocking(args))
+    let json = args.json;
+    let result = tokio::task::spawn_blocking(move || run_blocking(args))
         .await
-        .map_err(|error| format!("upgrade task failed: {error}"))?
+        .map_err(|error| format!("upgrade task failed: {error}"))?;
+    if json && result.is_err() {
+        std::process::exit(1);
+    }
+    result
 }
 
 fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
-    let triple = target_triple()?;
-    let current = env!("CARGO_PKG_VERSION");
-
-    let target = match args.version.as_deref() {
-        Some(v) => normalize_version(v)?,
-        None => fetch_latest_tag()?,
-    };
-
-    println!("Installed: v{current}");
-    println!("Target:    {target}");
-
-    if args.check {
-        return Ok(());
-    }
-
-    if !args.force && target.trim_start_matches('v') == current {
-        println!("Already on the latest release.");
-        return Ok(());
-    }
-
-    let current_exe =
-        env::current_exe().map_err(|error| format!("failed to resolve current exe: {error}"))?;
-    let current_exe = current_exe
-        .canonicalize()
-        .unwrap_or_else(|_| current_exe.clone());
-    let install_dir = current_exe
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", current_exe.display()))?
-        .to_path_buf();
-
-    let archive_name = format!("harn-{triple}.tar.gz");
-    let archive_url = format!("{RELEASES_BASE}/download/{target}/{archive_name}");
-    let checksums_url = format!("{RELEASES_BASE}/download/{target}/SHA256SUMS");
-
-    let staging = tempfile::tempdir()
-        .map_err(|error| format!("failed to create staging directory: {error}"))?;
-    let archive_path = staging.path().join(&archive_name);
-
-    println!("Downloading {archive_name}");
-    download(&archive_url, &archive_path)?;
-
-    let verification = if args.no_verify {
-        eprintln!("warning: SHA256 verification skipped (--no-verify)");
-        ChecksumVerification::Unavailable(0)
-    } else {
-        let result = verify_checksum(&checksums_url, &archive_name, &archive_path)?;
-        match result {
-            ChecksumVerification::Verified => println!("Verified SHA256 ({archive_name})"),
-            ChecksumVerification::Unavailable(status) => eprintln!(
-                "warning: no SHA256SUMS published for this release (status {status}); skipping verification"
-            ),
+    if let Some(archive) = &args.archive {
+        let result = install_verified_archive(
+            archive,
+            args.archive_sha256
+                .as_deref()
+                .expect("clap requires archive SHA256"),
+            args.install_dir
+                .as_deref()
+                .expect("clap requires destination"),
+            args.version.as_deref().expect("clap requires version"),
+        );
+        if args.json {
+            let envelope = match &result {
+                Ok(receipt) => JsonEnvelope::ok(UPGRADE_SCHEMA_VERSION, receipt.clone()),
+                Err(error) => {
+                    JsonEnvelope::err(UPGRADE_SCHEMA_VERSION, "install_failed", error.clone())
+                }
+            };
+            println!("{}", json_envelope::to_string_pretty(&envelope));
+        } else if let Ok(receipt) = &result {
+            println!("Installed {}", receipt.binary_path.display());
         }
-        result
-    };
-
-    println!("Extracting");
-    extract_tarball(&archive_path, staging.path())?;
-
-    let staged_binary = staging.path().join(harn_binary_name());
-    if !staged_binary.exists() {
-        return Err(format!(
-            "archive did not contain {} — refusing to upgrade",
-            harn_binary_name(),
-        ));
+        return result.map(|_| ());
     }
-
-    let hook_report = install_binaries_and_refresh_hook_runtime(
-        verification,
-        &target,
-        &staged_binary,
-        staging.path(),
-        &install_dir,
-    )
-    .map_err(|error| error.message)?;
-    print_hook_runtime_outcome(&hook_report);
-
-    println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
-    Ok(())
+    let mut report = None;
+    let result = upgrade(&args, &mut report);
+    if args.json {
+        let envelope = JsonEnvelope {
+            schema_version: UPGRADE_SCHEMA_VERSION,
+            ok: result.is_ok(),
+            data: report,
+            error: result.as_ref().err().map(|error| json_envelope::JsonError {
+                code: error.code.to_string(),
+                message: error.message.clone(),
+                details: serde_json::Value::Null,
+            }),
+            warnings: Vec::new(),
+        };
+        println!("{}", json_envelope::to_string_pretty(&envelope));
+    }
+    result.map_err(|error| error.message)
 }
 
-/// JSON variant. Mirrors `run_blocking` but emits a [`JsonEnvelope`]
-/// to stdout and routes every log line to stderr to keep stdout
-/// single-document parseable.
-fn run_blocking_json(args: UpgradeArgs) -> i32 {
-    let triple = match target_triple() {
-        Ok(t) => t,
-        Err(error) => return emit_upgrade_error("unsupported_target", error),
+/// Hash the bytes copied into a private handle, never a mutable shared-cache inode.
+fn verified_archive_snapshot(archive: &Path, expected_sha256: &str) -> Result<fs::File, String> {
+    if expected_sha256.len() != 64 || !expected_sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("archive SHA256 must contain exactly 64 hexadecimal characters".to_string());
+    }
+    let mut source = fs::File::open(archive).map_err(|error| error.to_string())?;
+    let mut snapshot = tempfile::tempfile().map_err(|error| error.to_string())?;
+    if copy_sha256_hex(&mut source, &mut snapshot, archive)? != expected_sha256.to_ascii_lowercase()
+    {
+        return Err("archive SHA256 mismatch; refusing to install".to_string());
+    }
+    snapshot.rewind().map_err(|error| error.to_string())?;
+    Ok(snapshot)
+}
+
+/// Native effects for the Harn installer: bounded archive reads, writer exclusion,
+/// executable publication, and a receipt committed after the complete bundle.
+fn install_verified_archive(
+    archive: &Path,
+    expected_sha256: &str,
+    destination: &Path,
+    version: &str,
+) -> Result<InstallReceipt, String> {
+    let version = normalize_version(version)?;
+    let input = verified_archive_snapshot(archive, expected_sha256)?;
+    let staging = tempfile::tempdir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    let destination = destination
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let lock_path = destination.join(".harn-install.lock");
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|error| error.to_string())?;
+    harn_flock::lock_with_deadline(
+        &lock,
+        &lock_path,
+        harn_flock::LockMode::Exclusive,
+        Duration::from_secs(60),
+    )
+    .map_err(|error| error.to_string())?;
+    let candidate = staging.path().join(harn_binary_name());
+    let mut found = false;
+    let mut extract = |name: &Path, size: u64, reader: &mut dyn Read| -> Result<(), String> {
+        if name
+            .file_name()
+            .is_none_or(|name| name != harn_binary_name())
+        {
+            return Ok(());
+        }
+        if found {
+            return Err("archive contains multiple runtime binaries".to_string());
+        }
+        if size > 1024 * 1024 * 1024 {
+            return Err("runtime binary exceeds 1 GiB".to_string());
+        }
+        found = true;
+        let mut output = fs::File::create(&candidate).map_err(|error| error.to_string())?;
+        let copied = std::io::copy(&mut reader.take(size + 1), &mut output)
+            .map_err(|error| error.to_string())?;
+        if copied != size {
+            return Err("runtime archive entry size mismatch".to_string());
+        }
+        Ok(())
     };
+    if archive
+        .extension()
+        .is_some_and(|extension| extension == "zip")
+    {
+        let mut archive = zip::ZipArchive::new(input).map_err(|error| error.to_string())?;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+            if entry.is_file() && !entry.is_symlink() {
+                let path = entry
+                    .enclosed_name()
+                    .ok_or("archive entry escapes its root")?;
+                extract(&path, entry.size(), &mut entry)?;
+            }
+        }
+    } else {
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(input));
+        for entry in archive.entries().map_err(|error| error.to_string())? {
+            let mut entry = entry.map_err(|error| error.to_string())?;
+            if entry.header().entry_type().is_file() {
+                let path = entry
+                    .path()
+                    .map_err(|error| error.to_string())?
+                    .into_owned();
+                extract(&path, entry.size(), &mut entry)?;
+            }
+        }
+    }
+    if !found {
+        return Err("archive contains no runtime binary for this host".to_string());
+    }
+    atomic_replace(&candidate, &destination.join(harn_binary_name()))?;
+    for alias in extra_binary_names() {
+        atomic_multicall_alias(harn_binary_name(), &destination.join(alias))?;
+    }
+    let receipt = InstallReceipt {
+        schema_version: "harn-install-v1",
+        version: version.trim_start_matches('v').to_string(),
+        binary_path: destination.join(harn_binary_name()),
+        binary_sha256: file_sha256_hex(&candidate)?,
+        checksum: expected_sha256.to_ascii_lowercase(),
+    };
+    harn_vm::atomic_io::atomic_write(
+        &destination.join("install-manifest.json"),
+        &serde_json::to_vec(&receipt).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(receipt)
+}
+
+fn upgrade(
+    args: &UpgradeArgs,
+    output: &mut Option<UpgradeReport>,
+) -> Result<(), HookRuntimeInstallFailure> {
+    let phase = |code, message| HookRuntimeInstallFailure {
+        installed: false,
+        code,
+        message,
+    };
+    let progress = |message: String| {
+        if args.json {
+            eprintln!("{message}");
+        } else {
+            println!("{message}");
+        }
+    };
+    let triple = target_triple().map_err(|error| phase("unsupported_target", error))?;
     let current = env!("CARGO_PKG_VERSION");
-
     let target = match args.version.as_deref() {
-        Some(v) => match normalize_version(v) {
-            Ok(t) => t,
-            Err(error) => return emit_upgrade_error("invalid_version", error),
-        },
-        None => match fetch_latest_tag() {
-            Ok(t) => t,
-            Err(error) => return emit_upgrade_error("resolve_failed", error),
-        },
+        Some(version) => {
+            normalize_version(version).map_err(|error| phase("invalid_version", error))?
+        }
+        None => fetch_latest_tag().map_err(|error| phase("resolve_failed", error))?,
     };
-
     let archive_name = format!("harn-{triple}.tar.gz");
     let archive_url = format!("{RELEASES_BASE}/download/{target}/{archive_name}");
     let checksums_url = format!("{RELEASES_BASE}/download/{target}/SHA256SUMS");
-    let needs_upgrade = target.trim_start_matches('v') != current;
-    let mode = if args.check {
-        UpgradeMode::Check
-    } else {
-        UpgradeMode::Install
-    };
-    let mut report = UpgradeReport {
+    let report = output.insert(UpgradeReport {
         current: current.to_string(),
         target: target.clone(),
-        needs_upgrade,
-        mode,
+        needs_upgrade: target.trim_start_matches('v') != current,
+        mode: if args.check {
+            UpgradeMode::Check
+        } else {
+            UpgradeMode::Install
+        },
         installed: false,
         archive_url: Some(archive_url.clone()),
         checksums_url: Some(checksums_url.clone()),
         target_triple: Some(triple.to_string()),
         hook_runtime: None,
-    };
-
+    });
+    if !args.json {
+        progress(format!("Installed: v{current}"));
+        progress(format!("Target:    {target}"));
+    }
     if args.check {
-        emit_upgrade_ok(report);
-        return 0;
+        return Ok(());
     }
-    if !args.force && !needs_upgrade {
-        emit_upgrade_ok(report);
-        return 0;
+    if !args.force && !report.needs_upgrade {
+        if !args.json {
+            println!("Already on the latest release.");
+        }
+        return Ok(());
     }
-
-    // Logs go to stderr so stdout stays a single parseable envelope.
-    eprintln!("Installed: v{current}");
-    eprintln!("Target:    {target}");
-
-    let current_exe = match env::current_exe()
-        .map_err(|error| format!("failed to resolve current exe: {error}"))
-    {
-        Ok(p) => p,
-        Err(error) => return emit_upgrade_error_with(&report, "resolve_exe_failed", error),
-    };
+    if args.json {
+        progress(format!("Installed: v{current}"));
+        progress(format!("Target:    {target}"));
+    }
+    let current_exe = env::current_exe().map_err(|error| {
+        phase(
+            "resolve_exe_failed",
+            format!("failed to resolve current exe: {error}"),
+        )
+    })?;
     let current_exe = current_exe
         .canonicalize()
         .unwrap_or_else(|_| current_exe.clone());
-    let install_dir = match current_exe
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", current_exe.display()))
-    {
-        Ok(p) => p.to_path_buf(),
-        Err(error) => return emit_upgrade_error_with(&report, "resolve_exe_failed", error),
-    };
-
-    let staging = match tempfile::tempdir()
-        .map_err(|error| format!("failed to create staging directory: {error}"))
-    {
-        Ok(s) => s,
-        Err(error) => return emit_upgrade_error_with(&report, "staging_failed", error),
-    };
+    let install_dir = current_exe.parent().ok_or_else(|| {
+        phase(
+            "resolve_exe_failed",
+            format!("{} has no parent directory", current_exe.display()),
+        )
+    })?;
+    let staging = tempfile::tempdir().map_err(|error| {
+        phase(
+            "staging_failed",
+            format!("failed to create staging directory: {error}"),
+        )
+    })?;
     let archive_path = staging.path().join(&archive_name);
-
-    eprintln!("Downloading {archive_name}");
-    if let Err(error) = download(&archive_url, &archive_path) {
-        return emit_upgrade_error_with(&report, "download_failed", error);
-    }
-
+    progress(format!("Downloading {archive_name}"));
+    download(&archive_url, &archive_path).map_err(|error| phase("download_failed", error))?;
     let verification = if args.no_verify {
         eprintln!("warning: SHA256 verification skipped (--no-verify)");
         ChecksumVerification::Unavailable(0)
     } else {
-        match verify_checksum(&checksums_url, &archive_name, &archive_path) {
-            Ok(ChecksumVerification::Verified) => {
-                eprintln!("Verified SHA256 ({archive_name})");
-                ChecksumVerification::Verified
-            }
-            Ok(ChecksumVerification::Unavailable(status)) => {
-                eprintln!(
-                    "warning: no SHA256SUMS published for this release (status {status}); skipping verification"
-                );
-                ChecksumVerification::Unavailable(status)
-            }
-            Err(error) => return emit_upgrade_error_with(&report, "checksum_failed", error),
+        let verification = verify_checksum(&checksums_url, &archive_name, &archive_path)
+            .map_err(|error| phase("checksum_failed", error))?;
+        match verification {
+            ChecksumVerification::Verified => progress(format!("Verified SHA256 ({archive_name})")),
+            ChecksumVerification::Unavailable(status) => eprintln!(
+                "warning: no SHA256SUMS published for this release (status {status}); skipping verification"
+            ),
         }
+        verification
     };
-
-    eprintln!("Extracting");
-    if let Err(error) = extract_tarball(&archive_path, staging.path()) {
-        return emit_upgrade_error_with(&report, "extract_failed", error);
-    }
-
+    progress("Extracting".to_string());
+    extract_tarball(&archive_path, staging.path())
+        .map_err(|error| phase("extract_failed", error))?;
     let staged_binary = staging.path().join(harn_binary_name());
     if !staged_binary.exists() {
-        return emit_upgrade_error_with(
-            &report,
+        return Err(phase(
             "archive_missing_binary",
             format!(
                 "archive did not contain {} — refusing to upgrade",
                 harn_binary_name()
             ),
-        );
+        ));
     }
-
-    let hook_report = match install_binaries_and_refresh_hook_runtime(
+    let hook_report = install_binaries_and_refresh_hook_runtime(
         verification,
         &target,
         &staged_binary,
         staging.path(),
-        &install_dir,
-    ) {
-        Ok(report) => report,
-        Err(error) => {
-            report.installed = error.installed;
-            return emit_upgrade_error_with(&report, error.code, error.message);
-        }
-    };
+        install_dir,
+    )
+    .inspect_err(|error| {
+        report.installed = error.installed;
+    })?;
     report.installed = true;
     print_hook_runtime_outcome(&hook_report);
     report.hook_runtime = Some(hook_report);
-    emit_upgrade_ok(report);
-    0
-}
-
-fn emit_upgrade_ok(report: UpgradeReport) {
-    let envelope = JsonEnvelope::ok(UPGRADE_SCHEMA_VERSION, report);
-    println!("{}", json_envelope::to_string_pretty(&envelope));
-}
-
-fn emit_upgrade_error(code: &str, message: String) -> i32 {
-    let envelope: JsonEnvelope<UpgradeReport> =
-        JsonEnvelope::err(UPGRADE_SCHEMA_VERSION, code, message);
-    println!("{}", json_envelope::to_string_pretty(&envelope));
-    1
-}
-
-fn emit_upgrade_error_with(report: &UpgradeReport, code: &str, message: String) -> i32 {
-    let envelope = JsonEnvelope {
-        schema_version: UPGRADE_SCHEMA_VERSION,
-        ok: false,
-        data: Some(report.clone()),
-        error: Some(json_envelope::JsonError {
-            code: code.to_string(),
-            message,
-            details: serde_json::Value::Null,
-        }),
-        warnings: Vec::new(),
-    };
-    println!("{}", json_envelope::to_string_pretty(&envelope));
-    1
+    if !args.json {
+        println!("Upgraded harn to {target}. Re-run your last command to use the new binary.");
+    }
+    Ok(())
 }
 
 /// Compile-time host target triple for selecting the matching release
@@ -755,6 +797,14 @@ fn verify_checksum(
 fn file_sha256_hex(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    copy_sha256_hex(&mut file, &mut std::io::sink(), path)
+}
+
+fn copy_sha256_hex(
+    file: &mut impl Read,
+    output: &mut impl Write,
+    path: &Path,
+) -> Result<String, String> {
     let mut hasher = Sha256::new();
     // 64 KiB I/O buffer — fine on the stack on every platform we ship to.
     #[allow(clippy::large_stack_arrays)]
@@ -766,6 +816,9 @@ fn file_sha256_hex(path: &Path) -> Result<String, String> {
         if n == 0 {
             break;
         }
+        output
+            .write_all(&buf[..n])
+            .map_err(|error| error.to_string())?;
         hasher.update(&buf[..n]);
     }
     Ok(hex_lower(&hasher.finalize()))
@@ -833,7 +886,7 @@ fn install_binaries(staging: &Path, install_dir: &Path) -> Result<(), String> {
         }
         let dest = install_dir.join(name);
         #[cfg(unix)]
-        atomic_symlink(main, &dest)?;
+        atomic_multicall_alias(main, &dest)?;
         #[cfg(not(unix))]
         atomic_replace(&src, &dest)?;
     }
@@ -841,54 +894,12 @@ fn install_binaries(staging: &Path, install_dir: &Path) -> Result<(), String> {
 }
 
 fn atomic_replace(src: &Path, dest: &Path) -> Result<(), String> {
-    // Stage a sibling temp file inside the destination directory so the
-    // rename is intra-filesystem and therefore atomic on POSIX. Copying
-    // from the (potentially tmpfs) staging dir into the same directory
-    // as `dest` ensures the final rename stays inside one filesystem.
-    let parent = dest
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", dest.display()))?;
-    let dest_basename = dest
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| format!("{} has no file name", dest.display()))?;
-    let temp_in_dest = parent.join(format!(
-        ".{dest_basename}.harn-upgrade-{pid}-{counter}",
-        pid = std::process::id(),
-        counter = next_upgrade_counter(),
-    ));
-    if let Err(error) = fs::copy(src, &temp_in_dest) {
-        return Err(format!(
-            "failed to stage {} -> {}: {error}",
-            src.display(),
-            temp_in_dest.display(),
-        ));
+    let receipt = harn_vm::atomic_io::atomic_copy_with_mode(src, dest, 0o755)
+        .map_err(|error| format!("failed to replace {}: {error}", dest.display()))?;
+    if cfg!(unix) && !receipt.namespace_synced {
+        return Err(format!("failed to sync parent of {}", dest.display()));
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = fs::Permissions::from_mode(0o755);
-        if let Err(error) = fs::set_permissions(&temp_in_dest, perms) {
-            let _ = fs::remove_file(&temp_in_dest);
-            return Err(format!("failed to chmod staged binary: {error}"));
-        }
-    }
-    // `sync_all` maps to `FlushFileBuffers` on Windows, which requires a
-    // write-capable handle. `File::open` creates a read-only handle there and
-    // turns every otherwise-valid upgrade into `Access is denied`.
-    if let Err(error) = fs::OpenOptions::new()
-        .write(true)
-        .open(&temp_in_dest)
-        .and_then(|file| file.sync_all())
-    {
-        let _ = fs::remove_file(&temp_in_dest);
-        return Err(format!("failed to sync staged binary: {error}"));
-    }
-    if let Err(error) = fs::rename(&temp_in_dest, dest) {
-        let _ = fs::remove_file(&temp_in_dest);
-        return Err(format!("failed to replace {}: {error}", dest.display()));
-    }
-    sync_parent_directory(parent)
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -903,11 +914,9 @@ fn sync_parent_directory(_parent: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Atomically place a relative symlink at `dest` pointing at `target_name`
-/// (a sibling in the same directory). Mirrors `atomic_replace`'s stage-then-
-/// rename so a concurrent reader never observes a half-written link.
-#[cfg(unix)]
-fn atomic_symlink(target_name: &str, dest: &Path) -> Result<(), String> {
+/// Publish a sibling multicall alias: relative symlink on Unix, hardlink on Windows.
+fn atomic_multicall_alias(target_name: &str, dest: &Path) -> Result<(), String> {
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
     let parent = dest
         .parent()
@@ -922,9 +931,11 @@ fn atomic_symlink(target_name: &str, dest: &Path) -> Result<(), String> {
         counter = next_upgrade_counter(),
     ));
     let _ = fs::remove_file(&temp_in_dest);
-    // Relative target so the link resolves to the sibling `harn` wherever the
-    // install dir lives.
-    if let Err(error) = symlink(target_name, &temp_in_dest) {
+    #[cfg(unix)]
+    let staged = symlink(target_name, &temp_in_dest);
+    #[cfg(windows)]
+    let staged = fs::hard_link(parent.join(target_name), &temp_in_dest);
+    if let Err(error) = staged {
         return Err(format!(
             "failed to stage symlink {} -> {target_name}: {error}",
             temp_in_dest.display(),
@@ -952,6 +963,20 @@ mod tests {
 
     const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    #[test]
+    fn verified_snapshot_survives_same_inode_cache_overwrite() {
+        let root = tempfile::tempdir().unwrap();
+        let cached = root.path().join("archive");
+        fs::write(&cached, b"verified bytes").unwrap();
+        let checksum = file_sha256_hex(&cached).unwrap();
+        let mut snapshot = verified_archive_snapshot(&cached, &checksum).unwrap();
+        fs::write(&cached, b"concurrent replacement").unwrap();
+        let mut installed = Vec::new();
+        snapshot.read_to_end(&mut installed).unwrap();
+        assert_eq!(installed, b"verified bytes");
+        assert!(verified_archive_snapshot(&cached, &checksum).is_err());
+    }
 
     #[test]
     fn normalize_version_accepts_v_prefix() {
@@ -1321,8 +1346,7 @@ cafef00d00000000000000000000000000000000000000000000000000000000  harn-aarch64-a
 
     #[test]
     fn find_expected_sha_tolerates_binary_mode_marker() {
-        let manifest =
-            "deadbeef00000000000000000000000000000000000000000000000000000000 *harn-x86_64-pc-windows-msvc.zip\n";
+        let manifest = "deadbeef00000000000000000000000000000000000000000000000000000000 *harn-x86_64-pc-windows-msvc.zip\n";
         assert_eq!(
             find_expected_sha(manifest, "harn-x86_64-pc-windows-msvc.zip").as_deref(),
             Some("deadbeef00000000000000000000000000000000000000000000000000000000"),

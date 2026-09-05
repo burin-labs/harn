@@ -455,7 +455,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "upgrade",
             schema_version: crate::commands::upgrade::UPGRADE_SCHEMA_VERSION,
             description:
-                "Self-update probe (`--check`) or install summary: current, target, archive URL, install outcome.",
+                "Self-update probe or summary; --archive returns a harn-install-v1 receipt with version, binary_path, binary_sha256, and checksum.",
             schema_json: None,
         },
         SchemaEntry {
