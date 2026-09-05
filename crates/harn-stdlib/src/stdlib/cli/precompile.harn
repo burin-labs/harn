@@ -8,7 +8,7 @@
  *   * argv parsing (target, --out, --keep-going, --quiet)
  *   * directory walking (single source vs recursive .harn discovery)
  *   * per-file --out path mirroring under the source root
- *   * the success/fail per-line render and trailing "N succeeded, N
+ *   * the per-file render and the trailing "N compiled, N reused, N
  *     failed" summary
  *
  * The actual parse+typecheck+compile work stays in Rust on the spawned
@@ -123,6 +123,20 @@ fn __spawn_precompile(
   return process.run({program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "1"}})
 }
 
+fn __child_reused(child: dict) -> bool {
+  // The child reports per-source outcome on stdout, which this driver captures
+  // and never forwards. Absence means compiled, not unknown: a child that
+  // succeeded without printing the marker is an older binary than this script,
+  // and counting that as a reuse would report work as skipped that was done.
+  const stdout = child["stdout"] ?? ""
+  for line in split(stdout, "\n") {
+    if trim(line) == "precompile-outcome: reused" {
+      return true
+    }
+  }
+  return false
+}
+
 fn __render_failure(source: string, child: dict) -> string {
   // Match the Rust eprintln format `{source}: {err}` where `err` is
   // either the child's first stderr line or a compact exit summary.
@@ -171,6 +185,7 @@ fn main(harness: Harness) {
     harness.runtime.exit(1)
   }
   let compiled = 0
+  let reused = 0
   let failed = 0
   for source in sources {
     // For each source, pre-compute the destination dir so the child --out
@@ -188,7 +203,11 @@ fn main(harness: Harness) {
     const child = __spawn_precompile(harness.process, bin, source, per_file_out, source_root)
     const exit_code = child["exit_code"] ?? -1
     if exit_code == 0 {
-      compiled = compiled + 1
+      if __child_reused(child) {
+        reused = reused + 1
+      } else {
+        compiled = compiled + 1
+      }
       if !quiet {
         const dest = __destination_path(source, source_root, out_root, "harnbc")
         harness.stdio.println(source + " -> " + dest)
@@ -203,7 +222,9 @@ fn main(harness: Harness) {
   }
   if !quiet {
     harness.stdio.eprintln(
-      "precompile: " + to_string(compiled) + " succeeded, "
+      "precompile: " + to_string(compiled) + " compiled, "
+        + to_string(reused)
+        + " reused, "
         + to_string(failed)
         + " failed",
     )
