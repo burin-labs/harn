@@ -352,6 +352,14 @@ impl SymbolGraph {
     /// flat symbol list that was extracted from the parse — callers
     /// (notably [`super::IndexState`]) reuse the symbol list to populate
     /// `IndexedFile::symbols` without re-parsing.
+    ///
+    /// `imported_files` is this file's **resolved** import set, which
+    /// scopes call resolution. The caller owns import resolution and must
+    /// have run it for `file_id` already;
+    /// [`super::IndexState`] does, at all three sites that reach here.
+    /// Pass an empty slice to mean "this file imports nothing", which is
+    /// the honest answer for a language or file with no import syntax —
+    /// not "resolve against everything".
     pub fn rebuild_file(
         &mut self,
         file_id: FileId,
@@ -359,6 +367,7 @@ impl SymbolGraph {
         language: Language,
         source: &str,
         import_strings: &[String],
+        imported_files: &[FileId],
     ) -> RebuildOutcome {
         self.remove_file(file_id);
         let module_id = self.add_module_for_file(file_id, path, &language);
@@ -427,16 +436,7 @@ impl SymbolGraph {
                     language: language.name().to_string(),
                 });
                 self.add_edge(module_id, call_id, EdgeKind::Contains);
-                let targets: Vec<NodeId> = self
-                    .nodes_named(&callee_name)
-                    .iter()
-                    .copied()
-                    .filter(|nid| {
-                        self.nodes
-                            .get(nid)
-                            .is_some_and(|n| matches!(n.kind, NodeKind::Function))
-                    })
-                    .collect();
+                let targets = self.resolve_call_targets(&callee_name, file_id, imported_files);
                 for t in targets {
                     self.add_edge(call_id, t, EdgeKind::Calls);
                 }
@@ -611,6 +611,79 @@ impl SymbolGraph {
         out
     }
 
+    /// Which functions a call to `callee_name` in `file_id` can be
+    /// reaching, in order of confidence.
+    ///
+    /// The old rule was "every function with this name, anywhere". On a
+    /// 7,038-file workspace that made a call to `assert` link to all
+    /// seven unrelated functions of that name, so six of every seven
+    /// edges were wrong and one function node collected 32,887 callers
+    /// (#8107).
+    ///
+    /// The replacement never guesses between candidates it cannot
+    /// distinguish:
+    ///
+    /// 1. **Same file.** A local definition shadows anything imported,
+    ///    so if the file defines the name itself, that is the call.
+    /// 2. **Imported files.** Otherwise the call can only reach what
+    ///    this file actually imports. All matching declarations in the
+    ///    resolved import set are returned, because a genuine ambiguity
+    ///    across two imports is a fact about the code, not a guess.
+    /// 3. **Exactly one declaration workspace-wide.** A unique name is
+    ///    unambiguous whether or not the import resolver saw the edge,
+    ///    which keeps recall for implicit visibility — a sibling module
+    ///    in the same crate, a global, a language with no import syntax.
+    /// 4. **Otherwise, nothing.** Several candidates and no import
+    ///    linking any of them is precisely the case where an edge would
+    ///    be invented rather than found.
+    fn resolve_call_targets(
+        &self,
+        callee_name: &str,
+        file_id: FileId,
+        imported_files: &[FileId],
+    ) -> Vec<NodeId> {
+        let named: Vec<NodeId> = self
+            .nodes_named(callee_name)
+            .iter()
+            .copied()
+            .filter(|nid| {
+                self.nodes
+                    .get(nid)
+                    .is_some_and(|n| n.kind == NodeKind::Function)
+            })
+            .collect();
+        if named.is_empty() {
+            return named;
+        }
+
+        let local: Vec<NodeId> = named
+            .iter()
+            .copied()
+            .filter(|nid| self.nodes.get(nid).is_some_and(|n| n.file_id == file_id))
+            .collect();
+        if !local.is_empty() {
+            return local;
+        }
+
+        let imported: Vec<NodeId> = named
+            .iter()
+            .copied()
+            .filter(|nid| {
+                self.nodes
+                    .get(nid)
+                    .is_some_and(|n| imported_files.contains(&n.file_id))
+            })
+            .collect();
+        if !imported.is_empty() {
+            return imported;
+        }
+
+        if named.len() == 1 {
+            return named;
+        }
+        Vec::new()
+    }
+
     /// Add every cross-file declaration named `word` to `bag`.
     ///
     /// `by_name` indexes every node, including call sites, because the
@@ -761,7 +834,7 @@ mod tests {
     #[test]
     fn add_and_remove_round_trip() {
         let mut g = SymbolGraph::new();
-        let outcome = g.rebuild_file(1, "src/a.rs", Language::Rust, "fn foo() {}\n", &[]);
+        let outcome = g.rebuild_file(1, "src/a.rs", Language::Rust, "fn foo() {}\n", &[], &[]);
         assert!(
             outcome.node_count >= 2,
             "module + function expected, got {}",
@@ -781,7 +854,7 @@ mod tests {
     fn rebuild_file_emits_function_module_and_call_nodes() {
         let mut g = SymbolGraph::new();
         let src = "fn alpha() {}\nfn beta() { alpha(); }\n";
-        let outcome = g.rebuild_file(7, "src/x.rs", Language::Rust, src, &[]);
+        let outcome = g.rebuild_file(7, "src/x.rs", Language::Rust, src, &[], &[]);
         assert!(
             outcome.node_count >= 3,
             "expected module + 2 functions, got {}",
@@ -808,7 +881,7 @@ mod tests {
     fn rebuild_file_emits_fields_and_enum_cases() {
         let mut g = SymbolGraph::new();
         let src = "pub struct Greeter {\n    pub name: String,\n}\n\nenum Color {\n    Red,\n}\n";
-        g.rebuild_file(9, "src/lib.rs", Language::Rust, src, &[]);
+        g.rebuild_file(9, "src/lib.rs", Language::Rust, src, &[], &[]);
 
         let field = g
             .iter_nodes()
@@ -860,6 +933,7 @@ mod tests {
             Language::Rust,
             "pub fn helper() -> i32 { 1 }\n",
             &[],
+            &[],
         );
         // A file full of calls to it. Each call is a CallSite node named
         // `helper`, and each is a candidate REFS target under the old rule.
@@ -869,6 +943,7 @@ mod tests {
             Language::Rust,
             "fn a() { helper(); helper(); helper(); }\n",
             &[],
+            &[],
         );
         // A third file that merely mentions the word.
         g.rebuild_file(
@@ -876,6 +951,7 @@ mod tests {
             "src/mentions.rs",
             Language::Rust,
             "fn b() { let _ = \"helper\"; helper(); }\n",
+            &[],
             &[],
         );
 
@@ -933,12 +1009,14 @@ mod tests {
             Language::Rust,
             "pub struct Doc { pub path: String }\npub enum Mode { Fastpath }\n",
             &[],
+            &[],
         );
         g.rebuild_file(
             2,
             "src/other.rs",
             Language::Rust,
             "fn go() { let path = 1; let Fastpath = 2; }\n",
+            &[],
             &[],
         );
         assert!(
@@ -981,6 +1059,178 @@ mod tests {
         }
     }
 
+    /// A call must not link to an identically-named function the caller
+    /// neither defines nor imports. Before this, every function sharing
+    /// the callee's name was a target, so on a 7,038-file workspace one
+    /// function node collected 32,887 callers and six of every seven
+    /// edges were wrong (#8107).
+    #[test]
+    fn a_call_does_not_reach_an_unimported_same_named_function() {
+        let mut g = SymbolGraph::new();
+        // Three unrelated files each declaring `assert`, plus a caller
+        // that imports exactly one of them.
+        g.rebuild_file(1, "a.rs", Language::Rust, "pub fn assert() {}\n", &[], &[]);
+        g.rebuild_file(2, "b.rs", Language::Rust, "pub fn assert() {}\n", &[], &[]);
+        g.rebuild_file(3, "c.rs", Language::Rust, "pub fn assert() {}\n", &[], &[]);
+        g.rebuild_file(
+            4,
+            "caller.rs",
+            Language::Rust,
+            "use crate::b::assert;\nfn go() { assert(); }\n",
+            &["crate::b".into()],
+            &[2],
+        );
+
+        let call = *g
+            .nodes_named("assert")
+            .iter()
+            .find(|id| g.node(**id).is_some_and(|n| n.kind == NodeKind::CallSite))
+            .expect("the call site exists");
+        let targets: Vec<&str> = g
+            .outgoing(call)
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .filter_map(|e| g.node(e.to))
+            .map(|n| n.path.as_str())
+            .collect();
+        assert_eq!(
+            targets,
+            vec!["b.rs"],
+            "a call must reach only the declaration its file imports"
+        );
+
+        // The negative control is the whole point: the other two
+        // declarations must have gained no caller at all.
+        for path in ["a.rs", "c.rs"] {
+            let decl = *g
+                .nodes_named("assert")
+                .iter()
+                .find(|id| {
+                    g.node(**id)
+                        .is_some_and(|n| n.kind == NodeKind::Function && n.path == path)
+                })
+                .expect("declaration exists");
+            assert!(
+                g.incoming(decl).iter().all(|e| e.kind != EdgeKind::Calls),
+                "{path} was never imported by the caller and must have no CALLS edge"
+            );
+        }
+    }
+
+    /// A definition in the calling file wins over anything imported,
+    /// because that is what the language does.
+    #[test]
+    fn a_local_definition_shadows_an_imported_one() {
+        let mut g = SymbolGraph::new();
+        g.rebuild_file(
+            1,
+            "dep.rs",
+            Language::Rust,
+            "pub fn helper() {}\n",
+            &[],
+            &[],
+        );
+        g.rebuild_file(
+            2,
+            "local.rs",
+            Language::Rust,
+            "use crate::dep::helper;\nfn helper() {}\nfn go() { helper(); }\n",
+            &["crate::dep".into()],
+            &[1],
+        );
+
+        let call = *g
+            .nodes_named("helper")
+            .iter()
+            .find(|id| g.node(**id).is_some_and(|n| n.kind == NodeKind::CallSite))
+            .expect("call site");
+        let targets: Vec<&str> = g
+            .outgoing(call)
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .filter_map(|e| g.node(e.to))
+            .map(|n| n.path.as_str())
+            .collect();
+        assert_eq!(targets, vec!["local.rs"]);
+    }
+
+    /// Recall guard. A name with exactly one declaration anywhere is
+    /// unambiguous, so it still resolves even when no import edge was
+    /// recorded — a sibling module in the same crate, a global, or a
+    /// language with no import syntax. Without this the fix would trade
+    /// one silent wrongness for another.
+    #[test]
+    fn a_unique_name_resolves_without_an_import_edge() {
+        let mut g = SymbolGraph::new();
+        g.rebuild_file(
+            1,
+            "only.rs",
+            Language::Rust,
+            "pub fn one_of_a_kind() {}\n",
+            &[],
+            &[],
+        );
+        g.rebuild_file(
+            2,
+            "caller.rs",
+            Language::Rust,
+            "fn go() { one_of_a_kind(); }\n",
+            &[],
+            &[],
+        );
+
+        let call = *g
+            .nodes_named("one_of_a_kind")
+            .iter()
+            .find(|id| g.node(**id).is_some_and(|n| n.kind == NodeKind::CallSite))
+            .expect("call site");
+        let targets: Vec<&str> = g
+            .outgoing(call)
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .filter_map(|e| g.node(e.to))
+            .map(|n| n.path.as_str())
+            .collect();
+        assert_eq!(
+            targets,
+            vec!["only.rs"],
+            "an unambiguous name must still resolve across files"
+        );
+    }
+
+    /// Ambiguous and unimportable is the one case where the old code
+    /// invented edges. It must now produce none rather than guess.
+    #[test]
+    fn an_ambiguous_unimported_call_produces_no_edge() {
+        let mut g = SymbolGraph::new();
+        g.rebuild_file(1, "a.rs", Language::Rust, "pub fn run() {}\n", &[], &[]);
+        g.rebuild_file(2, "b.rs", Language::Rust, "pub fn run() {}\n", &[], &[]);
+        g.rebuild_file(
+            3,
+            "caller.rs",
+            Language::Rust,
+            "fn go() { run(); }\n",
+            &[],
+            &[],
+        );
+
+        let call = *g
+            .nodes_named("run")
+            .iter()
+            .find(|id| g.node(**id).is_some_and(|n| n.kind == NodeKind::CallSite))
+            .expect("call site");
+        let calls: Vec<_> = g
+            .outgoing(call)
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .collect();
+        assert!(
+            calls.is_empty(),
+            "two candidates and no import is a guess, not a resolution; got {} edges",
+            calls.len()
+        );
+    }
+
     #[test]
     fn link_imports_creates_module_to_module_edges() {
         let mut g = SymbolGraph::new();
@@ -990,12 +1240,14 @@ mod tests {
             Language::TypeScript,
             "import { x } from \"./b\";\n",
             &["./b".into()],
+            &[],
         );
         g.rebuild_file(
             2,
             "src/b.ts",
             Language::TypeScript,
             "export const x = 1;\n",
+            &[],
             &[],
         );
         let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
@@ -1019,12 +1271,14 @@ mod tests {
             Language::TypeScript,
             "import { x } from \"./b\";\n",
             &["./b".into()],
+            &[],
         );
         g.rebuild_file(
             2,
             "src/b.ts",
             Language::TypeScript,
             "export const x = 1;\n",
+            &[],
             &[],
         );
         let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
@@ -1051,9 +1305,16 @@ mod tests {
     #[test]
     fn harn_reference_projection_replaces_stale_edges_and_keeps_names_separate() {
         let mut graph = SymbolGraph::new();
-        graph.rebuild_file(1, "a.harn", Language::Harn, "fn run() { 1 }", &[]);
-        graph.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 2 }", &[]);
-        graph.rebuild_file(3, "use.harn", Language::Harn, "fn use_it() { run() }", &[]);
+        graph.rebuild_file(1, "a.harn", Language::Harn, "fn run() { 1 }", &[], &[]);
+        graph.rebuild_file(2, "b.harn", Language::Harn, "fn run() { 2 }", &[], &[]);
+        graph.rebuild_file(
+            3,
+            "use.harn",
+            Language::Harn,
+            "fn use_it() { run() }",
+            &[],
+            &[],
+        );
         graph.replace_harn_references(&[ResolvedHarnReference {
             from_path: "use.harn".into(),
             to_path: "a.harn".into(),

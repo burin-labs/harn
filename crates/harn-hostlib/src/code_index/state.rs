@@ -569,9 +569,21 @@ impl IndexState {
         else {
             return;
         };
-        let outcome =
-            self.symbols
-                .rebuild_file(id, &file.relative_path, language, &source, &file.imports);
+        // Call resolution is scoped by this file's resolved imports, so
+        // the dep graph for `id` must already be current. Every caller
+        // runs `rebuild_deps` for the same id immediately before this,
+        // and `refresh_from_root` re-resolves the whole table whenever
+        // the set of paths changed, which is when a dangling import can
+        // start resolving.
+        let imported_files = self.deps.imports_of(id);
+        let outcome = self.symbols.rebuild_file(
+            id,
+            &file.relative_path,
+            language,
+            &source,
+            &file.imports,
+            &imported_files,
+        );
         if let Some(file_mut) = self.files.get_mut(&id) {
             file_mut.symbols = outcome
                 .symbols
