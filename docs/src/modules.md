@@ -203,6 +203,7 @@ Connector package helpers for common provider plumbing:
 | `oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options?)` | Refresh an OAuth2 access token with form-encoded `grant_type=refresh_token` |
 | `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
 | `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
+| `connector_lifecycle(provider, state_key, reset_keys?)` | Bind `state`, `init`, `activate`, and `shutdown` operations to provider-owned runtime keys; each takes `HarnessRuntime`, with context or bindings as its second argument. Duplicate binding paths fail before state changes. |
 
 The four `connector_http_*` helpers remain compatibility re-exports from this
 module. New code should import their single implementation from

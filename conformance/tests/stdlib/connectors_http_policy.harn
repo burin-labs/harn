@@ -4,8 +4,27 @@ import {
   connector_http_rate_limit,
   connector_http_request,
 } from "std/connectors/http"
+import { connector_lifecycle } from "std/connectors/shared"
 
 pipeline test(harness: Harness, task: unknown) {
+  const left = connector_lifecycle("left", "connector.left", ["connector.left.rate"])
+  const right = connector_lifecycle("right", "connector.right")
+  left.init(harness.runtime, {name: "left"})
+  right.init(harness.runtime, {name: "right"})
+  assert_eq(
+    left.activate(harness.runtime, [{id: "one", path: "/left"}]),
+    {provider: "left", bindings: 1},
+  )
+  const before = left.state(harness.runtime)
+  assert_eq(before.bindings.one0.binding_id, "one0")
+  assert(is_err(left.activate(harness.runtime, [{path: "/same"}, {match: {path: "/same"}}])))
+  assert_eq(left.state(harness.runtime), before)
+  harness.runtime.store_set("connector.left.rate", {tokens: 1})
+  assert_eq(left.shutdown(harness.runtime), {provider: "left", active: false})
+  assert_eq(harness.runtime.store_get("connector.left.rate"), nil)
+  assert_eq(left.state(harness.runtime).initialized, false)
+  assert_eq(right.state(harness.runtime).ctx.name, "right")
+  right.shutdown(harness.runtime)
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
