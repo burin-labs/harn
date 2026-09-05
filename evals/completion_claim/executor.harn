@@ -151,6 +151,22 @@ fn main(harness: Harness) -> int {
     ) },
   )
   const observations = __checkpoint_events(captured.events, "harn.completion_claim_observation.v1")
+  const completion_directives = __checkpoint_events(
+    captured.events,
+    "harn.completion_directive_receipt.v1",
+  )
+  const inspection_call_ids = captured.events
+    .filter(
+      { event -> event.type == "tool_call" && event?.tool_name == "inspect_status" },
+    )
+    .map({ event -> event.tool_call_id })
+    .to_list()
+  const completion_attempts = captured.events
+    .filter(
+      { event -> event.type == "tool_call" && event?.tool_name == "task_complete" },
+    )
+    .map({ event -> {tool_call_id: event.tool_call_id, input: event.raw_input} })
+    .to_list()
   const explicit = observations.any(
     { item -> item?.source == "tool" && item?.disposition == "valid" },
   )
@@ -200,6 +216,9 @@ fn main(harness: Harness) -> int {
     explicit_exit: explicit,
     fallback_exit: fallback,
     completion_claim_observations: observations,
+    completion_directives: completion_directives,
+    inspection_call_ids: inspection_call_ids,
+    completion_attempts: completion_attempts,
     completion_judge: captured.result?.completion_judge,
     terminal_error: to_string(captured.result?.error ?? ""),
     completion_judge_cap_reached: judge_cap_reached,
