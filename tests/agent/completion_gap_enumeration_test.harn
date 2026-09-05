@@ -29,7 +29,7 @@ import {
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import { agent_loop } from "std/agent/loop"
-import { with_llm_script } from "std/testing"
+import { llm_done, with_llm_script } from "std/testing"
 
 const SCHEDULER_VIEW = join(
   [
@@ -275,4 +275,124 @@ pipeline test_malformed_gap_rows_are_dropped_not_fatal(harness: Harness, task: u
   )
   assert(len(decoded.gaps) == 1, "only the whole row survives, got " + to_string(len(decoded.gaps)))
   assert(decoded.gaps[0].criterion == "kept", "and it is the right one")
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Through the real loop.
+//
+// Every case above reads the decoder and the checker directly, which is where
+// the logic lives but NOT where it runs. That gap cost a round: an extraction
+// left a dangling reference in the decision path, the checker was clean because
+// Harn resolves names at runtime, and this suite stayed green while six cases
+// in two neighbouring suites failed with `Undefined variable`. A change to the
+// judge decision path has to be executed by this file, not only imported.
+
+// -------------------------------------------------------------------------------------------------
+
+const RETRY_SCHEMA = "harn.completion_judge_contradiction_retry.v1"
+
+fn __retries(events: unknown, reason: string) -> int {
+  return len(
+    events.filter(
+      { event ->
+        event.type == "typed_checkpoint"
+          && event?.checkpoint?.schema == RETRY_SCHEMA
+          && event?.checkpoint?.reask_reason == reason
+      },
+    )
+      .to_list(),
+  )
+}
+
+fn __refusal_quoting(quote: string) -> dict {
+  return {
+    text: json_stringify(
+      {
+        verdict: "continue",
+        detail: "the ready queue is not sorted",
+        gaps: [
+          {
+            criterion: "ready queue is sorted lexicographically",
+            gap_class: "unmet_manner_clause",
+            detail: "sort the queue",
+            evidence_quote: quote,
+          },
+        ],
+      },
+    ),
+  }
+}
+
+fn __run_judge(harness: Harness, label: string, script: list) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the requested change.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 6,
+            verify_completion_judge: {provider: "mock", max_invocations: 3},
+          },
+        ) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+pipeline test_the_decision_path_executes_end_to_end(harness: Harness, task: unknown) {
+  // The case the unit tests could not have caught. It only has to REACH the
+  // judge decision path; an undefined name there throws rather than failing an
+  // assertion, so reaching it is the assertion.
+  const run = __run_judge(
+    harness,
+    "loop-reaches-judge",
+    [llm_done(), {text: json_stringify({verdict: "done", detail: "the work is finished"})}],
+  )
+  const invoked = run?.result?.completion_judge?.invocations ?? 0
+  assert(
+    invoked > 0,
+    "the judge must actually run, or this file never executes the path it tests. status="
+      + to_string(run?.result?.status ?? ""),
+  )
+  assert(
+    to_string(run?.result?.status ?? "") == "done",
+    "and an approval still finishes the run, got: " + to_string(run?.result?.status ?? ""),
+  )
+}
+
+pipeline test_a_refusal_quoting_absent_evidence_is_reasked_once(harness: Harness, task: unknown) {
+  // The mechanism, through the loop rather than through the predicate. The
+  // quote is not in any packet this run produced, so it cannot be grounded.
+  const run = __run_judge(
+    harness,
+    "loop-ungrounded",
+    [
+      llm_done(),
+      __refusal_quoting("queue = append(queue, name) // invented, not in any packet"),
+      {text: json_stringify({verdict: "done", detail: "re-read the evidence; it is sorted"})},
+      llm_done(),
+    ],
+  )
+  assert(
+    __retries(run.events, "ungrounded_quote") == 1,
+    "exactly one grounding re-ask, got "
+      + to_string(__retries(run.events, "ungrounded_quote")),
+  )
+  assert(
+    __retries(run.events, "contradiction") == 0,
+    "and it must not be attributed to the contradiction path",
+  )
 }

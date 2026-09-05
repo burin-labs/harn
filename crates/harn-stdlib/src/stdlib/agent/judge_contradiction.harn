@@ -147,8 +147,20 @@ fn __judge_reask_once(
   return {data: data, reasked: true}
 }
 
-/** A judge reply after every re-ask, with the reply it came from. */
-pub type JudgeSettledReply = {decoded: CompletionJudgeVerdict, reply_of_record: dict}
+/**
+ * A judge reply after every re-ask, with the reply it came from.
+ *
+ * `contradiction_reasked` is deliberately NOT "either re-ask happened". The
+ * arbitration ladder reads it to tell a FIRST self-contradiction from one that
+ * survived being pointed out, and a grounding re-ask says nothing about that.
+ * Folding the two together would let a quote correction overrule a judge whose
+ * contradiction had never been challenged.
+ */
+pub type JudgeSettledReply = {
+  decoded: CompletionJudgeVerdict,
+  reply_of_record: dict,
+  contradiction_reasked: bool,
+}
 
 /**
  * Run both re-ask reasons in order and return the reply of record.
@@ -214,7 +226,12 @@ pub fn __judge_settle_reply(
         payload.judge_evidence_packet,
       ),
       reply_of_record: grounding.data,
+      contradiction_reasked: contradiction.reasked,
     }
   }
-  return {decoded: after_contradiction, reply_of_record: contradiction.data}
+  return {
+    decoded: after_contradiction,
+    reply_of_record: contradiction.data,
+    contradiction_reasked: contradiction.reasked,
+  }
 }

@@ -568,7 +568,7 @@ fn __judge_invoke_structured(
     // Whether the self-contradiction was already pointed out to the judge and
     // came back anyway. The arbitration below reads it so a FIRST contradiction
     // is never overruled — only one that survived its resolution.
-    contradiction_reasked: contradiction.reasked,
+    contradiction_reasked: settled.contradiction_reasked,
     reason: if unassessed {
       "completion_judge_report_omitted"
     } else if requirements_pending {
