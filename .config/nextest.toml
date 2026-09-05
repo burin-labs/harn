@@ -206,6 +206,16 @@ test-group = "harn-dap"
 filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
 test-group = "harn-windows-sandbox"
 
+# The same shared OS resources, reached from the CLI suite instead of the VM
+# one. This case spawns a sandboxed AppContainer child and has it read the host
+# Node toolchain, so it contends with the harn-vm sandbox launches above for
+# exactly the resource that group exists to serialize — but the group's filter
+# is scoped to harn-vm, so it never covered this test. Its measured spread on
+# green Windows runs, 44.8s to 94.9s for the same work, is that contention.
+[[profile.default.overrides]]
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::windows_sandboxed_run_child_can_read_the_host_node_toolchain/)'
+test-group = "harn-windows-sandbox"
+
 # ---------------------------------------------------------------------------
 # Slow-test budgets
 # ---------------------------------------------------------------------------
@@ -279,6 +289,38 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 [[profile.default.overrides]]
 filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::burin_mini_rate_limit_(overresearch_planner_commits_final_action_graph|weak_verify_plan_normalizes_to_single_verify_action)/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+# windows_sandboxed_run_child_can_read_the_host_node_toolchain spawns a
+# sandboxed child on Windows and has it read the host Node toolchain, so its
+# wall-time is dominated by Windows process creation and sandbox setup rather
+# than by its own work. It is slow, not hung: it has never failed to finish.
+#
+# Measured from the `Workspace nextest (windows-latest)` job logs of the seven
+# most recent GREEN runs of the Windows workflow: 44.8s, 49.7s, 56.4s, 64.8s,
+# 66.1s, 81.3s, 94.9s — median 65s, worst 95s against the ci profile's 120s
+# hard kill. That is a 26% margin on the worst observed pass, so ordinary runner
+# noise is enough to tip it, and it did: harn run 33952045875 on 51365e1e killed
+# it at 120.029s with 12910 of 12911 tests passing, taking main red on a green
+# tree. The test arrived with #8029, which made the Windows sandbox read-open
+# while keeping writes confined, and the Windows workflow had not re-run since,
+# so the red was still outstanding.
+#
+# Serializing it into `harn-windows-sandbox` above is the cause fix and should
+# pull the spread down. This budget is the belt: the group change is a
+# prediction until a Windows run measures it, and a prediction is not a reason
+# to leave the cliff in place.
+#
+# The period is sized to the measured worst pass rather than to the median:
+# 60s x 4 leaves a 240s ceiling, about 2.5x the slowest green run, while
+# `terminate-after` stays at the profile default so a genuine hang is still
+# caught, just later. This is a budget correction, not a hang exemption.
+#
+# Scope is anchored to this one case on purpose. Its playground siblings keep
+# the default ceiling, so a real slow-test regression in one of them still
+# trips immediately.
+[[profile.default.overrides]]
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::windows_sandboxed_run_child_can_read_the_host_node_toolchain/)'
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
 
 # The two heavy burin-mini playground cases are not wall-clock budget tests,
 # but they have the same relationship to their neighbours: their cost is
