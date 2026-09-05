@@ -34,6 +34,43 @@ fn __checkpoint_events(events: list, schema: string) -> list {
     .to_list()
 }
 
+fn __enqueue_mock_cell(llm: HarnessLlm, arm: string, evidence: string) {
+  llm.mock_clear()
+  llm.mock_enqueue(
+    {
+      text: "",
+      tool_calls: [{id: "inspect-1", name: "inspect_status", arguments: {}}],
+    },
+  )
+  if arm == "treatment" {
+    llm.mock_enqueue(
+      {
+        text: "The status is ready. Evidence: " + evidence,
+        tool_calls: [
+          {
+            id: "complete-1",
+            name: "task_complete",
+            arguments: {requirements: [{requirement_id: "task", evidence_refs: ["inspect-1"]}]},
+          },
+        ],
+      },
+    )
+  } else {
+    llm.mock_enqueue({text: "The status is ready. Evidence: " + evidence})
+  }
+  llm.mock_enqueue(
+    {
+      text: json_stringify(
+        {
+          verdict: "done",
+          detail: "The inspected evidence supports the report.",
+          requirement_report: [{requirement_id: "task", met: true, evidence_refs: [2]}],
+        },
+      ),
+    },
+  )
+}
+
 fn __request_failure(stdio: HarnessStdio, started_ms: int, clock: HarnessClock, message: string) {
   stdio.println(
     json_stringify(
@@ -88,6 +125,9 @@ fn main(harness: Harness) -> int {
       harness.clock,
       "eval request failed its closed boundary checks",
     )
+  }
+  if provider == "mock" {
+    __enqueue_mock_cell(harness.llm, arm, evidence)
   }
   const session = "completion-claim-" + case_id + "-" + to_string(trial)
   const captured = agent_capture_events(
