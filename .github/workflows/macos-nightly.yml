@@ -87,19 +87,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
-      # A self-hosted runner keeps one workspace target per host across runs.
-      # Cargo's fingerprints keep it exact-source: every crate whose inputs
-      # changed (embedded stdlib sources included, through dep-info) rebuilds,
-      # and CARGO_INCREMENTAL=0 leaves no incremental state to go stale. Two
-      # runners on one host share the directory and serialize on Cargo's own
-      # lock rather than duplicating it.
-      - name: Use the host's persistent workspace target
-        if: ${{ runner.environment == 'self-hosted' }}
-        shell: bash
-        run: |
-          target="${HOME}/harn-ci/target/macos-workspace"
-          mkdir -p "${target}"
-          echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"
       # The hosted cache restores a whole target directory; on a self-hosted
       # runner that would replace the persistent one with a colder copy.
       - uses: ./.github/actions/rust-cache
@@ -120,6 +107,19 @@ jobs:
           # Sole writer for `workspace-macos`. Pull-request runs restore and do
           # not write, so they never mint a cache generation of their own.
           save: ${{ github.event_name != 'pull_request' }}
+      # A self-hosted runner keeps one workspace target per host across runs.
+      # Cargo's fingerprints keep it exact-source: every crate whose inputs
+      # changed (embedded stdlib sources included, through dep-info) rebuilds,
+      # and CARGO_INCREMENTAL=0 leaves no incremental state to go stale. Two
+      # runners on one host share the directory and serialize on Cargo's own
+      # lock rather than duplicating it.
+      - name: Use the host's persistent workspace target
+        if: ${{ runner.environment == 'self-hosted' }}
+        shell: bash
+        run: |
+          target="${HOME}/harn-ci/target/macos-workspace"
+          mkdir -p "${target}"
+          echo "CARGO_TARGET_DIR=${target}" >> "$GITHUB_ENV"
       # A pull-request run reads the main-produced warm artifact. It runs after
       # rust-cache so the artifact wins when both exist: the restore replaces
       # the target directory wholesale, and a cache the namespace has already
