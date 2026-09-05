@@ -93,39 +93,34 @@ fn main(harness: Harness) -> int {
   const captured = agent_capture_events(
     harness.agent,
     session,
-    fn() {
-      return agent_loop(
-        harness,
-        task,
-        nil,
-        {
+    fn() { return agent_loop(
+      harness,
+      task,
+      nil,
+      {
+        provider: provider,
+        model: model,
+        session_id: session,
+        tools: __inspect_tools(evidence),
+        required_tools: ["inspect_status"],
+        tool_format: "native",
+        completion_tool: arm == "treatment",
+        loop_until_done: true,
+        max_iterations: 6,
+        max_tokens: max_tokens,
+        final_wrapup: false,
+        verify_completion_judge: {
           provider: provider,
           model: model,
-          session_id: session,
-          tools: __inspect_tools(evidence),
-          required_tools: ["inspect_status"],
-          tool_format: "native",
-          completion_tool: arm == "treatment",
-          loop_until_done: true,
-          max_iterations: 6,
-          max_tokens: max_tokens,
-          final_wrapup: false,
-          verify_completion_judge: {
-            provider: provider,
-            model: model,
-            max_invocations: 2,
-            requirement_contract: {
-              requirements: [{requirement_id: "task", name: "Report the inspected status."}],
-            },
+          max_invocations: 2,
+          requirement_contract: {
+            requirements: [{requirement_id: "task", name: "Report the inspected status."}],
           },
         },
-      )
-    },
+      },
+    ) },
   )
-  const observations = __checkpoint_events(
-    captured.events,
-    "harn.completion_claim_observation.v1",
-  )
+  const observations = __checkpoint_events(captured.events, "harn.completion_claim_observation.v1")
   const explicit = observations.any(
     { item -> item?.source == "tool" && item?.disposition == "valid" },
   )
@@ -184,11 +179,19 @@ fn main(harness: Harness) -> int {
   harness.stdio.println(
     json_stringify(
       {
-        verification: if pass { "PASS" } else { "FAIL" },
+        verification: if pass {
+          "PASS"
+        } else {
+          "FAIL"
+        },
         wallTimeSeconds: to_float(harness.clock.monotonic_ms() - started_ms) / 1000.0,
         costUsd: artifact.known_cost_usd,
         producedPaths: [artifact_path],
-        failures: if pass { [] } else { [failure_bucket] },
+        failures: if pass {
+          []
+        } else {
+          [failure_bucket]
+        },
         runId: "completion-claim:" + case_id + ":" + to_string(trial),
         workflowId: "completion-claim-exit-v1",
         sourcePath: artifact_path,

@@ -25,9 +25,7 @@ fn main(harness: Harness) -> int {
     && is_absolute(ledger_path)
   if provider != "mock" {
     const confirmed = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_CONFIRM_SPEND", "0") == "1"
-    const ceiling = to_int(
-      harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_MAX_CELLS", "0"),
-    )
+    const ceiling = to_int(harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_MAX_CELLS", "0"))
       ?? 0
     if !confirmed || ceiling < planned_cells || !shared_ledger {
       harness.stdio.eprintln(
@@ -70,5 +68,9 @@ fn main(harness: Harness) -> int {
   }
   const report = harness.runtime.eval_pack_run(manifest, options)
   harness.stdio.println(json_stringify_pretty(report))
-  return if report.pass { 0 } else { 1 }
+  return if report.pass {
+    0
+  } else {
+    1
+  }
 }

@@ -20,5 +20,9 @@ fn main(harness: Harness) -> int {
     && receipt?.evidence_reported == true
     && receipt?.completion_judge_cap_reached == false
     && contains(["baseline", "treatment"], receipt?.arm)
-  return if valid { 0 } else { 1 }
+  return if valid {
+    0
+  } else {
+    1
+  }
 }
