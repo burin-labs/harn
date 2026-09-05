@@ -2089,10 +2089,13 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Preserve current release provenance policy
+        id: stage-release-tools
+        run: scripts/stage_release_tools.sh "$RUNNER_TEMP/release-provenance-policy"
+
+      - name: Preserve release signer policy
         run: |
           set -euo pipefail
           policy_dir="$RUNNER_TEMP/release-provenance-policy"
-          scripts/stage_release_tools.sh "$policy_dir"
           cp .github/release-bot-allowed-signers "$policy_dir/release-bot-allowed-signers"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

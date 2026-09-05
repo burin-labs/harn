@@ -172,13 +172,18 @@ jobs:
               - '.github/workflows/build-release-binaries.yml'
               - '.github/workflows/bump-release.yml'
               - '.github/workflows/publish-release.yml'
+              - '.github/workflows/release*'
               - 'CHANGELOG.md'
               - 'Cargo.toml'
               - 'scripts/lib/release_version.sh'
               - 'scripts/prepare_development_version.sh'
               - 'scripts/publish*'
-              - 'scripts/release_*'
+              - 'scripts/release*'
               - 'scripts/verify_release_*'
+              - 'scripts/stage_release_tools.sh'
+              - 'scripts/*development*'
+              - 'scripts/tests/*release*'
+              - 'scripts/tests/*development*'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -463,10 +468,9 @@ jobs:
   release-contract:
     name: Harn and release orchestrator agree
     needs: [changes]
-    # Skipped when nothing that can move release semantics was touched.
-    # ci-status below treats that skip as PASS only when this filter agrees it
-    # was not touched, so a skip cannot stand in for a missing verdict.
-    if: needs.changes.outputs.release_contract == 'true'
+    # Every main push rehearses the tail, including changes outside the PR filter.
+    # The required aggregate accepts a skip only on an unrelated PR.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -514,6 +518,9 @@ jobs:
           harn run --no-sandbox \
             .release-orchestrator/check_release_contract.harn \
             -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}" --contract-ref HEAD
+
+      - name: Rehearse release staging and development cutover offline
+        run: bash scripts/release_rehearsal.sh
 
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
@@ -2499,6 +2506,7 @@ jobs:
         env:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
+          RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
         run: |
           # Hard-required lanes: a hard failure here must fail the aggregate,
           # because the lanes that `needs` them would all skip and skips are
@@ -2549,7 +2557,7 @@ jobs:
           # which is the exact way this gate failed before it was required.
           # A cancellation is not a skip and is not tolerated here.
           release_contract_result="${{ needs['release-contract'].result }}"
-          release_contract_expected="${{ needs.changes.outputs.release_contract }}"
+          release_contract_expected="$RELEASE_CONTRACT_EXPECTED"
           echo "Release contract: $release_contract_result (expected=$release_contract_expected)"
           if [ "$release_contract_result" != "success" ]; then
             if [ "$release_contract_result" = "skipped" ] \

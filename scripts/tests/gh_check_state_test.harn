@@ -275,9 +275,15 @@ pipeline test_registry_prefixes_match_the_job_names_they_stand_for(
   const workflow = ci_workflow(harness.fs)
   for row in PATH_GATED_CHECKS {
     let found = false
+    const path_condition = "needs.changes.outputs.${row.filter} == 'true'"
+    const condition = if row?.always_main == true {
+      "github.event_name != 'pull_request' || " + path_condition
+    } else {
+      path_condition
+    }
     for job_key in keys(workflow?.jobs ?? {}) {
       const job = workflow?.jobs?.[job_key]
-      if to_string(job?.if ?? "").trim() == "needs.changes.outputs.${row.filter} == 'true'" {
+      if to_string(job?.if ?? "").trim() == condition {
         assert_eq(to_string(job?.name ?? "").starts_with(to_string(row.check_prefix)), true)
         found = true
       }

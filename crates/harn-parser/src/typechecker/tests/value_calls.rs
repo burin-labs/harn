@@ -32,3 +32,55 @@ fn apply() -> int { return (make_callback())("wrong") }"#,
         "expected callable diagnostic, got: {not_callable:?}"
     );
 }
+
+#[test]
+fn callable_parameter_shadows_same_named_module_function() {
+    let shadowed = errors(
+        r"fn transform(value: string, suffix: string) -> string {
+  return value + suffix
+}
+fn apply(transform: fn(int) -> int) -> int {
+  return transform(41)
+}",
+    );
+    assert!(
+        shadowed.is_empty(),
+        "the innermost callable binding must own the call: {shadowed:?}"
+    );
+
+    let bad_argument = errors(
+        r#"fn transform(value: string) -> string { return value }
+fn apply(transform: fn(int) -> int) -> int { return transform("wrong") }"#,
+    );
+    assert!(
+        bad_argument
+            .iter()
+            .any(|error| error.contains("expected int") && error.contains("found string")),
+        "the lexical callable contract must still validate arguments: {bad_argument:?}"
+    );
+
+    let unshadowed = errors(
+        r#"fn transform(value: string, suffix: string) -> string {
+  return value + suffix
+}
+fn apply() -> string {
+  return transform("value", "-suffix")
+}"#,
+    );
+    assert!(
+        unshadowed.is_empty(),
+        "the module function remains callable when no local shadows it: {unshadowed:?}"
+    );
+}
+
+#[test]
+fn gradual_local_call_does_not_fall_through_to_module_function() {
+    let diagnostics = errors(
+        r"fn transform(value: string) -> string { return value }
+fn apply(transform: any) -> int { return transform(1) }",
+    );
+    assert!(
+        diagnostics.is_empty(),
+        "a guarded dynamic call must not inherit the module signature: {diagnostics:?}"
+    );
+}
