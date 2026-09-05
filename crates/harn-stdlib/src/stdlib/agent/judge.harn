@@ -280,7 +280,7 @@ fn __judge_tool_descriptor(opts: dict, name: any) -> CompletionToolSemantics {
   const effect = lowercase(to_string(annotations?.side_effect_level ?? ""))
   const declared_role = __judge_declared_evidence_role(annotations?.completion_evidence_role)
   const evidence_role = __judge_evidence_role(declared_role, kind, effect, read_only)
-  const action: CompletionEvidenceAction = {
+  return {
     name: __judge_clip_evidence(name, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
     kind: __judge_clip_evidence(
       annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? "",
@@ -425,7 +425,7 @@ fn __judge_lifecycle_action(
   for matched in dispatched {
     observations = observations + [matched.text]
   }
-  return {
+  const action: CompletionEvidenceAction = {
     ordinal: lifecycle.ordinal,
     evidence_index: lifecycle.evidence_index,
     tool_call_id: __judge_clip_evidence(lifecycle.tool_call_id, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
@@ -436,10 +436,10 @@ fn __judge_lifecycle_action(
     observation: __judge_clip_evidence(join(observations, "\n"), __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     result_facts: __judge_clip_evidence(result?.data ?? {}, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     has_error_result: dispatched.any({ matched -> matched.outcome == "error" }),
-    // True when this call has results but EVERY one of them was written by the
-    // harness. The call itself was never dispatched, so it is not evidence of
-    // work either; the projection drops it and counts it instead.
   }
+  // A call with results exclusively written by the harness was never
+  // dispatched. Drop it, but keep the omission measurable. A mixed call keeps
+  // its real result and still reports the repair that was removed.
   const omitted = len(lifecycle.results) - len(dispatched)
   return action
     + if omitted > 0 {

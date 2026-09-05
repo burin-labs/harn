@@ -101,7 +101,7 @@ pipeline test_a_real_failed_call_is_still_evidence(harness: Harness, task: unkno
   ]
   const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
   assert_eq(len(projected.packet.actions), 1)
-  assert_eq(projected.packet.actions[0].has_error_result, true)
+  assert_eq(projected.packet.actions[0]?.has_error_result, true)
   assert_eq(projected.packet.omitted_harness_authored_result_count, nil)
   assert(!contains(projected.serialized, "omitted_harness_authored_result_count"))
   assert(contains(projected.serialized, "permission denied"))
@@ -123,7 +123,7 @@ pipeline test_a_dispatched_result_survives_a_later_repair(harness: Harness, task
   assert(contains(projected.serialized, "write applied"))
   assert(!contains(projected.serialized, VETO))
   // The veto must not flip the call's outcome to a failure either.
-  assert_eq(projected.packet.actions[0].has_error_result, false)
+  assert_eq(projected.packet.actions[0]?.has_error_result, false)
 }
 
 pipeline test_the_repair_origin_is_read_from_the_dispatch_envelope(
@@ -140,9 +140,9 @@ pipeline test_the_repair_origin_is_read_from_the_dispatch_envelope(
     ],
   )
   assert_eq(len(report.calls), 1)
-  assert_eq(len(report.calls[0].results), 2)
-  assert_eq(report.calls[0].results[0].origin, "dispatch")
-  assert_eq(report.calls[0].results[1].origin, "harness_repair")
+  assert_eq(len(report.calls[0]?.results ?? []), 2)
+  assert_eq(report.calls[0]?.results[0]?.origin, "dispatch")
+  assert_eq(report.calls[0]?.results[1]?.origin, "harness_repair")
 }
 
 pipeline test_an_untagged_result_reads_as_dispatched(harness: Harness, task: unknown) {
@@ -155,7 +155,7 @@ pipeline test_an_untagged_result_reads_as_dispatched(harness: Harness, task: unk
       dispatched_result("edit", "edit-1", "write applied", "ok"),
     ],
   )
-  assert_eq(report.calls[0].results[0].origin, "dispatch")
+  assert_eq(report.calls[0]?.results[0]?.origin, "dispatch")
 }
 
 pipeline test_a_typed_result_row_preserves_its_origin(harness: Harness, task: unknown) {
@@ -178,5 +178,5 @@ pipeline test_a_typed_result_row_preserves_its_origin(harness: Harness, task: un
   const report = agent_transcript_tool_lifecycle_report(
     [assistant_calling("edit", "edit-1"), typed_repair],
   )
-  assert_eq(report.calls[0].results[0].origin, "harness_repair")
+  assert_eq(report.calls[0]?.results[0]?.origin, "harness_repair")
 }
