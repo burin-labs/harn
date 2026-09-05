@@ -685,6 +685,15 @@ impl TypeChecker {
             return;
         };
         let resolved = self.resolve_alias(&callee_type, scope);
+        // An unannotated closure is callable even when its parameter and
+        // return contracts remain gradual. Preserve argument checking without
+        // inventing a non-callable diagnostic for this opaque callable type.
+        if matches!(&resolved, TypeExpr::Named(name) if name == "closure") {
+            for arg in args {
+                self.check_node(arg, scope);
+            }
+            return;
+        }
         let TypeExpr::FnType { params, .. } = resolved else {
             for arg in args {
                 self.check_node(arg, scope);
@@ -1249,6 +1258,17 @@ impl TypeChecker {
         scope: &mut TypeScope,
         span: Span,
     ) -> CallTarget {
+        // The parser represents `callback(...)` as a named FunctionCall even
+        // when `callback` resolves to a lexical value. Dispatch that shape
+        // through value-call checking before consulting module functions or
+        // builtins: the innermost binding owns both resolution and its call
+        // contract.
+        if scope.get_var_before_fn(name).is_some() {
+            let callee = SNode::new(Node::Identifier(name.to_owned()), span);
+            self.check_value_call(&callee, args, scope, span);
+            return CallTarget::Other;
+        }
+
         // Source and imported callables shadow builtins at runtime. Preserve
         // that resolution for callers that attach builtin-only flow semantics
         // after ordinary signature checking.
@@ -1258,16 +1278,7 @@ impl TypeChecker {
         // `assert` is a VM intrinsic rather than a typed-signature builtin, so
         // include it explicitly in the same resolution result.
         let native_builtin = name == "assert" || self.lookup_builtin(name).is_some();
-        // Values are callable too: a closure bound with `const assert = ...`
-        // wins over the intrinsic at runtime just like a source function does.
-        // Even a non-callable binding must remain `Other`, because its eventual
-        // call error cannot establish builtin-only flow facts.
-        let value_defined = scope.get_var(name).is_some();
-        let call_target = if !source_defined
-            && !value_defined
-            && !self.name_is_imported(name)
-            && native_builtin
-        {
+        let call_target = if !source_defined && !self.name_is_imported(name) && native_builtin {
             CallTarget::Builtin
         } else {
             CallTarget::Other

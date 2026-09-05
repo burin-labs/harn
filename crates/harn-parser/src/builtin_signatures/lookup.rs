@@ -452,6 +452,9 @@ mod ambient_install_regression {
 
     #[test]
     fn installed_manifest_does_not_shadow_ambient_capability_methods() {
+        let _guard = crate::legacy_ambient_capabilities_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Process-global env; restore afterwards so later tests in this
         // process do not inherit the legacy bridge (it previously leaked and
         // made strict-mode typechecker tests order-dependent).

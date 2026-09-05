@@ -32,3 +32,57 @@ fn apply() -> int { return (make_callback())("wrong") }"#,
         "expected callable diagnostic, got: {not_callable:?}"
     );
 }
+
+#[test]
+fn callable_parameter_shadows_same_named_module_function() {
+    let shadowed = errors(
+        r#"fn transform(value: string, suffix: string) -> string {
+  return value + suffix
+}
+fn apply(transform: fn(int) -> int) -> int {
+  return transform(41)
+}"#,
+    );
+    assert!(
+        shadowed.is_empty(),
+        "the innermost callable binding must own the call: {shadowed:?}"
+    );
+
+    let unshadowed = errors(
+        r#"fn transform(value: string, suffix: string) -> string {
+  return value + suffix
+}
+fn apply() -> string {
+  return transform("value", "-suffix")
+}"#,
+    );
+    assert!(
+        unshadowed.is_empty(),
+        "the module function remains callable when no local shadows it: {unshadowed:?}"
+    );
+}
+
+#[test]
+fn non_callable_local_shadow_does_not_fall_through_to_module_function() {
+    let diagnostics = errors(
+        r#"fn transform(value: string) -> string {
+  return value
+}
+fn apply() -> int {
+  const transform = 41
+  return transform(1)
+}"#,
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("int") && diagnostic.contains("not callable")),
+        "the local value must own the non-callable diagnostic: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("expected string, found int")),
+        "the shadowed module signature must not validate the call: {diagnostics:?}"
+    );
+}

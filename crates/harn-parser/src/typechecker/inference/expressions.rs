@@ -463,6 +463,18 @@ impl TypeChecker {
                 type_args,
                 args,
             } => {
+                // Bare calls retain FunctionCall syntax even when the name
+                // resolves to a lexical callable value. Infer from that
+                // innermost binding before considering module functions or
+                // builtins, matching diagnostic call resolution.
+                if let Some(bound_type) = scope.get_var_before_fn(name) {
+                    return bound_type.as_ref().and_then(|ty| {
+                        match self.resolve_alias(ty, scope) {
+                            TypeExpr::FnType { return_type, .. } => Some(*return_type),
+                            _ => None,
+                        }
+                    });
+                }
                 let source_defined = scope
                     .get_fn(name)
                     .is_some_and(|signature| signature.definition_span.is_some());
