@@ -36,6 +36,10 @@ pub type CompletionEvidenceAction = {
   observation: string,
   result_facts: string,
   has_error_result: bool,
+  // True when every result on this call was written by the harness. Such a call
+  // was never dispatched, so it is evidence of nothing and never enters the
+  // packet.
+  harness_authored?: bool,
 }
 
 /**
@@ -89,6 +93,11 @@ pub type CompletionEvidencePacket = {
   // carry one are represented, not omitted, and are not counted here.
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
+  // Calls whose every result was written by the harness rather than returned by
+  // a tool, so the call was never dispatched and its "result" is injected
+  // feedback. Dropped from `actions`, counted here, so a judge that sees fewer
+  // actions than the run made can tell why (harn#7757).
+  harness_authored_result_count: int,
   lifecycle_issue_count: int,
   lifecycle_issues: list<CompletionEvidenceIssue>,
   actions: list<CompletionEvidenceAction>,
@@ -112,6 +121,7 @@ pub type CompletionEvidenceProjectionStats = {
   included_read_only_call_count: int,
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
+  harness_authored_result_count: int,
   lifecycle_issue_count: int,
   serialized_chars: int,
   raw_transcript_digest: string,

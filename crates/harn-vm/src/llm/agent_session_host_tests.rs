@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use crate::agent_events::AgentEvent;
+use crate::llm::pairing_receipts::ToolResultOrigin;
 
 use super::run_identity::agent_init_control;
 use super::{
@@ -754,6 +755,7 @@ fn tool_results_use_one_durable_shape_for_every_provider() {
             ok,
             screenshots: &[],
             data: None,
+            origin: ToolResultOrigin::Dispatch,
         }));
         assert_eq!(message["role"], expected_role);
         assert_eq!(message["_harn"]["kind"], "tool_result");
@@ -802,6 +804,7 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
         ok: true,
         screenshots: &screenshots,
         data: None,
+        origin: ToolResultOrigin::Dispatch,
     }));
     assert_eq!(anthropic["role"], "tool_result");
     let content = anthropic["content"].as_array().expect("block list");
@@ -842,6 +845,7 @@ fn multi_screenshot_tool_result_delivers_every_frame() {
         ok: true,
         screenshots: &screenshots,
         data: None,
+        origin: ToolResultOrigin::Dispatch,
     }));
     let content = anthropic["content"].as_array().expect("block list");
     assert_eq!(content.len(), 3, "text + two images");
@@ -1071,6 +1075,66 @@ fn orphan_repair_covers_openai_wire_shape() {
     assert_eq!(msg["name"], "read");
     assert_eq!(msg["tool_call_id"], "call_9");
     assert_eq!(msg["content"], "nudge");
+}
+
+/// The synthesized result must say the HARNESS wrote it (harn#7757).
+///
+/// It carries the orphaned call's own name, id and an error outcome, so without
+/// this tag it is indistinguishable from a real failed call of that tool — and
+/// the completion judge reads the injected veto text back as an observation of
+/// the workspace. This is the production write side of that tag; the reading
+/// side is `tests/agent/judge_self_citation_test.harn`.
+#[test]
+fn orphan_repair_result_is_tagged_as_harness_authored() {
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "local",
+        "model": "Qwen/Qwen3.6-35B-A3B",
+        "text": "",
+        "_agent_tool_format": "native",
+        "native_tool_calls": [{
+            "id": "call_9",
+            "name": "read",
+            "arguments": {"path": "main.rs"}
+        }],
+    }));
+    let assistant = assistant_message_from_llm_result(&llm_result);
+    let synthetic = synthesize_orphan_tool_results(
+        &assistant,
+        "the required files were never listed",
+        &std::collections::BTreeSet::new(),
+    );
+    assert_eq!(synthetic.len(), 1);
+    let msg = vm_to_json(&synthetic[0]);
+    assert_eq!(
+        msg["_harn"]["origin"], "harness_repair",
+        "the repair result must carry its authorship: {msg}"
+    );
+    // The tag rides on the storage-only envelope, so the message the provider
+    // sees is unchanged.
+    assert_eq!(msg["name"], "read");
+    assert_eq!(msg["tool_call_id"], "call_9");
+    assert_eq!(msg["content"], "the required files were never listed");
+}
+
+/// NEGATIVE CONTROL: an ordinary dispatched result carries no origin key at
+/// all, so every message written before this tag existed reads back unchanged.
+#[test]
+fn a_dispatched_tool_result_carries_no_origin_tag() {
+    let msg = vm_to_json(&tool_result_message(ToolResultMessageInput {
+        channel: crate::llm_config::ToolFormatChannel::Native,
+        name: "read",
+        tool_call_id: "call_9",
+        observation: "file contents",
+        ok: true,
+        screenshots: &[],
+        data: None,
+        origin: ToolResultOrigin::Dispatch,
+    }));
+    assert_eq!(msg["_harn"]["kind"], "tool_result");
+    assert!(
+        msg["_harn"].get("origin").is_none(),
+        "a dispatched result must be byte-identical to before: {msg}"
+    );
 }
 
 /// REGRESSION GUARD: a homogeneous text-format run keeps its tool calls inline

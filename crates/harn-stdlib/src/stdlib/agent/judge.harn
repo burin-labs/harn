@@ -410,9 +410,19 @@ fn __judge_lifecycle_action(
   opts: dict,
 ) -> CompletionEvidenceAction {
   const descriptor = __judge_tool_descriptor(opts, lifecycle.name)
-  const result = lifecycle.result
+  // A `harness_repair` result is the harness's own injected feedback, written
+  // to close an orphaned `tool_use` block under that call's name and id. It is
+  // not an observation of anything, and reading it as one lets a completion
+  // veto cite itself as proof of the gap it asserted (harn#7757).
+  const dispatched = lifecycle.results.filter({ matched -> matched.origin != "harness_repair" })
+    .to_list()
+  const result = if len(dispatched) == 0 {
+    nil
+  } else {
+    dispatched[len(dispatched) - 1]
+  }
   let observations = []
-  for matched in lifecycle.results {
+  for matched in dispatched {
     observations = observations + [matched.text]
   }
   return {
@@ -425,7 +435,11 @@ fn __judge_lifecycle_action(
     arguments: __judge_clip_evidence(lifecycle.args, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     observation: __judge_clip_evidence(join(observations, "\n"), __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     result_facts: __judge_clip_evidence(result?.data ?? {}, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-    has_error_result: lifecycle.results.any({ matched -> matched.outcome == "error" }),
+    has_error_result: dispatched.any({ matched -> matched.outcome == "error" }),
+    // True when this call has results but EVERY one of them was written by the
+    // harness. The call itself was never dispatched, so it is not evidence of
+    // work either; the projection drops it and counts it instead.
+    harness_authored: len(lifecycle.results) > 0 && len(dispatched) == 0,
   }
 }
 
@@ -496,8 +510,16 @@ fn __judge_evidence_projection_from_lifecycle(
   let latest_verification = nil
   let latest_problem = nil
   let latest_observation = nil
+  let harness_authored_result_count = 0
   for call in lifecycle.calls {
     const action = __judge_lifecycle_action(call, opts)
+    if action.harness_authored {
+      // Every result on this call was written by the harness, so the call was
+      // never dispatched. Counted rather than silently dropped: a judge that
+      // sees fewer actions than the run made must be able to tell why.
+      harness_authored_result_count = harness_authored_result_count + 1
+      continue
+    }
     if action.semantics.read_only {
       read_only_evidence = read_only_evidence + [completion_read_only_evidence(call, action)]
       latest_observation = __judge_latest(latest_observation, action)
@@ -543,6 +565,7 @@ fn __judge_evidence_projection_from_lifecycle(
     relevant_action_count: relevant_call_count,
     omitted_read_only_call_count: research_summary.omitted_count,
     omitted_older_action_count: max(relevant_call_count - len(selected), 0),
+    harness_authored_result_count: harness_authored_result_count,
     lifecycle_issue_count: lifecycle.invalid_count,
     lifecycle_issues: latest_issues,
     actions: selected,
@@ -574,6 +597,7 @@ fn __judge_evidence_projection_from_lifecycle(
       included_read_only_call_count: research_summary.included_count,
       omitted_read_only_call_count: research_summary.omitted_count,
       omitted_older_action_count: max(relevant_call_count - len(selected), 0),
+      harness_authored_result_count: harness_authored_result_count,
       lifecycle_issue_count: lifecycle.invalid_count,
       serialized_chars: len(serialized),
       raw_transcript_digest: packet.raw_transcript_digest,

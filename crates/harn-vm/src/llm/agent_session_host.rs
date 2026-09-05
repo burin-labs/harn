@@ -6,6 +6,7 @@
 //! continue/break) lives in Harn; Rust is reduced to data plumbing,
 //! provider/tool capability surfaces, and resource lifecycle.
 
+use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
@@ -877,6 +878,7 @@ fn host_agent_session_record_tool_results_builtin(
                 ok,
                 screenshots: &screenshots,
                 data: transcript_data.as_ref(),
+                origin: ToolResultOrigin::Dispatch,
             }),
         )
         .map_err(VmError::Runtime)?;
