@@ -219,7 +219,9 @@ fn parse_nvidia_memory_csv(text: &str) -> Option<(u64, u64)> {
 }
 
 fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(args).output().ok()?;
+    let mut command = Command::new(program);
+    command.args(args);
+    let output = super::command_probe::output(command, super::command_probe::PROBE_TIMEOUT).ok()?;
     output
         .status
         .success()

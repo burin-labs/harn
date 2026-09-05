@@ -13,6 +13,7 @@ use harn_vm::secrets::{
 };
 use serde::Serialize;
 
+use super::command_probe::{self, PROBE_TIMEOUT};
 use crate::commands::hardware;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
@@ -21,9 +22,11 @@ use crate::package;
 
 mod next_step;
 mod repo_checks;
+mod targets;
 
 use next_step::next_step_suggestion;
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
+use targets::collect_targets;
 
 /// Env var the embedded `cli/doctor` script reads to pick up the raw
 /// `DoctorReport` payload (renderable shape — no envelope wrapper).
@@ -162,7 +165,19 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     let providers = collect_providers(opts.check_providers).await;
     checks.extend(provider_doctor_checks(&providers));
 
-    let targets = collect_targets(opts.check_targets).await;
+    let targets = match collect_targets(opts.check_targets).await {
+        Ok(targets) => targets,
+        Err(detail) => {
+            checks.push(DoctorCheck {
+                id: "rustup-targets".to_string(),
+                status: DoctorStatus::Warn,
+                label: "rustup targets".to_string(),
+                detail,
+                ..Default::default()
+            });
+            Vec::new()
+        }
+    };
     checks.extend(target_doctor_checks(&targets));
 
     for check in &mut checks {
@@ -361,93 +376,6 @@ fn build_host_info(toolchain_checks: &[DoctorCheck]) -> HostInfo {
         harn_version: env!("CARGO_PKG_VERSION").to_string(),
         rust_toolchain,
         cargo_version,
-    }
-}
-
-/// Canonical Rust target triples Harn ships for. Probed/listed by
-/// `harn doctor` so contributors can see at a glance whether Linux,
-/// macOS, Windows, and WASM builds will work locally without spawning
-/// a CI run.
-const CANONICAL_TARGETS: &[&str] = &[
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-pc-windows-msvc",
-    "aarch64-pc-windows-msvc",
-    "wasm32-unknown-unknown",
-    "wasm32-wasip1",
-];
-
-async fn collect_targets(check_targets: bool) -> Vec<TargetInfo> {
-    let installed = installed_rustup_targets();
-    let mut triples: std::collections::BTreeSet<String> =
-        CANONICAL_TARGETS.iter().map(|t| (*t).to_string()).collect();
-    triples.extend(installed.iter().cloned());
-
-    let mut targets = Vec::with_capacity(triples.len());
-    for triple in triples {
-        let is_installed = installed.contains(&triple);
-        let mut reasons = Vec::new();
-        let (buildable, checked) = if !check_targets {
-            (None, false)
-        } else if !is_installed {
-            reasons.push(format!(
-                "target not installed; run `rustup target add {triple}` to probe"
-            ));
-            (Some(false), true)
-        } else {
-            match cargo_check_target(&triple).await {
-                Ok(()) => (Some(true), true),
-                Err(detail) => {
-                    reasons.push(detail);
-                    (Some(false), true)
-                }
-            }
-        };
-        targets.push(TargetInfo {
-            triple,
-            installed: is_installed,
-            buildable,
-            reasons,
-            checked,
-        });
-    }
-    targets
-}
-
-fn installed_rustup_targets() -> Vec<String> {
-    let output = Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output()
-        .ok();
-    match output {
-        Some(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-async fn cargo_check_target(triple: &str) -> Result<(), String> {
-    let output = tokio::process::Command::new("cargo")
-        .args(["check", "--quiet", "--target", triple])
-        .output()
-        .await
-        .map_err(|err| format!("failed to spawn cargo check: {err}"))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let summary = stderr
-            .lines()
-            .rev()
-            .find(|line| line.contains("error"))
-            .map(|line| line.trim().to_string())
-            .unwrap_or_else(|| format!("cargo check --target {triple} failed"));
-        Err(summary)
     }
 }
 
@@ -785,10 +713,9 @@ async fn check_ollama_at(binary: Option<&Path>) -> DoctorCheck {
             ..Default::default()
         };
     };
-    let output = tokio::process::Command::new(binary)
-        .arg("list")
-        .output()
-        .await;
+    let mut command = Command::new(binary);
+    command.arg("list");
+    let output = command_probe::output_async(command, PROBE_TIMEOUT).await;
     match output {
         Ok(out) if out.status.success() => {
             let text = String::from_utf8_lossy(&out.stdout);
@@ -827,7 +754,7 @@ async fn check_ollama_at(binary: Option<&Path>) -> DoctorCheck {
         },
         Err(error) => DoctorCheck {
             id: "ollama".to_string(),
-            status: DoctorStatus::Skip,
+            status: DoctorStatus::Warn,
             label: "ollama".to_string(),
             detail: format!("ollama not callable: {error}"),
             ..Default::default()
@@ -918,7 +845,9 @@ impl ToolCheck {
             self.version_args
         };
         let label = self.id.to_string();
-        let result = Command::new(self.binary).args(args).output();
+        let mut command = Command::new(self.binary);
+        command.args(args);
+        let result = command_probe::output(command, PROBE_TIMEOUT);
         let mut check = match result {
             Ok(output) if output.status.success() => DoctorCheck {
                 id: self.id.to_string(),
@@ -947,7 +876,11 @@ impl ToolCheck {
                 id: self.id.to_string(),
                 status: self.missing_status,
                 label,
-                detail: format!("{} not found in PATH: {error}", self.binary),
+                detail: if error.kind() == std::io::ErrorKind::NotFound {
+                    format!("{} not found in PATH: {error}", self.binary)
+                } else {
+                    format!("{} probe failed: {error}", self.binary)
+                },
                 ..Default::default()
             },
         };
