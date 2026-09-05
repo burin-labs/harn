@@ -698,39 +698,6 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      # Report the mechanism from the runtime that actually installs it, then
-      # force a live outside-write through the same branch. On Linux runners
-      # without Landlock the write must succeed; treating a missing file as a
-      # denial would make the detector's absence read as sandbox coverage.
-      - name: Report process filesystem confinement
-        timeout-minutes: 5
-        env:
-          CARGO_BUILD_JOBS: "4"
-        run: |
-          set -euo pipefail
-          if ! output="$(
-            cargo test --locked -p harn-vm --lib \
-              process_filesystem_sandbox_report_matches_live_escape -- --nocapture 2>&1
-          )"; then
-            printf '%s\n' "$output"
-            exit 1
-          fi
-          printf '%s\n' "$output"
-          marker=""
-          while IFS= read -r line; do
-            case "$line" in
-              HARN_SANDBOX_ENFORCEMENT*) marker="$line"; break ;;
-            esac
-          done <<< "$output"
-          if [[ -z "$marker" ]]; then
-            echo "sandbox enforcement probe produced no receipt" >&2
-            exit 1
-          fi
-          {
-            echo "### Process filesystem confinement"
-            echo
-            echo "\`$marker\`"
-          } >> "$GITHUB_STEP_SUMMARY"
       # The kill switch retains the archive-mode fallback, but the normal path
       # executes the already-compiled suite directly in this warm workspace.
       - name: Build portable workspace test archive
@@ -1079,6 +1046,8 @@ jobs:
           "$GITHUB_SHA"
       - name: Run Linux sandbox tests
         id: release-audit-rust-security
+        env:
+          HARN_SANDBOX_ENFORCEMENT_RECEIPT: ${{ runner.temp }}/harn-sandbox-enforcement.txt
         # No --locked: nextest rejects it alongside --archive-file. This step
         # replays prebuilt binaries and never resolves dependencies, so there is
         # no lock for the flag to hold.
@@ -1087,7 +1056,27 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
+          -E 'test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
+      - name: Report process filesystem confinement
+        env:
+          HARN_SANDBOX_ENFORCEMENT_RECEIPT: ${{ runner.temp }}/harn-sandbox-enforcement.txt
+        run: |
+          set -euo pipefail
+          receipt="$HARN_SANDBOX_ENFORCEMENT_RECEIPT"
+          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -ne 1 ]]; then
+            echo "sandbox enforcement probe produced no single-line receipt" >&2
+            exit 1
+          fi
+          IFS= read -r marker < "$receipt"
+          case "$marker" in
+            HARN_SANDBOX_ENFORCEMENT*) ;;
+            *) echo "sandbox enforcement probe produced an invalid receipt" >&2; exit 1 ;;
+          esac
+          {
+            echo "### Process filesystem confinement"
+            echo
+            echo "\`$marker\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   harn-audit:
     name: ${{ matrix.name }}

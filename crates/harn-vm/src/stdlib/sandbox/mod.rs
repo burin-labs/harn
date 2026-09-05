@@ -69,6 +69,7 @@ use paths::{
     normalize_io_device_path, path_is_within, relocated_runtime_roots,
 };
 
+mod backend;
 #[cfg(all(test, target_os = "linux"))]
 mod enforcement_report;
 mod handler_env;
@@ -84,6 +85,12 @@ mod process_config;
 mod process_output;
 mod read_roots;
 mod refusal;
+use backend::ActiveBackend;
+pub use backend::{
+    active_backend_available, active_backend_filesystem_available,
+    active_backend_filesystem_mechanism, active_backend_name,
+};
+pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 pub use process_config::apply_active_rustc_wrapper_policy;
 use process_config::neutralize_rustc_wrapper;
 pub use process_config::{ProcessCommandConfig, ProcessStdin};
@@ -177,183 +184,8 @@ pub(crate) enum SandboxFallback {
     Enforce,
 }
 
-/// Trait implemented once per supported host OS. Each backend knows
-/// how to attach the active capability ceiling to a `Command` /
-/// `tokio::process::Command`, or — on Windows where the standard
-/// process types cannot carry an AppContainer — how to drive an
-/// equivalent custom spawn that returns an `Output`.
-///
-/// One concrete implementation is selected at compile time via `cfg`
-/// gating in this module. Callers should not reach for the trait
-/// directly; the module-level `command_output` / `std_command_for` /
-/// `tokio_command_for` entry points dispatch through it.
-pub(crate) trait SandboxBackend {
-    /// Stable identifier used in diagnostics and conformance fixtures.
-    fn name() -> &'static str;
-
-    /// Stable identifier for the filesystem-confinement mechanism this
-    /// backend attempts to attach. This names the mechanism even when the
-    /// running host cannot supply it, so diagnostics can distinguish
-    /// "Landlock unavailable" from "no backend exists for this platform".
-    fn filesystem_mechanism() -> &'static str;
-
-    /// Whether this host can enforce the backend's filesystem mechanism.
-    /// This may differ from [`Self::available`] when a composite backend can
-    /// still enforce non-filesystem restrictions.
-    fn filesystem_available() -> bool {
-        Self::available()
-    }
-
-    /// Whether the platform mechanism this backend uses is available
-    /// on the running host (e.g. Landlock kernel support, the
-    /// `/usr/bin/sandbox-exec` binary, AppContainer APIs).
-    fn available() -> bool;
-
-    /// Apply the per-spawn confinement to a [`std::process::Command`].
-    /// Returns `Ok(())` if the backend can attach inline (Linux
-    /// `pre_exec`, OpenBSD pledge/unveil), or
-    /// [`PrepareOutcome::WrappedExec`] when the spawn must be
-    /// re-routed through a wrapper binary (macOS `sandbox-exec`).
-    fn prepare_std_command(
-        program: &str,
-        args: &[String],
-        command: &mut Command,
-        policy: &CapabilityPolicy,
-        profile: SandboxProfile,
-    ) -> Result<PrepareOutcome, VmError>;
-
-    /// Same as [`prepare_std_command`], but for `tokio::process::Command`.
-    fn prepare_tokio_command(
-        program: &str,
-        args: &[String],
-        command: &mut tokio::process::Command,
-        policy: &CapabilityPolicy,
-        profile: SandboxProfile,
-    ) -> Result<PrepareOutcome, VmError>;
-
-    /// Direct spawn that returns the captured `Output`. Windows uses
-    /// this because AppContainer cannot be attached to a vanilla
-    /// `Command`; other platforms can fall back to the default
-    /// implementation that builds a `Command` and runs it.
-    fn run_to_output(
-        program: &str,
-        args: &[String],
-        config: &ProcessCommandConfig,
-        policy: &CapabilityPolicy,
-        profile: SandboxProfile,
-    ) -> Result<Output, VmError> {
-        let mut command = build_std_command::<Self>(program, args, policy, profile)?;
-        apply_process_config(&mut command, config, Some(policy));
-        crate::op_interrupt::capture_output_interruptible(&mut command)
-            .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
-    }
-}
-
-/// What [`SandboxBackend::prepare_std_command`] / `_tokio_command`
-/// produced: either the original spawn target with sandboxing applied
-/// inline, or a wrapper binary that should be invoked instead.
-pub(crate) enum PrepareOutcome {
-    /// Use the prepared command unchanged.
-    Direct,
-    /// Replace the spawn target with the wrapper binary and args
-    /// (e.g. `sandbox-exec -p '<profile>' -- <program> <args...>`).
-    /// Only macOS produces this today; on other platforms the variant
-    /// stays defined so the trait surface is portable, but the
-    /// build-time dead-code lint would otherwise flip.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    WrappedExec { wrapper: String, args: Vec<String> },
-}
-
-#[cfg(target_os = "linux")]
-type ActiveBackend = linux::Backend;
-#[cfg(target_os = "macos")]
-type ActiveBackend = macos::Backend;
-#[cfg(target_os = "openbsd")]
-type ActiveBackend = openbsd::Backend;
-#[cfg(target_os = "windows")]
-type ActiveBackend = windows::Backend;
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-)))]
-type ActiveBackend = NoopBackend;
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-)))]
-pub(crate) struct NoopBackend;
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-)))]
-impl SandboxBackend for NoopBackend {
-    fn name() -> &'static str {
-        "noop"
-    }
-    fn filesystem_mechanism() -> &'static str {
-        "none"
-    }
-    fn available() -> bool {
-        false
-    }
-    fn prepare_std_command(
-        _program: &str,
-        _args: &[String],
-        _command: &mut Command,
-        _policy: &CapabilityPolicy,
-        _profile: SandboxProfile,
-    ) -> Result<PrepareOutcome, VmError> {
-        Ok(PrepareOutcome::Direct)
-    }
-    fn prepare_tokio_command(
-        _program: &str,
-        _args: &[String],
-        _command: &mut tokio::process::Command,
-        _policy: &CapabilityPolicy,
-        _profile: SandboxProfile,
-    ) -> Result<PrepareOutcome, VmError> {
-        Ok(PrepareOutcome::Direct)
-    }
-}
-
 pub(crate) fn reset_sandbox_state() {
     WARNED_KEYS.with(|keys| keys.borrow_mut().clear());
-}
-
-/// Stable identifier for the platform sandbox backend selected at
-/// compile time. Surfaced for diagnostics and conformance fixtures so
-/// callers can record which backend produced a recorded run.
-pub fn active_backend_name() -> &'static str {
-    ActiveBackend::name()
-}
-
-/// Stable identifier for the active backend's filesystem-confinement
-/// mechanism. Paired with [`active_backend_filesystem_available`]: the name
-/// says what the backend needs, while the boolean says whether this host can
-/// enforce it.
-pub fn active_backend_filesystem_mechanism() -> &'static str {
-    ActiveBackend::filesystem_mechanism()
-}
-
-/// Whether the active backend can enforce its filesystem mechanism here.
-pub fn active_backend_filesystem_available() -> bool {
-    ActiveBackend::filesystem_available()
-}
-
-/// Whether the platform mechanism backing the active sandbox backend
-/// is available on the running host. Used by conformance fixtures and
-/// the `harn doctor` flow to skip OS-hardened checks on hosts without
-/// the required kernel support.
-pub fn active_backend_available() -> bool {
-    ActiveBackend::available()
 }
 
 /// Register Harn-callable introspection builtins for the sandbox.

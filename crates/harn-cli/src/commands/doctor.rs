@@ -6,9 +6,6 @@ use std::process::Command;
 
 use harn_vm::llm_config;
 use harn_vm::orchestration::SandboxProfile;
-use harn_vm::process_sandbox::{
-    active_backend_filesystem_available, active_backend_filesystem_mechanism, active_backend_name,
-};
 use harn_vm::runtime_paths;
 use harn_vm::secrets::{
     configured_default_chain, configured_secret_namespace, EnvSecretProvider,
@@ -23,9 +20,11 @@ use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
 mod next_step;
+mod process_sandbox;
 mod repo_checks;
 
 use next_step::next_step_suggestion;
+use process_sandbox::{process_sandbox_info, ProcessSandboxInfo};
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
 
 /// Env var the embedded `cli/doctor` script reads to pick up the raw
@@ -234,17 +233,8 @@ pub(crate) struct HostInfo {
     pub rust_toolchain: Option<String>,
     /// `cargo --version` first line, when Cargo is on PATH.
     pub cargo_version: Option<String>,
-    /// Runtime-owned fact about child-process filesystem confinement on this
-    /// host. `active == false` means the named backend cannot enforce its
-    /// mechanism here; it never means the probe was skipped.
+    /// Runtime-owned child-process filesystem-confinement fact for this host.
     pub process_sandbox: ProcessSandboxInfo,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct ProcessSandboxInfo {
-    pub backend: String,
-    pub filesystem_mechanism: String,
-    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -376,14 +366,6 @@ fn build_host_info(toolchain_checks: &[DoctorCheck]) -> HostInfo {
         rust_toolchain,
         cargo_version,
         process_sandbox: process_sandbox_info(),
-    }
-}
-
-fn process_sandbox_info() -> ProcessSandboxInfo {
-    ProcessSandboxInfo {
-        backend: active_backend_name().to_string(),
-        filesystem_mechanism: active_backend_filesystem_mechanism().to_string(),
-        active: active_backend_filesystem_available(),
     }
 }
 
@@ -608,7 +590,7 @@ fn stdlib_capability_matrix() -> Vec<CapabilityInfo> {
             .collect()
     };
     let in_process = names(true);
-    let subprocess = names(active_backend_filesystem_available()); // only os_hardened needs it
+    let subprocess = names(process_sandbox_info().active); // only os_hardened needs it
 
     let mut entries = Vec::new();
     for name in [

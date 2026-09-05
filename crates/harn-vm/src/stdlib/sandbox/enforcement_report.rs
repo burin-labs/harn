@@ -78,10 +78,14 @@ fn process_filesystem_sandbox_report_matches_live_escape() {
         "allowed"
     };
 
-    println!(
+    let marker = format!(
         "HARN_SANDBOX_ENFORCEMENT schema=harn.ci.sandbox_enforcement.v1 backend={} filesystem_mechanism={} active={} outside_write={outcome}",
         active_backend_name(),
         active_backend_filesystem_mechanism(),
         active,
     );
+    println!("{marker}");
+    if let Ok(path) = std::env::var("HARN_SANDBOX_ENFORCEMENT_RECEIPT") {
+        std::fs::write(path, format!("{marker}\n")).expect("write sandbox enforcement receipt");
+    }
 }
