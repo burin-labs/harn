@@ -1,4 +1,6 @@
 // Project every `harness.<capability>.<method>` that `harn-vm` declares into a
+import { scan_glob } from "./path_visibility.harn"
+
 // static table the parser can read without the VM.
 //
 // `harn-capability-contracts` is the dependency-leaf owner of capability method
@@ -88,7 +90,7 @@ pub fn render(pairs: list<string>) -> string {
 /** Sorted, de-duplicated pairs from every scanned file. */
 pub fn collect(fs: HarnessFs) -> list<string> {
   let seen: list<string> = []
-  for path in fs.glob(SOURCE_GLOB).sorted() {
+  for path in scan_glob(fs, "check-vm-exposures", SOURCE_GLOB).sorted() {
     for pair in exposures_in_text(fs.read_text(path)) {
       if !seen.contains(pair) {
         seen = seen + [pair]

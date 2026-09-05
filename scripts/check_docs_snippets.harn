@@ -1,4 +1,6 @@
 // Verify every fenced code block in active documentation that claims to be Harn
+import { require_scanned } from "./path_visibility.harn"
+
 // source or a Harn prompt template is valid, by handing it to the real
 // binary rather than approximating either grammar here.
 //
@@ -509,10 +511,13 @@ pipeline main(harness: Harness, task: unknown) {
   const harn_bin = resolve_harn_bin(harness)
   let md_files: list<string> = []
   for docs_glob in DOCS_GLOBS {
+    // scan-refused: require_scanned on md_files below.
     for g in harness.fs.glob(docs_glob) {
       md_files = md_files + [rel_path(g)]
     }
   }
+  // Zero documentation files is the instrument failing, not a clean corpus.
+  require_scanned("check-docs-snippets", "documentation file(s)", len(md_files))
   md_files = md_files.sorted()
   /* The runtime sandbox only permits writes inside the workspace, so the
    * snippet scratch directory lives there rather than under the system temp

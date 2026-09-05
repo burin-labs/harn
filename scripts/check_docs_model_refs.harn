@@ -1,4 +1,6 @@
 // Verify docs model references track the provider alias catalog.
+import { scan_glob } from "./path_visibility.harn"
+
 //
 // Ported from scripts/check_docs_model_refs.sh: every `claude-sonnet-4-*`
 // model id mentioned in docs/src or docs/llm must match the current
@@ -112,10 +114,10 @@ pipeline main(harness: Harness, task: unknown) {
     return 1
   }
   let files: list<string> = []
-  for g in harness.fs.glob("docs/src/**/*.md") {
+  for g in scan_glob(harness.fs, "check-docs-model-refs", "docs/src/**/*.md") {
     files = files + [rel_path(g)]
   }
-  for g in harness.fs.glob("docs/llm/**/*.md") {
+  for g in scan_glob(harness.fs, "check-docs-model-refs", "docs/llm/**/*.md") {
     files = files + [rel_path(g)]
   }
   let failures = 0

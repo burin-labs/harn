@@ -1,4 +1,6 @@
 // Guard published manifests from resolving stale Harn workspace siblings.
+import { require_scanned } from "./path_visibility.harn"
+
 //
 // Cargo strips local `path` entries when publishing crates.io packages, leaving
 // the `version` requirement as the only coupling between sibling crates. That
@@ -171,10 +173,14 @@ pub fn manifest_globs() -> list<string> {
 fn checked_manifest_paths(fs: HarnessFs) -> list<string> {
   let paths: list<string> = []
   for pattern in MANIFEST_GLOBS {
+    // scan-refused: require_scanned on the aggregate below.
     for path in fs.glob(pattern) {
       paths = paths + [path]
     }
   }
+  // A denied or mis-rooted glob returns an empty list, and every later loop
+  // then runs zero times and reports a clean crate graph.
+  require_scanned("check-crate-sibling-versions", "crate manifest(s)", len(paths))
   return paths.sorted()
 }
 

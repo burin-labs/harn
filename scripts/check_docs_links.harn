@@ -1,4 +1,6 @@
 // Check local links in docs/src Markdown files resolve to repository files.
+import { scan_glob } from "./path_visibility.harn"
+
 //
 // Ported from scripts/check_docs_links.py — behavior-identical: same three
 // link regexes (inline, reference, HTML href/src), same fenced-code-block
@@ -413,7 +415,7 @@ pub fn sort_by_start(links: list) -> list {
 }
 
 pipeline main(harness: Harness, task: unknown) {
-  const globbed = harness.fs.glob("${DOCS_DIR}/**/*.md")
+  const globbed = scan_glob(harness.fs, "check-docs-links", "${DOCS_DIR}/**/*.md")
   let repo_root = ""
   for g in globbed {
     const idx = g.index_of("/./")

@@ -1,4 +1,6 @@
 // Static checks for stable Harn diagnostic codes.
+import { scan_glob } from "./path_visibility.harn"
+
 //
 // Ported from scripts/check_diagnostic_codes.py. Behavior-identical: same
 // registry-entry regex + duplicate/category/identifier validation, same
@@ -403,7 +405,7 @@ pipeline main(harness: Harness, task: unknown) {
  */
 fn sorted_rs_files(fs: HarnessFs, root: string) -> list<string> {
   let paths: list<string> = []
-  for path in fs.glob("${root}/**/*.rs") {
+  for path in scan_glob(fs, "check-diagnostic-codes", "${root}/**/*.rs") {
     paths = paths + [path]
   }
   return paths.sorted()

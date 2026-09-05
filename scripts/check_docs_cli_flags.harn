@@ -1,4 +1,6 @@
 // Verify long flags in active documentation bash/sh Harn examples exist in `harn --help`.
+import { require_scanned } from "./path_visibility.harn"
+
 //
 // Ported from scripts/check_docs_cli_flags.sh (bash + inline python):
 // same bash-block extraction, backslash continuation joining, shlex-style
@@ -509,10 +511,13 @@ pipeline main(harness: Harness, task: unknown) {
   const fetch = { path: list<string> -> fetch_help(harness.process, harn_bin, path) }
   let md_files: list<string> = []
   for docs_glob in DOCS_GLOBS {
+    // scan-refused: require_scanned on md_files below.
     for g in harness.fs.glob(docs_glob) {
       md_files = md_files + [rel_path(g)]
     }
   }
+  // Zero documentation files is the instrument failing, not a clean corpus.
+  require_scanned("check-docs-cli-flags", "documentation file(s)", len(md_files))
   let state = {help: {}, flagsets: {}}
   let checked = 0
   let skipped = 0

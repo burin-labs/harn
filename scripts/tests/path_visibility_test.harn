@@ -1,4 +1,10 @@
-import { path_visibility, visibility_failure } from "../path_visibility.harn"
+import {
+  path_visibility,
+  require_scanned,
+  scan_files,
+  scan_glob,
+  visibility_failure,
+} from "../path_visibility.harn"
 
 /**
  * The distinction the whole module exists for, on the real builtin.
@@ -40,4 +46,45 @@ pipeline test_visibility_failure_is_empty_only_when_nothing_was_denied(
   assert(contains(failure, "failure rather than a skip"))
   assert(contains(failure, "a denied"))
   assert(contains(failure, "b denied"))
+}
+
+pipeline test_scan_glob_returns_real_matches(harness: Harness, task: unknown) {
+  const matches = scan_glob(harness.fs, "probe gate", "*.harn", harness.fs.source_dir())
+  assert(len(matches) > 0)
+}
+
+pipeline test_scan_glob_refuses_an_empty_result(harness: Harness, task: unknown) {
+  // A pattern that matches nothing is the shape a denied or mis-rooted scan
+  // produces, and a caller that loops over the empty list would conclude clean.
+  const outcome = try {
+    scan_glob(harness.fs, "probe gate", "*.no-such-extension", harness.fs.source_dir())
+    "returned"
+  } catch (err) {
+    to_string(err)
+  }
+  assert(outcome != "returned")
+  assert(outcome.contains("inspected 0"))
+}
+
+pipeline test_scan_files_refuses_an_empty_result(harness: Harness, task: unknown) {
+  assert(len(scan_files(harness.fs, "probe gate", harness.fs.source_dir(), "*.harn")) > 0)
+  const outcome = try {
+    scan_files(harness.fs, "probe gate", harness.fs.source_dir(), "*.no-such-extension")
+    "returned"
+  } catch (err) {
+    to_string(err)
+  }
+  assert(outcome != "returned")
+}
+
+pipeline test_require_scanned_refuses_only_at_zero(harness: Harness, task: unknown) {
+  require_scanned("probe gate", "thing(s)", 1)
+  const outcome = try {
+    require_scanned("probe gate", "thing(s)", 0)
+    "returned"
+  } catch (err) {
+    to_string(err)
+  }
+  assert(outcome != "returned")
+  assert(outcome.contains("cannot report success"))
 }
