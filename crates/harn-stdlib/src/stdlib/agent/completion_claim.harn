@@ -279,7 +279,8 @@ fn __completion_claim_validate_requirements(
             + json_stringify(
             available,
           )
-            + ".",
+            + ". Retry task_complete now with the applicable values from that list in evidence_refs. "
+            + "Do not answer in prose instead of retrying the tool.",
         )
       }
       if !__completion_claim_has_supporting_result(matches[0]) {

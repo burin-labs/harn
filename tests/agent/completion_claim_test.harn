@@ -100,6 +100,8 @@ pipeline test_fabricated_ref_is_rejected_before_judging(harness: Harness, task: 
   assert(disposition.feedback.contains("\"look-1\""))
   assert(!disposition.feedback.contains("complete-1"))
   assert(!disposition.feedback.contains("invented-404\"]"))
+  assert(disposition.feedback.contains("Retry task_complete now"))
+  assert(disposition.feedback.contains("Do not answer in prose"))
 }
 
 pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown) {
