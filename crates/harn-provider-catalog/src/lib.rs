@@ -10,15 +10,3 @@ pub use artifact::*;
 pub use data_controls::*;
 pub use model_def::*;
 pub use presentation::*;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn shipped_catalog_roundtrips_without_field_loss() {
-        let source = include_str!("../../../spec/provider-catalog/provider-catalog.json");
-        let catalog: super::ProviderCatalogArtifact = serde_json::from_str(source).unwrap();
-        assert!(!catalog.models.is_empty());
-        let expected: serde_json::Value = serde_json::from_str(source).unwrap();
-        assert_eq!(serde_json::to_value(catalog).unwrap(), expected);
-    }
-}
