@@ -25,6 +25,43 @@ fn __inspect_tools(evidence: string) {
   )
 }
 
+fn __status_evidence_verifier(evidence: string) {
+  return { payload ->
+    const matches = payload.judge_evidence_packet.research_summary.reads.filter(
+      { read -> read.name == "inspect_status" && !read.has_error_result },
+    )
+      .to_list()
+    const passed = len(matches) > 0 && contains(payload.judge_evidence, evidence)
+    return {
+      confirm: passed,
+      message: if passed {
+        "The authoritative status inspection contains the expected evidence."
+      } else {
+        "The authoritative status inspection does not contain the expected evidence."
+      },
+      reason: if passed {
+        "status_evidence_observed"
+      } else {
+        "status_evidence_missing"
+      },
+      verification: {
+        oracle_expected: true,
+        command: "inspect_status",
+        observed: if passed {
+          "passed"
+        } else {
+          "failed"
+        },
+        observed_at_evidence_index: if passed {
+          matches[0].evidence_index
+        } else {
+          nil
+        },
+      },
+    }
+  }
+}
+
 fn __checkpoint_events(events: list, schema: string) -> list {
   return events.filter(
     { event -> event.type == "typed_checkpoint" && event?.checkpoint?.schema == schema },
@@ -146,6 +183,7 @@ fn main(harness: Harness) -> int {
         max_iterations: 6,
         max_tokens: max_tokens,
         final_wrapup: false,
+        verify_completion: __status_evidence_verifier(evidence),
         verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
       },
     ) },
@@ -161,9 +199,13 @@ fn main(harness: Harness) -> int {
     .map({ event -> event.tool_call_id })
     .to_list()
   const completion_attempts = captured.events.filter(
-    { event -> event.type == "tool_call" && event?.tool_name == "task_complete" },
+    { event ->
+      event.type == "tool_call_update"
+        && event?.tool_name == "task_complete"
+        && event?.status == "completed"
+    },
   )
-    .map({ event -> {tool_call_id: event.tool_call_id, input: event.raw_input} })
+    .map({ event -> {tool_call_id: event.tool_call_id} })
     .to_list()
   const explicit = observations.any(
     { item -> item?.source == "tool" && item?.disposition == "valid" },
