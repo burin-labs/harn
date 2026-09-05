@@ -21,7 +21,6 @@ for source in \
   release_contract.harn \
   release_contract.json \
   release_contract.env \
-  verify_release_archive_provenance.sh \
   release_metadata.harn \
   release_withdrawals.harn \
   path_visibility.harn \

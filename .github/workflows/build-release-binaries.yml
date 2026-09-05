@@ -2092,7 +2092,9 @@ jobs:
         run: |
           set -euo pipefail
           policy_dir="$RUNNER_TEMP/release-provenance-policy"
-          scripts/stage_release_tools.sh "$policy_dir"
+          mkdir -p "$policy_dir/lib"
+          cp scripts/verify_release_archive_provenance.sh "$policy_dir/verify_release_archive_provenance.sh"
+          cp scripts/lib/release_version.sh "$policy_dir/lib/release_version.sh"
           cp .github/release-bot-allowed-signers "$policy_dir/release-bot-allowed-signers"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
