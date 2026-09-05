@@ -6,10 +6,10 @@ fn __selected_cases(manifest: dict, split: string) -> list {
 }
 
 fn main(harness: Harness) -> int {
-  const split = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_SPLIT", "meter-tune")
-  const trials = to_int(harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_TRIALS", "5")) ?? 5
-  const provider = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_PROVIDER", "mock")
-  const model = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_MODEL", "mock")
+  const split = harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_SPLIT", "meter-tune")
+  const trials = to_int(harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_TRIALS", "5")) ?? 5
+  const provider = harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_PROVIDER", "mock")
+  const model = harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_MODEL", "mock")
   const ledger_path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
   if !contains(["meter-tune", "meter-holdout"], split) || trials < 5 || trials > 20 {
     harness.stdio.eprintln("select a frozen split and 5-20 trials")
@@ -24,8 +24,9 @@ fn main(harness: Harness) -> int {
   const shared_ledger = harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
     && is_absolute(ledger_path)
   if provider != "mock" {
-    const confirmed = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_CONFIRM_SPEND", "0") == "1"
-    const ceiling = to_int(harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_MAX_CELLS", "0"))
+    const confirmed = harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_CONFIRM_SPEND", "0")
+      == "1"
+    const ceiling = to_int(harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_MAX_CELLS", "0"))
       ?? 0
     if !confirmed || ceiling < planned_cells || !shared_ledger {
       harness.stdio.eprintln(
@@ -62,7 +63,7 @@ fn main(harness: Harness) -> int {
     model: model,
     split: split,
   }
-  const commit = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_COMMIT", "")
+  const commit = harness.env.get_or("HARN_EXT_COMPLETION_CLAIM_EVAL_COMMIT", "")
   if commit != "" {
     options = options + {commit: commit}
   }
