@@ -44,8 +44,9 @@ pub type CheckCensus = {
 }
 
 /**
- * Path-gated CI jobs whose `if:` condition is exactly
- * `needs.changes.outputs.<filter> == 'true'`. The globs are NOT copied here;
+ * PR path-gated CI jobs whose condition selects the named change filter.
+ * `always_main` adds unconditional execution outside pull requests.
+ * The globs are NOT copied here;
  * they are read from the workflow that owns them.
  * `scripts/tests/gh_check_state_test.harn` fails when a workflow adds a
  * path-gated job that no row maps, so this table cannot silently fall behind.
@@ -55,7 +56,11 @@ pub const PATH_GATED_CHECKS = [
   {filter: "vscode", check_prefix: "VS Code extension"},
   {filter: "docs_site", check_prefix: "Docs site"},
   {filter: "setup_action", check_prefix: "Setup Harn action"},
-  {filter: "release_contract", check_prefix: "Harn and release orchestrator agree"},
+  {
+    filter: "release_contract",
+    check_prefix: "Harn and release orchestrator agree",
+    always_main: true,
+  },
 ]
 
 /** Checks that must report on every head, whatever the diff touched. */
