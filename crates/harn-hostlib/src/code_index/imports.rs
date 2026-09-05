@@ -29,7 +29,9 @@ const RULES_JSON: &str = include_str!("../../data/code_index_import_rules.json")
 /// language has no fallback extraction.
 pub(crate) fn import_keywords(language: &str) -> &'static [&'static str] {
     match language {
-        "swift" => &["import "],
+        // `@testable import` is how a Swift test target names the
+        // target under test, and it is most of a test file's imports.
+        "swift" => &["import ", "@testable import "],
         "rust" => &["use ", "extern crate ", "pub use "],
         "go" => &["import "],
         "python" => &["import ", "from "],
@@ -110,6 +112,11 @@ pub enum ResolutionStrategy {
     /// from the parent module, `self::` from the current one, with a
     /// `mod.rs` fallback for directory modules.
     RustModule,
+    /// Swift target membership. A Swift `import` names a target, not a
+    /// file, and every file in a target sees every other one with no
+    /// import statement at all. Both halves are the same fact about
+    /// modules, so both are answered from [`ModuleIndex`].
+    SwiftTarget,
     /// The language declares no resolver. **Not** the same as resolving
     /// to nothing: nothing was attempted, so a zero here is a measured
     /// nothing rather than a measured zero.
@@ -124,6 +131,7 @@ impl ResolutionStrategy {
             ResolutionStrategy::DottedLiteral => "dotted-literal",
             ResolutionStrategy::Relative => "relative",
             ResolutionStrategy::RustModule => "rust-module",
+            ResolutionStrategy::SwiftTarget => "swift-target",
             ResolutionStrategy::UnresolvedByDesign => "unresolved-by-design",
         }
     }
@@ -137,6 +145,7 @@ impl ResolutionStrategy {
             "dotted-literal" => Some(ResolutionStrategy::DottedLiteral),
             "relative" => Some(ResolutionStrategy::Relative),
             "rust-module" => Some(ResolutionStrategy::RustModule),
+            "swift-target" => Some(ResolutionStrategy::SwiftTarget),
             "unresolved-by-design" => Some(ResolutionStrategy::UnresolvedByDesign),
             _ => None,
         }
@@ -171,6 +180,150 @@ impl ModuleTarget {
             strategy: ResolutionStrategy::UnresolvedByDesign,
         }
     }
+}
+
+/// Module membership for languages where a file's module is implied by
+/// where it sits rather than written at the top of the file.
+///
+/// Swift is the case this exists for. `import Foo` names a build target,
+/// so it resolves to every file in that target, and the files of one
+/// target already see each other with no import statement. Both are the
+/// same underlying fact, and both are O(files) to store here rather than
+/// O(files squared) if same-target visibility were written out as one
+/// dependency edge per pair.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ModuleIndex {
+    /// Module root (workspace-relative, e.g. `Sources/Core`) to its files.
+    by_root: HashMap<String, Vec<FileId>>,
+    /// Module name (`Core`) to the roots declaring it. Two roots can
+    /// share a name, so this is a list and lookups union them.
+    by_name: HashMap<String, Vec<String>>,
+    /// File to the root of the module it belongs to.
+    home: HashMap<FileId, String>,
+}
+
+impl ModuleIndex {
+    /// Rebuild from the workspace path table. O(paths); the caller
+    /// refreshes it whenever the path set changes, never per file.
+    pub(crate) fn build(path_to_id: &HashMap<String, FileId>) -> Self {
+        let mut index = ModuleIndex::default();
+        for (path, id) in path_to_id {
+            let Some(root) = swift_module_root(path) else {
+                continue;
+            };
+            index.by_root.entry(root.clone()).or_default().push(*id);
+            index.home.insert(*id, root);
+        }
+        for (root, files) in &mut index.by_root {
+            files.sort_unstable();
+            let name = root.rsplit('/').next().unwrap_or(root).to_string();
+            index.by_name.entry(name).or_default().push(root.clone());
+        }
+        for roots in index.by_name.values_mut() {
+            roots.sort();
+        }
+        index
+    }
+
+    /// The module root(s) named `name`. This, not the file list, is
+    /// what the dep graph stores: a module of N files named by M
+    /// importers costs M roots here and N times M only when expanded.
+    pub(crate) fn roots_named(&self, name: &str) -> &[String] {
+        self.by_name.get(name).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Expand module roots back into their files.
+    pub(crate) fn files_in_roots(&self, roots: &[String]) -> Vec<FileId> {
+        let mut out: Vec<FileId> = roots
+            .iter()
+            .filter_map(|root| self.by_root.get(root))
+            .flatten()
+            .copied()
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// Every file in the module(s) named `name`.
+    pub(crate) fn files_named(&self, name: &str) -> Vec<FileId> {
+        self.files_in_roots(self.roots_named(name))
+    }
+
+    /// The root of the module `file` belongs to, if any.
+    pub(crate) fn home_of(&self, file: FileId) -> Option<&str> {
+        self.home.get(&file).map(String::as_str)
+    }
+
+    /// Every other file in `file`'s own module. Empty when the file
+    /// belongs to no module the index understands.
+    pub(crate) fn siblings_of(&self, file: FileId) -> Vec<FileId> {
+        let Some(root) = self.home.get(&file) else {
+            return Vec::new();
+        };
+        self.by_root
+            .get(root)
+            .map(|files| files.iter().copied().filter(|id| *id != file).collect())
+            .unwrap_or_default()
+    }
+}
+
+/// The target a Swift import statement names.
+///
+/// Swift spells this several ways and they all name the same target:
+/// `import Core`, `@testable import Core`, the submodule form
+/// `import Core.Net`, and the declaration form `import struct Core.Box`.
+/// The target is the first dotted segment after the keywords.
+fn swift_module_name(raw: &str) -> Option<String> {
+    let rest = raw.strip_prefix("@testable ").unwrap_or(raw).trim_start();
+    let rest = rest.strip_prefix("import ")?.trim();
+    // `import struct Core.Box` imports one declaration out of `Core`.
+    const DECLARATION_KINDS: &[&str] = &[
+        "struct",
+        "class",
+        "enum",
+        "protocol",
+        "typealias",
+        "func",
+        "let",
+        "var",
+        "actor",
+    ];
+    let mut token = rest.split_whitespace().next()?;
+    if DECLARATION_KINDS.contains(&token) {
+        token = rest.split_whitespace().nth(1)?;
+    }
+    let name = token.split('.').next()?.trim_end_matches(';');
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// The module root of a Swift file under the SwiftPM layout: the
+/// directory immediately below the nearest `Sources` or `Tests`
+/// ancestor. `Sources/Core/Net/Client.swift` belongs to `Sources/Core`.
+///
+/// Returns `None` for a Swift file that is not inside a target
+/// directory, which is `Package.swift` itself and loose scripts. A file
+/// sitting directly in `Sources/` also returns `None`: the layout does
+/// not say which target owns it.
+fn swift_module_root(path: &str) -> Option<String> {
+    if !path.ends_with(".swift") {
+        return None;
+    }
+    let segments: Vec<&str> = path.split('/').collect();
+    if segments.len() < 3 {
+        return None;
+    }
+    let last_container = segments.len() - 2;
+    let anchor = segments[..=last_container]
+        .iter()
+        .rposition(|seg| *seg == "Sources" || *seg == "Tests")?;
+    if anchor + 1 > last_container {
+        return None;
+    }
+    Some(segments[..=anchor + 1].join("/"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,8 +387,13 @@ fn rules() -> &'static HashMap<String, ImportRule> {
 /// Outcome of resolving the import strings for one file.
 #[derive(Debug, Default)]
 pub(crate) struct Resolved {
-    /// Workspace files these imports name.
+    /// Workspace files these imports name individually.
     pub resolved: HashSet<FileId>,
+    /// Module roots these imports name wholesale. Stored as roots, not
+    /// as their files: a Swift `import` names a build target, and
+    /// writing out one edge per file in it is the cross-product shape
+    /// that made the symbol graph unusable in issue #8081.
+    pub modules: Vec<String>,
     /// Import strings with no workspace target, whatever the reason.
     /// The dep graph stores these verbatim; ask [`strategy_for`] whether
     /// the language even has a resolver, because "tried and found
@@ -249,6 +407,7 @@ pub(crate) fn resolve(
     from_relative_path: &str,
     language: &str,
     path_to_id: &HashMap<String, FileId>,
+    modules: &ModuleIndex,
 ) -> Resolved {
     let mut out = Resolved::default();
     for raw in imports {
@@ -256,13 +415,26 @@ pub(crate) fn resolve(
         if trimmed.is_empty() {
             continue;
         }
-        let target = resolve_target(trimmed, language, from_relative_path, path_to_id);
+        if strategy_for(language) == ResolutionStrategy::SwiftTarget {
+            let roots = swift_module_name(trimmed)
+                .map(|name| modules.roots_named(&name))
+                .unwrap_or(&[]);
+            if roots.is_empty() {
+                out.unresolved.push(raw.clone());
+            } else {
+                out.modules.extend(roots.iter().cloned());
+            }
+            continue;
+        }
+        let target = resolve_target(trimmed, language, from_relative_path, path_to_id, modules);
         if target.files.is_empty() {
             out.unresolved.push(raw.clone());
         } else {
             out.resolved.extend(target.files);
         }
     }
+    out.modules.sort();
+    out.modules.dedup();
     out
 }
 
@@ -313,6 +485,7 @@ pub(crate) fn resolve_target(
     language: &str,
     from_relative_path: &str,
     path_to_id: &HashMap<String, FileId>,
+    modules: &ModuleIndex,
 ) -> ModuleTarget {
     let strategy = strategy_for(language);
     if !strategy.attempts_resolution() {
@@ -326,6 +499,9 @@ pub(crate) fn resolve_target(
         ResolutionStrategy::RustModule => {
             resolve_rust_module(raw.trim(), from_relative_path, path_to_id)
         }
+        ResolutionStrategy::SwiftTarget => swift_module_name(raw.trim())
+            .map(|name| modules.files_named(&name))
+            .unwrap_or_default(),
         _ => apply_rule(rule, raw.trim(), &base_dir, path_to_id)
             .map(|id| vec![id])
             .unwrap_or_default(),
@@ -341,22 +517,6 @@ pub(crate) fn import_kind(language: &str) -> &str {
         .get(language)
         .and_then(|r| r.kind.as_deref())
         .unwrap_or("import")
-}
-
-/// Try to resolve a single import string against `path_to_id`. `base_dir`
-/// is the workspace-relative directory of the *importing* file (with `/`
-/// separators, no trailing slash); pass an empty string when the resolver
-/// shouldn't attempt relative resolution.
-pub(crate) fn resolve_module(
-    module: &str,
-    language: &str,
-    from_relative_path: &str,
-    path_to_id: &HashMap<String, FileId>,
-) -> Option<FileId> {
-    resolve_target(module, language, from_relative_path, path_to_id)
-        .files
-        .into_iter()
-        .next()
 }
 
 fn apply_rule(
@@ -851,12 +1011,26 @@ mod tests {
         let mut paths: HashMap<String, FileId> = HashMap::new();
         paths.insert("src/util.rs".to_string(), 2);
 
-        let unattempted = resolve_target("import Foundation", "swift", "src/a.swift", &paths);
+        // Go still declares no resolver, so it is the language that
+        // distinguishes "never tried" from "tried and matched nothing".
+        let unattempted = resolve_target(
+            "import \"fmt\"",
+            "go",
+            "src/a.go",
+            &paths,
+            &ModuleIndex::build(&paths),
+        );
         assert_eq!(unattempted.strategy, ResolutionStrategy::UnresolvedByDesign);
         assert!(unattempted.files.is_empty());
         assert!(!unattempted.strategy.attempts_resolution());
 
-        let attempted = resolve_target("use std::fmt::Debug;", "rust", "src/main.rs", &paths);
+        let attempted = resolve_target(
+            "use std::fmt::Debug;",
+            "rust",
+            "src/main.rs",
+            &paths,
+            &ModuleIndex::build(&paths),
+        );
         assert_eq!(attempted.strategy, ResolutionStrategy::RustModule);
         assert!(attempted.files.is_empty());
         assert!(
@@ -885,6 +1059,7 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![1]);
         // Anchoring is on the importer's crate, from a nested module too.
@@ -893,6 +1068,7 @@ mod tests {
             "rust",
             "crates/pkg/src/deep/leaf.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![1]);
     }
@@ -905,9 +1081,16 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![3], "a file module wins over its parent");
-        let t = resolve_target("use crate::deep;", "rust", "crates/pkg/src/main.rs", &paths);
+        let t = resolve_target(
+            "use crate::deep;",
+            "rust",
+            "crates/pkg/src/main.rs",
+            &paths,
+            &ModuleIndex::build(&paths),
+        );
         assert_eq!(t.files, vec![2], "a directory module resolves via mod.rs");
     }
 
@@ -923,6 +1106,7 @@ mod tests {
             "rust",
             "crates/pkg/src/deep/leaf.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(
             t.files,
@@ -935,6 +1119,7 @@ mod tests {
             "rust",
             "crates/pkg/src/deep/leaf.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert!(
             t.files.is_empty(),
@@ -948,6 +1133,7 @@ mod tests {
             "rust",
             "crates/pkg/src/deep/mod.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![1]);
     }
@@ -961,10 +1147,17 @@ mod tests {
             "rust",
             "crates/pkg/src/deep/mod.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![3]);
         // `util.rs` is a file module, so its children live in `util/`.
-        let t = resolve_target("use self::inner;", "rust", "crates/pkg/src/util.rs", &paths);
+        let t = resolve_target(
+            "use self::inner;",
+            "rust",
+            "crates/pkg/src/util.rs",
+            &paths,
+            &ModuleIndex::build(&paths),
+        );
         assert_eq!(t.files, vec![6]);
     }
 
@@ -978,7 +1171,13 @@ mod tests {
             // A nested brace group is declined rather than mis-parsed.
             "use crate::util::{a::{b, c}, d};",
         ] {
-            let t = resolve_target(raw, "rust", "crates/pkg/src/main.rs", &paths);
+            let t = resolve_target(
+                raw,
+                "rust",
+                "crates/pkg/src/main.rs",
+                &paths,
+                &ModuleIndex::build(&paths),
+            );
             assert!(
                 t.files.is_empty(),
                 "`{raw}` must name no workspace file, got {:?}",
@@ -1001,6 +1200,7 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         let mut got = t.files;
         got.sort_unstable();
@@ -1012,6 +1212,7 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         let mut got = t.files;
         got.sort_unstable();
@@ -1026,6 +1227,7 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![2], "a glob names the module, not a parent");
         // The very common test-module form.
@@ -1034,6 +1236,7 @@ mod tests {
             "rust",
             "crates/pkg/src/deep/leaf.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![2], "`super::*` names the parent module");
     }
@@ -1046,6 +1249,7 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![1]);
         let t = resolve_target(
@@ -1053,6 +1257,7 @@ mod tests {
             "rust",
             "crates/pkg/src/main.rs",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         let mut got = t.files;
         got.sort_unstable();
@@ -1069,6 +1274,7 @@ mod tests {
             "harn",
             "pipelines/lib/agent/loop.harn",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(t.files, vec![7]);
         assert_eq!(t.strategy, ResolutionStrategy::Relative);
@@ -1078,6 +1284,7 @@ mod tests {
             "harn",
             "pipelines/lib/agent/loop.harn",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert_eq!(bare.files, vec![7], "a side-effect import resolves too");
 
@@ -1086,6 +1293,7 @@ mod tests {
             "harn",
             "pipelines/lib/agent/loop.harn",
             &paths,
+            &ModuleIndex::build(&paths),
         );
         assert!(std_import.files.is_empty());
         assert!(
@@ -1135,6 +1343,7 @@ mod tests {
             "src/index.ts",
             "typescript",
             &map,
+            &ModuleIndex::build(&map),
         );
         assert!(r.resolved.contains(&1));
     }
@@ -1149,6 +1358,7 @@ mod tests {
             "src/main.py",
             "python",
             &map,
+            &ModuleIndex::build(&map),
         );
         assert!(r.resolved.contains(&3));
         let r = resolve(
@@ -1156,6 +1366,7 @@ mod tests {
             "src/main.py",
             "python",
             &map,
+            &ModuleIndex::build(&map),
         );
         assert!(r.resolved.contains(&3));
     }
@@ -1168,6 +1379,7 @@ mod tests {
             "src/Main.java",
             "java",
             &map,
+            &ModuleIndex::build(&map),
         );
         assert!(r.resolved.contains(&4));
     }
@@ -1180,6 +1392,7 @@ mod tests {
             "src/Main.java",
             "java",
             &map,
+            &ModuleIndex::build(&map),
         );
         assert!(r.resolved.is_empty());
         assert_eq!(r.unresolved, vec!["import com.unknown.Foo;".to_string()]);
@@ -1196,5 +1409,136 @@ mod tests {
         assert_eq!(import_kind("rust"), "use");
         assert_eq!(import_kind("c"), "include");
         assert_eq!(import_kind("totally-unknown"), "import");
+    }
+
+    fn swift_workspace() -> HashMap<String, FileId> {
+        let mut paths: HashMap<String, FileId> = HashMap::new();
+        paths.insert("Sources/Core/Client.swift".to_string(), 1);
+        paths.insert("Sources/Core/Net/Session.swift".to_string(), 2);
+        paths.insert("Sources/App/Main.swift".to_string(), 3);
+        paths.insert("Tests/CoreTests/ClientTests.swift".to_string(), 4);
+        paths.insert("Package.swift".to_string(), 5);
+        paths.insert("Sources/Loose.swift".to_string(), 6);
+        paths
+    }
+
+    #[test]
+    fn swift_import_names_every_file_in_the_target() {
+        let paths = swift_workspace();
+        let modules = ModuleIndex::build(&paths);
+        let t = resolve_target(
+            "import Core",
+            "swift",
+            "Sources/App/Main.swift",
+            &paths,
+            &modules,
+        );
+        assert_eq!(t.strategy, ResolutionStrategy::SwiftTarget);
+        // Both files of the target, including the one in a subdirectory.
+        assert_eq!(t.files, vec![1, 2]);
+    }
+
+    #[test]
+    fn swift_target_membership_needs_no_import_statement() {
+        let paths = swift_workspace();
+        let modules = ModuleIndex::build(&paths);
+        // `Client.swift` writes no import naming `Session.swift`, and
+        // Swift does not require one: same target, mutually visible.
+        assert_eq!(modules.siblings_of(1), vec![2]);
+        assert_eq!(modules.siblings_of(2), vec![1]);
+        // Membership excludes the file itself, so a lone file in a
+        // target sees nobody.
+        assert!(modules.siblings_of(3).is_empty());
+    }
+
+    #[test]
+    fn swift_targets_do_not_leak_across_sources_and_tests() {
+        let paths = swift_workspace();
+        let modules = ModuleIndex::build(&paths);
+        // A test target is its own module: importing it from a source
+        // target must not pull in the source target's files.
+        assert_eq!(modules.files_named("CoreTests"), vec![4]);
+        assert!(!modules.siblings_of(4).contains(&1));
+    }
+
+    #[test]
+    fn swift_import_of_a_non_workspace_module_resolves_to_nothing() {
+        let paths = swift_workspace();
+        let modules = ModuleIndex::build(&paths);
+        let t = resolve_target(
+            "import Foundation",
+            "swift",
+            "Sources/App/Main.swift",
+            &paths,
+            &modules,
+        );
+        // A real strategy ran and matched nothing. That is a different
+        // answer from the unresolved-by-design verdict, and the strategy
+        // carried on the target is what says which one happened.
+        assert_eq!(t.strategy, ResolutionStrategy::SwiftTarget);
+        assert!(t.files.is_empty());
+        assert!(t.strategy.attempts_resolution());
+    }
+
+    #[test]
+    fn swift_files_outside_a_target_directory_join_no_module() {
+        let paths = swift_workspace();
+        let modules = ModuleIndex::build(&paths);
+        // `Package.swift` is the manifest, not target source.
+        assert!(modules.siblings_of(5).is_empty());
+        // A file sitting directly in `Sources/` has no target directory
+        // naming it, so guessing one would invent membership.
+        assert!(modules.siblings_of(6).is_empty());
+        assert!(modules.files_named("Sources").is_empty());
+    }
+
+    #[test]
+    fn swift_module_root_reads_the_nearest_target_anchor() {
+        assert_eq!(
+            swift_module_root("Sources/Core/Net/Session.swift").as_deref(),
+            Some("Sources/Core")
+        );
+        // A vendored package nests a second `Sources`; the nearest one
+        // wins, so the inner package's targets stay separate.
+        assert_eq!(
+            swift_module_root("vendor/Dep/Sources/DepCore/A.swift").as_deref(),
+            Some("vendor/Dep/Sources/DepCore")
+        );
+        assert_eq!(swift_module_root("Package.swift"), None);
+        assert_eq!(swift_module_root("Sources/Loose.swift"), None);
+        assert_eq!(swift_module_root("Sources/Core/Client.rs"), None);
+    }
+
+    #[test]
+    fn swift_import_spellings_all_name_the_same_target() {
+        assert_eq!(swift_module_name("import Core").as_deref(), Some("Core"));
+        assert_eq!(
+            swift_module_name("@testable import Core").as_deref(),
+            Some("Core")
+        );
+        assert_eq!(
+            swift_module_name("import Core.Net").as_deref(),
+            Some("Core")
+        );
+        assert_eq!(
+            swift_module_name("import struct Core.Box").as_deref(),
+            Some("Core")
+        );
+        assert_eq!(swift_module_name("import"), None);
+        assert_eq!(swift_module_name("class Foo {"), None);
+    }
+
+    #[test]
+    fn swift_testable_import_reaches_the_target_under_test() {
+        let paths = swift_workspace();
+        let modules = ModuleIndex::build(&paths);
+        let t = resolve_target(
+            "@testable import Core",
+            "swift",
+            "Tests/CoreTests/ClientTests.swift",
+            &paths,
+            &modules,
+        );
+        assert_eq!(t.files, vec![1, 2]);
     }
 }
