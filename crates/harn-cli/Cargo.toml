@@ -207,6 +207,7 @@ testbench-wasi = ["harn-vm/testbench-wasi"]
 
 [dev-dependencies]
 harn-mcp-compat = { path = "../harn-mcp-compat" }
+syn = { version = "2", features = ["full", "visit"] }
 rcgen = "0.14"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 wat = "1"

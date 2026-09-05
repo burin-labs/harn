@@ -6,6 +6,7 @@ pub(crate) mod canon;
 pub(crate) mod chat;
 pub(crate) mod check;
 pub(crate) mod codemod;
+mod command_probe;
 pub(crate) mod config_cmd;
 pub(crate) mod conformance_helper;
 pub(crate) mod connect;

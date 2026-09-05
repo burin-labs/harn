@@ -1887,6 +1887,12 @@ Each check reports a red/yellow/green status (`fail` / `warn` / `ok`, plus
 
 The command exits non-zero when at least one check is `fail`.
 
+Local diagnostic subprocesses have a five-second execution deadline and a
+64 KiB output limit per stream. Explicit target compilation probes use a
+30-second deadline. A timed-out tool is reported as a failed probe; an
+unreadable target inventory is a warning, not an empty successful inventory.
+Process cleanup may add a short grace period after the deadline.
+
 ### What it checks
 
 - **Toolchain** — `rustc`, `cargo` (FAIL when missing).

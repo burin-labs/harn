@@ -323,6 +323,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // not runtime scheduling policy; the command's deterministic semantics are
   // tested separately from these observations.
   "crates/harn-cli/src/commands/bench/portable.rs",
+  // OS diagnostic subprocess deadlines must advance with real elapsed time,
+  // even when the VM clock is virtual; tests exercise real child termination.
+  "crates/harn-cli/src/commands/command_probe.rs",
   "crates/harn-cli/src/commands/connect.rs",
   // `harn connect` waits for real browser OAuth callbacks and stamps
   // persisted connector credential metadata with host Unix time; those
