@@ -56,15 +56,45 @@ fn __tool_registry_has(registry: dict, name: string) {
   return false
 }
 
-fn __render_loaded_skill(agent: HarnessAgent, entry: dict, request: dict, session_id: any) {
+/**
+ * The entry's prompt with `$ARGUMENTS`, `$N` and `${HARN_*}` substituted, or
+ * nil when substitution is unavailable or produced nothing.
+ *
+ * Every surface that puts a skill prompt in front of a model renders it here.
+ * A surface that reads the entry's `prompt` field directly instead serves the
+ * raw placeholder text, and because substitution is fail-open there is no error
+ * to notice: the model is simply told its session is `${HARN_SESSION_ID}`.
+ * Returning nil rather than the raw prompt lets each caller keep its own
+ * framing for the unavailable case instead of this deciding for them.
+ */
+pub fn __skill_rendered_prompt(
+  agent: HarnessAgent,
+  entry: dict,
+  arguments: any,
+  session_id: any,
+) -> string? {
   const rendered = try {
-    agent.skill_render(entry, request?.arguments ?? request?.args ?? [], {session_id: session_id})
+    agent.skill_render(entry, arguments ?? [], {session_id: session_id})
   }
-  if !is_err(rendered) {
-    const body = trim(unwrap(rendered))
-    if body != "" {
-      return body
-    }
+  if is_err(rendered) {
+    return nil
+  }
+  const body = trim(unwrap(rendered))
+  if body == "" {
+    return nil
+  }
+  return body
+}
+
+fn __render_loaded_skill(agent: HarnessAgent, entry: dict, request: dict, session_id: any) {
+  const rendered = __skill_rendered_prompt(
+    agent,
+    entry,
+    request?.arguments ?? request?.args ?? [],
+    session_id,
+  )
+  if rendered != nil {
+    return rendered
   }
   let out = "### " + __skill_id(entry) + "\n"
   const description = trim(entry?.description ?? "")

@@ -5,6 +5,7 @@ import {
   agent_scratchpad_options,
   agent_scratchpad_recitation_fragment,
 } from "std/agent/scratchpad"
+import { __skill_rendered_prompt } from "std/agent/skills"
 import {
   agent_session_messages,
   agent_session_project_turn,
@@ -489,7 +490,18 @@ fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict)
   )
 }
 
-fn __agent_active_skill_prompt(active: list?) {
+/**
+ * The active-skills system-prompt block: one section per active skill, each
+ * carrying the skill's prompt as the model will read it.
+ *
+ * Internal, but exported so a conformance case can assert the served bytes
+ * without standing up a live agent session around it.
+ */
+pub fn __agent_active_skill_prompt(
+  agent: HarnessAgent,
+  session_id: any,
+  active: list?,
+) -> string {
   if len(active ?? []) == 0 {
     return ""
   }
@@ -512,7 +524,12 @@ fn __agent_active_skill_prompt(active: list?) {
     if len(allowed) > 0 {
       out = out + "Scoped tools: " + join(allowed, ", ") + "\n"
     }
-    const prompt = trim(active_skill?.prompt ?? "")
+    // Same renderer the loaded-skill path uses. Reading `prompt` directly here
+    // is what served a raw `${HARN_SESSION_ID}` to the model: substitution is
+    // fail-open, so the placeholder passed through with nothing reporting it.
+    const prompt = trim(
+      __skill_rendered_prompt(agent, active_skill, [], session_id) ?? active_skill?.prompt ?? "",
+    )
     if prompt != "" {
       out = out + "\n" + prompt + "\n"
     }
@@ -764,7 +781,7 @@ pub fn agent_build_turn_system_fragments(
   fragments = __agent_push_system_fragment(
     fragments,
     "active_skills",
-    __agent_active_skill_prompt(opts?.active_skills),
+    __agent_active_skill_prompt(harness.agent, session?.session_id, opts?.active_skills),
   )
   fragments = __agent_push_system_fragment(
     fragments,
