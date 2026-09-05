@@ -342,7 +342,7 @@ fn __agent_tool_listing_prompts(registry: dict) -> dict {
       // it. Widening the line to carry parameters would spend the savings the
       // flag exists for.
       let line = "- `" + name + "`"
-      const summary = __agent_tool_summary(description)
+      const summary = trim(regex_replace("\\s+", " ", tool_description_summary(description)))
       if summary != "" {
         line = line + " — " + summary
       }
@@ -374,45 +374,6 @@ fn __agent_tool_listing_prompts(registry: dict) -> dict {
     trim(expanded)
   }
   return {expanded: expanded_text, compact: trim(compact)}
-}
-
-/**
- * The leading sentences of a compact tool's description, collapsed to one line.
- *
- * Mirrors the Rust `tool_summary` in `llm/tools/summary.rs`, which shortens
- * the same field on the native wire: both take whole sentences up to an
- * 80-character floor, because half a sentence reads as the whole contract.
- *
- * The duplication is deliberate but not free — one policy with two
- * implementations, kept in parity by tests on each side rather than by a
- * shared owner, because the stdlib has no builtin into the Rust module.
- * Changing the rule here means changing it there.
- */
-fn __agent_tool_summary(description: string) -> string {
-  const head = trim(split(description, "\n\n")[0] ?? "")
-  if head == "" {
-    return ""
-  }
-  const sentences = split(head, ". ")
-  let out = ""
-  for sentence in sentences {
-    out = if out == "" {
-      sentence
-    } else {
-      out + ". " + sentence
-    }
-    if len(out) >= 80 {
-      break
-    }
-  }
-  const collapsed = trim(regex_replace("\\s+", " ", out))
-  // `split` on ". " drops the separator, so every piece but the last lost its
-  // period. Restore it, and leave a `?`/`!` ending alone.
-  if collapsed != "" && !ends_with(collapsed, ".") && !ends_with(collapsed, "?")
-    && !ends_with(collapsed, "!") {
-    return collapsed + "."
-  }
-  return collapsed
 }
 
 /**

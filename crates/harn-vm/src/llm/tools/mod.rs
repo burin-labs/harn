@@ -14,6 +14,8 @@ mod summary;
 mod ts_value_parser;
 mod type_expr;
 
+pub(crate) use summary::TOOL_DESCRIPTION_SUMMARY_IMPL_DEF;
+
 pub(crate) use collect::{collect_tool_schemas, validate_tool_args, ToolSchema};
 pub(crate) use compat::{is_generic_wrapper_name, normalize_tool_call_shape};
 pub use function_schema::function_schema_from_catalog_row;
