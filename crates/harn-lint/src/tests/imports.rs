@@ -160,6 +160,30 @@ fn test_import_order_fires_when_out_of_order() {
 }
 
 #[test]
+fn test_import_order_preserves_visibility_with_each_import() {
+    let cases = [
+        (
+            "import * as zebra from \"zebra\"\npub import { leaf } from \"alpha\"\nimport \"middle\"\n",
+            "pub import { leaf } from \"alpha\"\nimport \"middle\"\nimport * as zebra from \"zebra\"\n",
+        ),
+        (
+            "pub import * as zebra from \"zebra\"\nimport { leaf } from \"alpha\"\nimport \"middle\"\n",
+            "import { leaf } from \"alpha\"\nimport \"middle\"\npub import * as zebra from \"zebra\"\n",
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let diagnostics = lint_source(source);
+        let import_order = diagnostics
+            .into_iter()
+            .filter(|diagnostic| diagnostic.rule == "import-order")
+            .collect::<Vec<_>>();
+        assert_eq!(import_order.len(), 1, "expected one reorder for {source:?}");
+        assert_eq!(apply_fixes(source, &import_order), expected);
+    }
+}
+
+#[test]
 fn test_import_order_keeps_comments_by_disabling_unsafe_fix() {
     let source = "import \"std/io\"\n// keep with imports\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
     let diags = lint_source(source);
