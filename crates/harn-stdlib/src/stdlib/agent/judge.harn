@@ -35,14 +35,19 @@ pub import {
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
 import { agent_feedback_emit } from "std/agent/feedback"
+pub import {
+  CompletionJudgeInvocations,
+  CompletionPolicyEvaluation,
+  CompletionStageVerdict,
+  __completion_arbitrate_contradiction,
+  __completion_arbitrate_verification,
+} from "std/agent/judge_arbitration"
 import { __judge_resolve_contradiction } from "std/agent/judge_contradiction"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
   CompletionJudgeAdmission,
   CompletionJudgeGapClass,
   CompletionVerificationState,
-  __completion_arbitration_converts,
-  __completion_contradiction_arbitration_converts,
   __completion_judge_gap_class,
   __completion_verification_state_read,
   __judge_checkpoint_unavailable,
@@ -95,12 +100,6 @@ pub type CompletionJudgeAction = "accept" | "continue"
 /** Runtime completion decision after deadline and policy enforcement. */
 pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
 
-pub type CompletionJudgeInvocations = {
-  deterministic: bool,
-  verify_completion_judge: bool,
-  turn_end_condition: bool,
-}
-
 pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
 
 pub type CompletionDirectiveReceipt = {
@@ -139,36 +138,10 @@ pub type CompletionDirective = {
   knowledge_state: string,
 }
 
-/** Normalized result from either a deterministic or model completion check. */
-type CompletionStageVerdict = {
-  vetoed: bool,
-  confirm?: bool,
-  verdict?: string,
-  feedback?: string?,
-  reasoning?: string,
-  next_step?: string,
-  source?: string,
-  trigger?: string?,
-  reason?: string?,
-  gap_class?: CompletionJudgeGapClass?,
-  // Set when a `done` reply that named a gap was re-asked once with the
-  // contradiction spelled out. Present so the contradiction arbitration can
-  // tell a first self-contradiction from one that survived being pointed out.
-  contradiction_reasked?: bool?,
-  verification?: CompletionVerificationState?,
-  converted_from?: string?,
-  escalation_recommended?: bool?,
-  escalation_target?: string?,
-  judge_duration_ms?: int | float,
-  judge_outcome?: string?,
-  terminal_judge_reason?: string?,
-  terminal_evidence_preserved?: bool,
-  admission?: CompletionJudgeAdmission?,
-  typed_checkpoint?: dict?,
-  requirement_report?: CompletionRequirementReport?,
-}
-
-/** Stable identity for the two model-judge positions in the completion plan. */
+/**
+ * Normalized result from either a deterministic or model completion check.
+ * Stable identity for the two model-judge positions in the completion plan.
+ */
 enum CompletionJudgeSlot {
   Verification
   Completion
@@ -184,20 +157,6 @@ enum CompletionPolicyStage {
     prior_invocations: int,
     max_invocations: int?,
   )
-}
-
-type CompletionPolicyEvaluation = {
-  verdict: CompletionStageVerdict,
-  invoked: CompletionJudgeInvocations,
-  verification_judge_cap_reached: bool,
-  completion_judge_cap_reached: bool,
-  // The snapshot as of this stage. Later stages see what earlier stages
-  // established; a second model judge must not read the gate's facts through the
-  // first judge's overwritten verdict.
-  payload: CompletionEvidenceSnapshot,
-  // The deterministic gate's own reason, held separately because
-  // `evaluation.verdict` is overwritten by every stage that follows it.
-  deterministic_reason: string,
 }
 
 fn __unique_names(names: any) -> list<string> {
@@ -1294,97 +1253,6 @@ fn __completion_policy_mark_model_invoked(
       + {invoked: prior + {verify_completion_judge: invoked}} }
     Completion() -> { return evaluation + {invoked: prior + {turn_end_condition: invoked}} }
   }
-}
-
-const __COMPLETION_VERIFICATION_CONVERSION: string = "failed_verification_contradicted_by_gate"
-
-const __COMPLETION_CONTRADICTION_CONVERSION: string =
-  "gap_contradicts_done_survived_reask_over_passing_verifier"
-
-/**
- * Refuse a model `continue` that names a failed verification the deterministic
- * gate observed passing, and convert it to `done` with a receipt saying so.
- *
- * This narrows WHAT EVIDENCE a refusal may rest on; it does not weaken refusal.
- * Every other `gap_class` vetoes exactly as before, so artifact, manner and
- * negative-clause, and authorization gaps keep the judge's full authority — and
- * those are where its demonstrated discriminating power lives.
- *
- * `__completion_arbitration_converts` owns the conditions and why each is
- * required. The invocation map is read here rather than re-derived: whether an
- * adjudicator actually ran is the invocation map's question, not this
- * function's.
- */
-fn __completion_arbitrate_verification(
-  verdict: CompletionStageVerdict,
-  evaluation: CompletionPolicyEvaluation,
-) -> CompletionStageVerdict {
-  if !verdict.vetoed || verdict.source != "llm" {
-    return verdict
-  }
-  if !__completion_arbitration_converts(
-    to_string(verdict.gap_class ?? "other"),
-    evaluation.invoked.deterministic,
-    evaluation.deterministic_reason,
-    to_string(evaluation.payload.verification?.observed ?? "not_run"),
-  ) {
-    return verdict
-  }
-  // `reasoning` keeps the judge's own words. The record must show that a real
-  // refusal was overruled, not that no refusal happened.
-  return verdict
-    + {
-      vetoed: false,
-      verdict: "done",
-      feedback: nil,
-      next_step: "",
-      converted_from: __COMPLETION_VERIFICATION_CONVERSION,
-      reason: __COMPLETION_VERIFICATION_CONVERSION,
-    }
-}
-
-/**
- * Refuse a self-contradiction that survived its one re-ask and names nothing,
- * on a run the deterministic gate observed verifying green.
- *
- * `__completion_contradiction_arbitration_converts` owns the conditions and why
- * each is required. This is the second half of the harn#8060 fix: the re-ask
- * gives the judge one chance to name a real gap or drop the field, and this
- * stops an unnamed contradiction that took neither exit from spending the
- * invocation budget on feedback no turn can answer.
- *
- * As with the verification arbitration, `reasoning` keeps the judge's own words,
- * so the record shows a refusal that was overruled rather than one that never
- * happened.
- */
-fn __completion_arbitrate_contradiction(
-  verdict: CompletionStageVerdict,
-  evaluation: CompletionPolicyEvaluation,
-) -> CompletionStageVerdict {
-  if !verdict.vetoed || verdict.source != "llm" {
-    return verdict
-  }
-  if to_string(verdict.reason ?? "") != "completion_judge_gap_contradicts_done" {
-    return verdict
-  }
-  if !__completion_contradiction_arbitration_converts(
-    to_string(verdict.gap_class ?? "other"),
-    verdict.contradiction_reasked ?? false,
-    evaluation.invoked.deterministic,
-    evaluation.deterministic_reason,
-    to_string(evaluation.payload.verification?.observed ?? "not_run"),
-  ) {
-    return verdict
-  }
-  return verdict
-    + {
-      vetoed: false,
-      verdict: "done",
-      feedback: nil,
-      next_step: "",
-      converted_from: __COMPLETION_CONTRADICTION_CONVERSION,
-      reason: __COMPLETION_CONTRADICTION_CONVERSION,
-    }
 }
 
 fn __completion_policy_run_stage(
