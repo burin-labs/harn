@@ -1,0 +1,62 @@
+// The falsifier for a run whose opening user turn never reached its own
+// transcript.
+//
+// `inject_message` writes a sidecar `message` event into whatever transcript
+// is current when it runs. Session initialization used to push the requested
+// transcript directory before seeding those turns and later pushed it
+// afterwards, so the opening user message was written to no transcript. Every
+// consumer that reads the sidecar back — a projected training example most of
+// all — then saw a conversation that opened with the assistant, which is
+// indistinguishable from a run that genuinely had no user turn.
+//
+// A unit test of the message builder would have passed throughout. This
+// asserts the recorded role sequence off a real agent run instead.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { read_jsonl } from "std/jsonl"
+import { llm_text, with_llm_script } from "std/testing"
+
+const PROMPT = "Say the word and stop."
+
+/** The recorded message roles of one real agent run, in transcript order. */
+fn recorded_roles(harness: Harness) -> list<string> {
+  const dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-opening-user-turn-" + harness.random.uuid(),
+  )
+  const opts: AgentSpec = {
+    provider: "mock",
+    model: "mock",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 1,
+    session_id: "opening-user-turn-" + harness.random.uuid(),
+    llm_transcript_dir: dir,
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("acknowledged ##DONE##")],
+    { -> agent_loop(harness, PROMPT, "You are an agent.", opts) },
+  )
+  const records = read_jsonl(harness.fs, path_join(dir, "llm_transcript.jsonl"), {strict: true})
+  harness.fs.delete(dir)
+  return records
+    .filter({ record -> record.type == "message" })
+    .map({ record -> to_string(record?.role ?? "") })
+}
+
+pipeline main(harness: Harness) {
+  const roles = recorded_roles(harness)
+  // The non-vacuity check: a transcript that recorded no message events at all
+  // would satisfy every "does not contain" assertion below for free.
+  require len(roles) >= 2,
+    "the run must have recorded at least the user turn and one assistant turn, saw "
+    + to_string(roles)
+  require roles[0] == "user",
+    "the transcript must open with the user turn that started the run, saw " + to_string(roles)
+  // The sibling control. Without it a transcript that recorded only the user
+  // turn would pass the assertion above while having lost the rest of the run.
+  require len(roles.filter({ role -> role == "assistant" })) >= 1,
+    "the transcript must also carry the assistant turn, saw " + to_string(roles)
+  harness.stdio.log("agent transcript opening user turn test passed")
+}
