@@ -232,20 +232,25 @@ pub(super) fn run_imports_for(
         return Ok(empty_imports_response(&path));
     };
     let kind = imports::import_kind(&file.language).to_string();
-    let resolved_ids: HashSet<FileId> = state.deps.imports_of(file_id).into_iter().collect();
+    let resolved_ids: HashSet<FileId> = state.imports_of(file_id).into_iter().collect();
     let mut entries: Vec<VmValue> = Vec::with_capacity(file.imports.len());
     for raw_import in &file.imports {
         // The importing file's own path, not its directory: Rust module
         // resolution anchors on the crate root above it.
-        let resolved_path = imports::resolve_module(
+        let mut resolved_paths: Vec<String> = imports::resolve_target(
             raw_import,
             &file.language,
             &file.relative_path,
             &state.path_to_id,
+            &state.modules,
         )
+        .files
+        .into_iter()
         .filter(|id| resolved_ids.contains(id))
-        .and_then(|id| state.files.get(&id).map(|f| f.relative_path.clone()));
-        entries.push(import_entry(raw_import, resolved_path.as_deref(), &kind));
+        .filter_map(|id| state.files.get(&id).map(|f| f.relative_path.clone()))
+        .collect();
+        resolved_paths.sort();
+        entries.push(import_entry(raw_import, &resolved_paths, &kind));
     }
     Ok(build_dict([
         ("path", str_value(&file.relative_path)),
@@ -283,7 +288,6 @@ pub(super) fn run_importers_of(
 
     let mut importers: Vec<String> = match target_id {
         Some(id) => state
-            .deps
             .importers_of(id)
             .into_iter()
             .filter_map(|importer_id| {
@@ -686,8 +690,8 @@ pub(super) fn run_deps_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmVa
     let guard = index.lock().expect("code_index mutex poisoned");
     let mut neighbors: Vec<FileId> = match guard.as_ref() {
         Some(state) => match direction.as_str() {
-            "importers" => state.deps.importers_of(id),
-            "imports" => state.deps.imports_of(id),
+            "importers" => state.importers_of(id),
+            "imports" => state.imports_of(id),
             _ => {
                 return Err(HostlibError::InvalidParameter {
                     builtin: BUILTIN_DEPS_GET,
@@ -1350,15 +1354,14 @@ fn hit_to_value(hit: Hit) -> VmValue {
     ])
 }
 
-fn import_entry(module: &str, resolved: Option<&str>, kind: &str) -> VmValue {
+fn import_entry(module: &str, resolved: &[String], kind: &str) -> VmValue {
     let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     map.insert(harn_vm::value::intern_key("module"), str_value(module));
+    // A list, not one optional path: a Swift import names a build
+    // target, so one import statement can name hundreds of files.
     map.insert(
-        harn_vm::value::intern_key("resolved_path"),
-        match resolved {
-            Some(p) => str_value(p),
-            None => VmValue::Nil,
-        },
+        harn_vm::value::intern_key("resolved_paths"),
+        VmValue::List(Arc::new(resolved.iter().map(str_value).collect())),
     );
     map.insert(harn_vm::value::intern_key("kind"), str_value(kind));
     VmValue::dict(map)

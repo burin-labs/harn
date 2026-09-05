@@ -228,7 +228,7 @@
     },
     "swift": {
       "kind": "import",
-      "strategy": "unresolved-by-design"
+      "strategy": "swift-target"
     },
     "typescript": {
       "candidateExtensions": [

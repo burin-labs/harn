@@ -69,6 +69,7 @@ mod file_table;
 mod git_head;
 mod graph;
 mod imports;
+mod imports_swift;
 mod overlay;
 mod readonly;
 mod rename;
