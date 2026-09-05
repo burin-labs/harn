@@ -107,7 +107,10 @@ pipeline test_claim_cannot_cite_harness_authored_feedback(harness: Harness, task
 
 pipeline test_claim_cannot_cite_a_failed_dispatch(harness: Harness, task: unknown) {
   const disposition = agent_completion_claim_disposition(
-    [assistant_calling("edit", "edit-1"), dispatched_result("edit", "edit-1", "permission denied", "error")],
+    [
+      assistant_calling("edit", "edit-1"),
+      dispatched_result("edit", "edit-1", "permission denied", "error"),
+    ],
     completion_dispatch(claim("implementation", ["edit-1"])),
     {},
   )
@@ -143,7 +146,6 @@ pipeline test_claim_must_use_the_default_task_requirement(harness: Harness, task
   )
   assert_eq(invented.kind, "invalid")
   assert_eq(invented.reason, "completion_claim_requirement_missing")
-
   const canonical = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(claim("task", ["edit-1"])),
@@ -261,9 +263,7 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
           {
             id: "complete-1",
             name: "task_complete",
-            arguments: {
-              requirements: [{requirement_id: "task", evidence_refs: ["edit-1"]}],
-            },
+            arguments: {requirements: [{requirement_id: "task", evidence_refs: ["edit-1"]}]},
           },
         ],
       },
@@ -291,7 +291,7 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-              == "harn.completion_claim_observation.v1"
+            == "harn.completion_claim_observation.v1"
         },
       )
         .to_list()
@@ -344,7 +344,7 @@ pipeline test_invalid_claim_continues_without_calling_a_judge(harness: Harness, 
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-              == "harn.completion_claim_observation.v1"
+            == "harn.completion_claim_observation.v1"
         },
       )
         .map({ event -> event.checkpoint })

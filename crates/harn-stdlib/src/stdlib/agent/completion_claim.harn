@@ -125,7 +125,9 @@ pub fn agent_completion_claim_apply_options(options: dict? = nil) {
       id: "completion_claim",
       source: "std/agent/completion_claim",
       body: "When the task is complete, call task_complete exactly once. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: "
-        + json_stringify(requirement_ids)
+        + json_stringify(
+        requirement_ids,
+      )
         + ". A tool-free final response remains available as a compatibility fallback.",
     },
   )
@@ -135,7 +137,9 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
   let matches = []
   for result in __dispatch_results_list(dispatch) {
     if to_string(result?.tool_name ?? result?.name ?? "") == __COMPLETION_CLAIM_TOOL_NAME
-      && __tool_result_ok(result) {
+      && __tool_result_ok(
+      result,
+    ) {
       matches = matches + [result]
     }
   }
@@ -145,14 +149,16 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
 fn __completion_claim_requirement_ids(opts: dict) -> list<string> {
   const verification = opts?.verify_completion_judge
   if type_of(verification) == "dict" && verification?.requirement_contract != nil {
-    return completion_requirement_contract(verification.requirement_contract).requirements
-      .map({ requirement -> requirement.requirement_id })
+    return completion_requirement_contract(verification.requirement_contract).requirements.map(
+      { requirement -> requirement.requirement_id },
+    )
       .to_list()
   }
   const completion = opts?.turn_end_condition
   if type_of(completion) == "dict" && completion?.requirement_contract != nil {
-    return completion_requirement_contract(completion.requirement_contract).requirements
-      .map({ requirement -> requirement.requirement_id })
+    return completion_requirement_contract(completion.requirement_contract).requirements.map(
+      { requirement -> requirement.requirement_id },
+    )
       .to_list()
   }
   return ["task"]
@@ -171,9 +177,7 @@ fn __completion_claim_invalid(reason: string, feedback: string) -> CompletionCla
 }
 
 fn __completion_claim_has_supporting_result(lifecycle: AgentTranscriptToolLifecycle) -> bool {
-  return lifecycle.results.any({ result ->
-    result.origin == "dispatch" && result.outcome == "ok"
-  })
+  return lifecycle.results.any({ result -> result.origin == "dispatch" && result.outcome == "ok" })
 }
 
 fn __completion_claim_validate_requirements(
