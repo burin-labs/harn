@@ -40,6 +40,7 @@
  * without collapsing both facts into one bit.
  */
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
+import { deep_merge } from "std/collections"
 
 /** The canonical decision record schema, one per reviewer verdict. */
 pub const APPROVAL_REVIEW_DECISION_SCHEMA = "harn.approval_review_decision.v1"
@@ -270,8 +271,9 @@ fn approval_review_unavailable(request: dict, reason: string, detail: any) -> di
  * @errors: []
  */
 pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> dict {
+  const effective_policy = __approval_review_effective_policy(policy)
   const category = trim(to_string(request?.category ?? ""))
-  if approval_review_is_floor(policy, category) {
+  if approval_review_is_floor(effective_policy, category) {
     return {
       schema: APPROVAL_REVIEW_DECISION_SCHEMA,
       approved: false,
@@ -287,7 +289,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
       cost_usd: 0.0,
     }
   }
-  const schema = approval_review_verdict_schema(policy)
+  const schema = approval_review_verdict_schema(effective_policy)
   const started = harness.clock.monotonic_ms()
   const checkpoint = agent_typed_output_checkpoint(
     harness.agent,
@@ -296,10 +298,10 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     approval_review_user_prompt(request),
     schema,
     {
-      model: policy?.reviewer?.model,
-      system: approval_review_system_prompt(policy),
-      timeout_ms: policy?.reviewer?.timeout_ms,
-      reasoning_effort: policy?.reviewer?.effort,
+      model: effective_policy?.reviewer?.model,
+      system: approval_review_system_prompt(effective_policy),
+      timeout_ms: effective_policy?.reviewer?.timeout_ms,
+      reasoning_effort: effective_policy?.reviewer?.effort,
       output: {schema: schema, strict: true, validation: "error"},
       _call_stage: "verify",
     },
@@ -319,7 +321,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
   // The outcome is COMPUTED, never read from the model. A reviewer that tried
   // to assert a verdict it did not earn cannot, because nothing here reads a
   // field where it could put one.
-  const approved = approval_review_permits(policy, risk, authorization)
+  const approved = approval_review_permits(effective_policy, risk, authorization)
   return {
     schema: APPROVAL_REVIEW_DECISION_SCHEMA,
     approved: approved,
@@ -332,7 +334,7 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     detail: "",
     site: request?.site,
     category: category,
-    reviewer_model: policy?.reviewer?.model,
+    reviewer_model: effective_policy?.reviewer?.model,
     duration_ms: duration_ms,
     // NIL when the checkpoint reported no usage, never 0.0. A zero cost across a
     // whole calibration run would read as "the reviewer is free" when it means
@@ -346,6 +348,17 @@ pub fn approval_review_decide(harness: Harness, policy: dict, request: dict) -> 
     accounting_status: __approval_review_usage(checkpoint)?.accounting_status,
     unpriced_calls: to_int(__approval_review_usage(checkpoint)?.unpriced_calls),
   }
+}
+
+/**
+ * Overlay caller and host customizations onto the one Rust-parsed policy.
+ *
+ * The merge is recursive because hosts ordinarily contribute one leaf such as
+ * `host_guidance`; requiring them to repeat the floor and verdict tables would
+ * create a second policy owner and make omitted data look like an empty policy.
+ */
+fn __approval_review_effective_policy(policy: dict) -> dict {
+  return deep_merge(__approval_review_default_policy(), policy ?? {})
 }
 
 /** The usage block of a checkpoint envelope, wherever the envelope puts it. */
@@ -463,9 +476,10 @@ pub fn approval_review_is_floor(policy: dict, category: string) -> bool {
  * @errors: []
  */
 pub fn approval_allow_all_reviewer(policy: dict) -> any {
+  const effective_policy = __approval_review_effective_policy(policy)
   return { request ->
     const category = trim(to_string(request?.category ?? request?.tool ?? ""))
-    if approval_review_is_floor(policy, category) {
+    if approval_review_is_floor(effective_policy, category) {
       // The floor stands even here. This is the whole reason allow_all routes
       // through the reviewer seam instead of around it.
       {

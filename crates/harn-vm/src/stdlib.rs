@@ -22,6 +22,7 @@ mod agent_sessions;
 pub mod agent_state;
 pub(crate) mod agents;
 pub(crate) mod agents_daemon;
+mod approval_review_policy;
 mod artifact_emit;
 pub(crate) mod assemble;
 pub mod asset_paths;
@@ -149,6 +150,7 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
 
 /// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
+    approval_review_policy::register_approval_review_policy_builtins(vm);
     types::register_type_builtins(vm);
     math::register_math_builtins(vm);
     strings::register_string_builtins(vm);
