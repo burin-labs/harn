@@ -13,12 +13,12 @@ dispatch_runner="runs-on: \${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' &&
 dispatch_timeout="timeout-minutes: \${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 30 || 75 }}"
 
 if ! grep -Fq "$dispatch_runner" "$workflow"; then
-  echo "macOS nightly must require an explicit opt-in for the paid M4 runner" >&2
+  echo "macOS workspace tests must require an explicit opt-in for the paid M4 runner" >&2
   exit 1
 fi
 
 if ! grep -Fq "$dispatch_timeout" "$workflow"; then
-  echo "macOS nightly must bound dispatch and non-dispatch hangs independently" >&2
+  echo "macOS workspace tests must bound dispatch and non-dispatch hangs independently" >&2
   exit 1
 fi
 
@@ -26,21 +26,21 @@ fi
 # expressions name the dispatch event positively, so any event that is not a
 # dispatch falls to the hosted runner and the generous budget by construction.
 if grep -Fq "github.event_name != 'pull_request' && 'blacksmith" "$workflow"; then
-  echo "macOS nightly must not route pull requests to the paid M4 class" >&2
+  echo "macOS workspace tests must not route pull requests to the paid M4 class" >&2
   exit 1
 fi
 
 if ! grep -Fq \
   'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' \
   "$workflow"; then
-  echo "macOS nightly must use the canonical Rust test environment" >&2
+  echo "macOS workspace tests must use the canonical Rust test environment" >&2
   exit 1
 fi
 
 if ! grep -Fq \
   'uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0' \
   "$workflow"; then
-  echo "macOS nightly must provision the pinned formatter used by generated Go contracts" >&2
+  echo "macOS workspace tests must provision the pinned formatter used by generated Go contracts" >&2
   exit 1
 fi
 
@@ -51,12 +51,12 @@ performance_profile_line="$(grep -Fn 'HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_
 nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' "$workflow" | cut -d: -f1)"
 
 if [[ -z "$performance_id_line" || -z "$performance_command_line" || -z "$performance_binary_line" || -z "$performance_profile_line" ]]; then
-  echo "macOS nightly must own the exact release test-case performance proof" >&2
+  echo "macOS workspace tests must own the exact release test-case performance proof" >&2
   exit 1
 fi
 
 if [[ "$performance_id_line" -le "$nextest_line" || "$performance_command_line" -le "$nextest_line" ]]; then
-  echo "macOS nightly must measure release performance after workspace tests settle" >&2
+  echo "macOS workspace tests must measure release performance after workspace tests settle" >&2
   exit 1
 fi
 

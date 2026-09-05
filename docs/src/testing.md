@@ -869,5 +869,5 @@ modules opts out of Windows via `#![cfg(unix)]` because they exercise
 POSIX-only semantics (`bash`-fixture process spawning, SIGTERM-driven
 graceful shutdown). The full inventory and disposition lives at
 [Windows test coverage](./dev/windows-test-coverage.md), and the nightly
-`Windows nightly` GitHub Actions workflow runs the portable surface on
+`Windows workspace tests` GitHub Actions workflow runs the portable surface on
 `windows-latest` so cross-platform regressions surface within 24 hours.

@@ -20,7 +20,7 @@ fn run(overrides: dict = {}) {
     workflow_path: ".github/workflows/windows-nightly.yml",
     run_number: 42,
     run_attempt: 1,
-    name: "Windows nightly",
+    name: "Windows workspace tests",
     event: "workflow_dispatch",
     status: "completed",
     conclusion: "success",
