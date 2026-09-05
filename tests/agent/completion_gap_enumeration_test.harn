@@ -330,22 +330,18 @@ fn __run_judge(harness: Harness, label: string, script: list) {
     script,
     { ->
       const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 6,
+        verify_completion_judge: {provider: "mock", max_invocations: 3},
+      }
       const captured = agent_capture_events(
         harness.agent,
         session,
-        fn() { return agent_loop(
-          harness,
-          "Make the requested change.",
-          nil,
-          {
-            provider: "mock",
-            session_id: session,
-            loop_until_done: true,
-            done_sentinel: "##DONE##",
-            max_iterations: 6,
-            verify_completion_judge: {provider: "mock", max_invocations: 3},
-          },
-        ) },
+        fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
       )
       return {events: captured.events, result: captured.result}
     },
@@ -361,15 +357,15 @@ pipeline test_the_decision_path_executes_end_to_end(harness: Harness, task: unkn
     "loop-reaches-judge",
     [llm_done(), {text: json_stringify({verdict: "done", detail: "the work is finished"})}],
   )
-  const invoked = run?.result?.completion_judge?.invocations ?? 0
+  const invoked = run.result?.completion_judge?.invocations ?? 0
   assert(
     invoked > 0,
     "the judge must actually run, or this file never executes the path it tests. status="
-      + to_string(run?.result?.status ?? ""),
+      + to_string(run.result?.status ?? ""),
   )
   assert(
-    to_string(run?.result?.status ?? "") == "done",
-    "and an approval still finishes the run, got: " + to_string(run?.result?.status ?? ""),
+    to_string(run.result?.status ?? "") == "done",
+    "and an approval still finishes the run, got: " + to_string(run.result?.status ?? ""),
   )
 }
 
