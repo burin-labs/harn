@@ -616,7 +616,12 @@ fn __tool_result_outcome(record: dict? = nil) -> AgentTranscriptToolResultOutcom
 // record predates the tag, and a value we do not understand is not evidence
 // that the harness wrote the result.
 fn __tool_result_origin(record: dict) -> AgentTranscriptToolResultOrigin {
-  if to_string(record?._harn?.origin ?? "") == "harness_repair" {
+  const typed = if record?.schema == TRANSCRIPT_ROW_SCHEMA && record?.kind == "tool_result" {
+    record?.origin
+  } else {
+    record?._harn?.origin
+  }
+  if to_string(typed ?? "") == "harness_repair" {
     return "harness_repair"
   }
   return "dispatch"

@@ -71,7 +71,7 @@ pipeline test_a_repaired_orphan_is_not_evidence_the_tool_failed(harness: Harness
   ]
   const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
   assert_eq(len(projected.packet.actions), 0)
-  assert_eq(projected.packet.harness_authored_result_count, 1)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, 1)
   // The veto text must not reach the judge through the evidence packet at all.
   assert(!contains(projected.serialized, VETO))
 }
@@ -86,7 +86,7 @@ pipeline test_the_omission_is_counted_not_silent(harness: Harness, task: unknown
     repair_result("edit", "edit-1", VETO),
   ]
   const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
-  assert_eq(projected.stats.harness_authored_result_count, 1)
+  assert_eq(projected.stats.omitted_harness_authored_result_count, 1)
   assert_eq(projected.packet.relevant_action_count, 0)
 }
 
@@ -102,7 +102,7 @@ pipeline test_a_real_failed_call_is_still_evidence(harness: Harness, task: unkno
   const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
   assert_eq(len(projected.packet.actions), 1)
   assert_eq(projected.packet.actions[0].has_error_result, true)
-  assert_eq(projected.packet.harness_authored_result_count, 0)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, 0)
   assert(contains(projected.serialized, "permission denied"))
 }
 
@@ -118,7 +118,7 @@ pipeline test_a_dispatched_result_survives_a_later_repair(harness: Harness, task
   ]
   const projected = __judge_evidence_projection(messages, EDIT_TOOLS)
   assert_eq(len(projected.packet.actions), 1)
-  assert_eq(projected.packet.harness_authored_result_count, 0)
+  assert_eq(projected.packet.omitted_harness_authored_result_count, 1)
   assert(contains(projected.serialized, "write applied"))
   assert(!contains(projected.serialized, VETO))
   // The veto must not flip the call's outcome to a failure either.
@@ -155,4 +155,27 @@ pipeline test_an_untagged_result_reads_as_dispatched(harness: Harness, task: unk
     ],
   )
   assert_eq(report.calls[0].results[0].origin, "dispatch")
+}
+
+pipeline test_a_typed_result_row_preserves_its_origin(harness: Harness, task: unknown) {
+  // Normalization is used at more than one boundary. A row already projected
+  // into the public transcript shape must not lose provenance when it passes
+  // through the lifecycle reader again.
+  const typed_repair = {
+    schema: "harn.agent.transcript.row.v1",
+    kind: "tool_result",
+    role: "tool",
+    iteration: 1,
+    index: 1,
+    name: "edit",
+    tool_call_id: "edit-1",
+    text: VETO,
+    outcome: "error",
+    origin: "harness_repair",
+    data: {},
+  }
+  const report = agent_transcript_tool_lifecycle_report(
+    [assistant_calling("edit", "edit-1"), typed_repair],
+  )
+  assert_eq(report.calls[0].results[0].origin, "harness_repair")
 }
