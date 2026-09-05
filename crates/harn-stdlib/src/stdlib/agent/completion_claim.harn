@@ -139,9 +139,7 @@ pub fn agent_completion_claim_apply_options(options: dict? = nil) {
       id: "completion_claim",
       source: "std/agent/completion_claim",
       body: "When the task is complete, call task_complete exactly once and by itself, after the tool calls it cites have finished. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: "
-        + json_stringify(
-        requirement_ids,
-      )
+        + json_stringify(requirement_ids)
         + ". A tool-free final response remains available as a compatibility fallback.",
     },
   )
@@ -151,9 +149,7 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
   let matches = []
   for result in __dispatch_results_list(dispatch) {
     if to_string(result?.tool_name ?? result?.name ?? "") == __COMPLETION_CLAIM_TOOL_NAME
-      && __tool_result_ok(
-      result,
-    ) {
+      && __tool_result_ok(result) {
       matches = matches + [result]
     }
   }
@@ -278,9 +274,7 @@ fn __completion_claim_validate_requirements(
           "completion_claim_evidence_ref_unresolved",
           "Completion evidence ref `" + evidence_ref
             + "` did not resolve to exactly one recorded tool call. Available successful tool_call_id values: "
-            + json_stringify(
-            available,
-          )
+            + json_stringify(available)
             + ". Retry task_complete now with the applicable values from that list in evidence_refs. "
             + "Do not answer in prose instead of retrying the tool.",
         )

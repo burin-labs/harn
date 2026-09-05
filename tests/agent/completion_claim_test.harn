@@ -114,10 +114,7 @@ pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown
   assert_eq(disposition.reason, "completion_claim_evidence_ref_invalid")
 }
 
-pipeline test_completion_claim_cannot_share_a_batch_with_new_work(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_completion_claim_cannot_share_a_batch_with_new_work(harness: Harness, task: unknown) {
   const disposition = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(claim("task", ["edit-1"]))
@@ -137,10 +134,7 @@ pipeline test_completion_claim_cannot_share_a_batch_with_new_work(
   assert(disposition.feedback.contains("after the tool calls it cites have finished"))
 }
 
-pipeline test_blocked_dependency_is_not_accepted_as_completion(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_blocked_dependency_is_not_accepted_as_completion(harness: Harness, task: unknown) {
   const blocked = claim("task", ["edit-1"]) + {blocked_on: "Waiting for external approval."}
   const disposition = agent_completion_claim_disposition(
     evidence_messages(),
@@ -280,8 +274,8 @@ pipeline test_unavailable_tool_keeps_the_actual_judge_prompt_byte_identical(
         completion_tool: false,
         verify_completion_judge: {provider: "mock", max_invocations: 1},
       }
-      const _without = agent_loop(harness, "Answer the question.", nil, absent)
-      const _disabled = agent_loop(harness, "Answer the question.", nil, disabled)
+      const _ = agent_loop(harness, "Answer the question.", nil, absent)
+      const _ = agent_loop(harness, "Answer the question.", nil, disabled)
       const judges = harness.llm.mock_calls().filter(
         { call -> contains(to_string(call?.system ?? ""), "Stable completion goal") },
       )
@@ -331,7 +325,8 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
       },
       {text: json_stringify({verdict: "done", detail: "The cited edit satisfies the task."})},
       {
-        text: "<user_response>Implemented the requested edit and verified it.</user_response>\n<done>FINISHED</done>",
+        text:
+          "<user_response>Implemented the requested edit and verified it.</user_response>\n<done>FINISHED</done>",
         tool_calls: [],
       },
     ],
@@ -364,7 +359,7 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_claim_observation.v1"
+              == "harn.completion_claim_observation.v1"
         },
       )
         .to_list()
@@ -421,7 +416,7 @@ pipeline test_invalid_claim_continues_without_calling_a_judge(harness: Harness, 
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_claim_observation.v1"
+              == "harn.completion_claim_observation.v1"
         },
       )
         .map({ event -> event.checkpoint })
