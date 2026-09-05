@@ -1,0 +1,205 @@
+// MECHANISM CONTRACT (onramp tier): EXPLICIT COMPLETION CLAIM.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — after observing authoritative evidence, an agent calls the
+//              opt-in `task_complete` tool by itself and cites that completed
+//              inspection;
+//   effect   — the completion policy sees the typed claim, the loop seals the
+//              explicit-completion terminal, and finalization still emits a
+//              user-visible report;
+//   negative — a completion claim batched beside new work is rejected and
+//              cannot end the loop through the explicit-completion terminal.
+//
+// This contract proves that the mechanism attaches and that its isolation
+// boundary fires. The paired eval pack owns model adoption and quality.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn tools() {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "inspect_status",
+    "Read the authoritative task status.",
+    {
+      parameters: {},
+      handler: { _args ->
+        agent_tool_handler_result("status ready", {status: "ready"})
+      },
+      annotations: {kind: "read", read_only: true, side_effect_level: "none"},
+    },
+  )
+  return tool_define(
+    registry,
+    "apply_change",
+    "Apply one workspace change.",
+    {
+      parameters: {},
+      handler: { _args ->
+        agent_tool_handler_result(
+          "change applied",
+          {mutation_status: "applied", changed_paths: ["src/app.harn"]},
+        )
+      },
+      annotations: {kind: "edit", read_only: false, side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+fn observations(events: list) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_claim_observation.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+fn explicit_case(harness: Harness) {
+  return with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [{id: "inspect-1", name: "inspect_status", arguments: {}}],
+      },
+      {
+        text: "",
+        tool_calls: [
+          {
+            id: "complete-1",
+            name: "task_complete",
+            arguments: {requirements: [{requirement_id: "task", evidence_refs: ["inspect-1"]}]},
+          },
+        ],
+      },
+      {
+        text: "<user_response>The inspected status is ready.</user_response>\n<done>FINISHED</done>",
+        tool_calls: [],
+      },
+    ],
+    { ->
+      const session = "contract-explicit-completion-" + harness.random.uuid()
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Inspect the status and report when it is ready.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: tools(),
+            tool_format: "native",
+            completion_tool: true,
+            loop_until_done: true,
+            max_iterations: 4,
+            verify_completion: { payload ->
+              {
+                confirm: payload?.completion_claim?.source == "tool",
+                reason: "typed_claim_observed",
+              }
+            },
+          },
+        ) },
+      )
+    },
+  )
+}
+
+fn batched_case(harness: Harness) {
+  return with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [{id: "inspect-1", name: "inspect_status", arguments: {}}],
+      },
+      {
+        text: "",
+        tool_calls: [
+          {
+            id: "complete-1",
+            name: "task_complete",
+            arguments: {requirements: [{requirement_id: "task", evidence_refs: ["inspect-1"]}]},
+          },
+          {id: "edit-1", name: "apply_change", arguments: {}},
+        ],
+      },
+      {text: "The new change is not yet part of a completion claim.", tool_calls: []},
+    ],
+    { ->
+      const session = "contract-batched-completion-" + harness.random.uuid()
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Inspect the status and report when it is ready.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: tools(),
+            tool_format: "native",
+            completion_tool: true,
+            loop_until_done: true,
+            max_iterations: 4,
+            final_wrapup: false,
+          },
+        ) },
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const explicit = explicit_case(harness)
+  const explicit_observations = observations(explicit.events)
+  contract_effect(
+    harness.stdio,
+    "trigger_standalone_claim_is_observed",
+    len(explicit_observations) == 1
+      && explicit_observations[0].source == "tool"
+      && explicit_observations[0].disposition == "valid",
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_claim_seals_explicit_done_terminal",
+    explicit.result.status == "done"
+      && explicit.result.stop_reason == "explicit_completion_claim",
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_final_report_survives_tool_only_exit",
+    contains(explicit.result.text, "inspected status is ready"),
+  )
+
+  const batched = batched_case(harness)
+  const batched_observations = observations(batched.events)
+  contract_negative(
+    harness.stdio,
+    "negative_batched_claim_cannot_end_the_loop",
+    batched.result.stop_reason == "explicit_completion_claim"
+      || batched_observations.any(
+      { item -> item.source == "tool" && item.disposition == "valid" },
+    ),
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_batched_claim_is_rejected_by_the_typed_boundary",
+    batched_observations.any(
+      { item ->
+        item.source == "tool"
+          && item.disposition == "invalid"
+          && item.reason == "completion_claim_not_alone"
+      },
+    ),
+  )
+}
