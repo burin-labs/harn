@@ -22,7 +22,7 @@ task = "Use inspect_status to read the configuration result. Report the exact ev
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-config-baseline"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/tune-config-baseline.json"]
-metadata = { pair = "tune-config", arm = "baseline", evidence = "CONFIG-READY-41" }
+metadata = { pair = "tune-config", arm = "baseline", evidence = "config-ready-marker-41" }
 
 [[cases]]
 id = "tune-config-treatment"
@@ -31,7 +31,7 @@ task = "Use inspect_status to read the configuration result. Report the exact ev
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-config-treatment"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/tune-config-treatment.json"]
-metadata = { pair = "tune-config", arm = "treatment", evidence = "CONFIG-READY-41" }
+metadata = { pair = "tune-config", arm = "treatment", evidence = "config-ready-marker-41" }
 
 [[cases]]
 id = "tune-release-baseline"
@@ -40,7 +40,7 @@ task = "Use inspect_status to read the release result. Report the exact evidence
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-release-baseline"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/tune-release-baseline.json"]
-metadata = { pair = "tune-release", arm = "baseline", evidence = "RELEASE-READY-73" }
+metadata = { pair = "tune-release", arm = "baseline", evidence = "release-ready-marker-73" }
 
 [[cases]]
 id = "tune-release-treatment"
@@ -49,7 +49,7 @@ task = "Use inspect_status to read the release result. Report the exact evidence
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-release-treatment"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/tune-release-treatment.json"]
-metadata = { pair = "tune-release", arm = "treatment", evidence = "RELEASE-READY-73" }
+metadata = { pair = "tune-release", arm = "treatment", evidence = "release-ready-marker-73" }
 
 [[cases]]
 id = "holdout-alert-baseline"
@@ -58,7 +58,7 @@ task = "Use inspect_status to read the alert result. Report the exact evidence t
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-alert-baseline"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/holdout-alert-baseline.json"]
-metadata = { pair = "holdout-alert", arm = "baseline", evidence = "ALERT-CLEAR-29" }
+metadata = { pair = "holdout-alert", arm = "baseline", evidence = "alert-clear-marker-29" }
 
 [[cases]]
 id = "holdout-alert-treatment"
@@ -67,7 +67,7 @@ task = "Use inspect_status to read the alert result. Report the exact evidence t
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-alert-treatment"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/holdout-alert-treatment.json"]
-metadata = { pair = "holdout-alert", arm = "treatment", evidence = "ALERT-CLEAR-29" }
+metadata = { pair = "holdout-alert", arm = "treatment", evidence = "alert-clear-marker-29" }
 
 [[cases]]
 id = "holdout-policy-baseline"
@@ -76,7 +76,7 @@ task = "Use inspect_status to read the policy result. Report the exact evidence 
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-policy-baseline"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/holdout-policy-baseline.json"]
-metadata = { pair = "holdout-policy", arm = "baseline", evidence = "POLICY-PASS-88" }
+metadata = { pair = "holdout-policy", arm = "baseline", evidence = "policy-pass-marker-88" }
 
 [[cases]]
 id = "holdout-policy-treatment"
@@ -85,4 +85,4 @@ task = "Use inspect_status to read the policy result. Report the exact evidence 
 workspace = "."
 verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-policy-treatment"], timeout_seconds = 30 }
 expected_output_paths = ["receipts/holdout-policy-treatment.json"]
-metadata = { pair = "holdout-policy", arm = "treatment", evidence = "POLICY-PASS-88" }
+metadata = { pair = "holdout-policy", arm = "treatment", evidence = "policy-pass-marker-88" }
