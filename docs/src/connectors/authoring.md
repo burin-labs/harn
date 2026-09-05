@@ -806,6 +806,14 @@ The retry policy uses total-attempt semantics:
 `cap_ms`, the wrapper returns a retryable error with `retry_after_ms` instead of
 sleeping for a long reset window.
 
+Providers with quota admission can set `quota: {remaining_header, reset_header,
+reset_is_epoch}`. When remaining is `0`, reset is interpreted as integer seconds
+(Unix time when `reset_is_epoch` is true). Admission waits also apply to successful
+responses; waits exceeding `retry.cap_ms` return `rate_limit` without sleeping.
+Missing or malformed resets permit immediate retry. In quota mode, status retries
+require an exhausted quota; safe transport-error retries still use the shared policy.
+Admission time counts toward retry backoff, and unsafe methods still require idempotency.
+
 Use `connector_http_header(...)` for case-insensitive response header lookup and
 `connector_http_rate_limit(...)` to expose `Retry-After`, `RateLimit-*`, and
 `X-RateLimit-*` metadata without repeating provider-local header scans.

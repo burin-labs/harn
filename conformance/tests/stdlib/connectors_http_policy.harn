@@ -25,6 +25,63 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(left.state(harness.runtime).initialized, false)
   assert_eq(right.state(harness.runtime).ctx.name, "right")
   right.shutdown(harness.runtime)
+  // Quota admission also applies to successful responses, without making writes retryable.
+  const defaults = {
+    epoch: false,
+    reset: "0",
+    remaining: "0",
+    status: 200,
+    method: "GET",
+    wait: 0,
+    calls: 1,
+    ok: true,
+    base_ms: 0,
+  }
+  for overrides in [
+    {epoch: true, reset: "1002", wait: 2000},
+    {reset: "2", wait: 2000},
+    {reset: "2", status: 429, wait: 2000, calls: 2, base_ms: 1000},
+    {reset: "61", ok: false},
+    {epoch: true, reset: "invalid", status: 429, calls: 2},
+    {remaining: "1", status: 429, ok: false},
+    {method: "POST", status: 429, ok: false},
+  ] {
+    const case = defaults + overrides
+    harness.testing.clock_set(1000000)
+    harness.testing.http_mock_clear()
+    const url = "https://api.example.com/connector/quota"
+    harness.testing.http_mock(
+      case.method,
+      url,
+      {
+        responses: [
+          {
+            status: case.status,
+            headers: {remaining: case.remaining, reset: case.reset},
+            body: "quota",
+          },
+          {status: 200, body: "ok"},
+        ],
+      },
+    )
+    const response = connector_http_request(
+      harness.clock,
+      harness.net,
+      case.method,
+      url,
+      {
+        quota: {remaining_header: "remaining", reset_header: "reset", reset_is_epoch: case.epoch},
+        retry: {max_attempts: 2, base_ms: case.base_ms, cap_ms: 60000, retry_on: [429, 503]},
+      },
+    )
+    assert_eq(response.ok, case.ok)
+    assert_eq(harness.clock.now_ms() - 1000000, case.wait)
+    assert_eq(len(harness.testing.http_mock_calls()), case.calls)
+    if !case.ok {
+      assert_eq(response.error.category, "rate_limit")
+    }
+    harness.testing.clock_reset()
+  }
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
