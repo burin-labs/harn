@@ -615,6 +615,11 @@ test-harn-scripts:
 # held to a pre-warm boundary that forbids building Rust.
 	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 		HARN_BIN="$$harn_bin" ./scripts/tests/path_visibility_denial_test.sh
+# Also needs a real binary, and for the same reason cannot sit in the pre-warm
+# PR gate lane: it runs the refresh command end to end to prove the wait is
+# bounded.
+	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
+		HARN_BIN="$$harn_bin" ./scripts/tests/provider_refresh_timeout_test.sh
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_live_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_runtime_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/changelog_test.harn

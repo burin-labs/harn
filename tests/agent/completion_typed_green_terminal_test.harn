@@ -1,0 +1,234 @@
+// Run: harn test tests/agent/completion_typed_green_terminal_test.harn
+//
+// A run whose declared verifier passed over a source write, and whose turn is
+// the sealed final answer, is already finished. These fixtures prove the
+// completion judge is not called at that boundary, and — the load-bearing half —
+// that it is still called everywhere else.
+//
+// The positive case alone would look identical to a mechanism that simply
+// stopped calling the judge. Every control below is a boundary where the judge
+// MUST still spend its call: no gate, an unrun verifier, a green verifier with
+// no source write behind it, a non-sentinel stop, and a deferred effect that
+// outlives the turn. See harn#8110.
+import { agent_capture_events } from "std/agent/events"
+import { agent_completion_adjudicator_declared } from "std/agent/judge"
+import { __completion_typed_green_terminal } from "std/agent/judge_internals"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+
+const SKIP_OUTCOME = "skipped_verified_after_write"
+
+fn __completion_receipts(events: unknown) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+          == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/**
+ * How many times a completion judge was actually asked.
+ *
+ * Counted from `judge_started`, which is emitted immediately before the model
+ * call and never for a skip. A count read off receipts or verdicts would also
+ * be satisfied by a judge that ran and agreed, which is precisely the outcome
+ * this mechanism must be distinguished from.
+ */
+fn __judge_calls(events: unknown) -> int {
+  return len(events.filter({ event -> event.type == "judge_started" }).to_list())
+}
+
+/** A judge that refuses. Scripted so a call that happens is visible as a veto. */
+fn __judge_refuses(detail: string) -> dict {
+  return {
+    text: json_stringify({verdict: "continue", detail: detail, gap_class: "missing_artifact"}),
+  }
+}
+
+/** A gate that reports exactly the reading the case is about. */
+fn __gate_reporting(confirm: bool, reason: string, observed: string) {
+  return { _payload ->
+    {
+      confirm: confirm,
+      message: "gate",
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 2,
+        turn_end_condition: {provider: "mock", max_invocations: 1},
+      }
+        + opts_extra
+      assert(
+        agent_completion_adjudicator_declared(opts, "sentinel"),
+        "every case here must declare an adjudicator, or it differs from the others by two variables",
+      )
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The conditions, at the owning interface. Each clause isolated, because every
+// end-to-end case below blocks on several at once by construction.
+
+// -------------------------------------------------------------------------------------------------
+
+/** The reading a run that is genuinely finished presents. Cases vary ONE field. */
+fn __green_reading() {
+  return {
+    deterministic_invoked: true,
+    deterministic_reason: "verified_after_write",
+    observed: "passed",
+    stop_reason: "sentinel",
+    final_text: "Implemented the selector and the verifier passed.",
+    pending_tool_batch_effect_count: 0,
+  }
+}
+
+pipeline test_typed_green_terminal_requires_every_clause(harness: Harness, task: unknown) {
+  assert(__completion_typed_green_terminal(__green_reading()), "all six clauses hold")
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {deterministic_invoked: false}),
+    "a gate that never ran leaves the judge as the only authority",
+  )
+  // The clause the whole mechanism turns on: a green verifier with NO source
+  // write behind it is `verified`, not `verified_after_write`, and it proves
+  // nothing about work that was never done.
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {deterministic_reason: "verified"}),
+    "a green verifier with no source write is an ordinary prose completion",
+  )
+  assert(
+    !__completion_typed_green_terminal(
+      __green_reading() + {deterministic_reason: "no_workspace_write"},
+    ),
+    "a gate that had nothing to gate is not a verified terminal",
+  )
+  assert(
+    !__completion_typed_green_terminal(
+      __green_reading() + {deterministic_reason: "facts_unavailable"},
+    ),
+    "a gate that could not look does not skip the judge, even beside a passed reading",
+  )
+  // Reason and reading must agree. A gate whose summary says green while the
+  // reading it summarized says otherwise keeps the judge.
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {observed: "not_run"}),
+    "an unrun verifier is not a passing one",
+  )
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {observed: "failed"}),
+    "a failing verifier is not a passing one",
+  )
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {stop_reason: "stalled"}),
+    "a stall is not the sealed final answer",
+  )
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {final_text: "   "}),
+    "an empty final response is the ambiguous case the judge exists for",
+  )
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {pending_tool_batch_effect_count: 1}),
+    "a deferred effect outliving the turn makes the verifier's reading stale",
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+// The canonical path, and every boundary where the judge must still be asked.
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_verified_after_write_sentinel_never_calls_the_judge(harness: Harness, task: unknown) {
+  // The judge is scripted to REFUSE. If it is called, the run continues and the
+  // receipt says `continue`; the assertions below then fail on the quantity
+  // this mechanism owns rather than on a downstream count.
+  const captured = __run(
+    harness,
+    "typed-green",
+    [llm_done(), __judge_refuses("the fixture does not satisfy the required case")],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(__judge_calls(captured.events), 0)
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(len(receipts), 1)
+  assert_eq(receipts[0].action, "accept")
+  assert_eq(receipts[0].outcome, SKIP_OUTCOME)
+  assert_eq(receipts[0].reason, "verified_after_write")
+  assert_eq(receipts[0].source, "gate")
+  assert(receipts[0].invoked.deterministic, "the gate is recorded as having run")
+  assert(
+    !receipts[0].invoked.turn_end_condition,
+    "a judge that never ran is not recorded as invoked",
+  )
+  assert_eq(receipts[0].verification.observed, "passed")
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_green_verifier_without_a_source_write_still_calls_the_judge(
+  harness: Harness,
+  task: unknown,
+) {
+  // The direction control. Same green reading, same sentinel, no source write:
+  // the gate reports `verified` and the judge keeps its full authority.
+  const captured = __run(
+    harness,
+    "typed-green-no-write",
+    [llm_done(), __judge_refuses("no artifact was produced"), llm_done()],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  assert(__judge_calls(captured.events) >= 1, "the judge is asked on an ordinary prose completion")
+  assert_eq(__completion_receipts(captured.events)[0].action, "continue")
+}
+
+pipeline test_unrun_verifier_still_calls_the_judge(harness: Harness, task: unknown) {
+  const captured = __run(
+    harness,
+    "typed-green-unrun",
+    [llm_done(), __judge_refuses("run the verifier before finishing"), llm_done()],
+    {verify_completion: __gate_reporting(true, "no_workspace_write", "not_run")},
+  )
+  assert(__judge_calls(captured.events) >= 1, "an unverified path keeps the judge")
+  assert_eq(__completion_receipts(captured.events)[0].action, "continue")
+}
+
+pipeline test_no_deterministic_gate_still_calls_the_judge(harness: Harness, task: unknown) {
+  const captured = __run(
+    harness,
+    "typed-green-no-gate",
+    [llm_done(), __judge_refuses("nothing verified this run"), llm_done()],
+    {},
+  )
+  assert(__judge_calls(captured.events) >= 1, "with no gate the judge is the only authority")
+  const receipts = __completion_receipts(captured.events)
+  assert(!receipts[0].invoked.deterministic)
+  assert_eq(receipts[0].action, "continue")
+}

@@ -46,6 +46,11 @@ pub(crate) struct ProvidersRefreshArgs {
     /// Refresh workflow script path.
     #[arg(long, default_value = "scripts/update_provider_catalog.harn")]
     pub script: PathBuf,
+    /// Seconds to wait for the refresh workflow before giving up. Zero waits
+    /// forever, which is the behaviour that hung a repin rehearsal for five
+    /// minutes with nothing said about what it was waiting on.
+    #[arg(long, default_value_t = crate::commands::providers::DEFAULT_REFRESH_TIMEOUT_SECS)]
+    pub timeout_secs: u64,
 }
 
 #[derive(Debug, Args)]

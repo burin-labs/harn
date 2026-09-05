@@ -62,11 +62,34 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
     let exe = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current executable: {error}"))?;
     let mut command = Command::new(exe);
+    command.kill_on_drop(true);
     command.args(refresh_run_args(args));
-    let status = command
-        .status()
-        .await
+    let mut child = command
+        .spawn()
         .map_err(|error| format!("failed to run provider refresh workflow: {error}"))?;
+    let status = match refresh_timeout(args) {
+        None => child
+            .wait()
+            .await
+            .map_err(|error| format!("failed to run provider refresh workflow: {error}"))?,
+        Some(limit) => match tokio::time::timeout(limit, child.wait()).await {
+            Ok(status) => status
+                .map_err(|error| format!("failed to run provider refresh workflow: {error}"))?,
+            Err(_) => {
+                // Reap the child before reporting. A refresh that is still
+                // holding the network open is exactly what the caller was
+                // waiting on, and leaving it behind would make the next run
+                // contend with it.
+                child.kill().await.map_err(|error| {
+                    format!(
+                        "provider refresh workflow exceeded {}s and could not be stopped: {error}",
+                        limit.as_secs()
+                    )
+                })?;
+                return Err(refresh_timeout_message(args, limit));
+            }
+        },
+    };
     if status.success() {
         Ok(())
     } else {
@@ -80,13 +103,57 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
     }
 }
 
+/// Default bound on the refresh workflow.
+///
+/// Generous enough for a live pass over every provider source on a slow link,
+/// and short enough that a gate blocked on an unreachable endpoint fails while
+/// somebody is still watching it.
+pub(crate) const DEFAULT_REFRESH_TIMEOUT_SECS: u64 = 120;
+
+/// The bound to apply to one refresh, or `None` when the caller asked to wait
+/// forever.
+pub(crate) fn refresh_timeout(args: &ProvidersRefreshArgs) -> Option<std::time::Duration> {
+    if args.timeout_secs == 0 {
+        return None;
+    }
+    Some(std::time::Duration::from_secs(args.timeout_secs))
+}
+
+/// What a caller is told when the refresh runs out of time.
+///
+/// A timed-out refresh and a refresh that found nothing are different
+/// outcomes, so this never says the catalog was empty. It names the bound, the
+/// script, and which source class the run was reading, because "it hung" with
+/// no endpoint class named is what made the original five-minute stall
+/// undiagnosable.
+pub(crate) fn refresh_timeout_message(
+    args: &ProvidersRefreshArgs,
+    limit: std::time::Duration,
+) -> String {
+    let sources = if args.live {
+        "live provider and model endpoints"
+    } else {
+        "bundled offline fixtures"
+    };
+    format!(
+        "provider refresh workflow timed out after {}s waiting on {} via {}. \
+         This is a timeout, not an empty catalog: the refresh did not complete \
+         and its outputs must not be treated as authoritative. Raise \
+         --timeout-secs, pass \
+         --timeout-secs 0 to wait indefinitely, or drop --live to refresh from \
+         the committed fixtures without a network call.",
+        limit.as_secs(),
+        sources,
+        args.script.display(),
+    )
+}
+
 fn refresh_run_args(args: &ProvidersRefreshArgs) -> Vec<OsString> {
-    let mut command = vec![
-        OsString::from("run"),
-        OsString::from("--allow-process-network"),
-        args.script.as_os_str().to_owned(),
-        OsString::from("--"),
-    ];
+    let mut command = vec![OsString::from("run")];
+    if args.live {
+        command.push(OsString::from("--allow-process-network"));
+    }
+    command.extend([args.script.as_os_str().to_owned(), OsString::from("--")]);
     if args.live {
         command.push(OsString::from("--live"));
     }
@@ -201,4 +268,101 @@ fn load_filtered_recommend_report(
         report,
         args.provider.as_deref(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        refresh_run_args, refresh_timeout, refresh_timeout_message, DEFAULT_REFRESH_TIMEOUT_SECS,
+    };
+    use crate::cli::ProvidersRefreshArgs;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    fn args(live: bool, timeout_secs: u64) -> ProvidersRefreshArgs {
+        ProvidersRefreshArgs {
+            live,
+            check: false,
+            update: false,
+            script: PathBuf::from("scripts/update_provider_catalog.harn"),
+            timeout_secs,
+        }
+    }
+
+    #[test]
+    fn the_refresh_is_bounded_by_default() {
+        // The defect was an unbounded wait, so the assertion that binds is
+        // that the default produces a bound at all.
+        assert_eq!(
+            refresh_timeout(&args(true, DEFAULT_REFRESH_TIMEOUT_SECS)),
+            Some(Duration::from_secs(DEFAULT_REFRESH_TIMEOUT_SECS)),
+        );
+    }
+
+    #[test]
+    fn zero_is_the_explicit_opt_out_and_not_an_instant_timeout() {
+        // Reading zero as a zero-length bound would turn the opt-out into a
+        // refresh that always times out immediately.
+        assert_eq!(refresh_timeout(&args(true, 0)), None);
+    }
+
+    #[test]
+    fn a_timeout_names_the_bound_and_the_source_class() {
+        let message = refresh_timeout_message(&args(true, 30), Duration::from_secs(30));
+        assert!(message.contains("timed out after 30s"), "{message}");
+        assert!(
+            message.contains("live provider and model endpoints"),
+            "a timeout must name what it was waiting on: {message}",
+        );
+        assert!(
+            message.contains("update_provider_catalog.harn"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_timeout_is_never_reported_as_an_empty_catalog() {
+        // The third ask on the issue. A caller that greps for "empty" or reads
+        // "no models" would otherwise treat an unreachable endpoint as a real
+        // and answerable result.
+        let message = refresh_timeout_message(&args(true, 30), Duration::from_secs(30));
+        assert!(message.contains("not an empty catalog"), "{message}");
+        assert!(!message.to_lowercase().contains("no models"), "{message}");
+        assert!(
+            message.contains("outputs must not be treated as authoritative"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn an_offline_refresh_says_so_rather_than_blaming_the_network() {
+        // Without --live the workflow reads bundled fixtures, so a timeout
+        // there is not a reachability problem and must not be reported as one.
+        let message = refresh_timeout_message(&args(false, 5), Duration::from_secs(5));
+        assert!(message.contains("bundled offline fixtures"), "{message}");
+        assert!(
+            !message.contains("live provider and model endpoints"),
+            "{message}",
+        );
+    }
+
+    #[test]
+    fn offline_refresh_cannot_inherit_process_network_access() {
+        let command = refresh_run_args(&args(false, 5));
+        assert!(
+            !command.iter().any(|arg| arg == "--allow-process-network"),
+            "offline refresh must be structurally disconnected from process network: {command:?}",
+        );
+        assert!(
+            !command.iter().any(|arg| arg == "--live"),
+            "offline refresh must not select live sources: {command:?}",
+        );
+    }
+
+    #[test]
+    fn live_refresh_explicitly_enables_network_and_live_sources() {
+        let command = refresh_run_args(&args(true, 5));
+        assert!(command.iter().any(|arg| arg == "--allow-process-network"));
+        assert!(command.iter().any(|arg| arg == "--live"));
+    }
 }
