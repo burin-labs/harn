@@ -5,7 +5,8 @@
 //! `HARN_PRECOMPILE_INNER=1` so the inner compile work stays in the host inner compiler; this
 //! test exercises the dispatch path and inner compiler against the same input and asserts:
 //!
-//!   * stdout lines (the per-file `source -> dest` reports) match
+//!   * public stdout lines (the per-file `source -> dest` reports) match
+//!     after validating the inner compiler's captured outcome receipts.
 //!     when sorted — the dispatch wedge flushes stderr before stdout,
 //!     so the merged stream ordering naturally diverges from the
 //!     inner compiler. Comparing each stream independently after a sort is
@@ -42,7 +43,7 @@ fn single_file_dispatch_matches_inner_compile() {
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
 
     assert_eq!(
-        sort_lines(&inner.stdout),
+        inner_public_lines(&inner.stdout, 1).expect("one compiled outcome receipt"),
         sort_lines(&harn.stdout),
         "stdout lines diverged\nrust:\n{}\nharn:\n{}",
         inner.stdout,
@@ -85,7 +86,50 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
     );
     // Both reports should mention every source by stdout line, just
     // possibly in a different stream-flush order.
-    assert_eq!(sort_lines(&harn.stdout), sort_lines(&inner.stdout));
+    assert_eq!(
+        sort_lines(&harn.stdout),
+        inner_public_lines(&inner.stdout, 2).expect("two compiled outcome receipts"),
+    );
+}
+
+fn inner_public_lines(stdout: &str, expected_compiled: usize) -> Result<Vec<String>, String> {
+    use harn_cli::commands::precompile::PRECOMPILE_OUTCOME_PREFIX;
+
+    let mut compiled = 0;
+    let mut public = Vec::new();
+    for line in sort_lines(stdout) {
+        if let Some(outcome) = line.strip_prefix(PRECOMPILE_OUTCOME_PREFIX) {
+            if outcome.trim() != "compiled" {
+                return Err(format!("expected a fresh compile, received {outcome:?}"));
+            }
+            compiled += 1;
+        } else {
+            public.push(line);
+        }
+    }
+    if compiled != expected_compiled {
+        return Err(format!(
+            "compiled receipts: {compiled}, expected {expected_compiled}"
+        ));
+    }
+    Ok(public)
+}
+
+#[test]
+fn inner_outcome_projection_rejects_missing_duplicate_and_unknown_receipts() {
+    let valid = "source -> artifact\nprecompile-outcome: compiled\n";
+    assert_eq!(
+        inner_public_lines(valid, 1).unwrap(),
+        ["source -> artifact"]
+    );
+    for invalid in [
+        "source -> artifact\n".to_string(),
+        format!("{valid}precompile-outcome: compiled\n"),
+        valid.replace("compiled", "unknown"),
+        valid.replace("compiled", "reused"),
+    ] {
+        assert!(inner_public_lines(&invalid, 1).is_err());
+    }
 }
 
 #[test]
