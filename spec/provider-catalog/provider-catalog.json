@@ -14730,7 +14730,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -14766,6 +14766,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -14822,7 +14823,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -14858,6 +14859,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -14916,7 +14918,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -14952,6 +14954,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -15010,7 +15013,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15048,6 +15051,7 @@
         "tools",
         "vision",
         "audio",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -15104,7 +15108,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15142,6 +15146,7 @@
         "tools",
         "vision",
         "audio",
+        "prompt_caching",
         "structured_output",
         "batch"
       ],
@@ -15210,7 +15215,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15247,6 +15252,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15309,7 +15315,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15353,6 +15359,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15424,7 +15431,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15461,6 +15468,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15532,7 +15540,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15569,6 +15577,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15632,7 +15641,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15676,6 +15685,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15748,7 +15758,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15792,6 +15802,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -15917,7 +15928,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -15961,6 +15972,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16044,7 +16056,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16088,6 +16100,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16265,7 +16278,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16321,6 +16334,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16484,7 +16498,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16528,6 +16542,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16644,6 +16659,159 @@
       ]
     },
     {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "display_name": "GPT-6 Astra",
+      "blurb": "OpenAI's most capable model, for the hardest planning, coding, and review work at the highest cost.",
+      "provider": "openai",
+      "aliases": [
+        "astra",
+        "gpt-6"
+      ],
+      "context_window": 1050000,
+      "logical_model": "gpt-6-astra",
+      "equivalence_group": "gpt-6-astra",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "cache_read_per_mtok": 1.0,
+        "cache_write_per_mtok": 12.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision",
+        "agentic"
+      ],
+      "serving_tiers": [
+        {
+          "id": "flex",
+          "label": "Flex processing",
+          "mode": "synchronous",
+          "economics": "discounted",
+          "request": {
+            "param": "service_tier",
+            "value": "flex"
+          },
+          "discount_percent": 50,
+          "status": "beta",
+          "latency": "slower and variable synchronous latency",
+          "reliability": "best-effort availability; provider can return resource unavailable",
+          "suitable_workloads": [
+            "offline_eval",
+            "corpus",
+            "bulk_judge"
+          ],
+          "unsuitable_workloads": [
+            "interactive_chat"
+          ]
+        }
+      ],
+      "released": "2026-09-03"
+    },
+    {
       "id": "o1",
       "name": "OpenAI o1",
       "display_name": "OpenAI o1",
@@ -16686,7 +16854,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16723,6 +16891,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16779,7 +16948,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16816,6 +16985,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16873,7 +17043,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -16910,6 +17080,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -16970,7 +17141,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -17007,6 +17178,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -17069,7 +17241,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "batch": {
         "wire_format": "openai",
         "input_mode": "jsonl_file",
@@ -17105,6 +17277,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output",
@@ -20026,7 +20199,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.75,
         "output_per_mtok": 4.5,
@@ -20043,6 +20216,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20107,7 +20281,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.25,
@@ -20124,6 +20298,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20186,7 +20361,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
@@ -20203,6 +20378,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20267,7 +20443,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
@@ -20284,6 +20460,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20348,7 +20525,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 30.0,
         "output_per_mtok": 180.0,
@@ -20365,6 +20542,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20436,7 +20614,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.2,
@@ -20452,6 +20630,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20525,7 +20704,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.2,
@@ -20541,6 +20720,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20614,7 +20794,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
@@ -20642,6 +20822,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20713,7 +20894,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 5.0,
         "output_per_mtok": 30.0,
@@ -20741,6 +20922,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20812,7 +20994,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
@@ -20828,6 +21010,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -20899,7 +21082,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 2.0,
         "output_per_mtok": 12.0,
@@ -20915,6 +21098,7 @@
         "streaming",
         "tools",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -25312,7 +25496,7 @@
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.2,
         "output_per_mtok": 1.25,
@@ -25329,6 +25513,7 @@
         "tools",
         "tool_search",
         "vision",
+        "prompt_caching",
         "thinking",
         "extended_thinking",
         "structured_output"
@@ -26528,6 +26713,11 @@
   ],
   "aliases": [
     {
+      "name": "astra",
+      "model_id": "gpt-6-astra",
+      "provider": "openai"
+    },
+    {
       "name": "baseten-deepseek-v4-flash-0731",
       "model_id": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731",
       "provider": "baseten",
@@ -26752,6 +26942,11 @@
     {
       "name": "gpt-5.6",
       "model_id": "gpt-5.6-sol",
+      "provider": "openai"
+    },
+    {
+      "name": "gpt-6",
+      "model_id": "gpt-6-astra",
       "provider": "openai"
     },
     {
@@ -30007,6 +30202,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30026,6 +30222,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30045,6 +30242,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30065,6 +30263,7 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -30085,6 +30284,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30108,6 +30308,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30131,6 +30332,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30154,6 +30356,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30177,6 +30380,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30200,6 +30404,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30223,6 +30428,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30246,6 +30452,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30269,6 +30476,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30292,6 +30500,31 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-6 Astra",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -30315,6 +30548,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31040,6 +31274,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31062,6 +31297,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31084,6 +31320,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31106,6 +31343,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31128,6 +31366,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31150,6 +31389,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31171,6 +31411,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31192,6 +31433,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31213,6 +31455,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31234,6 +31477,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -31255,6 +31499,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
@@ -32203,6 +32448,7 @@
         "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
+        "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",

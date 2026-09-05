@@ -1,3 +1,4 @@
+import { scan_glob } from "./path_visibility.harn"
 // Build or check the shipped harn release binary against the two-level release
 // size policy and, unless disabled, write a cargo-bloat report for follow-up
 // analysis.
@@ -266,7 +267,7 @@ fn binary_size_env_or(env: HarnessEnv, name: string, fallback: string) -> string
 
 /** Absolute repo root (the glob search root marker). */
 fn repo_root(fs: HarnessFs) -> string {
-  for g in fs.glob("Cargo.toml") {
+  for g in scan_glob(fs, "check-binary-size-policy", "Cargo.toml") {
     const idx = g.index_of("/./")
     if idx >= 0 {
       return g.substring(0, idx)

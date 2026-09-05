@@ -57,6 +57,7 @@ exempt_checks = [
   "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
+  "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
   "check-docs-portable",            # the half of check-docs a published release can judge
@@ -91,6 +92,23 @@ exempt_checks = [
 # ---------------------------------------------------------------------------
 # Fully-wired mirrors (gen + check + CI + make all, several also hooked)
 # ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "release-contract"
+description = "Typed Harn-owned release semantics consumed by the external release orchestrator, including version/fold/tag policy and cross-repository workflow identifiers."
+gen = "gen-release-contract"
+check = "check-release-contract"
+outputs = ["scripts/release_contract.json", "scripts/release_contract.env"]
+sources = [
+  "scripts/release_contract.harn",
+  "scripts/release_metadata.harn",
+  "scripts/release_ship.sh",
+  "scripts/lib/release_version.sh",
+  ".github/workflows/publish-release.yml",
+  ".github/workflows/build-release-binaries.yml",
+]
+ci = true
+make_all = true
 
 [[artifact]]
 id = "cli-aot"
@@ -622,11 +640,13 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-grammar-keywords" = "source"
 "check-grammar-fitness" = "excluded"
 "check-generated-registry" = "source"
+"check-release-contract" = "source"
 "check-release-audit-contract" = "source"
 "check-ci-cache-policy" = "source"
 "check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
 "check-cargo-lock-contract" = "source"
+"check-scheduled-workflows" = "source"
 "lint-test-patterns" = "source"
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"

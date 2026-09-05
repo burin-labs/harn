@@ -396,7 +396,7 @@ fn catalog_model(
             llm::capabilities::lookup_with_user_overrides(&model.provider, &id, overrides)
         }
         CatalogCapabilityOverrides::SourceBase(base) => {
-            llm::capabilities::lookup_with_base_file(&model.provider, &id, base)
+            llm::capabilities::lookup_with_source_config(&model.provider, &id, base, config)
         }
     };
     let structured_output = caps

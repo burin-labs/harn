@@ -6,11 +6,12 @@ day/week/month time series. It also reports prompt-cache efficiency.
 
 Every LLM call the runtime makes appends a `provider_call_response` event to the
 `agent.transcript.llm` topic in `<project>/.harn/events.sqlite`. That event
-already carries `provider`, `model`, token counts, cache telemetry, and the
-runtime-computed `cost_usd`. `harn usage` reads those events through the same
+already carries `provider`, `model`, token counts, cache telemetry, known cost,
+and whether the provider reported enough information to trust those numbers.
+`harn usage` reads those events through the same
 event-log reader `harn portal` uses, filters to `provider_call_response`
-records, and aggregates them. It does **not** recompute pricing — `cost_usd` is
-summed straight from the event.
+records, and aggregates them. It does **not** recompute pricing. Known cost and
+unpriced/unknown counts are summed straight from the event.
 
 ## Quick start
 
@@ -28,15 +29,15 @@ harn usage --all
 Example output:
 
 ```text
-harn usage — 4329 calls across 1 source, $18.8753 by provider
+harn usage — 4329 provider calls in 4320 responses across 1 source, $18.8753 by provider
 
-provider               calls        cost      in_tok    out_tok   cache%  cache_save    ms/call
+provider               calls  known cost      in_tok    out_tok   cache%  cache_save  ms/response
 openrouter              2880    $16.5757    62298223    1096570    25.8%     $1.8904       3781
 cerebras                 613     $2.2948     7622388     293140    41.0%     $0.0000        961
 anthropic                  1     $0.0019          10        123     0.0%    $-0.0079       4710
 llamacpp                 829     $0.0000    12640752     177160    40.6%     $0.0000      14967
 
-total: 4329 calls, $18.8753, 82566555 in / 1567871 out tok, $1.8826 cache savings
+total: 4329 provider calls, $18.8753, 82566555 in / 1567871 out tok, $1.8826 cache savings
 ```
 
 ## Options
@@ -60,15 +61,23 @@ never contaminate real spend. There is no flag to include them.
 
 Each group reports:
 
-- `calls` — number of `provider_call_response` records
-- `cost_usd` — sum of the runtime-computed per-call cost
+- `responses` — number of durable `provider_call_response` records
+- `provider_calls` — number of physical provider requests represented by those
+  records, including retries
+- `cost_status` / `usage_status` — independent `no_calls`, `reported`,
+  `partial`, or `unknown` completeness signals for price and token accounting;
+  only `reported` makes that dimension's numeric zero a complete measurement
+- `known_cost_usd` — measured cost only
+- `unpriced_calls` / `usage_unknown_calls` — provider requests whose cost or
+  token usage is absent
 - `input_tokens` / `output_tokens`
 - `cache_read_tokens` / `cache_write_tokens`
 - `cache_savings_usd` — sum of the runtime's per-call cache-savings estimate
-- `cache_hit_ratio` — call-weighted mean of the runtime's normalized
-  per-call prompt-cache ratio
+- `cache_hit_ratio` — response-weighted mean of the runtime's normalized
+  prompt-cache ratio
 - `mean_response_ms`
-- `cumulative_cost_usd` — running cost total, on the `day`/`week`/`month` series
+- `cumulative_known_cost_usd` — running measured-cost total, on the
+  `day`/`week`/`month` series
 
 ## Time series
 
@@ -77,14 +86,17 @@ harn usage --group-by day --since 2026-06-01
 ```
 
 Day/week/month group-bys are ordered chronologically and carry a
-`cumulative_cost_usd` column so you can see spend accrue over the window.
+`cumulative_known_cost_usd` column so you can see measured spend accrue over
+the window. Each row still exposes its unpriced-call count, so the cumulative
+number cannot be mistaken for a complete bill when accounting is partial.
 
 ## JSON envelope
 
 `--json` returns the same versioned envelope shape every `harn … --json`
 command uses (`schemaVersion`, `ok`, `data`, `error`, `warnings`). The `data`
-payload is a `UsageReport` with `group_by`, `sources`, `calls`, `groups`, and
-`totals`. Agents can negotiate compatibility via `harn --json-schemas`, which
+payload is a `UsageReport` with `group_by`, `sources`, `responses`,
+`provider_calls`, `groups`, and `totals`. Agents can negotiate compatibility
+via `harn --json-schemas`, which
 lists `usage` and its schema version.
 
 ## Scope and limitations

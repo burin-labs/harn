@@ -45,15 +45,25 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write,
-    process_sandbox_developer_toolchain_read_roots,
-    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
-    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
+    policy_allows_network, process_sandbox_developer_toolchain_read_roots,
+    process_sandbox_package_manager_config_read_roots, process_sandbox_path_read_roots,
     process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
     SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
+
+// Declared here rather than in the sandbox module index: this backend is its
+// only consumer, and the index is a platform-neutral surface.
+#[path = "windows_system_roots.rs"]
+mod system_roots;
+
+// The ACL grant machinery answers a different question from process launch, and
+// carries the measurements that justify each rule.
+#[path = "windows_acl_grants.rs"]
+mod acl_grants;
+
+use acl_grants::WorkspaceAclGrants;
 
 pub(super) struct Backend;
 
@@ -473,89 +483,6 @@ impl Drop for AppContainerProfile {
     }
 }
 
-struct WorkspaceAclGrants {
-    label: String,
-    sid: String,
-    paths: Vec<PathBuf>,
-}
-
-impl WorkspaceAclGrants {
-    fn grant(label: &str, sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
-        // Read-execute for the entire profile when writes are denied;
-        // otherwise Modify on the writable roots. Read-only roots always
-        // get read-execute regardless of the workspace-write capability.
-        let workspace_permission = if policy_allows_workspace_write(policy) {
-            "(OI)(CI)M"
-        } else {
-            "(OI)(CI)RX"
-        };
-        let mut paths = Vec::new();
-        let writable = process_sandbox_roots(policy)
-            .into_iter()
-            .map(|root| (root, workspace_permission, false));
-        let read_only = process_sandbox_readonly_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
-        let process_read = process_sandbox_policy_read_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
-        let preset_roots = process_sandbox_preset_acl_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", true));
-        let process_write = if policy_allows_workspace_write(policy) {
-            process_sandbox_policy_write_roots(policy)
-                .into_iter()
-                .map(|root| (root, workspace_permission, false))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        for (root, permission, optional) in writable
-            .chain(read_only)
-            .chain(process_read)
-            .chain(preset_roots)
-            .chain(process_write)
-        {
-            if !root.exists() {
-                if optional {
-                    continue;
-                }
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("sandbox workspace root '{}' does not exist", root.display()),
-                ));
-            }
-            sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
-            run_icacls(
-                &root,
-                ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
-            )?;
-            sandbox_trace(label, "icacls grant ok");
-            paths.push(root);
-        }
-        Ok(Self {
-            label: label.to_string(),
-            sid: sid.to_string(),
-            paths,
-        })
-    }
-}
-
-impl Drop for WorkspaceAclGrants {
-    fn drop(&mut self) {
-        for path in &self.paths {
-            sandbox_trace(
-                &self.label,
-                format!("icacls remove begin path={}", path.display()),
-            );
-            match run_icacls(path, ["/remove:g", &format!("*{}", self.sid), "/T", "/C"]) {
-                Ok(()) => sandbox_trace(&self.label, "icacls remove ok"),
-                Err(error) => sandbox_trace(&self.label, format!("icacls remove failed: {error}")),
-            }
-        }
-    }
-}
-
 fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     // `presets: None` means "use the runtime defaults" per
     // `ProcessSandboxPolicy`'s own documented contract (types.rs), and those
@@ -572,35 +499,11 @@ fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
-        .chain(windows_path_read_roots(policy))
-        .collect()
-}
-
-/// Every directory on this process's own `PATH`, gated on the same
-/// `DeveloperToolchains` preset as the home-relative roots above.
-///
-/// Unlike macOS (seatbelt) and Linux (Landlock), which are read-open by
-/// default and confine only writes, this backend's AppContainer is
-/// read-closed by construction: nothing outside an explicit icacls grant is
-/// visible to the child. `developer_toolchain_read_roots_for_home` only
-/// covers *home-relative* installs (`~/.cargo`, `~/.nvm`, ...), so a global,
-/// non-home-relative install on PATH — e.g. the official Node.js installer's
-/// `C:\Program Files\nodejs` — stays invisible, and `cmd.exe` reports the
-/// unreadable executable as "not recognized" rather than a permission error
-/// (harn#7993). A PATH entry is, definitionally, a developer toolchain
-/// location. `optional: true` in the icacls grant loop above already skips
-/// any entry that does not exist, so a stray or unusual PATH entry costs
-/// nothing.
-fn windows_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    use crate::orchestration::ProcessSandboxPreset;
-    if !super::process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains)
-    {
-        return Vec::new();
-    }
-    std::env::var_os("PATH")
-        .iter()
-        .flat_map(std::env::split_paths)
-        .map(|dir| super::paths::normalize_for_policy(&dir))
+        // Owned by `mod.rs` so the pre-launch coverage check reads the same
+        // set this loop grants an ACE for; see
+        // `process_sandbox_path_read_roots`. `optional: true` in the grant
+        // loop above already skips an entry that is not on disk.
+        .chain(process_sandbox_path_read_roots(policy))
         .collect()
 }
 

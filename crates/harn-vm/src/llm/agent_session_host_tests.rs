@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use crate::agent_events::AgentEvent;
+use crate::llm::pairing_receipts::ToolResultOrigin;
 
 use super::run_identity::agent_init_control;
 use super::{
@@ -13,6 +14,8 @@ use super::{
     vm_to_json, ToolResultMessageInput,
 };
 
+#[path = "agent_session_host_message_projection_tests.rs"]
+mod message_projection;
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
 mod mock_dispatch;
 #[path = "agent_session_host_record_tool_data_tests.rs"]
@@ -754,6 +757,7 @@ fn tool_results_use_one_durable_shape_for_every_provider() {
             ok,
             screenshots: &[],
             data: None,
+            origin: ToolResultOrigin::Dispatch,
         }));
         assert_eq!(message["role"], expected_role);
         assert_eq!(message["_harn"]["kind"], "tool_result");
@@ -802,6 +806,7 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
         ok: true,
         screenshots: &screenshots,
         data: None,
+        origin: ToolResultOrigin::Dispatch,
     }));
     assert_eq!(anthropic["role"], "tool_result");
     let content = anthropic["content"].as_array().expect("block list");
@@ -842,6 +847,7 @@ fn multi_screenshot_tool_result_delivers_every_frame() {
         ok: true,
         screenshots: &screenshots,
         data: None,
+        origin: ToolResultOrigin::Dispatch,
     }));
     let content = anthropic["content"].as_array().expect("block list");
     assert_eq!(content.len(), 3, "text + two images");
@@ -1443,3 +1449,5 @@ fn auto_continue_does_not_fire_on_length_truncated_prose() {
 
 #[path = "agent_session_host_tests/policy_and_usage.rs"]
 mod policy_and_usage;
+#[path = "agent_session_host_tests/tool_result_origin.rs"]
+mod tool_result_origin;

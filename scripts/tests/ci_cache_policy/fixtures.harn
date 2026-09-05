@@ -11,20 +11,24 @@ pub fn gha_expression(body: string) -> string {
 
 pub fn windows_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest'",
   )
 }
 
 pub fn windows_nightly_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-16vcpu-windows-2025'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest'",
   )
 }
 
 pub fn windows_tier_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted'",
   )
+}
+
+pub fn windows_timeout_expression() -> string {
+  return gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90")
 }
 
 pub fn windows_warm_restore_step() {
@@ -229,7 +233,7 @@ pub fn release_binary_workflow() {
       },
       prepare_cli_aot: {
         "runs-on": gha_expression(
-          "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
+          "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
         ),
       },
       build: {
@@ -438,6 +442,7 @@ pub fn workflows() {
         },
         windows: {
           "runs-on": windows_runner_expression(),
+          "timeout-minutes": windows_timeout_expression(),
           permissions: {contents: "read", actions: "read"},
           env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
@@ -494,7 +499,7 @@ pub fn workflows() {
                 ),
               },
               run:
-                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
+                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n[[ \"$harn_bin\" -ef \"$harn_bin\" ]]\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
             },
             {
               name: "Report Windows storage (terminal)",

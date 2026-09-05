@@ -586,6 +586,17 @@ capability_method!(
     "Finalize an agent execution session."
 );
 capability_method!(
+    agent_session_control_events,
+    "harness.agent.session_control_events",
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
+    "__cap_agent_session_control_events(session_id: string) -> list",
+    "Read the accepted control events recorded for an agent session."
+);
+capability_method!(
     agent_session_messages,
     "harness.agent.session_messages",
     // Match the corresponding `__host_agent_*` runtime_internal builtin

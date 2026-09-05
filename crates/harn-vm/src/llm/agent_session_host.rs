@@ -6,6 +6,7 @@
 //! continue/break) lives in Harn; Rust is reduced to data plumbing,
 //! provider/tool capability surfaces, and resource lifecycle.
 
+use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
@@ -65,6 +66,7 @@ enum AgentFinalizationStage {
 
 mod assistant_messages;
 pub(crate) mod cancellation;
+mod control_history;
 mod daemon_bridge;
 mod inbox;
 mod lifecycle;
@@ -877,6 +879,7 @@ fn host_agent_session_record_tool_results_builtin(
                 ok,
                 screenshots: &screenshots,
                 data: transcript_data.as_ref(),
+                origin: ToolResultOrigin::Dispatch,
             }),
         )
         .map_err(VmError::Runtime)?;
@@ -1026,6 +1029,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, HOST_SESSION_BUILTINS);
+    control_history::register_control_history_primitives(vm);
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);
     lifecycle::register_lifecycle_primitives(vm);

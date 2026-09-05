@@ -1,3 +1,4 @@
+import { CompletionClaim } from "std/agent/completion_claim"
 // std/agent/completion_evidence — typed, bounded terminal evidence contracts.
 import { CompletionRequirementEvidenceRecord } from "std/agent/completion_requirements"
 import { CompletionVerificationState } from "std/agent/judge_internals"
@@ -36,6 +37,13 @@ pub type CompletionEvidenceAction = {
   observation: string,
   result_facts: string,
   has_error_result: bool,
+  // True when this call has results but every one was written by the harness.
+  // Such a call was never dispatched, so it is evidence of nothing and never
+  // enters the packet.
+  harness_authored_only?: bool,
+  // Every harness-authored result removed from this action. This can be nonzero
+  // even when a real dispatched result keeps the action in the packet.
+  omitted_harness_authored_result_count?: int,
 }
 
 /**
@@ -89,12 +97,18 @@ pub type CompletionEvidencePacket = {
   // carry one are represented, not omitted, and are not counted here.
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
+  // Calls whose every result was written by the harness rather than returned by
+  // a tool, so the call was never dispatched and its "result" is injected
+  // feedback. Dropped from `actions`, counted here, so a judge that sees fewer
+  // actions than the run made can tell why (harn#7757).
+  omitted_harness_authored_result_count?: int,
   lifecycle_issue_count: int,
   lifecycle_issues: list<CompletionEvidenceIssue>,
   actions: list<CompletionEvidenceAction>,
   research_summary: CompletionResearchSummary,
   fallback_observations: list<CompletionEvidenceAction>,
   requirement_evidence: list<CompletionRequirementEvidenceRecord>,
+  completion_claim?: CompletionClaim,
 }
 
 pub type CompletionEvidenceSelection = {
@@ -112,6 +126,7 @@ pub type CompletionEvidenceProjectionStats = {
   included_read_only_call_count: int,
   omitted_read_only_call_count: int,
   omitted_older_action_count: int,
+  omitted_harness_authored_result_count: int,
   lifecycle_issue_count: int,
   serialized_chars: int,
   raw_transcript_digest: string,
@@ -122,6 +137,32 @@ pub type CompletionEvidenceProjection = {
   packet: CompletionEvidencePacket,
   serialized: string,
   stats: CompletionEvidenceProjectionStats,
+}
+
+/**
+ * Attach measurable authorship omissions to one projected action.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn completion_evidence_action_authorship(
+  action: CompletionEvidenceAction,
+  total_result_count: int,
+  dispatched_result_count: int,
+) -> CompletionEvidenceAction {
+  const omitted = total_result_count - dispatched_result_count
+  return action
+    + if omitted > 0 {
+      {omitted_harness_authored_result_count: omitted}
+    } else {
+      {}
+    }
+    + if total_result_count > 0 && dispatched_result_count == 0 {
+      {harness_authored_only: true}
+    } else {
+      {}
+    }
 }
 
 pub type CompletionEvidenceSnapshot = {
@@ -149,6 +190,7 @@ pub type CompletionEvidenceSnapshot = {
   pending_tool_batch_effect_count: int,
   // Absent until a deterministic gate actually ran and reported.
   verification?: CompletionVerificationState?,
+  completion_claim?: CompletionClaim,
   // The completion target as amended by accepted mid-run user steering,
   // derived once at the judge payload seam. Every exit authority shown this
   // snapshot — the LLM judge, a `verify_completion` closure, the completion
@@ -184,6 +226,14 @@ fn completion_evidence_clip(value: string) -> string {
 // order as one retained action.
 const COMPLETION_RESEARCH_SUMMARY_LIMIT = 6
 
+// Distinct paths whose latest mutation is carried into the packet. The packet
+// keeps one action per touched path rather than one mutation overall, because
+// a single slot cannot represent a two-file change and silently reports the
+// displaced file as untouched (#8090). Six is the same order as the read
+// budget above; a wider refactor degrades to the most recently touched files
+// and counts the rest in `omitted_older_action_count`.
+pub const COMPLETION_MUTATION_TARGET_LIMIT = 6
+
 const COMPLETION_READ_DIGEST_CHAR_LIMIT = 200
 
 const COMPLETION_READ_TARGET_KEYS = [
@@ -203,16 +253,26 @@ const COMPLETION_READ_TARGET_KEYS = [
 ]
 
 /**
- * What a read-only call looked at.
+ * What a call looked at or wrote, as a canonical locator.
  *
  * Prefer a canonical locator key when the arguments carry one, because that is
  * what a judge weighing "was this stop justified?" needs to see. Fall back to
  * the bounded arguments themselves so an unrecognized shape degrades to less
  * detail rather than to nothing.
+ *
+ * Shared by both evidence paths on purpose. Read-only calls use it to say what
+ * was inspected; mutations use it as the key that keeps the latest edit per
+ * path, which is what stops a second edit from displacing the first (#8090).
+ * One extractor means the two paths can never disagree about what a call
+ * addressed.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
  */
-fn completion_read_target(args: dict) -> string {
+pub fn completion_read_target(args: dict) -> string {
   for key in COMPLETION_READ_TARGET_KEYS {
-    const value = args[key] ?? nil
+    const value = args[key]
     if value != nil {
       const rendered = trim(
         completion_evidence_clip_to(value, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT),
@@ -360,7 +420,7 @@ pub fn completion_evidence_id(
   verification: CompletionVerificationState? = nil,
   obligations_digest: string = "",
 ) -> string {
-  const base = {
+  let base = {
     task: task,
     trigger: stop_reason,
     candidate_text: text,
@@ -374,6 +434,11 @@ pub fn completion_evidence_id(
     lifecycle_issues: packet.lifecycle_issues,
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: verification,
+  }
+  // Keep the default, opt-out path byte-identical. A nil optional field would
+  // still serialize as a new key and churn every existing evidence identity.
+  if packet.completion_claim != nil {
+    base = base + {completion_claim: packet.completion_claim}
   }
   // Two decisions that differ only in accepted steering were decided under
   // different obligations and must not share an evidence identity. An unsteered

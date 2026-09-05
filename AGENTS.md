@@ -156,9 +156,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   source fragments only.
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
   `make gen-provider-support`, then verify with the matching `check-` targets.
-  Regenerate using a binary built from the tree you are changing. A binary that
-  predates a new capability rule writes the same bytes back, so the local check
-  reads green and CI fails on a rebuild.
+  All three generators read the current source fragments from the repository
+  root. Catalog-only edits don't require rebuilding the CLI. Matrix and support
+  use embedded defaults when source directories are absent; `generate` requires
+  sources. Invalid fragments fail explicitly.
 - **Ship every route the model is served on.** A model reachable both directly
   and through an aggregator needs a catalog row and a capability rule on each
   route. Adding only the direct route leaves the aggregated route falling
@@ -195,6 +196,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `npm run portal:build`.
 - VS Code changes need `(cd editors/vscode && npm run compile)`.
 - Tree-sitter changes need `(cd tree-sitter-harn && npm test)`.
+- Read one head's CI check state with
+  `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
+  latest verdict per check name, counts queued work as pending, and exits 3 when
+  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
@@ -235,7 +240,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Use a closing keyword only when the pull request resolves the whole issue:
   `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
   #N` when the issue is not enumerated. For partial work, use `Partial: #N
-  items: 1, 3` or `Refs #N`; never use a closing keyword.
+  items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
+  closing link from the keyword and ignores the text after it, so a keyword on
+  partial work closes the whole issue on merge however the line is worded.
+  Verify with `gh pr view <N> --json closingIssuesReferences`, which is the
+  check; the body text is not.
 
 ## Release
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$repo_root/.github/workflows/development-cutover-monitor.yml"
+workflow="$repo_root/.github/workflows/repository-state-reconciliation.yml"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/repo"
@@ -51,6 +51,32 @@ HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
 grep -Fq 'main_version=1.2.4-dev' "$current_log"
 grep -Fq 'matching_pr_count=0' "$current_log"
 grep -Fq 'development cutover monitor: current:' "$current_log"
+
+# A merged next release is awaiting publication, not an overdue development
+# bump for the preceding tag. The commit status must remain pending, not green.
+printf '[workspace.package]\nversion = "1.2.4"\n' > "$fixture/Cargo.toml"
+git -C "$fixture" add Cargo.toml
+git -C "$fixture" commit --quiet -m 'Release v1.2.4'
+git -C "$fixture" update-ref refs/remotes/origin/main HEAD
+pending_log="$tmp_root/pending.log"
+pending_output="$tmp_root/pending-output"
+HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+GITHUB_OUTPUT="$pending_output" \
+  "$repo_root/scripts/check_development_cutover.sh" >"$pending_log"
+grep -Fxq 'state=pending' "$pending_output"
+grep -Fq 'publication pending: main 1.2.4, latest tag v1.2.3' "$pending_log"
+
+# Publishing that exact version changes the same observation into a real debt.
+git -C "$fixture" tag v1.2.4
+if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+  HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+    "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/published.log" 2>&1; then
+  echo "published stable main without a development PR did not alarm" >&2
+  exit 1
+fi
+grep -Fq 'expected_development_version=1.2.5-dev' "$tmp_root/published.log"
+git -C "$fixture" tag -d v1.2.4 >/dev/null
 
 # Any other version is unhealthy. Merely differing from the latest tag must
 # not collapse an older stable or a skipped development target into green.
@@ -119,6 +145,37 @@ grep -Fq 'could not measure pull requests' "$query_log"
 
 grep -Fq 'cron: "*/5 * * * *"' "$workflow"
 grep -Fq 'run: ./scripts/check_development_cutover.sh' "$workflow"
-grep -Fq 'context="development cutover"' "$workflow"
+grep -Fq 'run: ./scripts/publish_development_cutover_status.sh' "$workflow"
+
+# Exercise the workflow's actual status publisher. Missing measurement must
+# remain failed, and a measured pending phase must never turn into success.
+cat > "$bin_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CUTOVER_TEST_PUBLISH_ARGS"
+EOF
+chmod +x "$bin_dir/gh"
+for case_row in success:success:success success:pending:pending success:missing:failure success:invalid:failure failure:success:failure; do
+  IFS=: read -r outcome measured expected <<< "$case_row"
+  set +e
+  (
+    cd "$fixture"
+    PATH="$bin_dir:$PATH" CUTOVER_TEST_PUBLISH_ARGS="$tmp_root/publish-$measured" \
+    CHECK_OUTCOME="$outcome" MEASURED_STATE="${measured/missing/}" \
+    GH_REPO=fixture/project TARGET_URL=https://example.invalid/run/1 \
+      "$repo_root/scripts/publish_development_cutover_status.sh"
+  ) > "$tmp_root/publish-$measured.log" 2>&1
+  published_rc=$?
+  set -e
+  grep -Fxq "state=$expected" "$tmp_root/publish-$measured"
+  if [[ "$expected" == failure ]]; then
+    [[ "$published_rc" -eq 1 ]]
+  else
+    [[ "$published_rc" -eq 0 ]]
+  fi
+done
+grep -Fq 'name: Cancel obsolete speculative workflows' "$workflow"
+grep -Fq "if: github.event_name == 'merge_group'" "$workflow"
+grep -Fq 'group: repository-state-reconciliation-${{ github.repository }}-${{ github.event_name }}' "$workflow"
+grep -Fq 'run: ./scripts/cancel_superseded_merge_groups.sh --repo "$TARGET_REPO" --apply' "$workflow"
 
 echo "development_cutover_monitor_test: ok"

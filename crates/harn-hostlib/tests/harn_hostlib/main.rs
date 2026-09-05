@@ -25,6 +25,7 @@ mod ast_language_coverage;
 mod code_index;
 mod code_index_cypher_recall;
 mod code_index_graph_surface;
+mod code_index_incremental;
 mod code_index_live_state;
 mod code_index_scenario;
 mod code_librarian_recall;

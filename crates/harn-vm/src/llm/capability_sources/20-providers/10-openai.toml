@@ -4,10 +4,30 @@
 # in `[provider_family]` below (OpenRouter, Together, Groq, DeepSeek,
 # Fireworks, HuggingFace, local vLLM/SGLang). Siblings may still add their
 # own `[[provider.<name>]]` rules and those win over the openai fallback.
+#
+# `prompt_caching` is set per rule here, NOT by the `capabilities` list on a
+# model row. The catalog's `model.prompt_cache` field is projected from
+# `rule.prompt_caching.unwrap_or(false)`, so a model row listing
+# "prompt_caching" in `capabilities` still exports `prompt_cache: false` when
+# no rule sets the flag. Until 2026-09-04 no OpenAI rule set it, while every
+# other major provider family did, so the entire OpenAI lineup exported
+# `prompt_cache: false` despite caching automatically on any prompt at or above
+# 1024 tokens. Probed 2026-09-04 with an identical ~1578-token prefix sent
+# twice: call 1 reported cached_tokens 0, call 2 reported a cache hit on
+# gpt-5.6-luna (1575), gpt-6-astra (1575), gpt-4o-mini (1536), gpt-5.4-mini
+# (1280) and o4-mini (1408). Only gpt-5.6 and gpt-6 also report
+# cache_write_tokens; the older families report cached_tokens alone.
+#
+# The two catch-all rules with no `version_min` deliberately leave the flag
+# unset: they backstop pre-4o models that predate automatic caching. The
+# `extends = true` gpt-5.4 row also leaves it unset, because an extends rule
+# contributes only the fields it sets and resolution falls through to the
+# `version_min = [5, 4]` rule that carries the flag.
 
 # ChatGPT-era GPT models use Markdown prompt sections and native JSON output.
 [[provider.openai]]
 model_match = "gpt-4o*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "logit_bias", "prediction"]
 native_tools = true
 preferred_tool_format = "native"
@@ -25,6 +45,7 @@ thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "gpt-4.1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 vision_supported = true
@@ -45,6 +66,7 @@ thinking_block_style = "none"
 # Placed before the generic `gpt-*` version rows so it wins the first-match.
 [[provider.openai]]
 model_match = "gpt-*codex*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -75,11 +97,66 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# GPT-6 Astra narrows the effort ladder again: it accepts only
+# low/medium/high/xhigh. Both `none` and `max` are rejected by the live API,
+# even though OpenAI's model page lists `max` as supported — the published
+# doc and the deployed model disagree and the API is authoritative here.
+# Probed 2026-09-04 against gpt-6-astra on /v1/chat/completions:
+#   reasoning_effort=none    -> 400 "does not support 'none' with this model.
+#                                    Supported values are: 'low', 'medium',
+#                                    'high', and 'xhigh'."
+#   reasoning_effort=minimal -> 400 (same list)
+#   reasoning_effort=max     -> 400 (same list)
+#   temperature=0.2          -> 400 "Only the default (1) value is supported."
+#   top_p=0.5                -> 400 "Unsupported parameter: 'top_p' is not
+#                                    supported with this model."
+# Without this row `gpt-6-astra` parses as generation (6, 0) and falls through
+# to the generic `gpt-*` version_min = [5, 4] rule below, which advertises
+# `reasoning_none_supported = true` and leaves temperature/top_p unconstrained.
+# That combination turns a routine effort=none or temperature-bearing preset
+# into a provider 400 at request time, so keep this row ahead of the wildcard.
+[[provider.openai]]
+model_match = "gpt-6*"
+prompt_caching = true
+advanced_generation_options = ["logprobs", "verbosity"]
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+responses_api = true
+hosted_tools = ["web_search", "web_search_preview", "file_search", "code_interpreter", "image_generation", "computer_use", "mcp", "remote_mcp"]
+computer_use_style = "native_openai"
+screenshot_scaling = "original"
+safety_ack_flow = true
+remote_mcp = true
+conversation_state = true
+compaction = true
+background_mode = true
+tool_approval_policy = "provider_or_harn"
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_tools_require_responses = true
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 # GPT-5.6 accepts none/low/medium/high/xhigh/max, but not the `minimal`
 # effort supported by earlier GPT-5 models. Keep this row ahead of the generic
 # version rule so Harn rejects an invalid effort before spending an API call.
 [[provider.openai]]
 model_match = "gpt-5.6*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -129,6 +206,7 @@ reasoning_excluded_portable_options = ["temperature"]
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 4]
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -161,6 +239,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 1]
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -181,6 +260,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 0]
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -214,6 +294,7 @@ thinking_block_style = "none"
 # Reasoning family (o1, o3, o4, ...).
 [[provider.openai]]
 model_match = "o1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -230,6 +311,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "o3*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -246,6 +328,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "o4*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -264,6 +347,7 @@ thinking_block_style = "reasoning_summary"
 # OpenRouter-style provider-prefixed IDs.
 [[provider.openai]]
 model_match = "openai/gpt-4o*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 vision = true
@@ -280,6 +364,7 @@ thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/gpt-4.1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 vision_supported = true
@@ -295,6 +380,7 @@ thinking_block_style = "none"
 # OpenRouter-style provider-prefixed codex ids (responses-only, chat 404).
 [[provider.openai]]
 model_match = "openai/gpt-*codex*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 responses_api = true
@@ -321,12 +407,39 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Gateway GPT-6 slugs carry the same narrowed effort ladder and sampling
+# constraints as the direct OpenAI route. Keep this ahead of the broad gateway
+# GPT rule so `none`/`max` effort and temperature/top_p are rejected locally
+# rather than costing a round trip.
+[[provider.openai]]
+model_match = "openai/gpt-6*"
+prompt_caching = true
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 # OpenRouter's GPT-5.6 slugs use the OpenAI-compatible Chat transport while
 # preserving the model family's exact reasoning and sampling constraints.
 # Keep this ahead of the broad gateway GPT rule so `minimal` and temperature
 # are rejected locally for both standard and provider-managed `-pro` routes.
 [[provider.openai]]
 model_match = "openai/gpt-5.6*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -348,6 +461,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 4]
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -379,6 +493,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 1]
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -397,6 +512,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 0]
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -426,6 +542,7 @@ thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/o1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -442,6 +559,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/o3*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -458,6 +576,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/o4*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"

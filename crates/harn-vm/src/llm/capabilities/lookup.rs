@@ -157,11 +157,41 @@ pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFil
     finish_lookup(provider, lookup_with(provider, &model, base, None))
 }
 
-fn finish_lookup(provider: &str, mut caps: Capabilities) -> Capabilities {
-    if provider != "openai"
-        && provider != "mock"
-        && !crate::llm_config::provider_has_feature(provider, "responses_api")
-    {
+fn finish_lookup(provider: &str, caps: Capabilities) -> Capabilities {
+    finish_lookup_with_responses(
+        provider,
+        caps,
+        crate::llm_config::provider_has_feature(provider, "responses_api"),
+    )
+}
+
+/// Resolve source-owned rules and wire identities without ambient registry state.
+pub fn lookup_with_source_config(
+    provider: &str,
+    model: &str,
+    base: &CapabilitiesFile,
+    config: &crate::llm_config::ProvidersConfig,
+) -> Capabilities {
+    let model = crate::llm_config::capability_model_id_for_config(provider, model, config);
+    let responses = config.providers.get(provider).is_some_and(|provider| {
+        provider
+            .features
+            .iter()
+            .any(|feature| feature == "responses_api")
+    });
+    finish_lookup_with_responses(
+        provider,
+        lookup_with(provider, &model, base, None),
+        responses,
+    )
+}
+
+fn finish_lookup_with_responses(
+    provider: &str,
+    mut caps: Capabilities,
+    responses: bool,
+) -> Capabilities {
+    if provider != "openai" && provider != "mock" && !responses {
         caps.responses_api = false;
         caps.chat_completions_unsupported = false;
     }

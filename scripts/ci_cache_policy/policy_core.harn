@@ -102,7 +102,7 @@ pub const RELEASE_AOT_SETUP_PRIMARY = "$"
 pub const RELEASE_AOT_SETUP_STANDARD = "$"
   + "{{ steps.resolve.outputs.cli_aot_standard_runner }}"
 
-pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true'"
+pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'"
 
 pub const RELEASE_CACHE_BUDGET_IF =
   "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
@@ -171,7 +171,7 @@ pub const HOSTED_RUNNER_TIER = "github-hosted"
 
 pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
-pub const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
+pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
 pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
@@ -352,7 +352,7 @@ pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
 
-pub const WINDOWS_BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_WINDOWS"
+pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
 
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
 

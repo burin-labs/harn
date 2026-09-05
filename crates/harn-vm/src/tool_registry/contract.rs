@@ -676,6 +676,26 @@ fn validate_refs(
         .map_err(|error| format!("{field} contains an unresolved schema reference: {error}"))
 }
 
+/// Whether any node in `schema` references the registry's shared components.
+///
+/// The catalog owns `components.schemas`, so a document carrying one of these
+/// references is only complete once this module resolves it. Entry-level
+/// callers use this to defer to that owner instead of compiling a pointer with
+/// no document behind it.
+pub(crate) fn references_registry_components(schema: &JsonValue) -> bool {
+    match schema {
+        JsonValue::Object(fields) => fields.iter().any(|(key, value)| {
+            (matches!(key.as_str(), "$ref" | "$dynamicRef")
+                && value
+                    .as_str()
+                    .is_some_and(|target| target.starts_with("#/components/schemas/")))
+                || references_registry_components(value)
+        }),
+        JsonValue::Array(items) => items.iter().any(references_registry_components),
+        _ => false,
+    }
+}
+
 fn validate_defs_do_not_shadow_components(
     schema: &JsonValue,
     components: Option<&BTreeMap<String, JsonValue>>,

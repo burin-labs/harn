@@ -884,6 +884,55 @@ pub fn __completion_arbitration_converts(
 }
 
 /**
+ * Does a self-contradiction that SURVIVED its one re-ask lose to the
+ * deterministic gate's reading?
+ *
+ * `done` beside a populated `gap_class` is refused because the gap is the half
+ * backed by evidence (harn#7910). That reasoning holds for the four named
+ * classes, each of which points at an obligation a reader can go and check. It
+ * does not hold for `other` once a deterministic oracle has already answered:
+ * `other` names nothing, so there is no evidence on that side to prefer, and
+ * `other` is also what an absent, blank, or unrecognized field decodes to. A
+ * judge that keeps returning `done` with `other` after being told the two
+ * cannot both be true has not identified a gap; it is populating a field the
+ * schema offers.
+ *
+ * Left standing, that refusal is unanswerable. The feedback handed to the actor
+ * is the judge's own text saying the work is finished, so no turn can satisfy
+ * it, and the loop spends its whole invocation budget before dying at the cap
+ * with `turn_end_judge_cap_reached` on a run whose verifier passed.
+ *
+ * The clauses beyond the gap class are the ones `__completion_arbitration_converts`
+ * already owns, for the same reasons, plus one:
+ *
+ * 5. `reasked` — the contradiction was pointed out to the judge and came back
+ *    anyway. A first contradiction still refuses, so the judge keeps every
+ *    chance to name a real gap before anything is overruled.
+ *
+ * A named gap converts nothing here, in either direction. That is the direction
+ * control: harn#7910's blocked-write run returns `unresolved_authorization` and
+ * is refused exactly as it is today.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_contradiction_arbitration_converts("other", true, true, "verified", "passed")
+ */
+pub fn __completion_contradiction_arbitration_converts(
+  gap_class: string,
+  reasked: bool,
+  deterministic_invoked: bool,
+  deterministic_reason: string,
+  observed: string,
+) -> bool {
+  return gap_class == "other"
+    && reasked
+    && deterministic_invoked
+    && deterministic_reason != "facts_unavailable"
+    && observed == "passed"
+}
+
+/**
  * Default rendered feedback strings for each vetoing ladder rule. The MECHANISM
  * (evidence gate + post-write-verify gate) is generic; these strings are host
  * DOMAIN content (host-authored coding prose), so `completion_gate`'s

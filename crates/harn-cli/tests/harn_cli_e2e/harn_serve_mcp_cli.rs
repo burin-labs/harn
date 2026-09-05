@@ -202,7 +202,7 @@ pub fn render_value(args: dict) {
 pipeline default(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "render_fixture", "Render one fixture value", {
-    parameters: {
+    input_schema: {
       type: "object",
       properties: {value: {type: "string"}},
       required: ["value"],
@@ -716,4 +716,165 @@ async fn serve_mcp_http_reenters_handler_with_stable_input_response() {
     child.kill().unwrap();
     child.wait().unwrap();
     stderr.join().unwrap();
+}
+
+fn write_component_backed_registry_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r##"
+import { tool_registry_from } from "std/tools"
+
+fn main(harness: Harness) {
+  const tools = tool_registry_from([
+    {
+      name: "lookup_widget",
+      description: "Look up one widget.",
+      input_schema: {
+        type: "object",
+        properties: {widget_id: {"$ref": "#/components/schemas/WidgetId"}},
+        required: ["widget_id"],
+        additionalProperties: false,
+      },
+      returns: {"$ref": "#/components/schemas/Widget"},
+      cli: {
+        command: ["widgets", "get"],
+        arguments: {widget_id: {position: 0, value_name: "WIDGET"}},
+      },
+      handler: {args -> {id: args.widget_id}},
+    },
+    {
+      name: "broken_widget",
+      description: "Return one widget outside its declared shape.",
+      input_schema: {
+        type: "object",
+        properties: {widget_id: {"$ref": "#/components/schemas/WidgetId"}},
+        required: ["widget_id"],
+        additionalProperties: false,
+      },
+      returns: {"$ref": "#/components/schemas/Widget"},
+      cli: {
+        command: ["widgets", "broken"],
+        arguments: {widget_id: {position: 0, value_name: "WIDGET"}},
+      },
+      handler: {_args -> {id: "not-an-integer"}},
+    },
+  ], {
+    info: {name: "widgets", version: "1.0.0"},
+    components: {
+      schemas: {
+        WidgetId: {type: "integer", minimum: 1},
+        Widget: {
+          type: "object",
+          properties: {id: {type: "integer"}},
+          required: ["id"],
+          additionalProperties: false,
+        },
+      },
+    },
+  })
+  harness.tools.mcp_tools(tools)
+}
+"##,
+    )
+    .unwrap();
+}
+
+/// A component-backed catalog must execute, not merely publish. Both surfaces
+/// resolve the shared reference, reject the same out-of-range input before the
+/// handler runs, and refuse to report an out-of-contract result as a success.
+#[ignore = "binary surface: runs in the slow E2E/smoke job"]
+#[test]
+fn component_backed_registry_enforces_the_same_contract_on_cli_and_mcp() {
+    let temp = TempDir::new().unwrap();
+    write_component_backed_registry_fixture(&temp);
+    let script = temp.path().join("server.harn");
+    let script = script.display().to_string();
+
+    let cli_ok = harn_e2e_command()
+        .args(["tool", "run", &script, "widgets", "get", "7", "--json"])
+        .output()
+        .expect("generated CLI invocation");
+    assert!(
+        cli_ok.status.success(),
+        "component-backed CLI call failed: {}",
+        String::from_utf8_lossy(&cli_ok.stderr)
+    );
+    let cli_result: JsonValue = serde_json::from_slice(&cli_ok.stdout).expect("CLI JSON");
+    assert_eq!(cli_result, json!({"id": 7}));
+
+    let cli_invalid_input = harn_e2e_command()
+        .args(["tool", "run", &script, "widgets", "get", "0", "--json"])
+        .output()
+        .expect("invalid CLI input");
+    assert!(!cli_invalid_input.status.success());
+    let stderr = String::from_utf8_lossy(&cli_invalid_input.stderr);
+    assert!(stderr.contains("minimum"), "{stderr}");
+
+    let cli_invalid_output = harn_e2e_command()
+        .args(["tool", "run", &script, "widgets", "broken", "7", "--json"])
+        .output()
+        .expect("invalid CLI output");
+    assert!(
+        !cli_invalid_output.status.success(),
+        "an out-of-contract result must not be reported as a success"
+    );
+
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("component-backed harn serve mcp", command);
+
+    let listed = client.request(stable_request(1, "tools/list", json!({})));
+    let advertised = listed["result"]["tools"]
+        .as_array()
+        .expect("advertised tools")
+        .iter()
+        .find(|tool| tool["name"] == "lookup_widget")
+        .expect("lookup_widget is advertised")
+        .clone();
+    let input_schema = serde_json::to_string(&advertised["inputSchema"]).expect("input schema");
+    assert!(
+        input_schema.contains("\"minimum\":1"),
+        "MCP discovery must carry the shared component's constraint: {input_schema}"
+    );
+    assert!(
+        !input_schema.contains("#/components/schemas/"),
+        "MCP discovery must publish a self-contained schema: {input_schema}"
+    );
+
+    let called = client.request(stable_request(
+        2,
+        "tools/call",
+        json!({"name": "lookup_widget", "arguments": {"widget_id": 7}}),
+    ));
+    assert_eq!(called["result"]["structuredContent"], cli_result);
+
+    let invalid_input = client.request(stable_request(
+        3,
+        "tools/call",
+        json!({"name": "lookup_widget", "arguments": {"widget_id": 0}}),
+    ));
+    assert_eq!(invalid_input["error"]["code"], -32602);
+    assert!(
+        invalid_input["error"]["message"]
+            .as_str()
+            .expect("validation message")
+            .contains("minimum"),
+        "{invalid_input}"
+    );
+
+    let invalid_output = client.request(stable_request(
+        4,
+        "tools/call",
+        json!({"name": "broken_widget", "arguments": {"widget_id": 7}}),
+    ));
+    assert_eq!(
+        invalid_output["result"]["isError"],
+        json!(true),
+        "{invalid_output}"
+    );
+    client.shutdown_expect_success();
 }

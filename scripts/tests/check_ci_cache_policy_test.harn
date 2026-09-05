@@ -446,7 +446,7 @@ pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harnes
   assert_eq(
     release_aot_runner_errors(invalid),
     [
-      "build-release-binaries.yml:prepare_cli_aot runner selection must include vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true'",
+      "build-release-binaries.yml:prepare_cli_aot runner selection must include vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'",
     ],
   )
 }
@@ -527,7 +527,17 @@ pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(
   assert(
     windows_pr_native_feedback_errors(policy(), hosted_only, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows must use blacksmith-8vcpu-windows-2025 for candidate and main fallback proof, with HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true falling back to windows-latest",
+        "ci.yml:windows must default to windows-latest, with HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-8vcpu-windows-2025",
+      ),
+  )
+  const fixed_timeout = {
+    ...declared["ci.yml"],
+    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "timeout-minutes": 60}},
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), fixed_timeout, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must cap paid Windows runs at 60 minutes and allow the hosted fallback 90 minutes",
       ),
   )
   const wrong_tier = {
@@ -771,7 +781,35 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   assert(
     windows_pr_native_feedback_errors(policy(), direct_smoke, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution",
+        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
+      ),
+  )
+  const textual_path_identity = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Smoke test harn run" {
+              return step
+            }
+            return {...step, run: step.run.replace(" -ef ", " == ")}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(
+      policy(),
+      textual_path_identity,
+      declared["windows-nightly.yml"],
+    )
+      .contains(
+        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution and filesystem identity",
       ),
   )
   const silent_tail = {
@@ -931,7 +969,7 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
   // nightly compiles and runs the whole workspace, so it holds the 16 vCPU rung.
   // A producer wearing the consumer's own 8 vCPU expression keeps every other
   // property this checker reads -- the runner family, the tier, and the single
-  // HARN_CI_DISABLE_BLACKSMITH_WINDOWS fallback -- so it is the case that decides
+  // HARN_CI_ENABLE_BLACKSMITH_WINDOWS opt-in -- so it is the case that decides
   // whether the size is genuinely pinned or merely implied by the family.
   const consumer_sized_writer = {
     ...nightly,
@@ -940,8 +978,8 @@ pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(
   assert(
     windows_pr_native_feedback_errors(policy(), declared["ci.yml"], consumer_sized_writer)
       .contains(
-        "windows-nightly.yml:nextest must use blacksmith-16vcpu-windows-2025, with "
-          + "HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true falling back to windows-latest",
+        "windows-nightly.yml:nextest must default to windows-latest, with "
+          + "HARN_CI_ENABLE_BLACKSMITH_WINDOWS=true opting into blacksmith-16vcpu-windows-2025",
       ),
   )
 }

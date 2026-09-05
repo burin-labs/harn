@@ -1,0 +1,66 @@
+// Run: harn test tests/agent/skill_prompt_substitution_test.harn
+//
+// A skill prompt reaches the model through two surfaces: the body a model pulls
+// with `load_skill`, and the active-skills block the turn's system prompt
+// carries. Both must render the prompt through `skill_render`, so a body written
+// with `${HARN_SESSION_ID}` arrives as the session id rather than as the
+// placeholder text.
+//
+// Substitution is fail-open by design: an unresolvable placeholder passes
+// through and the call still succeeds. That makes this class silent — a surface
+// that reads the entry's `prompt` field directly serves the raw text and nothing
+// reports it — so these cases assert the served bytes, not the call's success.
+import { __agent_active_skill_prompt } from "std/agent/preflight"
+
+// Assembled from pieces: a literal dollar-brace opens Harn's own string
+// interpolation, which would not survive to the assertion.
+const SESSION_PLACEHOLDER: string = "$" + "{HARN_SESSION_ID}"
+
+const SESSION_ID: string = "conformance-session-8fd21"
+
+fn skill_entry() -> dict {
+  return {
+    name: "session-echo",
+    description: "Echoes the running session.",
+    prompt: "Session: " + SESSION_PLACEHOLDER + ".",
+  }
+}
+
+/**
+ * The block exactly as `agent_build_turn_system_fragments` pushes it into the
+ * turn's system prompt, called directly so the case needs no live agent session.
+ */
+fn active_skills_body(agent: HarnessAgent, session_id: string) -> string {
+  return __agent_active_skill_prompt(agent, session_id, [skill_entry()])
+}
+
+/** The served active-skills block carries the session id, not the placeholder. */
+pipeline test_active_skills_block_substitutes_the_session(harness: Harness, _task: unknown) {
+  const body = active_skills_body(harness.agent, SESSION_ID)
+  assert(body != "", "the active-skills fragment must be served at all")
+  assert(
+    body.contains(SESSION_ID),
+    "served active-skills block must carry the session id; got: " + body,
+  )
+  assert(
+    !body.contains(SESSION_PLACEHOLDER),
+    "no raw placeholder may survive into the served active-skills block; got: " + body,
+  )
+}
+
+/**
+ * The negative control. Without it the assertion above could pass on a fixture
+ * whose prompt never contained a placeholder, which is the failure mode this
+ * whole class is made of.
+ */
+pipeline test_fixture_prompt_really_carries_a_placeholder(harness: Harness, _task: unknown) {
+  assert(
+    skill_entry().prompt.contains(SESSION_PLACEHOLDER),
+    "the fixture prompt must contain a placeholder, else the positive case is vacuous",
+  )
+  const body = active_skills_body(harness.agent, "")
+  assert(
+    body.contains(SESSION_PLACEHOLDER),
+    "with no session id the placeholder must survive, proving substitution is what removed it",
+  )
+}

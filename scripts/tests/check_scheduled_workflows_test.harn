@@ -1,0 +1,69 @@
+import "../check_scheduled_workflows.harn"
+
+fn record(overrides: dict = {}) -> dict {
+  return {
+    path: ".github/workflows/example.yml",
+    name: "Example claim",
+    claim: "The example behavior remains true",
+    crons: ["17 11 * * *"],
+    cadence_reason: "Daily detects upstream drift.",
+    job_ids: ["check"],
+  }
+    + overrides
+}
+
+fn document(overrides: dict = {}) -> dict {
+  return {
+    name: "Example claim",
+    on: {schedule: [{cron: "17 11 * * *"}]},
+    jobs: {check: {name: "Stable check name", steps: []}},
+  }
+    + overrides
+}
+
+@test
+pipeline test_matching_registry_and_workflow_pass(harness: Harness, task: unknown) {
+  assert_eq(
+    scheduled_workflow_errors([record()], {".github/workflows/example.yml": document()}),
+    [],
+  )
+}
+
+@test
+pipeline test_missing_workflow_does_not_read_as_proven(harness: Harness, task: unknown) {
+  const errors = scheduled_workflow_errors([record()], {})
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "was not readable"))
+}
+
+@test
+pipeline test_unregistered_schedule_does_not_read_as_proven(harness: Harness, task: unknown) {
+  const errors = scheduled_workflow_errors([], {".github/workflows/example.yml": document()})
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "no registered claim"))
+}
+
+@test
+pipeline test_name_cadence_and_job_drift_are_each_reported(harness: Harness, task: unknown) {
+  const changed = document(
+    {
+      name: "Old cadence label",
+      on: {schedule: [{cron: "0 0 * * *"}]},
+      jobs: {renamed: {steps: []}},
+    },
+  )
+  const errors = scheduled_workflow_errors([record()], {".github/workflows/example.yml": changed})
+  assert_eq(len(errors), 3)
+}
+
+@test
+pipeline test_duplicate_claim_and_cadence_are_rejected(harness: Harness, task: unknown) {
+  const second_path = ".github/workflows/second.yml"
+  const second = record({path: second_path})
+  let documents = {".github/workflows/example.yml": document()}
+  documents[second_path] = document()
+  const errors = scheduled_workflow_errors([record(), second], documents)
+  assert_eq(len(errors), 2)
+  assert(errors.any({ error -> return contains(error, "duplicate claim") }))
+  assert(errors.any({ error -> return contains(error, "cadence duplicates") }))
+}

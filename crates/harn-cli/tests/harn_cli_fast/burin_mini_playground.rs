@@ -148,103 +148,9 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
         return;
     }
     let stage_summary = summarize_stages(report);
-    // On Windows, a failure here has repeatedly turned out to be a `node`
-    // resolution problem inside the sandboxed `run` tool (harn#7993), and the
-    // standalone diagnostic probe test that used to be the only place this
-    // was visible does not reliably show a PASS/FAIL line under nextest's
-    // `ci` profile (`success-output = "never"` on its siblings, and its own
-    // line has gone missing from at least one real CI run). Driving the same
-    // probe from inside THIS already-failing test's own panic message
-    // guarantees visibility: nextest's `failure-output = "immediate-final"`
-    // always prints a failing test's message in full, with no dependency on
-    // whether a sibling test's own report renders.
-    #[cfg(windows)]
-    let env_probe = format!(
-        "\nwindows env probe (same Inherited-policy run tool, run inline \
-         because this test just failed):\n{}\n",
-        windows_env_probe_dump()
-    );
-    #[cfg(not(windows))]
-    let env_probe = String::new();
     panic!(
-        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}{env_probe}\nfull report:\n{report}"
+        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}\nfull report:\n{report}"
     );
-}
-
-/// Run the same `where node & set ...` probe
-/// `windows_only_diagnostic_probe_of_the_sandboxed_run_child_env` runs, in its
-/// own throwaway sandbox, through the same `Inherited`-policy sandboxed `run`
-/// tool. Returns a formatted dump (never panics) so callers can fold it into
-/// their own failure message regardless of whether this probe itself
-/// resolved `node`.
-///
-/// Each command below is its OWN `harness.process.exec` call, and status is
-/// read from Harn's own structured `result.status`/`result.success`, never
-/// from a same-line `%ERRORLEVEL%` expansion: cmd.exe parses and expands
-/// every `%VAR%` on a logical line BEFORE running any of the `&`-joined
-/// commands on it, so `cmd & set X=%ERRORLEVEL% & echo %X%` always reports
-/// the errorlevel from BEFORE `cmd` ran, not its actual result — a real
-/// defect an earlier version of this probe had (harn#7993 round 2), which
-/// made two earlier "PASS" verdicts on this exact check vacuous. Splitting
-/// each command into its own call sidesteps the whole class of same-line
-/// expansion timing bugs.
-#[cfg(windows)]
-fn windows_env_probe_dump() -> String {
-    let temp = TempDir::new().unwrap();
-    let sandbox_root = temp.path().to_path_buf();
-    let script = sandbox_root.join("probe.harn");
-    fs::write(
-        &script,
-        r#"
-fn dump(harness: Harness, label: string, command: string) {
-  let result = harness.process.exec("cmd.exe", "/D", "/C", command)
-  harness.stdio.println("${label}_STATUS=${result.status}")
-  harness.stdio.println("${label}_SUCCESS=${result.success}")
-  harness.stdio.println("${label}_STDOUT_START")
-  harness.stdio.println(result.stdout)
-  harness.stdio.println("${label}_STDOUT_END")
-  harness.stdio.println("${label}_STDERR_START")
-  harness.stdio.println(result.stderr)
-  harness.stdio.println("${label}_STDERR_END")
-}
-
-fn main(harness: Harness) {
-  dump(harness, "WHERE", "where node")
-  dump(harness, "WHOAMI", "whoami /groups /fo list")
-  dump(harness, "ICACLS", "icacls \"C:\\Program Files\\nodejs\"")
-  dump(harness, "TYPE", "type \"C:\\Program Files\\nodejs\\package.json\"")
-  dump(harness, "ENV", "echo PROBE_PATH=%PATH% & echo PROBE_PATHEXT=%PATHEXT% & echo PROBE_COMSPEC=%ComSpec% & echo PROBE_SYSTEMROOT=%SystemRoot% & echo PROBE_CD=%CD% & echo PROBE_ENV_START & set & echo PROBE_ENV_END")
-}
-"#,
-    )
-    .unwrap();
-
-    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = harn_state_lock::lock_harn_state_async().await;
-        let _cwd_guard = cwd_lock::lock_cwd_async().await;
-        harn_vm::reset_thread_local_state();
-        execute_run_with_sandbox_options(
-            &script.to_string_lossy(),
-            false,
-            HashSet::new(),
-            Vec::new(),
-            Vec::new(),
-            CliLlmMockMode::Off,
-            None,
-            RunProfileOptions::default(),
-            RunSandboxOptions::default().with_workspace_root(sandbox_root),
-        )
-        .await
-    });
-
-    let where_status_ok = outcome
-        .stdout
-        .lines()
-        .any(|line| line.trim() == "WHERE_STATUS=0");
-    format!(
-        "where_node_ok={where_status_ok}\nharness exec exit_code={}\nfull script stdout (WHERE = `where node`; WHOAMI = the token's groups and integrity level; ICACLS = the nodejs install dir's ACL; TYPE = a plain read of a file inside it; ENV = PATH/PATHEXT/ComSpec/SystemRoot/CD and the full child env key list):\n{}\nfull script stderr:\n{}",
-        outcome.exit_code, outcome.stdout, outcome.stderr
-    )
 }
 
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
@@ -318,10 +224,6 @@ fn run_playground_case(
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn burin_mini_explain_repo_fixture_run_passes() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -341,11 +243,11 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     );
 }
 
-#[test]
 #[cfg_attr(
     windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
 )]
+#[test]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -405,11 +307,11 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     );
 }
 
-#[test]
 #[cfg_attr(
     windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
 )]
+#[test]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -520,11 +422,11 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
 }
 
-#[test]
 #[cfg_attr(
     windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
 )]
+#[test]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -565,11 +467,11 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     );
 }
 
-#[test]
 #[cfg_attr(
     windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
 )]
+#[test]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -630,11 +532,11 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
 }
 
-#[test]
 #[cfg_attr(
     windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
 )]
+#[test]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root) = setup_experiment_copy();
     let stdout = run_playground_case(
@@ -832,42 +734,6 @@ mod stage_summary_tests {
     }
 }
 
-/// DIAGNOSTIC PROBE (harn#7993). Asserts that `where node` resolves inside an
-/// `Inherited`-policy sandboxed `run`-tool child — the exact seam
-/// `burin_mini_comment_file_fixture_run_updates_workspace_copy`'s failing
-/// `node scripts/verify-comment.js` call goes through —
-/// `harness.process.exec` -> `process_command_config` ->
-/// `session_closed_env` -> `crate::security::resolve_env` — under
-/// `RunSandboxOptions::default()`, the same default `Inherited` policy that
-/// test runs under. `windows_env_probe_dump` does the actual work and never
-/// panics; `assert_report_passes` also calls it inline on a Windows failure
-/// so the diagnostic is guaranteed to appear in a report that is ALREADY
-/// failing (and therefore always shown in full), rather than depending on
-/// this test's own PASS/FAIL line rendering under nextest's `ci` profile.
-/// Keep both alongside the fixture test as a standing regression guard once
-/// the Windows red above is fixed; this one is cheaper to run in isolation
-/// and pinpoints the same seam.
-#[cfg(windows)]
-#[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
-fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
-    let dump = windows_env_probe_dump();
-    // `eprintln!` (not `harness.stdio`) so the transcript survives even if
-    // the probe script itself never got far enough to print anything.
-    eprintln!(
-        "=== windows_only_diagnostic_probe_of_the_sandboxed_run_child_env ===\n{dump}\n=== end probe ==="
-    );
-    assert!(
-        dump.starts_with("where_node_ok=true"),
-        "the sandboxed run tool's child could not resolve 'node' via \
-         `where node`, under the SAME Inherited environment policy the \
-         burin-mini playground test uses\n{dump}"
-    );
-}
-
 /// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993). Every candidate fix for
 /// the Windows read-closed defect widens READS; none of them may widen
 /// WRITES. This drives the same seam the failing fixtures use
@@ -919,10 +785,6 @@ fn windows_only_diagnostic_probe_of_the_sandboxed_run_child_env() {
 /// runner.
 #[cfg(windows)]
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     let (_temp, experiment_root) = setup_experiment_copy();
 
@@ -962,18 +824,23 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     // Negative control: prove the detector can see a write at these exact
     // paths before trusting that an absent file means the sandbox denied
     // it. Same target paths, no sandbox anywhere in the call path.
-    let control_status = std::process::Command::new("cmd.exe")
-        .args([
-            "/D",
-            "/C",
-            &format!(
-                "echo control > \"{}\" & echo control > \"{}\"",
+    // `raw_arg`, not `arg`. Rust quotes an ordinary argument for the
+    // MSVC convention and escapes the inner quotes as `\"`, which `cmd.exe`
+    // does not understand: it reports "The filename, directory name, or
+    // volume label syntax is incorrect" and the control fails before it can
+    // prove anything. `raw_arg` hands the command line over verbatim, which
+    // is the only way to pass a quoted path through `cmd /C`.
+    let control_status = {
+        use std::os::windows::process::CommandExt as _;
+        std::process::Command::new("cmd.exe")
+            .raw_arg(format!(
+                "/D /C echo control > \"{}\" & echo control > \"{}\"",
                 userprofile_escape.display(),
                 subdir_escape.display()
-            ),
-        ])
-        .status()
-        .expect("spawn the unsandboxed write-confinement negative control");
+            ))
+            .status()
+            .expect("spawn the unsandboxed write-confinement negative control")
+    };
     assert!(
         control_status.success(),
         "unsandboxed negative control command itself failed to run"
@@ -1001,28 +868,113 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
         "Comment what this file does".to_string(),
         "windows_write_confinement_probe.jsonl",
     );
-    let stdout = match &outcome {
+    assert_writes_stay_confined(
+        &experiment_root,
+        &outcome,
+        &[
+            ("USERPROFILE", Some(userprofile_escape)),
+            ("USERPROFILE subdirectory", Some(subdir_escape)),
+        ],
+        &[&subdir],
+    );
+}
+
+/// The write-confinement assertion the Windows, macOS and Linux backends
+/// share. Each platform's test supplies its own escape targets, because the
+/// paths a normal process can write to outside a workspace differ by OS; the
+/// verdict below does not.
+///
+/// The check reads the real filesystem rather than the shell's own stdout
+/// wording. Denial text and exit codes differ across the three backends, but
+/// the file either exists on disk or it does not, and that is
+/// mechanism-agnostic.
+///
+/// The write inside the workspace is the non-null control. Without it a
+/// backend that refused every write would pass this assertion while being
+/// completely broken, and absence of an escape file would be indistinguishable
+/// from absence of any write at all.
+///
+/// Any escape file found is deleted before the panic, so a broken backend does
+/// not leave stray files behind for the next run to trip over.
+/// Whether this host actually confines a child process's filesystem access.
+///
+/// This is not a restatement of the code under test, it is the host fact the
+/// backend itself branches on. macOS always has its sandbox. Linux needs
+/// Landlock, and on a kernel without it the `Worktree` profile is documented
+/// best-effort: it warns and runs the child unconfined. Continuous
+/// integration runs on exactly such a host, which is worth stating plainly —
+/// no Linux job here can prove write confinement, so the confinement claim
+/// rests on macOS and Windows.
+///
+/// The point of returning a fact rather than skipping is that the assertion
+/// above keeps binding either way: where isolation is active the escapes must
+/// be denied, and where it is absent they must succeed.
+#[cfg(unix)]
+fn process_filesystem_isolation_is_active() -> bool {
+    if cfg!(target_os = "macos") {
+        return true;
+    }
+    fs::read_to_string("/sys/kernel/security/lsm")
+        .map(|active| active.split(',').any(|lsm| lsm.trim() == "landlock"))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn process_filesystem_isolation_is_active() -> bool {
+    // The AppContainer this backend launches is always available.
+    true
+}
+
+fn assert_writes_stay_confined(
+    experiment_root: &Path,
+    outcome: &Result<String, String>,
+    escape_targets: &[(&str, Option<PathBuf>)],
+    cleanup_dirs: &[&Path],
+) {
+    let isolation_active = process_filesystem_isolation_is_active();
+    let stdout = match outcome {
         Ok(stdout) => stdout.clone(),
         Err(error) => error.clone(),
     };
-
     let inside_write = experiment_root
         .join("workspace")
         .join("harn-write-confinement-7993-inside.txt");
 
     let mut failures = Vec::new();
-    for (label, escape_path) in [
-        ("USERPROFILE", &userprofile_escape),
-        ("USERPROFILE subdirectory", &subdir_escape),
-    ] {
-        if escape_path.exists() {
-            let contents = fs::read_to_string(escape_path).unwrap_or_default();
+    for (label, escape_path) in escape_targets {
+        let Some(escape_path) = escape_path else {
             failures.push(format!(
+                "  {label}: no path to check -- the environment did not name one, so this \
+                 target proved nothing"
+            ));
+            continue;
+        };
+        let escaped = escape_path.exists();
+        let contents = if escaped {
+            let contents = fs::read_to_string(escape_path).unwrap_or_default();
+            let _ = fs::remove_file(escape_path);
+            contents
+        } else {
+            String::new()
+        };
+        match (isolation_active, escaped) {
+            (true, true) => failures.push(format!(
                 "  WRITE ESCAPED CONFINEMENT: {label} target {} exists (contents: {contents:?}) \
                  -- the sandboxed run tool wrote outside the workspace",
                 escape_path.display()
-            ));
-            let _ = fs::remove_file(escape_path);
+            )),
+            (true, false) => {}
+            // No isolation on this host, so the write MUST have landed. This
+            // arm is why the check cannot pass by measuring nothing: on a host
+            // that confines nothing, a missing file means the command never
+            // ran, and that would otherwise read exactly like confinement.
+            (false, false) => failures.push(format!(
+                "  NOTHING WAS WRITTEN AND NOTHING WAS CONFINING IT: {label} target {} is \
+                 absent on a host that reports no process filesystem isolation, so the \
+                 command that should have created it never ran",
+                escape_path.display()
+            )),
+            (false, true) => {}
         }
     }
     match fs::read_to_string(&inside_write) {
@@ -1033,17 +985,20 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
         )),
         Err(error) => failures.push(format!(
             "  WRITE INSIDE THE WORKSPACE DID NOT HAPPEN: {} ({error}) -- a confinement fix \
-             must not also break writes the sandbox is supposed to allow",
+             must not also break writes the sandbox is supposed to allow, and without this \
+             write the escape checks above prove nothing",
             inside_write.display()
         )),
     }
 
-    let _ = fs::remove_dir_all(&subdir);
+    for cleanup_dir in cleanup_dirs {
+        let _ = fs::remove_dir_all(cleanup_dir);
+    }
 
     if failures.is_empty() {
         return;
     }
-    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let report_path = generated_report_path(experiment_root, &stdout, "comment_file-latest.json");
     let report_dump = if report_path.exists() {
         format!("{}", read_json(&report_path))
     } else {
@@ -1052,5 +1007,212 @@ fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
     panic!(
         "write-confinement check failed:\n{}\nplayground stdout/error:\n{stdout}\nfull report:\n{report_dump}",
         failures.join("\n")
+    );
+}
+
+/// Every `tool_call_update` transcript event for the `run` tool, across every
+/// stage and regardless of status: the command asked for, what the tool
+/// returned, and the error when the call failed outright. The diagnostic
+/// below deliberately runs commands whose interesting content is what they
+/// printed rather than whether they "failed", so a summary that only reads
+/// failed stages would drop exactly the part worth reading.
+#[cfg(windows)]
+fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let Some(stages) = report["stages"].as_array() else {
+        return "  (no execution.run.stages in this report)\n".to_string();
+    };
+    for stage in stages {
+        let Some(events) = stage["transcript"]["events"].as_array() else {
+            continue;
+        };
+        for event in events {
+            if event["kind"] != "tool_call_update" {
+                continue;
+            }
+            let metadata = &event["metadata"];
+            if metadata["tool_name"] != "run" {
+                continue;
+            }
+            out.push_str(&format!(
+                "  tool_call_update status={} raw_input={} raw_output={} error={}\n",
+                metadata["status"].as_str().unwrap_or("<none>"),
+                metadata["raw_input"],
+                metadata["raw_output"],
+                metadata["error"].as_str().unwrap_or("<none>"),
+            ));
+        }
+    }
+    if out.is_empty() {
+        out.push_str("  (no run tool_call_update events found in any stage's transcript)\n");
+    }
+    out
+}
+
+/// Standing Windows diagnostic for the read-open contract (harn#7993). The
+/// five playground fixtures above fail the moment a confined child cannot
+/// read the interpreter its command names, and `cmd.exe` reports that as
+/// "'node' is not recognized as an internal or external command" — a message
+/// that blames the search path for a file-permission problem and has twice
+/// sent a diagnosis down the wrong road.
+///
+/// Five commands through the exact seam the fixtures use, with all five
+/// outputs printed on failure, so one red round answers every question at
+/// once instead of costing a round each:
+///
+/// 1. `whoami /groups /fo list` — which SIDs the child token carries,
+///    including whether `ALL APPLICATION PACKAGES` is among them. Everything
+///    about read access follows from this.
+/// 2. `icacls` on the Node install directory — whether its permissions admit
+///    the container at all. Permissions that already name
+///    `ALL APPLICATION PACKAGES` while the read still fails would falsify the
+///    file-permission premise this whole area rests on.
+/// 3. `type` on a plain file inside it — a read with no path search, no
+///    extension resolution and no executable launch in the way, separating
+///    "cannot read" from "cannot resolve".
+/// 4. `dotnet --version` — the positive control. It is another global install
+///    under the same Program Files prefix, so if it runs while Node does not,
+///    the difference is that one directory's permissions rather than anything
+///    about the prefix, the sandbox, or the search path.
+/// 5. `node --version` — the product claim itself, in the fixtures' shape.
+///
+/// The assertion is on (5). The other four mutate nothing, which is why this
+/// is safe to keep permanently, and that is the point: the next read
+/// regression prints its own cause instead of needing a probe invented for it
+/// again.
+#[cfg(windows)]
+#[test]
+fn windows_sandboxed_run_child_can_read_the_host_node_toolchain() {
+    // Turn the backend's own per-decision trace on for this test's process.
+    // The backend keeps it behind an environment variable so production
+    // spawns stay quiet, but a timeout here is unreadable without it: the
+    // trace is what names which roots were probed, which were granted, and
+    // how many milliseconds each cost. Safe to set process-wide because the
+    // test runner gives every test its own process.
+    std::env::set_var("HARN_WINDOWS_SANDBOX_TRACE", "1");
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_system_read_diagnostic.jsonl",
+    );
+    let stdout = match &outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let transcript_dump = if report_path.exists() {
+        let report = read_json(&report_path);
+        dump_run_tool_transcript(&report)
+    } else {
+        format!(
+            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
+            report_path.display()
+        )
+    };
+    let full_dump = format!(
+        "=== windows_sandboxed_run_child_can_read_the_host_node_toolchain ===\n\
+         playground stdout/error:\n{stdout}\n\
+         run tool transcript (5 commands, in order: whoami /groups /fo list; \
+         icacls on the Node install directory; type on a plain file inside \
+         it; dotnet --version as the positive control; node --version):\n\
+         {transcript_dump}\n\
+         === end diagnostic ==="
+    );
+    // `cmd` expands `%ERRORLEVEL%` when it parses the line, so a same-line
+    // status read reports the status of the line BEFORE it. The marker is
+    // chained with `&&` instead, which only runs when the tool itself
+    // exited 0.
+    assert!(
+        full_dump.contains("DIAGNOSTIC_NODE_VERSION=ok"),
+        "the sandboxed run tool's child could not run the host's `node`. The \
+         four diagnostic commands above it say why: whether the child token \
+         carries ALL APPLICATION PACKAGES, whether the Node install \
+         directory's permissions admit it, whether a plain file read inside \
+         that directory succeeds, and whether the neighbouring dotnet install \
+         under the same prefix runs\n{full_dump}"
+    );
+}
+
+/// The macOS/Linux half of the same adversarial check the Windows test above
+/// runs (harn#7993 swarm brief). The three OS backends confine writes through
+/// three different mechanisms -- seatbelt on macOS, Landlock on Linux, an
+/// AppContainer plus file permissions on Windows -- so the confinement claim
+/// is only as good as its weakest backend, and until now only Windows was
+/// asserted.
+///
+/// Picking escape targets is the whole difficulty, and getting it wrong in
+/// either direction produces a test that proves nothing:
+///
+/// * The system temporary directory is NOT a valid target. The `UserTemp`
+///   preset grants writes there on purpose whenever workspace writes are
+///   allowed, so a file appearing in `/tmp` or `$TMPDIR` is the policy
+///   working, not an escape. An earlier version of this test aimed there and
+///   reported a false violation.
+/// * `$TMPDIR` is doubly wrong, because the sandbox also injects its own
+///   workspace-scoped temporary directory, so the child would write somewhere
+///   the test is not even looking and the absence would read as confinement.
+///
+/// Both targets below sit under the user's home directory, which no preset
+/// grants: the presets open specific subdirectories such as `~/.cargo` and
+/// `~/.gradle`, never the root and never an arbitrary sibling. One target is
+/// the home root itself. The other is a directory this test creates and
+/// proves writable by the parent process before the run, so a missing file
+/// afterwards cannot be an ambient permission the account never had. It is a
+/// temporary directory, removed when the test ends.
+///
+/// The created directory's path is not known until the test runs, so the
+/// fixture is a template and the concrete path is substituted into the copied
+/// experiment before the playground reads it.
+#[cfg(unix)]
+#[test]
+fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME names the user's home"));
+    // Under the home directory on purpose: the system temporary directory is a
+    // granted preset root, so an escape file there would be policy working.
+    let escape_dir =
+        TempDir::new_in(&home).expect("create the outside-the-workspace escape directory");
+
+    // Non-null control on the escape directory itself.
+    let control = escape_dir.path().join("parent-can-write.txt");
+    fs::write(&control, "the parent process can write here")
+        .expect("the escape directory must be writable by this process, or the check is vacuous");
+    fs::remove_file(&control).expect("remove the control file");
+
+    let template = fs::read_to_string(
+        repo_root()
+            .join("experiments/burin-mini/fixtures/unix_write_confinement_probe.jsonl.template"),
+    )
+    .expect("read the write-confinement fixture template");
+    let fixture_name = "unix_write_confinement_probe.jsonl";
+    fs::write(
+        experiment_root.join("fixtures").join(fixture_name),
+        template.replace(
+            "__HARN_ESCAPE_DIR__",
+            escape_dir
+                .path()
+                .to_str()
+                .expect("the escape directory path is valid UTF-8"),
+        ),
+    )
+    .expect("write the resolved write-confinement fixture");
+
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        fixture_name,
+    );
+    assert_writes_stay_confined(
+        &experiment_root,
+        &outcome,
+        &[
+            (
+                "outside-the-workspace directory",
+                Some(escape_dir.path().join("harn-escape-7993-outside.txt")),
+            ),
+            ("HOME", Some(home.join("harn-escape-7993-home.txt"))),
+        ],
+        &[],
     );
 }

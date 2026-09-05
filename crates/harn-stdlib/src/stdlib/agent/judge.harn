@@ -1,23 +1,14 @@
-import { canon_event_paths } from "std/agent/canon"
+import { CompletionClaim } from "std/agent/completion_claim"
 import {
   COMPLETION_VERIFICATION_EVIDENCE_INDEX,
-  CompletionEvidenceAction,
-  CompletionEvidenceIssue,
   CompletionEvidenceProjection,
   CompletionEvidenceProjectionStats,
-  CompletionEvidenceRole,
-  CompletionEvidenceSelection,
   CompletionEvidenceSnapshot,
-  CompletionReadOnlyEvidence,
-  CompletionToolSemantics,
   completion_evidence_id,
-  completion_read_only_evidence,
   completion_requirement_evidence_packet,
-  completion_research_summary,
 } from "std/agent/completion_evidence"
 import {
   CompletionRequirementEvidencePacket,
-  CompletionRequirementEvidenceRecord,
   CompletionRequirementReport,
   completion_requirement_assessments_schema,
   completion_requirement_contract,
@@ -35,12 +26,20 @@ pub import {
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
 import { agent_feedback_emit } from "std/agent/feedback"
+pub import {
+  CompletionJudgeInvocations,
+  CompletionPolicyEvaluation,
+  CompletionStageVerdict,
+  __completion_arbitrate_contradiction,
+  __completion_arbitrate_verification,
+} from "std/agent/judge_arbitration"
+import { __judge_settle_reply } from "std/agent/judge_contradiction"
+import { __judge_evidence_projection_from_lifecycle } from "std/agent/judge_evidence"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
   CompletionJudgeAdmission,
   CompletionJudgeGapClass,
   CompletionVerificationState,
-  __completion_arbitration_converts,
   __completion_judge_gap_class,
   __completion_verification_state_read,
   __judge_checkpoint_unavailable,
@@ -50,14 +49,17 @@ import {
 } from "std/agent/judge_internals"
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
 pub import {
+  CompletionJudgeGapItem,
   CompletionJudgeVerdict,
+  __judge_clamp_completion_detail,
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import {
+  agent_completion_obligations,
   completion_obligations_digest,
-  completion_obligations_from_messages,
   completion_obligations_prompt,
 } from "std/agent/obligations"
 import { __normalize_judge_config } from "std/agent/options_formats"
@@ -65,39 +67,25 @@ import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
-import { agent_tool_annotations, agent_tool_is_read_only } from "std/agent/tool_annotations"
 import {
-  AgentTranscriptIssue,
-  AgentTranscriptToolLifecycle,
   AgentTranscriptToolLifecycleReport,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
 pub import { agent_turn_end_judge_cap } from "std/agent/turn_end"
 
-// The completion judge is a terminal checkpoint, not a second agent loop. Give
-// it the latest effect-bearing actions and their observations without replaying
-// an unbounded session or the full callable schemas it cannot use.
-const __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT = 4500
-
-const __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT = 160
-
-// Negative indices are reserved for Harn-owned session summaries. Transcript
-// lifecycle indices are non-negative, so the two namespaces cannot alias.
-const __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX = -3
-
-const __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT = 12
-
 /** Action the completion-judge model is allowed to return. */
 pub type CompletionJudgeAction = "accept" | "continue"
 
-/** Runtime completion decision after deadline and policy enforcement. */
-pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
-
-pub type CompletionJudgeInvocations = {
-  deterministic: bool,
-  verify_completion_judge: bool,
-  turn_end_condition: bool,
-}
+/**
+ * Runtime completion decision after deadline and policy enforcement.
+ *
+ * The two stop actions differ on ONE question: had the deterministic verifier
+ * oracle already answered when the loop ran out of judge invocations?
+ * `stop_verified` means it had, and it passed; the judge's dissent is kept on
+ * the receipt rather than deciding the run. `stop_unverified` is every other
+ * stop, including a cap reached over a `failed` or `not_run` oracle.
+ */
+pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified" | "stop_verified"
 
 pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
 
@@ -125,6 +113,7 @@ pub type CompletionDirectiveReceipt = {
   admission?: CompletionJudgeAdmission?,
   checkpoint?: dict?,
   requirements?: CompletionRequirementReport?,
+  completion_claim?: CompletionClaim,
 }
 
 pub type CompletionDirective = {
@@ -137,32 +126,10 @@ pub type CompletionDirective = {
   knowledge_state: string,
 }
 
-/** Normalized result from either a deterministic or model completion check. */
-type CompletionStageVerdict = {
-  vetoed: bool,
-  confirm?: bool,
-  verdict?: string,
-  feedback?: string?,
-  reasoning?: string,
-  next_step?: string,
-  source?: string,
-  trigger?: string?,
-  reason?: string?,
-  gap_class?: CompletionJudgeGapClass?,
-  verification?: CompletionVerificationState?,
-  converted_from?: string?,
-  escalation_recommended?: bool?,
-  escalation_target?: string?,
-  judge_duration_ms?: int | float,
-  judge_outcome?: string?,
-  terminal_judge_reason?: string?,
-  terminal_evidence_preserved?: bool,
-  admission?: CompletionJudgeAdmission?,
-  typed_checkpoint?: dict?,
-  requirement_report?: CompletionRequirementReport?,
-}
-
-/** Stable identity for the two model-judge positions in the completion plan. */
+/**
+ * Normalized result from either a deterministic or model completion check.
+ * Stable identity for the two model-judge positions in the completion plan.
+ */
 enum CompletionJudgeSlot {
   Verification
   Completion
@@ -178,20 +145,6 @@ enum CompletionPolicyStage {
     prior_invocations: int,
     max_invocations: int?,
   )
-}
-
-type CompletionPolicyEvaluation = {
-  verdict: CompletionStageVerdict,
-  invoked: CompletionJudgeInvocations,
-  verification_judge_cap_reached: bool,
-  completion_judge_cap_reached: bool,
-  // The snapshot as of this stage. Later stages see what earlier stages
-  // established; a second model judge must not read the gate's facts through the
-  // first judge's overwritten verdict.
-  payload: CompletionEvidenceSnapshot,
-  // The deterministic gate's own reason, held separately because
-  // `evaluation.verdict` is overwritten by every stage that follows it.
-  deterministic_reason: string,
 }
 
 fn __unique_names(names: any) -> list<string> {
@@ -220,366 +173,6 @@ fn __session_successful_tool_names(lifecycle: AgentTranscriptToolLifecycleReport
     }
   }
   return __unique_names(names)
-}
-
-fn __judge_tool_entries(opts: dict) {
-  const registry = opts?.tools
-  return if type_of(registry) == "dict" {
-    registry?.tools ?? []
-  } else if type_of(registry) == "list" {
-    registry
-  } else {
-    []
-  }
-}
-
-fn __judge_tool_name(entry: dict) -> string {
-  return to_string(entry?.name ?? entry?.function?.name ?? "")
-}
-
-fn __judge_tool_entry(opts: dict, name: any) {
-  for entry in __judge_tool_entries(opts) {
-    if __judge_tool_name(entry) == name {
-      return entry
-    }
-  }
-  return nil
-}
-
-fn __judge_declared_evidence_role(value: string?) -> CompletionEvidenceRole? {
-  const role = lowercase(to_string(value ?? ""))
-  if role == "observation" || role == "mutation" || role == "verification" {
-    return role
-  }
-  return nil
-}
-
-fn __judge_evidence_role(
-  declared: CompletionEvidenceRole?,
-  kind: string,
-  effect: string,
-  read_only: bool,
-) -> CompletionEvidenceRole {
-  if declared != nil {
-    return declared
-  }
-  if kind == "edit" || effect == "workspace_write" {
-    return "mutation"
-  }
-  if read_only {
-    return "observation"
-  }
-  return "other"
-}
-
-fn __judge_tool_descriptor(opts: dict, name: any) -> CompletionToolSemantics {
-  const entry = __judge_tool_entry(opts, name)
-  const annotations = agent_tool_annotations(entry, opts?.policy, name)
-  const read_only = entry != nil && agent_tool_is_read_only(entry, opts?.policy, name)
-  const kind = lowercase(to_string(annotations?.kind ?? ""))
-  const effect = lowercase(to_string(annotations?.side_effect_level ?? ""))
-  const declared_role = __judge_declared_evidence_role(annotations?.completion_evidence_role)
-  const evidence_role = __judge_evidence_role(declared_role, kind, effect, read_only)
-  return {
-    name: __judge_clip_evidence(name, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
-    kind: __judge_clip_evidence(
-      annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? "",
-      __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT,
-    ),
-    side_effect_level: __judge_clip_evidence(
-      annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-        ?? annotations?.sideEffect
-        ?? "",
-      __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT,
-    ),
-    read_only: read_only,
-    evidence_role: evidence_role,
-  }
-}
-
-fn __judge_clip_evidence(value: any, limit: int) -> string {
-  const text = if type_of(value) == "string" {
-    value
-  } else {
-    json_stringify(value ?? "")
-  }
-  if len(text) <= limit {
-    return text
-  }
-  const tail_chars = limit / 3
-  const head_chars = limit - tail_chars
-  const omitted = len(text) - limit
-  return substring(text, 0, head_chars)
-    + "\n…["
-    + to_string(omitted)
-    + " chars elided — middle of evidence]…\n"
-    + substring(text, len(text) - tail_chars, len(text))
-}
-
-fn __judge_bounded_artifact_id(value: unknown) -> string {
-  const identity = trim(to_string(value ?? ""))
-  if identity == "" {
-    return ""
-  }
-  if len(identity) <= __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT {
-    return identity
-  }
-  // Keep a readable prefix and a collision-resistant identity for paths longer
-  // than the evidence envelope. No changed artifact silently disappears.
-  return substring(identity, 0, 80) + "…#sha256:" + sha256(identity)
-}
-
-fn __judge_push_artifact_ids(items: list<string>, bucket: unknown) -> list<string> {
-  let out = items
-  if type_of(bucket) != "list" {
-    return out
-  }
-  for value in bucket {
-    const identity = trim(to_string(value ?? ""))
-    if identity != "" && !out.contains(identity) {
-      out = out + [identity]
-    }
-  }
-  return out
-}
-
-fn __judge_mutation_artifact_ids(
-  lifecycle: AgentTranscriptToolLifecycleReport,
-  opts: dict,
-) -> list<string> {
-  let artifact_ids: list<string> = []
-  for call in lifecycle.calls {
-    const descriptor = __judge_tool_descriptor(opts, call.name)
-    if !__judge_descriptor_is_mutation(descriptor) || call.status != "completed" {
-      continue
-    }
-    for result in call.results {
-      if result.outcome != "ok" {
-        continue
-      }
-      artifact_ids = __judge_push_artifact_ids(artifact_ids, canon_event_paths(result.data))
-    }
-  }
-  return artifact_ids
-}
-
-fn __judge_mutation_requirement_evidence(
-  lifecycle: AgentTranscriptToolLifecycleReport,
-  opts: dict,
-) -> list<CompletionRequirementEvidenceRecord> {
-  const artifact_ids = __judge_mutation_artifact_ids(lifecycle, opts).sorted()
-  if len(artifact_ids) == 0 {
-    return []
-  }
-  const sample_count = if len(artifact_ids) < __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT {
-    len(artifact_ids)
-  } else {
-    __JUDGE_MUTATION_ARTIFACT_SAMPLE_LIMIT
-  }
-  let representative_ids: list<string> = []
-  for identity in artifact_ids.slice(0, sample_count) {
-    representative_ids = representative_ids + [__judge_bounded_artifact_id(identity)]
-  }
-  const record: CompletionRequirementEvidenceRecord = {
-    evidence_index: __JUDGE_MUTATION_SUMMARY_EVIDENCE_INDEX,
-    role: "mutation_summary",
-    supports_completion: true,
-    summary: "Changed " + to_string(len(artifact_ids)) + " artifact(s) across this session.",
-    representative_artifact_ids: representative_ids,
-    artifact_count: len(artifact_ids),
-    artifact_set_digest: "sha256:" + sha256(json_stringify(artifact_ids)),
-    measurement: "observed",
-  }
-  return [record]
-}
-
-fn __judge_descriptor_is_verifier(descriptor: dict) -> bool {
-  return descriptor?.evidence_role == "verification"
-}
-
-fn __judge_descriptor_is_mutation(descriptor: dict) -> bool {
-  return descriptor?.evidence_role == "mutation"
-}
-
-fn __judge_descriptor_is_observation(descriptor: dict) -> bool {
-  return descriptor?.evidence_role == "observation"
-}
-
-fn __judge_lifecycle_action(
-  lifecycle: AgentTranscriptToolLifecycle,
-  opts: dict,
-) -> CompletionEvidenceAction {
-  const descriptor = __judge_tool_descriptor(opts, lifecycle.name)
-  const result = lifecycle.result
-  let observations = []
-  for matched in lifecycle.results {
-    observations = observations + [matched.text]
-  }
-  return {
-    ordinal: lifecycle.ordinal,
-    evidence_index: lifecycle.evidence_index,
-    tool_call_id: __judge_clip_evidence(lifecycle.tool_call_id, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
-    name: descriptor.name,
-    semantics: descriptor,
-    lifecycle_status: lifecycle.status,
-    arguments: __judge_clip_evidence(lifecycle.args, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-    observation: __judge_clip_evidence(join(observations, "\n"), __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-    result_facts: __judge_clip_evidence(result?.data ?? {}, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-    has_error_result: lifecycle.results.any({ matched -> matched.outcome == "error" }),
-  }
-}
-
-fn __judge_latest(
-  current: CompletionEvidenceAction?,
-  candidate: CompletionEvidenceAction?,
-) -> CompletionEvidenceAction? {
-  if candidate == nil {
-    return current
-  }
-  if current == nil || candidate.evidence_index >= current.evidence_index {
-    return candidate
-  }
-  return current
-}
-
-fn __judge_unique_slot_actions(
-  candidates: list<CompletionEvidenceAction?>,
-) -> list<CompletionEvidenceAction> {
-  let selected: list<CompletionEvidenceAction> = []
-  let seen = {}
-  for candidate in candidates {
-    if candidate == nil {
-      continue
-    }
-    const key = to_string(candidate.ordinal) + ":" + to_string(candidate.evidence_index)
-    if seen[key] ?? false {
-      continue
-    }
-    seen = seen + {[key]: true}
-    selected = selected + [candidate]
-  }
-  return selected
-}
-
-fn __judge_issue_evidence(issue: AgentTranscriptIssue) -> CompletionEvidenceIssue {
-  return {
-    code: __judge_clip_evidence(issue.code, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
-    record_index: issue.record_index,
-    message: __judge_clip_evidence(issue.message, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
-    details: __judge_clip_evidence(issue.details, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
-  }
-}
-
-/**
- * Build the bounded evidence packet sent to the completion-judge LLM. The raw
- * transcript remains on the canonical payload for deterministic gates, replay,
- * and audit. Selection is structural: explicit mutation and verification roles
- * are retained as actions, and read-only calls are reduced to the bounded
- * `research_summary` instead of being dropped. Canonical edit and
- * workspace-write annotations imply mutation; execute tools must declare a
- * completion evidence role instead of being guessed from provider prose or
- * process capability.
- *
- * @effects: []
- * @errors: []
- * @api_stability: internal
- */
-fn __judge_evidence_projection_from_lifecycle(
-  messages: string | bytes | list | dict | set | range | nil,
-  lifecycle: AgentTranscriptToolLifecycleReport,
-  opts: dict,
-  raw_transcript_digest: any = nil,
-) -> CompletionEvidenceProjection {
-  let relevant_call_count = 0
-  let read_only_evidence: list<CompletionReadOnlyEvidence> = []
-  let latest_mutation = nil
-  let latest_verification = nil
-  let latest_problem = nil
-  let latest_observation = nil
-  for call in lifecycle.calls {
-    const action = __judge_lifecycle_action(call, opts)
-    if action.semantics.read_only {
-      read_only_evidence = read_only_evidence + [completion_read_only_evidence(call, action)]
-      latest_observation = __judge_latest(latest_observation, action)
-      continue
-    }
-    relevant_call_count = relevant_call_count + 1
-    if __judge_descriptor_is_observation(action.semantics) {
-      latest_observation = __judge_latest(latest_observation, action)
-    }
-    if __judge_descriptor_is_mutation(action.semantics) {
-      latest_mutation = __judge_latest(latest_mutation, action)
-    }
-    if __judge_descriptor_is_verifier(action.semantics) {
-      latest_verification = __judge_latest(latest_verification, action)
-    }
-    if action.lifecycle_status != "completed" || action.has_error_result {
-      latest_problem = __judge_latest(latest_problem, action)
-    }
-  }
-  let issue_tail = lifecycle.issues
-  if len(issue_tail) > 3 {
-    issue_tail = issue_tail.slice(len(issue_tail) - 3, len(issue_tail))
-  }
-  let latest_issues = []
-  for issue in issue_tail {
-    latest_issues = latest_issues + [__judge_issue_evidence(issue)]
-  }
-  const selected = __judge_unique_slot_actions(
-    [latest_mutation, latest_verification, latest_problem],
-  )
-  const observation_fallback = if len(selected) == 0 && latest_observation != nil {
-    [latest_observation]
-  } else {
-    []
-  }
-  const raw_digest = raw_transcript_digest
-    ?? ("sha256:" + sha256(json_stringify(messages)))
-  const research_summary = completion_research_summary(read_only_evidence)
-  const packet = {
-    schema: "harn.completion_judge_evidence.v2",
-    raw_message_count: len(messages),
-    raw_transcript_digest: raw_digest,
-    relevant_action_count: relevant_call_count,
-    omitted_read_only_call_count: research_summary.omitted_count,
-    omitted_older_action_count: max(relevant_call_count - len(selected), 0),
-    lifecycle_issue_count: lifecycle.invalid_count,
-    lifecycle_issues: latest_issues,
-    actions: selected,
-    research_summary: research_summary,
-    fallback_observations: observation_fallback,
-    requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
-  }
-  let selection: list<CompletionEvidenceSelection> = []
-  for action in selected {
-    selection = selection
-      + [
-        {
-          name: action.name,
-          evidence_role: action.semantics.evidence_role,
-          evidence_index: action.evidence_index,
-        },
-      ]
-  }
-  const serialized = json_stringify(packet)
-  return {
-    packet: packet,
-    serialized: serialized,
-    stats: {
-      schema: "harn.completion_judge_evidence_projection.v1",
-      raw_message_count: len(messages),
-      relevant_call_count: relevant_call_count,
-      included_action_count: len(selected),
-      included_fallback_observation_count: len(observation_fallback),
-      included_read_only_call_count: research_summary.included_count,
-      omitted_read_only_call_count: research_summary.omitted_count,
-      omitted_older_action_count: max(relevant_call_count - len(selected), 0),
-      lifecycle_issue_count: lifecycle.invalid_count,
-      serialized_chars: len(serialized),
-      raw_transcript_digest: packet.raw_transcript_digest,
-      selected_actions: selection,
-    },
-  }
 }
 
 pub fn __judge_evidence_projection(
@@ -639,7 +232,9 @@ fn __judge_payload(
   const pending_tool_batch_effect_count = len(
     opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
   )
-  const obligations = completion_obligations_from_messages(messages, session?.task ?? "")
+  // Read from the session's control records, not from `messages`: an accepted
+  // stop delivers no user message, so the transcript in hand cannot show one.
+  const obligations = agent_completion_obligations(agent, session.session_id, session?.task ?? "")
   const evidence_id = completion_evidence_id(
     session?.task ?? "",
     stop_reason,
@@ -649,7 +244,7 @@ fn __judge_payload(
     nil,
     completion_obligations_digest(obligations),
   )
-  return {
+  let payload = {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
     session_id: session.session_id,
@@ -671,6 +266,10 @@ fn __judge_payload(
     pending_tool_batch_effect_count: pending_tool_batch_effect_count,
     verification: nil,
   }
+  if opts?._completion_claim != nil {
+    payload = payload + {completion_claim: opts._completion_claim}
+  }
+  return payload
 }
 
 /** Bind a gate reading onto the snapshot the remaining stages will be shown. */
@@ -893,28 +492,44 @@ fn __judge_invoke_structured(
       typed_checkpoint: checkpoint,
     }
   }
+  const reask_request = {
+    judge_cfg: judge_cfg,
+    opts: opts,
+    payload: payload,
+    checkpoint_name: "agent.completion_judge",
+    system: stable_prefix,
+    user: user,
+    schema: schema,
+  }
   // A judge that answered `done` without itemizing has assessed nothing. Re-ask
   // the JUDGE once, rather than sending the actor feedback it cannot act on.
   const resolved = __judge_resolve_itemization(
     harness,
-    {
-      judge_cfg: judge_cfg,
-      opts: opts,
-      payload: payload,
-      checkpoint_name: "agent.completion_judge",
-      system: stable_prefix,
-      user: user,
-      schema: schema,
-    },
+    reask_request,
     contract,
     checkpoint.data,
     __judge_completion_verdict_read(checkpoint.data).verdict == "done",
   )
-  const decoded = __judge_completion_verdict_read(
+  const itemized_decoded = __judge_completion_verdict_read(
     resolved.data,
     contract,
     payload.judge_evidence_packet,
   )
+  // Both re-ask reasons, in order, owned by the module that owns re-asks: a
+  // `done` that also names a gap (harn#8060), then a refusal quoting evidence
+  // it was never shown (#8100). The sequencing lives there so this function
+  // does not grow a second copy of "re-ask, then re-decode, then remember which
+  // reply is now of record".
+  const settled = __judge_settle_reply(
+    harness,
+    reask_request,
+    contract,
+    payload,
+    resolved.data,
+    itemized_decoded,
+  )
+  const decoded = settled.decoded
+  const reply_of_record = settled.reply_of_record
   const requirement_report = decoded.requirement_report
   const unassessed = resolved.omitted && requirement_report != nil
   // A judge that REFUSED and itemized nothing has assessed nothing either, but
@@ -924,7 +539,7 @@ fn __judge_invoke_structured(
   // not supply, in place of the reason the judge actually gave.
   const declined_unassessed = requirement_report != nil
     && !resolved.omitted
-    && completion_requirement_report_omitted(contract, resolved.data?.requirement_report)
+    && completion_requirement_report_omitted(contract, reply_of_record?.requirement_report)
   const requirements_pending = requirement_report != nil
     && !requirement_report.complete
     && !declined_unassessed
@@ -956,6 +571,10 @@ fn __judge_invoke_structured(
     vetoed: verdict == "continue",
     verdict: verdict,
     gap_class: decoded.gap_class,
+    // Whether the self-contradiction was already pointed out to the judge and
+    // came back anyway. The arbitration below reads it so a FIRST contradiction
+    // is never overruled — only one that survived its resolution.
+    contradiction_reasked: settled.contradiction_reasked,
     reason: if unassessed {
       "completion_judge_report_omitted"
     } else if requirements_pending {
@@ -1021,9 +640,22 @@ pub fn __done_contract_judge_system(opts: dict) -> string {
     "Return `done` only when the claim covers the visible request and names adequate evidence.",
     "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
     "Judge the substance of the claim, never its wire format. Response markers, sentinels, and layout are enforced elsewhere, and their absence is never a reason to continue.",
-    "Return only `verdict`, one concise `detail`, and the `gap_class` the gap belongs to.",
-    "On `done`, use `detail` for the strongest evidence that every requirement is met.",
-    "On `continue`, use `detail` for the single most important gap and the substantive next action that closes it, never a restatement or formatting instruction.",
+    "On `done`, use `detail` for the strongest evidence that every requirement is met, and set no gap fields.",
+    // The old instruction here was "use `detail` for the single most important
+    // gap". A judge holding three objections could not state them, so it named
+    // one, the actor fixed it, and the next invocation named the next. The
+    // default cap is three. See #8100.
+    "On `continue`, list in `gaps` EVERY gap you currently hold — not the most important one.",
+    "The actor can only converge on a set it is shown in full, and you may not add a criterion later that you could have named now.",
+    "Give each gap the `criterion` from the task it is against, and the substantive next action that closes it, never a restatement or formatting instruction.",
+    // #8091: the refusals read like a judge restating its previous position
+    // rather than re-reading the current state. The packet labels the current
+    // file view; nothing told the judge it outranks what it said last round.
+    "Where the evidence shows a labelled current-state view of a file, that view is the file's state NOW.",
+    "It supersedes anything you or the actor said about that file in an earlier round, including your own previous verdict.",
+    "When a gap is about the content of a file shown in the evidence above, copy the line that proves it into `evidence_quote`, verbatim.",
+    "A quote that does not appear in that evidence is refused and sent back to you, so quote what is there rather than what you expect to be there.",
+    "Keep `detail` as the one-line summary of the whole refusal.",
   ]
   if extra != "" {
     lines = lines.appending("Additional rubric:\n" + extra)
@@ -1091,7 +723,36 @@ fn __judge_directive(
   defer_feedback: bool,
 ) -> CompletionDirective {
   const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
-  const reason = if terminal_reason != "" {
+  // A cap is a statement about the JUDGE running out of turns, not about the
+  // work. When the deterministic oracle already ran and passed, the run has a
+  // stronger answer than the judge was being asked for, so the cap stops it as
+  // verified and the dissent stays on the receipt (`outcome`, `gap_class`,
+  // `reason`) for whoever grades it later. `observed` is a positive reading
+  // ONLY on "passed": `not_run` also covers "the gate could not read facts",
+  // and treating that as verified would convert a genuine non-convergence into
+  // a clean stop, which is the worse defect. An explicit
+  // `terminal_judge_reason` is untouched — that is the judge naming a terminal,
+  // not the loop running out of room.
+  const cap_reached = completion_judge_cap_reached || turn_end_judge_cap_reached
+  const verified_at_cap = cap_reached
+    && terminal_reason == ""
+    && to_string(payload?.verification?.observed ?? "") == "passed"
+  const action = if verified_at_cap {
+    "stop_verified"
+  } else if terminal_reason != "" || cap_reached {
+    "stop_unverified"
+  } else if verdict.vetoed {
+    "continue"
+  } else {
+    "accept"
+  }
+  // A cap over a passed oracle gets its OWN wire reason. Reusing the cap label
+  // would leave a run that finished and one that never converged sharing a
+  // single value, which is what #8058 is about. Which cap it was is not lost:
+  // `invoked` on the same receipt names the judge that ran.
+  const reason = if verified_at_cap {
+    "judge_cap_reached_over_verified_pass"
+  } else if terminal_reason != "" {
     terminal_reason
   } else if completion_judge_cap_reached {
     "completion_judge_cap_reached"
@@ -1099,15 +760,6 @@ fn __judge_directive(
     "turn_end_judge_cap_reached"
   } else {
     to_string(verdict?.reason ?? verdict?.reasoning ?? "")
-  }
-  const action = if terminal_reason != ""
-    || completion_judge_cap_reached
-    || turn_end_judge_cap_reached {
-    "stop_unverified"
-  } else if verdict.vetoed {
-    "continue"
-  } else {
-    "accept"
   }
   const has_feedback = verdict.vetoed
     && trim(to_string(verdict?.feedback ?? "")) != ""
@@ -1136,6 +788,7 @@ fn __judge_directive(
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
     requirements: verdict?.requirement_report,
+    completion_claim: payload?.completion_claim,
   }
   return {
     action: action,
@@ -1155,7 +808,7 @@ fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
   if !due {
     return false
   }
-  return contains(["sentinel", "natural", "stalled"], stop_reason)
+  return contains(["sentinel", "natural", "stalled", "explicit_completion_claim"], stop_reason)
 }
 
 /** Build the one ordered plan for a completion boundary. */
@@ -1264,50 +917,6 @@ fn __completion_policy_mark_model_invoked(
   }
 }
 
-const __COMPLETION_VERIFICATION_CONVERSION: string = "failed_verification_contradicted_by_gate"
-
-/**
- * Refuse a model `continue` that names a failed verification the deterministic
- * gate observed passing, and convert it to `done` with a receipt saying so.
- *
- * This narrows WHAT EVIDENCE a refusal may rest on; it does not weaken refusal.
- * Every other `gap_class` vetoes exactly as before, so artifact, manner and
- * negative-clause, and authorization gaps keep the judge's full authority — and
- * those are where its demonstrated discriminating power lives.
- *
- * `__completion_arbitration_converts` owns the conditions and why each is
- * required. The invocation map is read here rather than re-derived: whether an
- * adjudicator actually ran is the invocation map's question, not this
- * function's.
- */
-fn __completion_arbitrate_verification(
-  verdict: CompletionStageVerdict,
-  evaluation: CompletionPolicyEvaluation,
-) -> CompletionStageVerdict {
-  if !verdict.vetoed || verdict.source != "llm" {
-    return verdict
-  }
-  if !__completion_arbitration_converts(
-    to_string(verdict.gap_class ?? "other"),
-    evaluation.invoked.deterministic,
-    evaluation.deterministic_reason,
-    to_string(evaluation.payload.verification?.observed ?? "not_run"),
-  ) {
-    return verdict
-  }
-  // `reasoning` keeps the judge's own words. The record must show that a real
-  // refusal was overruled, not that no refusal happened.
-  return verdict
-    + {
-      vetoed: false,
-      verdict: "done",
-      feedback: nil,
-      next_step: "",
-      converted_from: __COMPLETION_VERIFICATION_CONVERSION,
-      reason: __COMPLETION_VERIFICATION_CONVERSION,
-    }
-}
-
 fn __completion_policy_run_stage(
   harness: Harness,
   opts: dict,
@@ -1359,7 +968,11 @@ fn __completion_policy_run_stage(
       }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)
       let verdict = __judge_invoke_structured(harness, config, opts, payload)
-      verdict = __completion_arbitrate_verification(verdict, evaluation) + {trigger: trigger}
+      verdict = __completion_arbitrate_contradiction(
+        __completion_arbitrate_verification(verdict, evaluation),
+        evaluation,
+      )
+        + {trigger: trigger}
       __judge_emit_decision(harness.agent, payload.session_id, iteration, verdict)
       const next = evaluation + {verdict: verdict}
       return __completion_policy_mark_model_invoked(

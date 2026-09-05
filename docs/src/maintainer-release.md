@@ -103,7 +103,7 @@ env -u HARN_EGRESS_ALLOW \
   -u HARN_EGRESS_BLOCK_PRIVATE \
   -u HARN_EGRESS_ALLOW_LOOPBACK \
   HARN_BIN=/path/to/frozen/harn \
-  ./scripts/harn_bin.sh -- test conformance/tests/path/to/test.harn
+  ./scripts/harn_bin.sh -- test conformance --filter <case name>
 ```
 
 If the focused test passes, replay the full conformance set more than once.

@@ -160,12 +160,50 @@ fn __model_job_output_bytes(
     return Ok(output.bytes)
   }
   if output.path != nil && trim(output.path) != "" {
-    if !io.fs.exists(output.path) {
+    const path_status = try {
+      io.fs.status(output.path)
+    } catch (error) {
+      return Err(
+        model_job_error(
+          "stat_error",
+          "could not inspect model output path: " + output.path,
+          {backend: job.backend, job_id: job.id, detail: error},
+        ),
+      )
+    }
+    if path_status.status == "missing" {
       return Err(
         model_job_error(
           "malformed_output",
           "model output path is missing: " + output.path,
           {backend: job.backend, job_id: job.id},
+        ),
+      )
+    }
+    if path_status.status == "scope_denied" {
+      return Err(
+        model_job_error(
+          "scope_denied",
+          "model output path is not readable under this run's filesystem policy: " + output.path,
+          {backend: job.backend, job_id: job.id, detail: path_status},
+        ),
+      )
+    }
+    if path_status.status == "read_only_denied" {
+      return Err(
+        model_job_error(
+          "read_only_denied",
+          "model output path is not readable under this run's filesystem policy: " + output.path,
+          {backend: job.backend, job_id: job.id, detail: path_status},
+        ),
+      )
+    }
+    if path_status.status != "present_file" {
+      return Err(
+        model_job_error(
+          "stat_error",
+          "could not inspect model output path: " + output.path,
+          {backend: job.backend, job_id: job.id, detail: path_status},
         ),
       )
     }

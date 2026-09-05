@@ -935,6 +935,10 @@ fn portable_json(value: &VmValue, owner: &str) -> Result<JsonValue, VmError> {
 }
 
 fn validate_json_schema(schema: &JsonValue, owner: &str) -> Result<(), VmError> {
+    // The catalog owns `components.schemas` and compiles the resolved document.
+    if contract::references_registry_components(schema) {
+        return Ok(());
+    }
     jsonschema::draft202012::new(schema)
         .map(|_| ())
         .map_err(|error| VmError::Runtime(format!("{owner} is invalid: {error}")))

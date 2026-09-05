@@ -420,7 +420,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "usage",
             schema_version: crate::commands::usage::USAGE_SCHEMA_VERSION,
             description:
-                "LLM spend/usage rollup from the event log: per-group calls, cost_usd, tokens, cache telemetry, and time-series cumulatives.",
+                "LLM spend/usage rollup from the event log: response and provider-call counts, accounting certainty, known cost, tokens, cache telemetry, and time-series cumulatives.",
             schema_json: None,
         },
         SchemaEntry {

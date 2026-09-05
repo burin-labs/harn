@@ -67,6 +67,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/file_time.sh
 source "$SCRIPT_DIR/lib/file_time.sh"
 
+# When was this target tree last built in?
+#
+# Not `file_mtime_epoch` on the entry itself. A Cargo target directory's own
+# mtime only moves when something is created or removed at its top level, and
+# Cargo writes into `debug/` for the whole life of a tree, so the entry's mtime
+# is effectively its creation time and never advances no matter how much is
+# built. `cargo_target_seed.sh` then makes that reading actively wrong: a
+# restored seed carries the seed's timestamps, so a tree created minutes ago
+# reports an mtime weeks old.
+#
+# That is not a slow clock, it is a measurement that cannot answer the question
+# being asked, and the retention cap below acts on it. Measured on a live fleet
+# cache: eight of fourteen entries reported an entry mtime of 2026-08-09 while
+# their `debug/` directories read 2026-09-04, and one of them was reaped as a
+# "cold cache" while its worktree was actively building. `debug/` tracked real
+# activity correctly in every one of those rows.
+#
+# Take the newest of the entry and its profile directories. Three stats, no
+# walk of a multi-gigabyte tree.
+target_entry_activity_epoch() {
+  local entry="$1"
+  local newest="" candidate="" sub
+  for sub in "$entry" "$entry/debug" "$entry/release"; do
+    [ -e "$sub" ] || continue
+    candidate="$(file_mtime_epoch "$sub")" || continue
+    if [ -z "$newest" ] || [ "$candidate" -gt "$newest" ]; then
+      newest="$candidate"
+    fi
+  done
+  [ -n "$newest" ] || return 1
+  printf '%s\n' "$newest"
+}
+
 dry_run=0
 [[ "${1:-}" == "--dry-run" ]] && dry_run=1
 
@@ -341,7 +374,7 @@ prune_root() {
       # An mtime this run could not read is not a rank. Keep it outright
       # rather than letting an unreadable tree sort to the bottom and be
       # retired for a measurement that never happened.
-      if ! m="$(file_mtime_epoch "$d")"; then
+      if ! m="$(target_entry_activity_epoch "$d")"; then
         echo "keep (live worktree, mtime unavailable): $name"
         kept=$((kept + 1)); kept_paths+=("$d"); continue
       fi
@@ -353,7 +386,7 @@ prune_root() {
     # is the last line of defence when worktree discovery is incomplete -- a
     # root that is not in HARN_TARGET_GC_ROOTS has no keep-set entry, and a
     # warm target for such a worktree must still survive.
-    if ! m="$(file_mtime_epoch "$d")"; then
+    if ! m="$(target_entry_activity_epoch "$d")"; then
       echo "keep (mtime unavailable): $name"; kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
     if [ "$m" -ge "$cutoff" ]; then

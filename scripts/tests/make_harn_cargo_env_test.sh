@@ -59,6 +59,9 @@ chmod +x "$fake_bin/cygpath"
 cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" = "host lease run cargo --help" ]]; then
+  exit 0
+fi
 if [[ "$*" = "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" ]]; then
   mkdir -p "$HARN_HOST_LEASE_ROOT"
   : > "$HARN_HOST_LEASE_ROOT/host-leases.wake"
@@ -362,15 +365,15 @@ rm -f "$auto_harn"
 
 : > "$record"
 : > "$lease_record"
-explicit_harn=/usr/bin/true
+explicit_harn="$fake_bin/harn-lease"
 env -u HARN_CARGO_LEASE_MODE -u CI \
   HARN_BIN="$explicit_harn" \
-  PATH="$fake_bin:/usr/bin:/bin" \
+  PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm
-if [[ -s "$record" || -s "$lease_record" ]]; then
+if [[ -s "$record" || ! -s "$lease_record" ]]; then
   echo "wrapper did not route through the explicit compatible Harn lease runner" >&2
   cat "$record" "$lease_record" >&2
   exit 1
@@ -397,6 +400,50 @@ chmod +x "$fake_bin/harn"
 
 : > "$record"
 stale_harn_record="$tmp_root/stale-harn-record.txt"
+: > "$stale_harn_record"
+if HARN_CARGO_LEASE_MODE=required \
+  HARN_BIN="$fake_bin/harn" \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_STALE_HARN_RECORD="$stale_harn_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+    > "$tmp_root/harn-bin-stale-stdout.txt" \
+    2> "$tmp_root/harn-bin-stale-stderr.txt"; then
+  echo "HARN_BIN lease selection accepted a runner without idle waits" >&2
+  exit 1
+fi
+if ! grep -Fq "no compatible prebuilt Harn binary" \
+    "$tmp_root/harn-bin-stale-stderr.txt" \
+  || grep -Fq "host lease run cargo --owner" "$stale_harn_record" \
+  || [[ -s "$record" ]]; then
+  echo "stale HARN_BIN did not fail before workload execution" >&2
+  cat "$stale_harn_record" "$record" "$tmp_root/harn-bin-stale-stderr.txt" >&2
+  exit 1
+fi
+
+: > "$stale_harn_record"
+if HARN_CARGO_LEASE_MODE=required \
+  HARN_CARGO_LEASE_RUNNER=harn \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_STALE_HARN_RECORD="$stale_harn_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+    > "$tmp_root/explicit-stale-stdout.txt" \
+    2> "$tmp_root/explicit-stale-stderr.txt"; then
+  echo "explicit lease selection accepted a runner without idle waits" >&2
+  exit 1
+fi
+if ! grep -Fq "must provide the idle host-lease wait contract" \
+    "$tmp_root/explicit-stale-stderr.txt" \
+  || grep -Fq "host lease run cargo --owner" "$stale_harn_record" \
+  || [[ -s "$record" ]]; then
+  echo "explicit stale lease runner did not fail before workload execution" >&2
+  cat "$stale_harn_record" "$record" "$tmp_root/explicit-stale-stderr.txt" >&2
+  exit 1
+fi
+
 : > "$stale_harn_record"
 env -u HARN_CARGO_LEASE_MODE -u CI \
   PATH="$fake_bin:/usr/bin:/bin" \
@@ -682,6 +729,71 @@ if grep -Fq 'nextest run --workspace -p harn-vm' "$make_focused_test"; then
   exit 1
 fi
 
+make_focused_e2e="$tmp_root/make-focused-e2e.txt"
+make -C "$repo_root" -n test-e2e ARGS='-p harn-cli --test harn_cli_e2e one_case' \
+  > "$make_focused_e2e"
+if ! grep -Fq \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-cli --test harn_cli_e2e one_case --profile e2e --run-ignored all' \
+  "$make_focused_e2e"; then
+  echo "Makefile test-e2e target did not forward focused ARGS" >&2
+  cat "$make_focused_e2e" >&2
+  exit 1
+fi
+if grep -Fq 'nextest run --workspace -p harn-cli' "$make_focused_e2e"; then
+  echo "focused Makefile test-e2e retained --workspace and would compile every package" >&2
+  cat "$make_focused_e2e" >&2
+  exit 1
+fi
+
+cat > "$fake_bin/cargo-nextest" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$fake_bin/cargo-nextest"
+cat > "$fake_bin/toolchain-refusal" <<'SH'
+#!/usr/bin/env bash
+echo "error: rust-toolchain.toml pins rustc 1.95.0 but rustc resolves to 1.98.0" >&2
+exit 91
+SH
+chmod +x "$fake_bin/toolchain-refusal"
+nextest_probe_stdout="$tmp_root/nextest-probe-stdout.txt"
+nextest_probe_stderr="$tmp_root/nextest-probe-stderr.txt"
+if PATH="$fake_bin:/usr/bin:/bin" make -C "$repo_root" test \
+    HARN_CARGO_CMD="$fake_bin/toolchain-refusal" \
+    > "$nextest_probe_stdout" 2> "$nextest_probe_stderr"; then
+  echo "Makefile test target ignored a failing toolchain probe" >&2
+  exit 1
+fi
+if ! grep -Fq 'rust-toolchain.toml pins rustc 1.95.0 but rustc resolves to 1.98.0' \
+    "$nextest_probe_stderr"; then
+  echo "Makefile test target hid the toolchain probe diagnostic" >&2
+  cat "$nextest_probe_stderr" >&2
+  exit 1
+fi
+if grep -Fq 'cargo-nextest is required' "$nextest_probe_stderr"; then
+  echo "Makefile test target mislabeled a toolchain refusal as missing cargo-nextest" >&2
+  cat "$nextest_probe_stderr" >&2
+  exit 1
+fi
+
+missing_nextest_stderr="$tmp_root/missing-nextest-stderr.txt"
+if PATH="/usr/bin:/bin" /usr/bin/make -C "$repo_root" test \
+    HARN_CARGO_CMD="$fake_bin/toolchain-refusal" \
+    > /dev/null 2> "$missing_nextest_stderr"; then
+  echo "Makefile test target accepted a missing cargo-nextest executable" >&2
+  exit 1
+fi
+if ! grep -Fq 'cargo-nextest is required' "$missing_nextest_stderr"; then
+  echo "Makefile test target did not diagnose a missing cargo-nextest executable" >&2
+  cat "$missing_nextest_stderr" >&2
+  exit 1
+fi
+if grep -Fq 'rust-toolchain.toml pins rustc' "$missing_nextest_stderr"; then
+  echo "Makefile test target ran the toolchain probe after cargo-nextest was absent" >&2
+  cat "$missing_nextest_stderr" >&2
+  exit 1
+fi
+
 for variable in \
   HARN_EGRESS_ALLOW \
   HARN_EGRESS_DENY \
@@ -779,9 +891,9 @@ fi
 for expected in \
   'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate' \
   'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate --check' \
-  '"$harn_bin" provider catalog generate;' \
+  '"$harn_bin" provider catalog generate &&' \
   '"$harn_bin" provider catalog support' \
-  '"$harn_bin" provider catalog generate --check;' \
+  '"$harn_bin" provider catalog generate --check &&' \
   '"$harn_bin" provider catalog support --check' \
   '"$harn_bin" provider catalog matrix' \
   '"$harn_bin" provider catalog matrix --check'

@@ -1,3 +1,5 @@
+import { find_files } from "std/fs"
+
 /**
  * One owner for "a path this run was never allowed to look at is not a path
  * that is missing".
@@ -112,4 +114,60 @@ pub fn zero_scan_failure(check: string, unit: string, scanned: int) -> string {
     + " that resolved to the wrong root, or to one this run was not permitted"
     + " to read, produces exactly this count, so a clean verdict here would be"
     + " vacuous."
+}
+
+/**
+ * Enumerate `pattern` and refuse when it resolves to nothing.
+ *
+ * `fs.glob` reports a denied root, a mis-rooted base, and a genuinely empty
+ * tree the same way: an empty list. A gate that writes
+ *
+ *     for path in fs.glob("crates/**/*.rs") { ... }
+ *
+ * therefore runs its body zero times and concludes clean, which is the same
+ * class as the skip-shaped `fs.exists` guard this module was written for. Use
+ * this wrapper wherever an empty result would mean the instrument broke rather
+ * than that the tree is legitimately empty; keep the bare builtin where zero is
+ * a real answer.
+ */
+pub fn scan_glob(fs: HarnessFs, check: string, pattern: string, base: any = nil) -> list<string> {
+  const matches = if base == nil {
+    // scan-refused: this wrapper is the refusal.
+    fs.glob(pattern)
+  } else {
+    // scan-refused: this wrapper is the refusal.
+    fs.glob(pattern, base)
+  }
+  const failure = zero_scan_failure(check, "path(s) matching `" + pattern + "`", len(matches))
+  if failure != "" {
+    throw failure
+  }
+  return matches
+}
+
+/** `std/fs`'s `find_files` with the same zero-result refusal as [[scan_glob]]. */
+pub fn scan_files(fs: HarnessFs, check: string, root: string, pattern: string) -> list<string> {
+  // scan-refused: this wrapper is the refusal.
+  const matches = find_files(fs, root, pattern)
+  const failure = zero_scan_failure(
+    check,
+    "path(s) matching `" + pattern + "` under `" + root + "`",
+    len(matches),
+  )
+  if failure != "" {
+    throw failure
+  }
+  return matches
+}
+
+/**
+ * Refuse an enumeration that produced nothing, for callers that build the list
+ * themselves (`fs.walk`, `fs.list_dir`, or a filtered glob).
+ */
+pub fn require_scanned(check: string, unit: string, scanned: int) -> nil {
+  const failure = zero_scan_failure(check, unit, scanned)
+  if failure != "" {
+    throw failure
+  }
+  return nil
 }

@@ -617,7 +617,65 @@ pub fn __completion_stop_reason(verdict: dict) -> string {
   if verdict?.action == "stop_unverified" {
     return to_string(verdict?.receipt?.reason ?? "completion_unverified")
   }
+  if verdict?.action == "stop_verified" {
+    return to_string(verdict?.receipt?.reason ?? "judge_cap_reached_over_verified_pass")
+  }
   return ""
+}
+
+/**
+ * True when a completion directive ends the loop, either stop action.
+ *
+ * Callers break on this and take the terminal status from
+ * `__completion_stop_status`, so the two stop actions cannot drift apart at one
+ * call site and not another.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_directive_stops({action: "stop_verified"})
+ */
+pub fn __completion_directive_stops(verdict: dict) -> bool {
+  return verdict?.action == "stop_unverified" || verdict?.action == "stop_verified"
+}
+
+/**
+ * The loop's terminal status for a stopping completion directive.
+ *
+ * `stop_verified` seals `done`, because the deterministic oracle answered the
+ * question the judge ran out of turns to answer. Every other stop keeps
+ * `completion_unverified`. One owner for this mapping: five call sites break on
+ * a completion directive, and a per-site conditional is how the verified case
+ * would end up honoured in some of them and not the rest.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_stop_status({action: "stop_verified"})
+ */
+pub fn __completion_stop_status(verdict: dict) -> string {
+  if verdict?.action == "stop_verified" {
+    return "done"
+  }
+  return "completion_unverified"
+}
+
+/**
+ * __completion_stop_call_note.
+ *
+ * Why undispatched tool calls were closed when a completion directive stopped
+ * the loop.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_stop_call_note({action: "stop_verified"})
+ */
+pub fn __completion_stop_call_note(verdict: dict) -> string {
+  if verdict?.action == "stop_verified" {
+    return "stopped after the verifier passed; the completion judge did not concur"
+  }
+  return "stopped without verified completion"
 }
 
 pub fn __close_stall_calls(

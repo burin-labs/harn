@@ -1,0 +1,417 @@
+import { completion_requirement_contract } from "std/agent/completion_requirements"
+import {
+  AgentToolDispatch,
+  __dispatch_results_list,
+  __tool_result_ok,
+} from "std/agent/loop_result_status"
+import { AgentSpec } from "std/agent/options_types"
+import { __with_prompt_fragment } from "std/agent/preflight"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import {
+  AgentTranscriptToolLifecycle,
+  agent_transcript_tool_lifecycle_report,
+} from "std/agent/transcript"
+import { ToolRegistry, tool_registry_from } from "std/tools"
+
+const __COMPLETION_CLAIM_TOOL_NAME = "task_complete"
+
+const __COMPLETION_CLAIM_MAX_EVIDENCE_REFS = 12
+
+pub type CompletionClaimRequirement = {requirement_id: string, evidence_refs: list<string>}
+
+pub type CompletionClaim = {
+  schema: "harn.completion_claim.v1",
+  requirements: list<CompletionClaimRequirement>,
+  blocked_on?: string,
+  source: "tool" | "implicit",
+}
+
+pub type CompletionClaimDisposition = {
+  kind: "absent" | "valid" | "invalid",
+  claim?: CompletionClaim,
+  reason?: string,
+  feedback?: string,
+}
+
+fn __completion_claim_handler(args: dict) {
+  const blocked_on = trim(to_string(args?.blocked_on ?? ""))
+  const base: CompletionClaim = {
+    schema: "harn.completion_claim.v1",
+    requirements: args?.requirements ?? [],
+    source: "tool",
+  }
+  if blocked_on == "" {
+    return agent_tool_handler_result("Completion claim recorded.", base)
+  }
+  return agent_tool_handler_result(
+    "Completion claim recorded with an unresolved dependency.",
+    base + {blocked_on: blocked_on},
+  )
+}
+
+fn __completion_claim_registry_has_name(registry: any, name: string) -> bool {
+  for entry in registry?.tools ?? [] {
+    const function_name = if type_of(entry?.function) == "dict" {
+      to_string(entry.function?.name ?? "")
+    } else {
+      ""
+    }
+    if to_string(entry?.name ?? function_name) == name {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Add the one Harn-owned explicit completion affordance to a tool registry.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @api_stability: experimental
+ */
+pub fn agent_completion_claim_tool(registry: ToolRegistry? = nil) -> ToolRegistry {
+  const tools: ToolRegistry = registry ?? tool_registry()
+  if __completion_claim_registry_has_name(tools, __COMPLETION_CLAIM_TOOL_NAME) {
+    throw "agent_loop: `completion_tool` cannot replace an existing `task_complete` tool"
+  }
+  return tool_define(
+    tools,
+    __COMPLETION_CLAIM_TOOL_NAME,
+    "Claim that the task is complete and cite the recorded tool calls that support each requirement.",
+    {
+      inputSchema: {
+        type: "object",
+        properties: {
+          requirements: {
+            type: "array",
+            description: "Every required task outcome, paired with the tool calls that prove it.",
+            minItems: 1,
+            items: {
+              type: "object",
+              properties: {
+                requirement_id: {
+                  type: "string",
+                  description: "One of the requirement IDs named in the completion instruction.",
+                  minLength: 1,
+                },
+                evidence_refs: {
+                  type: "array",
+                  description: "Recorded tool_call_id values that support this requirement.",
+                  minItems: 1,
+                  maxItems: __COMPLETION_CLAIM_MAX_EVIDENCE_REFS,
+                  items: {type: "string", minLength: 1},
+                },
+              },
+              required: ["requirement_id", "evidence_refs"],
+              additionalProperties: false,
+            },
+          },
+          blocked_on: {
+            type: "string",
+            description:
+              "An external dependency that prevents completion; this does not claim completion.",
+          },
+        },
+        required: ["requirements"],
+        additionalProperties: false,
+      },
+      returns: {type: "object"},
+      handler: __completion_claim_handler,
+      governance: {audiences: ["agent"]},
+      annotations: {
+        structural: true,
+        read_only: true,
+        evidence_role: "other",
+        side_effect_level: "none",
+      },
+    },
+  )
+}
+
+/**
+ * Opt in to the explicit completion tool. The default path is inert.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @api_stability: experimental
+ */
+pub fn agent_completion_claim_apply_options(options: AgentSpec? = nil) -> AgentSpec {
+  const opts = options ?? {}
+  const enabled = opts?.completion_tool ?? false
+  if type_of(enabled) != "bool" {
+    throw "agent_loop: `completion_tool` must be bool or nil"
+  }
+  if !enabled {
+    return opts
+  }
+  const requirement_ids = __completion_claim_requirement_ids(opts)
+  const existing_tools = opts?.tools
+  const registry: ToolRegistry = if type_of(existing_tools) == "list" {
+    tool_registry_from(existing_tools)
+  } else {
+    existing_tools ?? tool_registry()
+  }
+  return __with_prompt_fragment(
+    opts + {tools: agent_completion_claim_tool(registry)},
+    {
+      id: "completion_claim",
+      source: "std/agent/completion_claim",
+      body: "When the task is complete, call task_complete exactly once and by itself, after the tool calls it cites have finished. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: "
+        + json_stringify(requirement_ids)
+        + ". A tool-free final response remains available as a compatibility fallback.",
+    },
+  )
+}
+
+fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
+  let matches = []
+  for result in __dispatch_results_list(dispatch) {
+    if to_string(result?.tool_name ?? result?.name ?? "") == __COMPLETION_CLAIM_TOOL_NAME
+      && __tool_result_ok(result) {
+      matches = matches + [result]
+    }
+  }
+  return matches
+}
+
+fn __completion_claim_payload(result: dict) {
+  const payload = result?.result
+  if payload?.schema == "harn.agent_tool_handler_result.v1" {
+    return payload?.data
+  }
+  return payload
+}
+
+fn __completion_claim_requirement_ids(opts: dict) -> list<string> {
+  const verification = opts?.verify_completion_judge
+  if type_of(verification) == "dict" && verification?.requirement_contract != nil {
+    const contract = completion_requirement_contract(verification.requirement_contract)
+    if contract != nil {
+      return contract.requirements.map({ requirement -> requirement.requirement_id }).to_list()
+    }
+  }
+  const completion = opts?.turn_end_condition
+  if type_of(completion) == "dict" && completion?.requirement_contract != nil {
+    const contract = completion_requirement_contract(completion.requirement_contract)
+    if contract != nil {
+      return contract.requirements.map({ requirement -> requirement.requirement_id }).to_list()
+    }
+  }
+  return ["task"]
+}
+
+fn __completion_claim_lifecycle_by_id(messages: any) -> dict {
+  let by_id = {}
+  for call in agent_transcript_tool_lifecycle_report(messages).calls {
+    by_id = by_id + {[call.tool_call_id]: (by_id[call.tool_call_id] ?? []) + [call]}
+  }
+  return by_id
+}
+
+fn __completion_claim_invalid(reason: string, feedback: string) -> CompletionClaimDisposition {
+  return {kind: "invalid", reason: reason, feedback: feedback}
+}
+
+fn __completion_claim_has_supporting_result(lifecycle: AgentTranscriptToolLifecycle) -> bool {
+  return lifecycle.results.any({ result -> result.origin == "dispatch" && result.outcome == "ok" })
+}
+
+fn __completion_claim_supported_ref_ids(
+  lifecycle_by_id: dict,
+  own_call_id: string,
+) -> list<string> {
+  let refs: list<string> = []
+  for tool_call_id in lifecycle_by_id.keys() {
+    const matches: list<AgentTranscriptToolLifecycle> = lifecycle_by_id[tool_call_id] ?? []
+    const only_match = matches[0]
+    if tool_call_id != own_call_id
+      && len(matches) == 1
+      && only_match != nil
+      && __completion_claim_has_supporting_result(only_match) {
+      refs = refs + [tool_call_id]
+    }
+  }
+  return refs
+}
+
+fn __completion_claim_validate_requirements(
+  claim: CompletionClaim,
+  own_call_id: string,
+  lifecycle_by_id: dict,
+  expected_requirement_ids: list<string>,
+) -> CompletionClaimDisposition {
+  if len(claim.requirements) == 0 {
+    return __completion_claim_invalid(
+      "completion_claim_empty",
+      "The completion claim named no requirements. Call task_complete with supported requirements.",
+    )
+  }
+  let seen_requirements = {}
+  let ref_count = 0
+  for requirement in claim.requirements {
+    const requirement_id = trim(to_string(requirement.requirement_id ?? ""))
+    if requirement_id == "" || (seen_requirements[requirement_id] ?? false) {
+      return __completion_claim_invalid(
+        "completion_claim_requirement_invalid",
+        "Every completion requirement needs one unique, non-empty requirement_id.",
+      )
+    }
+    seen_requirements = seen_requirements + {[requirement_id]: true}
+    const refs = requirement.evidence_refs
+    if type_of(refs) != "list" || len(refs) == 0 {
+      return __completion_claim_invalid(
+        "completion_claim_requirement_unsupported",
+        "Completion requirement `" + requirement_id
+          + "` needs at least one evidence_refs tool_call_id.",
+      )
+    }
+    ref_count = ref_count + len(refs)
+    if ref_count > __COMPLETION_CLAIM_MAX_EVIDENCE_REFS {
+      return __completion_claim_invalid(
+        "completion_claim_too_many_refs",
+        "A completion claim may cite at most "
+          + to_string(__COMPLETION_CLAIM_MAX_EVIDENCE_REFS)
+          + " tool calls.",
+      )
+    }
+    let seen_requirement_refs = {}
+    for raw_ref in refs {
+      const evidence_ref = trim(to_string(raw_ref))
+      if evidence_ref == ""
+        || evidence_ref == own_call_id
+        || (seen_requirement_refs[evidence_ref] ?? false) {
+        return __completion_claim_invalid(
+          "completion_claim_evidence_ref_invalid",
+          "Each evidence_refs entry must be a unique recorded tool_call_id and cannot cite task_complete itself.",
+        )
+      }
+      const matches: list<AgentTranscriptToolLifecycle> = lifecycle_by_id[evidence_ref] ?? []
+      if len(matches) != 1 {
+        const available = __completion_claim_supported_ref_ids(lifecycle_by_id, own_call_id)
+        return __completion_claim_invalid(
+          "completion_claim_evidence_ref_unresolved",
+          "Completion evidence ref `" + evidence_ref
+            + "` did not resolve to exactly one recorded tool call. Available successful tool_call_id values: "
+            + json_stringify(available)
+            + ". Retry task_complete now with the applicable values from that list in evidence_refs. "
+            + "Do not answer in prose instead of retrying the tool.",
+        )
+      }
+      const only_match = matches[0]
+      if only_match == nil || !__completion_claim_has_supporting_result(only_match) {
+        return __completion_claim_invalid(
+          "completion_claim_evidence_ref_unsupported",
+          "Completion evidence ref `" + evidence_ref
+            + "` has no successful dispatched result and cannot support completion.",
+        )
+      }
+      seen_requirement_refs = seen_requirement_refs + {[evidence_ref]: true}
+    }
+  }
+  let expected = {}
+  for requirement_id in expected_requirement_ids {
+    expected = expected + {[requirement_id]: true}
+    if !(seen_requirements[requirement_id] ?? false) {
+      return __completion_claim_invalid(
+        "completion_claim_requirement_missing",
+        "The completion claim omitted required item `" + requirement_id + "`.",
+      )
+    }
+  }
+  for requirement_id in seen_requirements.keys() {
+    if !(expected[requirement_id] ?? false) {
+      return __completion_claim_invalid(
+        "completion_claim_requirement_unknown",
+        "The completion claim named unknown requirement `" + requirement_id + "`.",
+      )
+    }
+  }
+  return {kind: "valid", claim: claim}
+}
+
+/**
+ * Validate the explicit claim before any completion judge is called.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_completion_claim_disposition(
+  messages: any,
+  dispatch: AgentToolDispatch,
+  opts: dict,
+) -> CompletionClaimDisposition {
+  if opts?.completion_tool != true {
+    return {kind: "absent"}
+  }
+  const matches = __completion_claim_results(dispatch)
+  if len(matches) == 0 {
+    return {kind: "absent"}
+  }
+  if len(matches) != 1 {
+    return __completion_claim_invalid(
+      "completion_claim_ambiguous",
+      "Call task_complete exactly once in a completion turn.",
+    )
+  }
+  if len(__dispatch_results_list(dispatch)) != 1 {
+    return __completion_claim_invalid(
+      "completion_claim_not_alone",
+      "Call task_complete by itself, after the tool calls it cites have finished. Do not combine new work with the completion claim.",
+    )
+  }
+  const result = matches[0]
+  const payload = __completion_claim_payload(result)
+  if type_of(payload) != "dict"
+    || payload?.schema != "harn.completion_claim.v1"
+    || payload?.source != "tool" {
+    return __completion_claim_invalid(
+      "completion_claim_result_invalid",
+      "The task_complete result did not preserve Harn's completion-claim schema.",
+    )
+  }
+  const claim: CompletionClaim = payload
+  if trim(to_string(claim.blocked_on ?? "")) != "" {
+    return __completion_claim_invalid(
+      "completion_claim_blocked",
+      "A blocked dependency is not completion. Continue only when the dependency is resolved.",
+    )
+  }
+  return __completion_claim_validate_requirements(
+    claim,
+    to_string(result?.tool_call_id ?? ""),
+    __completion_claim_lifecycle_by_id(messages),
+    __completion_claim_requirement_ids(opts),
+  )
+}
+
+/**
+ * Build the compatibility claim used when a tool-free completion is accepted.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_claim_implicit() -> CompletionClaim {
+  return {schema: "harn.completion_claim.v1", requirements: [], source: "implicit"}
+}
+
+/**
+ * Return the unique evidence references carried by a completion claim.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn completion_claim_evidence_refs(claim: CompletionClaim?) -> list<string> {
+  let refs: list<string> = []
+  for requirement in claim?.requirements ?? [] {
+    for evidence_ref in requirement.evidence_refs {
+      if !refs.contains(evidence_ref) {
+        refs = refs + [evidence_ref]
+      }
+    }
+  }
+  return refs
+}

@@ -44,8 +44,13 @@ path = "crates/harn-cli/src/commands/eval_coding_agent.rs"
 max_loc = 2391
 
 [[handler]]
+# Grew when precompiling learned to reuse an artifact whose stored key already
+# matches instead of recompiling every source it walks. The key derivation and
+# the reuse decision live in commands/precompile/reuse.rs, so what landed here
+# is the call and the early return; this is compile policy, not new Rust
+# dispatch, which is what the ratchet exists to hold down.
 path = "crates/harn-cli/src/commands/precompile.rs"
-max_loc = 285
+max_loc = 297
 
 [[handler]]
 path = "crates/harn-cli/src/lib.rs"
