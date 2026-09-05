@@ -533,6 +533,89 @@ fn write_graph(root: &Path) {
     }
 }
 
+/// A relative target must mirror the source tree, not collapse it.
+///
+/// The driver walks with an absolute path and was handed the root the user
+/// typed, so relativizing one against the other produced nothing and every
+/// source fell back to its bare filename under the output root. Same-named
+/// modules in different directories then wrote to one destination and all but
+/// the last were lost, with a zero exit and no warning. The assertion is on
+/// the mirrored paths rather than on the artifact count alone, because a run
+/// that collapses still writes an artifact for every name it kept.
+#[test]
+fn a_relative_target_mirrors_the_tree_under_out() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let tree = workdir.path().join("tree");
+    let out = workdir.path().join("out");
+    write_same_named_in_two_directories(&tree);
+
+    let harn = run_precompile_in(
+        Some(workdir.path()),
+        &["tree", "--out", out.to_string_lossy().as_ref()],
+        &[],
+    );
+    assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
+
+    let artifacts = collect_artifacts(&out);
+    assert!(
+        artifacts.contains(&PathBuf::from("alpha/shared.harnbc"))
+            && artifacts.contains(&PathBuf::from("beta/shared.harnbc")),
+        "both same-named sources must keep their own mirrored destination; got {artifacts:?}"
+    );
+    assert!(
+        !artifacts.contains(&PathBuf::from("shared.harnbc")),
+        "no source may land on a collapsed top-level name; got {artifacts:?}"
+    );
+}
+
+/// The two spellings of one target must produce the same tree.
+///
+/// The absolute form was always correct, so this pins the fix to "the relative
+/// form now agrees" rather than to two hand-written paths. A change that
+/// stopped mirroring for every target would satisfy the test above's specific
+/// assertions only by also breaking this one.
+#[test]
+fn absolute_and_relative_targets_produce_the_same_tree() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let tree = workdir.path().join("tree");
+    let from_absolute = workdir.path().join("out-absolute");
+    let from_relative = workdir.path().join("out-relative");
+    write_same_named_in_two_directories(&tree);
+
+    let absolute = run_precompile(
+        &[
+            tree.to_string_lossy().as_ref(),
+            "--out",
+            from_absolute.to_string_lossy().as_ref(),
+        ],
+        &[],
+    );
+    assert_eq!(absolute.exit_code, 0, "stderr={}", absolute.stderr);
+
+    let relative = run_precompile_in(
+        Some(workdir.path()),
+        &["tree", "--out", from_relative.to_string_lossy().as_ref()],
+        &[],
+    );
+    assert_eq!(relative.exit_code, 0, "stderr={}", relative.stderr);
+
+    assert_eq!(
+        collect_artifacts(&from_absolute),
+        collect_artifacts(&from_relative),
+        "how a target is spelled must not change where its artifacts land"
+    );
+}
+
+/// Two sources with the same file name in different subdirectories, which is
+/// the only shape a collapsed mirror can lose.
+fn write_same_named_in_two_directories(tree: &Path) {
+    for dir in ["alpha", "beta"] {
+        let sub = tree.join(dir);
+        std::fs::create_dir_all(&sub).expect("create subdirectory");
+        write_hello(&sub, "shared.harn");
+    }
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────
 
 struct PrecompileOutcome {
@@ -542,7 +625,20 @@ struct PrecompileOutcome {
 }
 
 fn run_precompile(argv: &[&str], extra_env: &[(&str, &str)]) -> PrecompileOutcome {
+    run_precompile_in(None, argv, extra_env)
+}
+
+/// As [`run_precompile`], but from an explicit working directory, so a test can
+/// pass the target as a relative path the way a caller in a repository does.
+fn run_precompile_in(
+    cwd: Option<&Path>,
+    argv: &[&str],
+    extra_env: &[(&str, &str)],
+) -> PrecompileOutcome {
     let mut cmd = harn_e2e_command();
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
     cmd.arg("precompile");
     for arg in argv {
         cmd.arg(arg);
