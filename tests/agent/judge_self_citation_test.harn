@@ -90,6 +90,27 @@ pipeline test_the_omission_is_counted_not_silent(harness: Harness, task: unknown
   assert_eq(projected.packet.relevant_action_count, 0)
 }
 
+pipeline test_a_repair_cannot_become_requirement_evidence(harness: Harness, task: unknown) {
+  // Requirement evidence is a parallel projection consumed separately from
+  // `packet.actions`. Even if a future repair carries structured artifact data,
+  // the harness's own record must not prove that a workspace mutation happened.
+  const synthetic_with_data = repair_result("edit", "edit-1", VETO)
+    + {
+      _harn: repair_result("edit", "edit-1", VETO)._harn
+        + {outcome: "ok", data: {mutation_status: "applied", changed_paths: ["src/app.py"]}},
+    }
+  const projected = __judge_evidence_projection(
+    [
+      {role: "user", content: "Fix the parser."},
+      assistant_calling("edit", "edit-1"),
+      synthetic_with_data,
+    ],
+    EDIT_TOOLS,
+  )
+  assert_eq(len(projected.packet.requirement_evidence), 0)
+  assert(!contains(projected.serialized, "src/app.py"))
+}
+
 pipeline test_a_real_failed_call_is_still_evidence(harness: Harness, task: unknown) {
   // NEGATIVE CONTROL. The same shape with a dispatched error result keeps
   // today's behavior exactly: a tool that really failed is a problem the judge
@@ -141,8 +162,8 @@ pipeline test_the_repair_origin_is_read_from_the_dispatch_envelope(
   )
   assert_eq(len(report.calls), 1)
   assert_eq(len(report.calls[0]?.results ?? []), 2)
-  assert_eq(report.calls[0]?.results[0]?.origin, "dispatch")
-  assert_eq(report.calls[0]?.results[1]?.origin, "harness_repair")
+  assert_eq(report.calls[0]?.results?.[0]?.origin, "dispatch")
+  assert_eq(report.calls[0]?.results?.[1]?.origin, "harness_repair")
 }
 
 pipeline test_an_untagged_result_reads_as_dispatched(harness: Harness, task: unknown) {
@@ -155,7 +176,7 @@ pipeline test_an_untagged_result_reads_as_dispatched(harness: Harness, task: unk
       dispatched_result("edit", "edit-1", "write applied", "ok"),
     ],
   )
-  assert_eq(report.calls[0]?.results[0]?.origin, "dispatch")
+  assert_eq(report.calls[0]?.results?.[0]?.origin, "dispatch")
 }
 
 pipeline test_a_typed_result_row_preserves_its_origin(harness: Harness, task: unknown) {
@@ -178,5 +199,5 @@ pipeline test_a_typed_result_row_preserves_its_origin(harness: Harness, task: un
   const report = agent_transcript_tool_lifecycle_report(
     [assistant_calling("edit", "edit-1"), typed_repair],
   )
-  assert_eq(report.calls[0]?.results[0]?.origin, "harness_repair")
+  assert_eq(report.calls[0]?.results?.[0]?.origin, "harness_repair")
 }

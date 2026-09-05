@@ -354,7 +354,10 @@ fn __judge_mutation_artifact_ids(
       continue
     }
     for result in call.results {
-      if result.outcome != "ok" {
+      // Requirement evidence is consumed independently of `packet.actions`, so
+      // enforce the same authorship boundary here rather than relying on the
+      // action projection to have removed injected harness feedback already.
+      if result.origin == "harness_repair" || result.outcome != "ok" {
         continue
       }
       artifact_ids = __judge_push_artifact_ids(artifact_ids, canon_event_paths(result.data))
