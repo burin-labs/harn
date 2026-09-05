@@ -964,11 +964,6 @@ struct ParsedHeader {
     payload: Vec<u8>,
 }
 
-/// Read and validate a header.
-///
-/// `expected_context` is `None` for entry chunks, which decide validity from
-/// the artifact's own manifest before they are willing to pay for the
-/// context hash. Every other field is checked the same way for both families.
 /// True when the artifact at `path` was written for exactly `key` and carries
 /// `expected_kind`.
 ///
@@ -995,9 +990,13 @@ pub fn module_artifact_at_matches(path: &Path, key: &CacheKey) -> bool {
     artifact_at_matches(path, key, KIND_MODULE_ARTIFACT)
 }
 
-/// Parse a cache header and validate every field that could mean the stored
-/// artifact does not describe `key`. Both the reading and the reuse paths go
-/// through it, so that list has one owner and cannot drift between them.
+/// Read and validate a header.
+///
+/// `expected_context` is `None` for entry chunks, which decide validity from
+/// the artifact's own manifest before they are willing to pay for the
+/// context hash. Every other field is checked the same way for both families,
+/// and both the reading and the reuse paths come through here, so the list of
+/// reasons an artifact does not describe `key` has one owner.
 fn read_header_if_matches(
     path: &Path,
     key: &CacheKey,
