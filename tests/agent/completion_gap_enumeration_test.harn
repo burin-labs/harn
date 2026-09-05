@@ -1,0 +1,252 @@
+// Run: harn test tests/agent/completion_gap_enumeration_test.harn
+//
+// #8100, both halves.
+//
+// (a) The judge was told to use `detail` for "the single most important gap"
+// and given one `detail` and one `gap_class` to say it with. A judge holding
+// three objections could not state them, so it named one, the actor fixed it,
+// and the next invocation named the next. The default cap is three. On the
+// 2026-09-05 python trial that produced five refusals whose criteria cycled:
+// status-filter coverage, last-step ranking, last-step discrimination, BACK to
+// status-filter, then two further exclusions, while the verifier, the clean
+// re-execution and the rubric judge all passed.
+//
+// (b) On the two scheduler trials the judge refused ten times over a file view
+// it had been shown, phrasing the gap against "the current scheduler.go shown
+// in the live edited window". Seven of those are #8090, where the edit had aged
+// out of the packet and the judge was right about what it could see. The rest
+// had the view in front of them.
+//
+// The direction control is the load-bearing case in both halves. A judge that
+// raises a genuinely new criterion, or one whose quote IS in the evidence, must
+// still get through, or the fix converts a real objection into a silenced one.
+import { agent_capture_events } from "std/agent/events"
+import { __done_contract_judge_system } from "std/agent/judge"
+import {
+  __judge_completion_gaps_read,
+  __judge_completion_verdict_read,
+  __judge_completion_verdict_schema,
+  __judge_ungrounded_gap_quotes,
+} from "std/agent/judge_verdict"
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+const SCHEDULER_VIEW = join(
+  [
+    "--- internal/engine/scheduler.go (live edited window) ---",
+    "  41 | func kahnSort(graph map[string][]string) []string {",
+    "  42 |     queue := make([]string, 0, len(indegree))",
+    "  43 |     for name, deg := range indegree {",
+    "  44 |         if deg == 0 { queue = append(queue, name) }",
+    "  45 |     }",
+    "  46 |     sort.Strings(queue)",
+    "  47 |     for len(queue) > 0 {",
+  ],
+  "\n",
+)
+
+// -------------------------------------------------------------------------------------------------
+// The conditions, at the owning interface.
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_the_prompt_makes_the_current_view_outrank_earlier_rounds(harness: Harness, task: unknown) {
+  // #8091 read the refusals as a judge restating its previous position rather
+  // than re-reading the view it was handed. Nothing in the prompt said the
+  // labelled view outranks what was said last round. Assert the WORDS, because
+  // this clause is the only thing carrying that instruction.
+  const system = __done_contract_judge_system({})
+  assert(
+    system.lower().contains("state now"),
+    "the prompt must say a labelled current-state view is the state NOW",
+  )
+  assert(
+    system.lower().contains("supersedes"),
+    "and that it supersedes earlier rounds, including the judge's own previous verdict",
+  )
+  assert(
+    !system.contains("single most important gap"),
+    "the one-gap-at-a-time instruction must be gone, it is the cause of the moving target",
+  )
+}
+
+pipeline test_the_schema_offers_room_for_every_gap(harness: Harness, task: unknown) {
+  const schema = __judge_completion_verdict_schema()
+  const gaps = schema?.properties?.gaps
+  assert(gaps != nil, "the verdict schema must offer a `gaps` array, or the judge cannot enumerate")
+  assert(to_string(gaps?.type ?? "") == "array", "`gaps` is a list, not one more string field")
+  const item = gaps?.items
+  for field in ["criterion", "gap_class", "detail"] {
+    assert(
+      item?.properties?[field] != nil,
+      "every gap must carry `" + field + "`, or the actor cannot tell the gaps apart",
+    )
+  }
+  assert(
+    item?.properties?.evidence_quote != nil,
+    "a gap must be able to cite the line it was read from",
+  )
+}
+
+pipeline test_a_refusal_can_name_five_gaps_at_once(harness: Harness, task: unknown) {
+  // The five criteria the python trial spent five invocations discovering, in
+  // one reply. The point of the fix is that this reply is now expressible.
+  const reply = {
+    verdict: "continue",
+    detail: "Five test-quality gaps remain.",
+    gaps: [
+      {criterion: "status filter excludes a top-scoring non-matching run", gap_class: "unmet_manner_clause", detail: "make the non-matching run highest-scoring"},
+      {criterion: "last-step ranking is distinguished from peak", gap_class: "unmet_manner_clause", detail: "adjust fixtures so peak ranking picks a different run"},
+      {criterion: "experiment scoping is exercised", gap_class: "unmet_manner_clause", detail: "add a cross-experiment run"},
+      {criterion: "the other experiment's score exceeds the selected run", gap_class: "unmet_manner_clause", detail: "raise it above the selection"},
+      {criterion: "the missing-metric run carries a higher different-key value", gap_class: "unmet_manner_clause", detail: "set that value above the target"},
+    ],
+  }
+  const gaps = __judge_completion_gaps_read(reply)
+  assert(len(gaps) == 5, "all five gaps survive the read, got " + to_string(len(gaps)))
+  const decoded = __judge_completion_verdict_read(reply)
+  assert(len(decoded.gaps) == 5, "and reach the verdict the loop acts on")
+  assert(decoded.verdict == "continue", "still a refusal")
+}
+
+pipeline test_a_later_refusals_criteria_are_a_subset_of_the_first(harness: Harness, task: unknown) {
+  // The property the fix buys. Enumeration is what makes it hold: if each
+  // refusal must state every gap it holds, and gaps only ever get closed, a
+  // later refusal cannot introduce a criterion the first one could have named.
+  const first = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "three gaps",
+      gaps: [
+        {criterion: "status filter", gap_class: "unmet_manner_clause", detail: "a"},
+        {criterion: "last-step ranking", gap_class: "unmet_manner_clause", detail: "b"},
+        {criterion: "experiment scoping", gap_class: "unmet_manner_clause", detail: "c"},
+      ],
+    },
+  )
+  const second = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "one left",
+      gaps: [{criterion: "last-step ranking", gap_class: "unmet_manner_clause", detail: "b"}],
+    },
+  )
+  let first_criteria: list<string> = []
+  for gap in first.gaps {
+    first_criteria = first_criteria + [gap.criterion]
+  }
+  for gap in second.gaps {
+    assert(
+      contains(first_criteria, gap.criterion),
+      "the second refusal introduced a criterion the first never raised: " + gap.criterion,
+    )
+  }
+  assert(len(second.gaps) < len(first.gaps), "and the set shrank rather than rotating")
+}
+
+// -------------------------------------------------------------------------------------------------
+// (b) A quote is checked against the evidence the judge was handed.
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_a_quote_absent_from_the_view_is_caught(harness: Harness, task: unknown) {
+  // The scheduler shape: the view on line 46 sorts, and the judge says it does not.
+  const gaps = __judge_completion_gaps_read(
+    {
+      gaps: [
+        {
+          criterion: "ready queue is sorted lexicographically",
+          gap_class: "unmet_manner_clause",
+          detail: "the queue is still FIFO",
+          evidence_quote: "queue = append(queue, name) // never sorted",
+        },
+      ],
+    },
+  )
+  const bad = __judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)
+  assert(len(bad) == 1, "the invented quote must be caught, got " + to_string(len(bad)))
+}
+
+pipeline test_a_quote_present_in_the_view_passes(harness: Harness, task: unknown) {
+  // Direction control. A real objection sourced to a real line must get through,
+  // or the check silences the judge instead of grounding it.
+  const gaps = __judge_completion_gaps_read(
+    {
+      gaps: [
+        {
+          criterion: "ready queue is sorted lexicographically",
+          gap_class: "unmet_manner_clause",
+          detail: "only the initial set is sorted",
+          evidence_quote: "sort.Strings(queue)",
+        },
+      ],
+    },
+  )
+  assert(len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0, "a real line is not a violation")
+}
+
+pipeline test_reflowed_whitespace_still_matches(harness: Harness, task: unknown) {
+  // A judge that re-indents or reflows what it copied has not invented anything.
+  const gaps = __judge_completion_gaps_read(
+    {
+      gaps: [
+        {
+          criterion: "ready queue is sorted",
+          gap_class: "unmet_manner_clause",
+          detail: "d",
+          evidence_quote: "if deg == 0 {   queue = append(queue,    name) }",
+        },
+      ],
+    },
+  )
+  assert(
+    len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0,
+    "whitespace differences are not fabrication",
+  )
+}
+
+pipeline test_an_uncited_gap_is_not_a_violation(harness: Harness, task: unknown) {
+  // The field is required only for gaps about file content. A judge that cites
+  // nothing is judged by the other clauses, not failed by this one.
+  const gaps = __judge_completion_gaps_read(
+    {gaps: [{criterion: "docs updated", gap_class: "missing_artifact", detail: "no changelog"}]},
+  )
+  assert(len(gaps) == 1, "the gap still reads")
+  assert(len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0, "and is not a violation")
+}
+
+pipeline test_no_rendered_evidence_cannot_convict(harness: Harness, task: unknown) {
+  // Refusing here would fail a judge for the harness having shown it nothing.
+  const gaps = __judge_completion_gaps_read(
+    {gaps: [{criterion: "c", gap_class: "other", detail: "d", evidence_quote: "anything at all"}]},
+  )
+  assert(len(__judge_ungrounded_gap_quotes(gaps, "")) == 0, "an empty packet convicts nobody")
+}
+
+// -------------------------------------------------------------------------------------------------
+// Compatibility. Cached and replayed replies outlive the schema that produced them.
+// -------------------------------------------------------------------------------------------------
+
+pipeline test_a_reply_without_gaps_still_decodes(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "continue", detail: "the old single-gap shape", gap_class: "missing_artifact"},
+  )
+  assert(decoded.verdict == "continue", "the verdict survives")
+  assert(decoded.detail != "", "the detail survives")
+  assert(len(decoded.gaps) == 0, "and it simply itemizes nothing")
+}
+
+pipeline test_malformed_gap_rows_are_dropped_not_fatal(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "one good row among junk",
+      gaps: [
+        {criterion: "", gap_class: "other", detail: "no criterion"},
+        {criterion: "real one", gap_class: "other", detail: ""},
+        "not even a dict",
+        {criterion: "kept", gap_class: "missing_artifact", detail: "this one is whole"},
+      ],
+    },
+  )
+  assert(len(decoded.gaps) == 1, "only the whole row survives, got " + to_string(len(decoded.gaps)))
+  assert(decoded.gaps[0].criterion == "kept", "and it is the right one")
+}

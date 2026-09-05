@@ -51,10 +51,71 @@ pub fn __judge_resolve_contradiction(
   if !contradictory {
     return {data: data, reasked: false}
   }
-  const reask = __judge_run_checkpoint(
+  return __judge_reask_once(harness, request, data, __JUDGE_CONTRADICTION_RETRY_PROMPT, "contradiction")
+}
+
+/**
+ * Resolve a refusal that quoted evidence the judge was never shown.
+ *
+ * Same treatment and the same reasoning as the contradiction above: the reply
+ * is not usable, and handing the actor a complaint sourced to a line that is
+ * not in the file view is worse than asking again. Measured 2026-09-05 on two
+ * scheduler trials, where the judge refused ten times over a file view it had
+ * been shown, phrasing the gap against "the current scheduler.go shown in the
+ * live edited window".
+ *
+ * The re-ask names the offending quotes, because a judge told only "that was
+ * wrong" has the same reply available to it.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_resolve_ungrounded_quotes(harness, request, data, ["queue = append(queue, s)"])
+ */
+pub fn __judge_resolve_ungrounded_quotes(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  data: dict,
+  quotes: list<string>,
+) -> JudgeContradictionResolution {
+  if len(quotes) == 0 {
+    return {data: data, reasked: false}
+  }
+  return __judge_reask_once(
     harness,
-    request + {user: request.user + __JUDGE_CONTRADICTION_RETRY_PROMPT},
+    request,
+    data,
+    __judge_ungrounded_quote_retry_prompt(quotes),
+    "ungrounded_quote",
   )
+}
+
+/** The instruction added to the user turn when a refusal quoted absent evidence. */
+fn __judge_ungrounded_quote_retry_prompt(quotes: list<string>) -> string {
+  return "\n\nYour previous reply refused the work and attributed it to evidence above, "
+    + "but these quotes do not appear anywhere in the evidence you were given:\n"
+    + join(quotes.map({ quote -> "  - " + quote }), "\n")
+    + "\nRe-read the evidence and answer again. Quote only lines that are actually there. "
+    + "If the evidence does not in fact show the gap you had in mind, that gap is not "
+    + "supported and you should not raise it; if the evidence shows the work IS done, reply `done`."
+}
+
+/**
+ * One re-ask on the user turn, with the reason named.
+ *
+ * Both re-ask reasons share this so the retry stays a single behaviour: the
+ * stable system prefix is untouched (so the cached prompt prefix stays
+ * byte-identical), a re-ask whose checkpoint could not be read keeps the first
+ * reply rather than inventing one, and the attempt is recorded either way.
+ */
+fn __judge_reask_once(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  data: dict,
+  prompt: string,
+  reason: string,
+) -> JudgeContradictionResolution {
+  const reask = __judge_run_checkpoint(harness, request + {user: request.user + prompt})
   const readable = reask.checkpoint?.ok ?? false
   agent_emit_event(
     harness.agent,
@@ -64,6 +125,7 @@ pub fn __judge_resolve_contradiction(
       schema: "harn.completion_judge_contradiction_retry.v1",
       reask_status: to_string(reask.checkpoint?.status ?? "ok"),
       reask_readable: readable,
+      reask_reason: reason,
     },
   )
   if readable {

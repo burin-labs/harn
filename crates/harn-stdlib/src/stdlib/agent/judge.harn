@@ -32,7 +32,10 @@ pub import {
   __completion_arbitrate_contradiction,
   __completion_arbitrate_verification,
 } from "std/agent/judge_arbitration"
-import { __judge_resolve_contradiction } from "std/agent/judge_contradiction"
+import {
+  __judge_resolve_contradiction,
+  __judge_resolve_ungrounded_quotes,
+} from "std/agent/judge_contradiction"
 import { __judge_evidence_projection_from_lifecycle } from "std/agent/judge_evidence"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -48,11 +51,13 @@ import {
 } from "std/agent/judge_internals"
 import { __judge_resolve_itemization } from "std/agent/judge_itemization"
 pub import {
+  CompletionJudgeGapItem,
   CompletionJudgeVerdict,
   __judge_clamp_completion_detail,
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import {
   agent_completion_obligations,
@@ -521,10 +526,38 @@ fn __judge_invoke_structured(
   // `contradiction.data` is the reply of record: the re-ask when one happened,
   // and the itemization pass's reply unchanged when none did. Every read below
   // goes through it so no clause is left describing a superseded reply.
-  const decoded = if contradiction.reasked {
+  const contradiction_decoded = if contradiction.reasked {
     __judge_completion_verdict_read(contradiction.data, contract, payload.judge_evidence_packet)
   } else {
     itemized_decoded
+  }
+  // A refusal that sources itself to the evidence gets checked against the
+  // evidence. Same treatment as the self-contradiction above and for the same
+  // reason: the reply is not usable, and re-asking the JUDGE once beats handing
+  // the actor a complaint whose stated basis is not in the file view it was
+  // shown. See #8100. `payload.judge_evidence` is the rendered packet the judge
+  // was actually handed, so this compares against what it saw and not against
+  // what the workspace happens to hold now.
+  const ungrounded = __judge_ungrounded_gap_quotes(
+    contradiction_decoded.gaps,
+    payload.judge_evidence,
+  )
+  const grounding = if contradiction_decoded.verdict == "continue" {
+    __judge_resolve_ungrounded_quotes(harness, reask_request, contradiction.data, ungrounded)
+  } else {
+    {data: contradiction.data, reasked: false}
+  }
+  const decoded = if grounding.reasked {
+    __judge_completion_verdict_read(grounding.data, contract, payload.judge_evidence_packet)
+  } else {
+    contradiction_decoded
+  }
+  // The last reply either re-ask produced. Every read below goes through it so
+  // no clause is left describing a superseded reply.
+  const reply_of_record = if grounding.reasked {
+    grounding.data
+  } else {
+    contradiction.data
   }
   const requirement_report = decoded.requirement_report
   const unassessed = resolved.omitted && requirement_report != nil
@@ -535,7 +568,7 @@ fn __judge_invoke_structured(
   // not supply, in place of the reason the judge actually gave.
   const declined_unassessed = requirement_report != nil
     && !resolved.omitted
-    && completion_requirement_report_omitted(contract, contradiction.data?.requirement_report)
+    && completion_requirement_report_omitted(contract, reply_of_record?.requirement_report)
   const requirements_pending = requirement_report != nil
     && !requirement_report.complete
     && !declined_unassessed
@@ -636,9 +669,22 @@ pub fn __done_contract_judge_system(opts: dict) -> string {
     "Return `done` only when the claim covers the visible request and names adequate evidence.",
     "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
     "Judge the substance of the claim, never its wire format. Response markers, sentinels, and layout are enforced elsewhere, and their absence is never a reason to continue.",
-    "Return only `verdict`, one concise `detail`, and the `gap_class` the gap belongs to.",
-    "On `done`, use `detail` for the strongest evidence that every requirement is met.",
-    "On `continue`, use `detail` for the single most important gap and the substantive next action that closes it, never a restatement or formatting instruction.",
+    "On `done`, use `detail` for the strongest evidence that every requirement is met, and set no gap fields.",
+    // The old instruction here was "use `detail` for the single most important
+    // gap". A judge holding three objections could not state them, so it named
+    // one, the actor fixed it, and the next invocation named the next. The
+    // default cap is three. See #8100.
+    "On `continue`, list in `gaps` EVERY gap you currently hold — not the most important one.",
+    "The actor can only converge on a set it is shown in full, and you may not add a criterion later that you could have named now.",
+    "Give each gap the `criterion` from the task it is against, and the substantive next action that closes it, never a restatement or formatting instruction.",
+    // #8091: the refusals read like a judge restating its previous position
+    // rather than re-reading the current state. The packet labels the current
+    // file view; nothing told the judge it outranks what it said last round.
+    "Where the evidence shows a labelled current-state view of a file, that view is the file's state NOW.",
+    "It supersedes anything you or the actor said about that file in an earlier round, including your own previous verdict.",
+    "When a gap is about the content of a file shown in the evidence above, copy the line that proves it into `evidence_quote`, verbatim.",
+    "A quote that does not appear in that evidence is refused and sent back to you, so quote what is there rather than what you expect to be there.",
+    "Keep `detail` as the one-line summary of the whole refusal.",
   ]
   if extra != "" {
     lines = lines.appending("Additional rubric:\n" + extra)

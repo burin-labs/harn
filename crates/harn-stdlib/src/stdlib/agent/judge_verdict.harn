@@ -16,10 +16,29 @@ import {
  * an out-of-contract value is preserved verbatim so telemetry can show what
  * the judge actually said, and is treated as a non-veto by the caller.
  */
+/**
+ * One itemized gap from a refusal.
+ *
+ * `criterion` is what the gap is against, so the actor can see the whole set it
+ * has to satisfy instead of discovering it one refusal at a time.
+ * `evidence_quote` is what the judge read to conclude it, checked against the
+ * evidence the judge was actually handed.
+ */
+pub type CompletionJudgeGapItem = {
+  criterion: string,
+  gap_class: CompletionJudgeGapClass,
+  detail: string,
+  evidence_quote: string,
+}
+
 pub type CompletionJudgeVerdict = {
   verdict: string,
   detail: string,
   gap_class: CompletionJudgeGapClass,
+  // Every gap the refusal itemized. Empty on an approval and on replies that
+  // predate the field, which is why no clause may read "no gaps" as "no
+  // objection" without also checking the verdict.
+  gaps: list<CompletionJudgeGapItem>,
   // Whether the RAW reply carried a non-blank `gap_class` field at all, before
   // `__completion_judge_gap_class` folds absent, blank, unrecognized, and an
   // explicit `other` into the same normalized value. The normalized value
@@ -177,6 +196,46 @@ pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil
       description:
         "On `continue`, the kind of gap being named. Leave unset on `done`; setting it, including to `other`, is read as an unresolved gap and refused.",
     },
+    // The judge used to have one `detail` and one `gap_class` to answer with,
+    // and was told to use them for "the single most important gap". A judge
+    // holding three objections could not state them, so it named one, the
+    // actor fixed it, and the next invocation named the next. With a default
+    // cap of three that is a task with three real gaps failing inside its own
+    // budget while every refusal it received was correct. `gaps` is the room
+    // to say all of it at once.
+    gaps: {
+      type: "array",
+      minItems: 1,
+      description:
+        "On `continue`, EVERY gap you currently hold, not the most important one. "
+          + "The actor can only converge on a set it is shown in full. Omit on `done`.",
+      items: {
+        type: "object",
+        required: ["criterion", "gap_class", "detail"],
+        additionalProperties: false,
+        properties: {
+          criterion: {
+            type: "string",
+            minLength: 1,
+            description:
+              "The requirement from the task statement this gap is against, quoted or closely paraphrased. One gap, one criterion.",
+          },
+          gap_class: {type: "string", enum: COMPLETION_JUDGE_GAP_CLASSES},
+          detail: {
+            type: "string",
+            minLength: 1,
+            description: "What is missing and the substantive next action that closes it.",
+          },
+          evidence_quote: {
+            type: "string",
+            description:
+              "A line copied VERBATIM from the evidence above that shows this gap. "
+                + "Required when the gap is about the content of a file the evidence displays. "
+                + "A quote that does not appear in the evidence is refused.",
+          },
+        },
+      },
+    },
   }
   const assessments = completion_requirement_assessments_schema(contract)
   if assessments != nil {
@@ -234,6 +293,7 @@ pub fn __judge_completion_verdict_read(
     verdict: verdict,
     detail: clamped,
     gap_class: __completion_judge_gap_class(result?.gap_class),
+    gaps: __judge_completion_gaps_read(result),
     gap_declared: gap_declared,
     requirement_report: completion_requirement_report(
       completion_requirement_contract(raw_requirement_contract),
@@ -241,4 +301,99 @@ pub fn __judge_completion_verdict_read(
       evidence_packet,
     ),
   }
+}
+
+/**
+ * The gaps a refusal itemized, normalized.
+ *
+ * Empty for an approval, for a reply that predates the `gaps` field, and for a
+ * reply that sent something other than a list. Callers distinguish "itemized
+ * nothing" from "itemized badly" by asking for the raw field themselves; this
+ * reader only ever returns well-formed rows.
+ */
+pub fn __judge_completion_gaps_read(result: dict) -> list<CompletionJudgeGapItem> {
+  const raw = result?.gaps
+  guard type_of(raw) == "list" else {
+    return []
+  }
+  let out: list<CompletionJudgeGapItem> = []
+  for entry in raw {
+    guard type_of(entry) == "dict" else {
+      continue
+    }
+    const criterion = trim(to_string(entry?.criterion ?? ""))
+    const detail = trim(to_string(entry?.detail ?? ""))
+    if criterion == "" || detail == "" {
+      continue
+    }
+    out = out
+      + [
+        {
+          criterion: criterion,
+          gap_class: __completion_judge_gap_class(entry?.gap_class),
+          detail: detail,
+          evidence_quote: trim(to_string(entry?.evidence_quote ?? "")),
+        },
+      ]
+  }
+  return out
+}
+
+/**
+ * Quotes a refusal attributed to the evidence that are not in the evidence.
+ *
+ * Measured 2026-09-05 on two scheduler trials: the judge refused ten times
+ * saying the ready queue was still unsorted, phrased against the file view it
+ * had been shown ("the current scheduler.go shown in the live edited window").
+ * Seven of those were harn#8090 and the judge was right about what it could
+ * see. The rest had the view in front of them.
+ *
+ * A quote is checked by presence in the rendered evidence the judge was
+ * actually handed, whitespace-normalized so a reflowed copy still matches. This
+ * cannot catch a wrong INFERENCE from a real line, and is not meant to: it
+ * catches a claim attributed to a view that does not support it, which is the
+ * observed failure. An empty quote is not a violation — the field is required
+ * only for file-content gaps, and a judge that cites nothing is judged by the
+ * other clauses.
+ */
+pub fn __judge_ungrounded_gap_quotes(
+  gaps: list<CompletionJudgeGapItem>,
+  evidence: string,
+) -> list<string> {
+  const haystack = __judge_collapse_spaces(evidence)
+  guard haystack != "" else {
+    // No evidence rendered means nothing to contradict. Refusing here would
+    // fail a judge for the harness having shown it nothing.
+    return []
+  }
+  let bad: list<string> = []
+  for gap in gaps {
+    const quote = __judge_collapse_spaces(gap.evidence_quote)
+    if quote == "" {
+      continue
+    }
+    if !haystack.contains(quote) {
+      bad = bad + [gap.evidence_quote]
+    }
+  }
+  return bad
+}
+
+/** Whitespace-normalize so a reflowed or re-indented copy of a real line still matches. */
+fn __judge_collapse_spaces(value: string) -> string {
+  let out = ""
+  let last_space = true
+  for ch in split(trim(value), "") {
+    const is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r"
+    if is_space {
+      if !last_space {
+        out = out + " "
+      }
+      last_space = true
+    } else {
+      out = out + ch
+      last_space = false
+    }
+  }
+  return trim(out)
 }
