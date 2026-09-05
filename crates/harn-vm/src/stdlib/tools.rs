@@ -479,12 +479,8 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     Ok(crate::schema::json_to_vm_value(&schema))
 }
 
-// Unknown config keys (beyond parameters/handler/returns/annotations) are
-// preserved verbatim so integrators can attach policy/effect metadata. This
-// is also how `guidance` rides through to the tool entry: the prompt
-// assembler (`llm::prompt`) reads it off the active tool set and injects a
-// capability-gated system-prompt fragment, so a tool's instruction and the
-// tool itself share one source of truth and cannot drift.
+// Preserve extension metadata, including `guidance`, which the prompt assembler
+// reads from the active tool set to inject capability-gated instructions.
 #[harn_builtin(
     exposure = "pure",
     effects = [],
