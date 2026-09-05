@@ -289,7 +289,11 @@ pipeline test_valid_explicit_claim_ends_the_same_tool_turn(harness: Harness, tas
       )
       assert_eq(captured.result.status, "done")
       assert_eq(captured.result.stop_reason, "explicit_completion_claim")
-      assert_eq(captured.result.provider_call_count, 2)
+      assert_eq(captured.result.provider_call_count, 3)
+      assert_eq(
+        len(captured.events.filter({ event -> event.type == "iteration_start" }).to_list()),
+        2,
+      )
       const observations = captured.events.filter(
         { event ->
           event.type == "typed_checkpoint"
