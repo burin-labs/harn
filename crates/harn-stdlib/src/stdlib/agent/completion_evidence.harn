@@ -137,6 +137,26 @@ pub type CompletionEvidenceProjection = {
   stats: CompletionEvidenceProjectionStats,
 }
 
+/** Attach measurable authorship omissions to one projected action. */
+pub fn completion_evidence_action_authorship(
+  action: CompletionEvidenceAction,
+  total_result_count: int,
+  dispatched_result_count: int,
+) -> CompletionEvidenceAction {
+  const omitted = total_result_count - dispatched_result_count
+  return action
+    + if omitted > 0 {
+      {omitted_harness_authored_result_count: omitted}
+    } else {
+      {}
+    }
+    + if total_result_count > 0 && dispatched_result_count == 0 {
+      {harness_authored_only: true}
+    } else {
+      {}
+    }
+}
+
 pub type CompletionEvidenceSnapshot = {
   schema: "harn.completion_evidence_snapshot.v1",
   evidence_id: string,

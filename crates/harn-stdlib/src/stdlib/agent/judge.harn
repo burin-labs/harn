@@ -11,6 +11,7 @@ import {
   CompletionReadOnlyEvidence,
   CompletionToolSemantics,
   completion_evidence_id,
+  completion_evidence_action_authorship,
   completion_read_only_evidence,
   completion_requirement_evidence_packet,
   completion_research_summary,
@@ -440,21 +441,7 @@ fn __judge_lifecycle_action(
     result_facts: __judge_clip_evidence(result?.data ?? {}, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
     has_error_result: dispatched.any({ matched -> matched.outcome == "error" }),
   }
-  // A call with results exclusively written by the harness was never
-  // dispatched. Drop it, but keep the omission measurable. A mixed call keeps
-  // its real result and still reports the repair that was removed.
-  const omitted = len(lifecycle.results) - len(dispatched)
-  return action
-    + if omitted > 0 {
-      {omitted_harness_authored_result_count: omitted}
-    } else {
-      {}
-    }
-    + if len(lifecycle.results) > 0 && len(dispatched) == 0 {
-      {harness_authored_only: true}
-    } else {
-      {}
-    }
+  return completion_evidence_action_authorship(action, len(lifecycle.results), len(dispatched))
 }
 
 fn __judge_latest(
