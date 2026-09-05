@@ -137,6 +137,21 @@ pipeline test_completion_claim_cannot_share_a_batch_with_new_work(
   assert(disposition.feedback.contains("after the tool calls it cites have finished"))
 }
 
+pipeline test_blocked_dependency_is_not_accepted_as_completion(
+  harness: Harness,
+  task: unknown,
+) {
+  const blocked = claim("task", ["edit-1"]) + {blocked_on: "Waiting for external approval."}
+  const disposition = agent_completion_claim_disposition(
+    evidence_messages(),
+    completion_dispatch(blocked),
+    {completion_tool: true},
+  )
+  assert_eq(disposition.kind, "invalid")
+  assert_eq(disposition.reason, "completion_claim_blocked")
+  assert(disposition.feedback.contains("not completion"))
+}
+
 pipeline test_claim_cannot_cite_harness_authored_feedback(harness: Harness, task: unknown) {
   const messages = [
     assistant_calling("edit", "edit-1"),
