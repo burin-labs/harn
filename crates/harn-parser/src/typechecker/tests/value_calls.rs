@@ -48,6 +48,17 @@ fn apply(transform: fn(int) -> int) -> int {
         "the innermost callable binding must own the call: {shadowed:?}"
     );
 
+    let bad_argument = errors(
+        r#"fn transform(value: string) -> string { return value }
+fn apply(transform: fn(int) -> int) -> int { return transform("wrong") }"#,
+    );
+    assert!(
+        bad_argument
+            .iter()
+            .any(|error| error.contains("expected int") && error.contains("found string")),
+        "the lexical callable contract must still validate arguments: {bad_argument:?}"
+    );
+
     let unshadowed = errors(
         r#"fn transform(value: string, suffix: string) -> string {
   return value + suffix
@@ -63,26 +74,13 @@ fn apply() -> string {
 }
 
 #[test]
-fn non_callable_local_shadow_does_not_fall_through_to_module_function() {
+fn gradual_local_call_does_not_fall_through_to_module_function() {
     let diagnostics = errors(
-        r"fn transform(value: string) -> string {
-  return value
-}
-fn apply() -> int {
-  const transform = 41
-  return transform(1)
-}",
+        r"fn transform(value: string) -> string { return value }
+fn apply(transform: any) -> int { return transform(1) }",
     );
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.contains("int") && diagnostic.contains("not callable")),
-        "the local value must own the non-callable diagnostic: {diagnostics:?}"
-    );
-    assert!(
-        !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.contains("expected string, found int")),
-        "the shadowed module signature must not validate the call: {diagnostics:?}"
+        diagnostics.is_empty(),
+        "a guarded dynamic call must not inherit the module signature: {diagnostics:?}"
     );
 }

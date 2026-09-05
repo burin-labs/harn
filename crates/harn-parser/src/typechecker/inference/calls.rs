@@ -685,15 +685,6 @@ impl TypeChecker {
             return;
         };
         let resolved = self.resolve_alias(&callee_type, scope);
-        // An unannotated closure is callable even when its parameter and
-        // return contracts remain gradual. Preserve argument checking without
-        // inventing a non-callable diagnostic for this opaque callable type.
-        if matches!(&resolved, TypeExpr::Named(name) if name == "closure") {
-            for arg in args {
-                self.check_node(arg, scope);
-            }
-            return;
-        }
         let TypeExpr::FnType { params, .. } = resolved else {
             for arg in args {
                 self.check_node(arg, scope);
@@ -1258,14 +1249,7 @@ impl TypeChecker {
         scope: &mut TypeScope,
         span: Span,
     ) -> CallTarget {
-        // The parser represents `callback(...)` as a named FunctionCall even
-        // when `callback` resolves to a lexical value. Dispatch that shape
-        // through value-call checking before consulting module functions or
-        // builtins: the innermost binding owns both resolution and its call
-        // contract.
-        if scope.get_var_before_fn(name).is_some() {
-            let callee = SNode::new(Node::Identifier(name.to_owned()), span);
-            self.check_value_call(&callee, args, scope, span);
+        if self.check_lexical_value_call(name, args, scope, span) {
             return CallTarget::Other;
         }
 
@@ -1369,6 +1353,49 @@ impl TypeChecker {
             }
         }
         call_target
+    }
+
+    /// Resolve the lexical owner of a bare call before module functions.
+    /// Gradual values remain runtime-checked; a known function type receives
+    /// the ordinary static argument checks.
+    fn check_lexical_value_call(
+        &mut self,
+        name: &str,
+        args: &[SNode],
+        scope: &mut TypeScope,
+        span: Span,
+    ) -> bool {
+        let Some(bound_type) = scope.get_var_before_fn(name).cloned() else {
+            return false;
+        };
+        if bound_type
+            .as_ref()
+            .is_some_and(|ty| matches!(self.resolve_alias(ty, scope), TypeExpr::FnType { .. }))
+        {
+            let callee = SNode::new(Node::Identifier(name.to_owned()), span);
+            self.check_value_call(&callee, args, scope, span);
+        } else {
+            for arg in args {
+                self.check_node(arg, scope);
+            }
+        }
+        true
+    }
+
+    pub(in crate::typechecker) fn infer_lexical_call_return(
+        &self,
+        name: &str,
+        scope: &TypeScope,
+    ) -> Option<Option<TypeExpr>> {
+        let bound_type = scope.get_var_before_fn(name)?;
+        Some(
+            bound_type
+                .as_ref()
+                .and_then(|ty| match self.resolve_alias(ty, scope) {
+                    TypeExpr::FnType { return_type, .. } => Some(*return_type),
+                    _ => None,
+                }),
+        )
     }
 
     /// Whether `name` was brought into scope by an `import` in the

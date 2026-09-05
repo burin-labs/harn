@@ -430,11 +430,8 @@ impl TypeChecker {
             }
 
             Node::Identifier(name) => {
-                // A defined local shadows a same-named function — return its
-                // type even when statically unknown (`None`), rather than
-                // falling through to the function reference below. (Flattening
-                // to `None` and falling through would mis-resolve a shadowing
-                // `var x = …` to a function `x` of the same name.)
+                // A local owns the name even when its type is unknown; do not
+                // flatten that binding into a same-named function reference.
                 if let Some(var_ty) = scope.get_var(name) {
                     return var_ty.clone();
                 }
@@ -463,17 +460,8 @@ impl TypeChecker {
                 type_args,
                 args,
             } => {
-                // Bare calls retain FunctionCall syntax even when the name
-                // resolves to a lexical callable value. Infer from that
-                // innermost binding before considering module functions or
-                // builtins, matching diagnostic call resolution.
-                if let Some(bound_type) = scope.get_var_before_fn(name) {
-                    return bound_type.as_ref().and_then(|ty| {
-                        match self.resolve_alias(ty, scope) {
-                            TypeExpr::FnType { return_type, .. } => Some(*return_type),
-                            _ => None,
-                        }
-                    });
+                if let Some(return_type) = self.infer_lexical_call_return(name, scope) {
+                    return return_type;
                 }
                 let source_defined = scope
                     .get_fn(name)
