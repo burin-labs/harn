@@ -62,6 +62,7 @@
 //! but the mutex still serialises actual work.
 
 mod agents;
+mod builtin_args;
 mod builtins;
 mod cypher;
 mod file_table;

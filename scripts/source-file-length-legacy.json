@@ -8,7 +8,6 @@
     "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
     "crates/harn-cli/src/package/extensions_tests.rs",
     "crates/harn-dap/src/debugger/tests.rs",
-    "crates/harn-hostlib/src/code_index/builtins.rs",
     "crates/harn-hostlib/src/code_index/rename.rs",
     "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
     "crates/harn-parser/src/typechecker/inference/expressions.rs",
