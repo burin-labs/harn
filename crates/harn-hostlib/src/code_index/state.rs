@@ -126,8 +126,16 @@ pub struct ImportCensusRow {
     pub files: u64,
     /// Files from which at least one import string was extracted.
     pub files_with_imports: u64,
-    /// Files with at least one import resolved to a workspace file.
+    /// Files whose own import statements resolved to at least one
+    /// workspace file. Deliberately separate from
+    /// [`Self::files_with_module_peers`]: a language with implicit
+    /// module membership would otherwise report every file as resolved
+    /// while its import-path resolver did nothing at all, which is
+    /// exactly the failure this census exists to catch.
     pub files_with_resolved_imports: u64,
+    /// Files that see at least one other file through module membership
+    /// rather than through an import statement.
+    pub files_with_module_peers: u64,
 }
 
 impl IndexState {
@@ -602,13 +610,22 @@ impl IndexState {
                     files: 0,
                     files_with_imports: 0,
                     files_with_resolved_imports: 0,
+                    files_with_module_peers: 0,
                 });
             row.files += 1;
             if !file.imports.is_empty() {
                 row.files_with_imports += 1;
             }
-            if !self.imports_of(file.id).is_empty() {
+            // Explicit import statements only. Folding membership in
+            // here would let a broken import-path resolver read as a
+            // working one.
+            if !self.deps.imports_of(file.id).is_empty()
+                || !self.deps.module_imports_of(file.id).is_empty()
+            {
                 row.files_with_resolved_imports += 1;
+            }
+            if !self.modules.siblings_of(file.id).is_empty() {
+                row.files_with_module_peers += 1;
             }
         }
         let mut rows: Vec<ImportCensusRow> = by_language.into_values().collect();

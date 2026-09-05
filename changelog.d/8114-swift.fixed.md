@@ -13,4 +13,8 @@
   files named by M importers costs N plus M rows rather than N times M, which
   is the cross-product shape removed from the symbol graph in #8081. On a
   7,038-file workspace 6,185 stored rows expand to 1,546,696 dependency
-  answers, and the files whose imports resolve go from 1,901 to 3,773.
+  answers. Swift files whose import statements resolve go from 0 to 1,089, and
+  1,868 of them additionally see their target's other files.
+  The census reports those two counts separately, because a language with
+  implicit module membership would otherwise report every file as resolved
+  while its import-path resolver did nothing at all.
