@@ -9,8 +9,16 @@
 //! Single-file mutations (`reindex_file`, `remove_file`) flow through
 //! the same paths so the sub-indexes stay consistent across the
 //! incremental host ops drive.
+//!
+//! [`IndexState::refresh_from_root`] is the incremental counterpart of
+//! `build_from_root`: it re-walks the workspace but re-reads and
+//! re-parses only the files whose mtime or size moved, so an unchanged
+//! tree costs one stat per file instead of a full read-and-parse pass.
+//! Every index read goes through it, which is why the cost of holding a
+//! warm index no longer scales with the size of the workspace.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -69,6 +77,39 @@ pub struct BuildOutcome {
     pub files_skipped: u64,
 }
 
+/// Summary returned from [`IndexState::refresh_from_root`].
+///
+/// `files_reindexed` is the falsifiable number: on an unchanged tree it
+/// must be zero, and after one edit it must be one. A refresh that
+/// reports work it did not do, or hides work it did, is the failure this
+/// struct exists to make visible.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct RefreshOutcome {
+    /// Files the walk visited (i.e. that passed the indexer's filters).
+    pub files_scanned: u64,
+    /// Files whose mtime and size were unchanged, so nothing was read.
+    pub files_unchanged: u64,
+    /// Files whose contents were re-read, re-hashed, and re-parsed.
+    pub files_reindexed: u64,
+    /// Files present in the walk but absent from the previous index.
+    pub files_added: u64,
+    /// Files dropped from the index because they no longer exist or no
+    /// longer pass the filters.
+    pub files_removed: u64,
+    /// Files that were re-read but turned out to have identical content
+    /// (mtime moved, bytes did not), so no re-parse was needed.
+    pub files_touched_only: u64,
+    /// Files the walk offered but `ingest` refused (unreadable, oversize).
+    pub files_skipped: u64,
+}
+
+impl RefreshOutcome {
+    /// True when the refresh changed nothing about the index contents.
+    pub fn is_noop(&self) -> bool {
+        self.files_reindexed == 0 && self.files_added == 0 && self.files_removed == 0
+    }
+}
+
 impl IndexState {
     /// Build a fresh index over `root`. Returns the populated state plus a
     /// summary of how many files were indexed vs skipped.
@@ -91,15 +132,17 @@ impl IndexState {
         };
         let mut outcome = BuildOutcome::default();
         let mut to_resolve: Vec<(FileId, String)> = Vec::new();
-        walk_indexable(&canonical_root, |abs| match state.ingest(abs) {
-            Some(file_id) => {
-                outcome.files_indexed += 1;
-                if let Some(file) = state.files.get(&file_id) {
-                    to_resolve.push((file_id, file.relative_path.clone()));
+        walk_indexable(&canonical_root, |abs, meta| {
+            match state.ingest(abs, Some(meta)) {
+                Some((file_id, _)) => {
+                    outcome.files_indexed += 1;
+                    if let Some(file) = state.files.get(&file_id) {
+                        to_resolve.push((file_id, file.relative_path.clone()));
+                    }
                 }
-            }
-            None => {
-                outcome.files_skipped += 1;
+                None => {
+                    outcome.files_skipped += 1;
+                }
             }
         });
         for (id, rel) in to_resolve {
@@ -109,6 +152,131 @@ impl IndexState {
         // Second pass: every Module node exists now, so resolve IMPORTS.
         state.link_symbol_imports();
         (state, outcome)
+    }
+
+    /// Bring an already-built index up to date with the workspace on
+    /// disk, re-reading only the files that actually moved.
+    ///
+    /// The walk is the same one `build_from_root` uses, and it already
+    /// has to `stat` every candidate to apply the size and symlink
+    /// filters. That metadata is the freshness oracle: a tracked file
+    /// whose mtime **and** size both match the indexed row is skipped
+    /// without opening it. Everything else is re-read, and only the
+    /// files whose content hash actually changed pay the tree-sitter
+    /// re-parse. Paths the walk no longer yields are dropped.
+    ///
+    /// Two whole-index passes survive, both of which are pure in-memory
+    /// map work with no disk or parser cost: import resolution is redone
+    /// for every file when the set of paths changed (a new file can
+    /// resolve an import that was dangling), and `link_symbol_imports`
+    /// re-links Module→Module edges. The Harn reference resolver runs
+    /// only when a `.harn` file moved, because it re-reads the whole
+    /// Harn source set.
+    ///
+    /// Returns a [`RefreshOutcome`] whose `files_reindexed` is the
+    /// honest count of files re-read from disk — zero on an unchanged
+    /// tree.
+    pub fn refresh_from_root(
+        &mut self,
+        resolver: Option<&HarnReferenceResolver>,
+    ) -> RefreshOutcome {
+        let root = self.root.clone();
+        let mut outcome = RefreshOutcome::default();
+        let mut seen: HashSet<String> = HashSet::with_capacity(self.files.len());
+        let mut reparse: Vec<(FileId, String)> = Vec::new();
+        let mut harn_touched = false;
+        let mut path_set_changed = false;
+
+        walk_indexable(&root, |abs, meta| {
+            outcome.files_scanned += 1;
+            let Some(rel) = relative_path_under_root(&root, abs) else {
+                return;
+            };
+            let known = self.path_to_id.get(&rel).copied();
+            if let Some(id) = known {
+                if let Some(file) = self.files.get(&id) {
+                    if file.size_bytes == meta.len() && file.mtime_ms == mtime_ms_of(meta) {
+                        outcome.files_unchanged += 1;
+                        seen.insert(rel);
+                        return;
+                    }
+                }
+            }
+            match self.ingest(abs, Some(meta)) {
+                Some((id, changed)) => {
+                    seen.insert(rel.clone());
+                    if known.is_none() {
+                        outcome.files_added += 1;
+                        path_set_changed = true;
+                    }
+                    if changed {
+                        outcome.files_reindexed += 1;
+                        if self.files.get(&id).is_some_and(|f| f.language == "harn") {
+                            harn_touched = true;
+                        }
+                        reparse.push((id, rel));
+                    } else {
+                        outcome.files_touched_only += 1;
+                    }
+                }
+                None => {
+                    outcome.files_skipped += 1;
+                }
+            }
+        });
+
+        // Anything tracked that the walk did not yield is gone (deleted,
+        // moved, or newly filtered out).
+        let stale: Vec<String> = self
+            .path_to_id
+            .keys()
+            .filter(|rel| !seen.contains(*rel))
+            .cloned()
+            .collect();
+        for rel in stale {
+            if self
+                .path_to_id
+                .get(&rel)
+                .and_then(|id| self.files.get(id))
+                .is_some_and(|f| f.language == "harn")
+            {
+                harn_touched = true;
+            }
+            self.remove_relative_path(&rel);
+            outcome.files_removed += 1;
+            path_set_changed = true;
+        }
+
+        if outcome.is_noop() {
+            return outcome;
+        }
+
+        if path_set_changed {
+            // A path appearing or disappearing can resolve or dangle an
+            // import in a file that did not itself change, so redo the
+            // whole resolution table. Pure map lookups, no disk reads.
+            let all: Vec<(FileId, String)> = self
+                .files
+                .values()
+                .map(|f| (f.id, f.relative_path.clone()))
+                .collect();
+            for (id, rel) in all {
+                self.rebuild_deps(id, &rel);
+            }
+        } else {
+            for (id, rel) in &reparse {
+                self.rebuild_deps(*id, rel);
+            }
+        }
+        for (id, _) in &reparse {
+            self.rebuild_symbol_graph_for(*id);
+        }
+        self.link_symbol_imports();
+        if harn_touched {
+            self.relink_harn_references(resolver);
+        }
+        self.last_built_unix_ms = now_unix_ms();
+        outcome
     }
 
     /// Re-index a single file by its absolute path. Returns the id of the
@@ -124,7 +292,7 @@ impl IndexState {
             self.remove_file_path(abs);
             return None;
         }
-        let id = self.ingest(abs)?;
+        let (id, _changed) = self.ingest(abs, None)?;
         let rel = self
             .files
             .get(&id)
@@ -144,7 +312,15 @@ impl IndexState {
         let Some(rel) = relative_path(&self.root, abs) else {
             return;
         };
-        let Some(id) = self.path_to_id.remove(&rel) else {
+        self.remove_relative_path(&rel);
+    }
+
+    /// Remove a workspace-relative path from every sub-index. The
+    /// path-keyed entry point, used by the incremental refresh where the
+    /// file is already known to be gone and re-canonicalising it would
+    /// be a wasted syscall. No-op when the path isn't tracked.
+    pub(super) fn remove_relative_path(&mut self, rel: &str) {
+        let Some(id) = self.path_to_id.remove(rel) else {
             return;
         };
         self.files.remove(&id);
@@ -154,11 +330,27 @@ impl IndexState {
         self.symbols.remove_file(id);
     }
 
-    fn ingest(&mut self, abs: &Path) -> Option<FileId> {
+    /// Read `abs` and install (or update) its row in every flat
+    /// sub-index. Returns the file id and whether the **contents**
+    /// changed; a file whose bytes hash the same as the indexed row
+    /// reports `false` so the caller can skip the tree-sitter re-parse,
+    /// and its recorded mtime is refreshed so the cheap stat gate stops
+    /// re-reading it on every later refresh.
+    ///
+    /// `known_metadata` lets the directory walk hand over the `stat` it
+    /// already performed instead of paying a second one per file.
+    fn ingest(&mut self, abs: &Path, known_metadata: Option<&Metadata>) -> Option<(FileId, bool)> {
         if !is_indexable_file(abs) {
             return None;
         }
-        let metadata = std::fs::metadata(abs).ok()?;
+        let owned;
+        let metadata = match known_metadata {
+            Some(meta) => meta,
+            None => {
+                owned = std::fs::metadata(abs).ok()?;
+                &owned
+            }
+        };
         if metadata.len() > MAX_FILE_BYTES {
             return None;
         }
@@ -168,14 +360,21 @@ impl IndexState {
         }
         let rel = relative_path(&self.root, abs)?;
         let hash = fnv1a64(content.as_bytes());
+        let mtime_ms = mtime_ms_of(metadata);
         let id = match self.path_to_id.get(&rel) {
             Some(existing_id) => {
-                if let Some(file) = self.files.get(existing_id) {
+                let existing_id = *existing_id;
+                if let Some(file) = self.files.get_mut(&existing_id) {
                     if file.content_hash == hash {
-                        return Some(*existing_id);
+                        // Same bytes under a newer timestamp. Record the
+                        // timestamp so the stat gate recognises it next
+                        // time, and tell the caller nothing changed.
+                        file.mtime_ms = mtime_ms;
+                        file.size_bytes = metadata.len();
+                        return Some((existing_id, false));
                     }
                 }
-                *existing_id
+                existing_id
             }
             None => {
                 let id = self.next_id;
@@ -192,19 +391,13 @@ impl IndexState {
             .to_ascii_lowercase();
         let language = language_for_extension(&ext).to_string();
         let imports = imports::extract_imports(&content, &language);
-        let mtime_ms = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
         let line_count = crate::text::count_lines(content.as_bytes()) as u32;
 
         let file = IndexedFile {
             id,
             relative_path: rel,
             language,
-            size_bytes: content.len() as u64,
+            size_bytes: metadata.len(),
             line_count,
             content_hash: hash,
             mtime_ms,
@@ -214,7 +407,7 @@ impl IndexState {
         self.trigrams.index_file(id, &content);
         self.words.index_file(id, &content);
         self.files.insert(id, file);
-        Some(id)
+        Some((id, true))
     }
 
     fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
@@ -401,6 +594,29 @@ pub(crate) fn now_unix_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Last-modified time of `metadata` in milliseconds since the Unix
+/// epoch, or `0` when the platform does not report one. Paired with the
+/// file size, this is the freshness oracle the incremental refresh uses
+/// to decide it can skip opening a file.
+pub(crate) fn mtime_ms_of(metadata: &Metadata) -> i64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Cheap relative path for a walk result. The walker descends from the
+/// already-canonical root and never follows a symlink, so every path it
+/// yields is canonical-prefixed and a plain `strip_prefix` is correct.
+/// [`relative_path`] stays the entry point for caller-supplied paths,
+/// which may be symlinked, relative, or already deleted.
+fn relative_path_under_root(root: &Path, abs: &Path) -> Option<String> {
+    let stripped = abs.strip_prefix(root).ok()?;
+    Some(crate::tools::args::to_agent_path(stripped))
 }
 
 pub(super) fn canonicalize(root: &Path) -> PathBuf {

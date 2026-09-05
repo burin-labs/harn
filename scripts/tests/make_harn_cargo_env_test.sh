@@ -891,9 +891,9 @@ fi
 for expected in \
   'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate' \
   'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate --check' \
-  '"$harn_bin" provider catalog generate;' \
+  '"$harn_bin" provider catalog generate &&' \
   '"$harn_bin" provider catalog support' \
-  '"$harn_bin" provider catalog generate --check;' \
+  '"$harn_bin" provider catalog generate --check &&' \
   '"$harn_bin" provider catalog support --check' \
   '"$harn_bin" provider catalog matrix' \
   '"$harn_bin" provider catalog matrix --check'

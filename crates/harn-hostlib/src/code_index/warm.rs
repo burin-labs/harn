@@ -18,7 +18,7 @@ use super::builtins::SharedIndex;
 use super::state::{canonicalize, IndexState};
 use super::CodeIndexCapability;
 use crate::error::HostlibError;
-use crate::tools::args::{build_dict, dict_arg, optional_bool, optional_string};
+use crate::tools::args::{build_dict, dict_arg, optional_bool, optional_string, str_value};
 use crate::HarnReferenceResolver;
 
 /// Outcome of [`CodeIndexCapability::warm_session`].
@@ -300,10 +300,79 @@ fn live_stats_for_root(
         return None;
     }
     Some(build_dict([
+        // Joined another builder's flight: this call did no work itself,
+        // and says so rather than reporting the other flight's counts.
+        ("mode", str_value("refreshed")),
         ("files_indexed", VmValue::Int(state.files.len() as i64)),
         ("files_skipped", VmValue::Int(0)),
+        ("files_reindexed", VmValue::Int(0)),
+        ("files_unchanged", VmValue::Int(state.files.len() as i64)),
+        ("files_added", VmValue::Int(0)),
+        ("files_removed", VmValue::Int(0)),
         ("elapsed_ms", VmValue::Int(elapsed.as_millis() as i64)),
     ]))
+}
+
+/// Reconcile the live index against disk when it is already anchored at
+/// `canonical`, returning the same stats dict a full rebuild would.
+///
+/// Returns `None` — and rebuilds nothing — when the slot is empty or
+/// holds a different root, which is the caller's signal to take the full
+/// build path. The returned flag says whether the index actually
+/// changed, so the caller can skip writing a snapshot that would be
+/// byte-identical to the one already on disk.
+///
+/// The workspace mutex is held for the duration. A refresh mutates the
+/// index in place rather than swapping a finished copy in, and readers
+/// must not observe it half-reconciled. On an unchanged tree that window
+/// is a stat walk; the pathological case, a refresh where every file
+/// changed, is bounded by the full-rebuild cost it replaces.
+fn refresh_in_place(
+    index: &SharedIndex,
+    canonical: &Path,
+    resolver: Option<&HarnReferenceResolver>,
+    started: Instant,
+) -> Option<(VmValue, bool)> {
+    let mut guard = index.lock().expect("code_index mutex poisoned");
+    let state = guard.as_mut()?;
+    if state.root != *canonical {
+        return None;
+    }
+    let outcome = state.refresh_from_root(resolver);
+    let changed = !outcome.is_noop();
+    let indexed_files = state.files.len() as i64;
+    drop(guard);
+    let elapsed_ms = started.elapsed().as_millis() as i64;
+    tracing::info!(
+        target: "harn_hostlib::code_index",
+        root = %canonical.display(),
+        files_scanned = outcome.files_scanned,
+        files_unchanged = outcome.files_unchanged,
+        files_reindexed = outcome.files_reindexed,
+        files_added = outcome.files_added,
+        files_removed = outcome.files_removed,
+        elapsed_ms,
+        "code-index incremental refresh complete",
+    );
+    Some((
+        build_dict([
+            ("mode", str_value("refreshed")),
+            ("files_indexed", VmValue::Int(indexed_files)),
+            ("files_skipped", VmValue::Int(outcome.files_skipped as i64)),
+            (
+                "files_reindexed",
+                VmValue::Int(outcome.files_reindexed as i64),
+            ),
+            (
+                "files_unchanged",
+                VmValue::Int(outcome.files_unchanged as i64),
+            ),
+            ("files_added", VmValue::Int(outcome.files_added as i64)),
+            ("files_removed", VmValue::Int(outcome.files_removed as i64)),
+            ("elapsed_ms", VmValue::Int(elapsed_ms)),
+        ]),
+        changed,
+    ))
 }
 
 /// Rebuild that joins any in-flight session warm for the same root.
@@ -317,7 +386,7 @@ pub(super) fn run_rebuild_single_flight(
 
     let raw = dict_arg(BUILTIN_REBUILD, args)?;
     let dict = raw.as_ref();
-    let _force = optional_bool(BUILTIN_REBUILD, dict, "force", false)?;
+    let force = optional_bool(BUILTIN_REBUILD, dict, "force", false)?;
     let root = optional_string(BUILTIN_REBUILD, dict, "root")?
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -353,10 +422,37 @@ pub(super) fn run_rebuild_single_flight(
             continue;
         };
 
+        // An index already anchored at this root is reconciled in place.
+        // Only a cold slot, a different root, or an explicit `force` pays
+        // the full walk-read-parse pass. This is what makes `ensure_fresh`
+        // the freshness gate its name claims: on an unchanged tree the
+        // whole call is one `stat` per file.
+        if !force {
+            if let Some((stats, changed)) = refresh_in_place(index, &canonical, resolver, started) {
+                drop(flight);
+                // Only a refresh that changed something is worth writing
+                // back. The snapshot is a whole-index serialisation, so
+                // persisting after a no-op would put a multi-hundred-
+                // megabyte write on the read path we just made free.
+                if changed {
+                    if let Err(error) = super::persist_shared(index) {
+                        tracing::debug!(
+                            target: "harn_hostlib::code_index",
+                            %error,
+                            root = %canonical.display(),
+                            "code-index refresh persist failed",
+                        );
+                    }
+                }
+                return Ok(stats);
+            }
+        }
+
         tracing::info!(
             target: "harn_hostlib::code_index",
             root = %canonical.display(),
-            "code-index rebuild starting",
+            force,
+            "code-index full rebuild starting",
         );
         let (mut state, outcome) = IndexState::build_from_root(&canonical);
         state.relink_harn_references(resolver);
@@ -383,8 +479,19 @@ pub(super) fn run_rebuild_single_flight(
             "code-index rebuild complete",
         );
         return Ok(build_dict([
+            ("mode", str_value("built")),
             ("files_indexed", VmValue::Int(outcome.files_indexed as i64)),
             ("files_skipped", VmValue::Int(outcome.files_skipped as i64)),
+            // A cold build reads every file it indexes and adds every one
+            // of them, so the reconciliation counters stay meaningful
+            // rather than being reported as zero work.
+            (
+                "files_reindexed",
+                VmValue::Int(outcome.files_indexed as i64),
+            ),
+            ("files_unchanged", VmValue::Int(0)),
+            ("files_added", VmValue::Int(outcome.files_indexed as i64)),
+            ("files_removed", VmValue::Int(0)),
             ("elapsed_ms", VmValue::Int(elapsed_ms)),
         ]));
     }
@@ -393,8 +500,13 @@ pub(super) fn run_rebuild_single_flight(
     Ok(
         live_stats_for_root(index, &canonical, started.elapsed()).unwrap_or_else(|| {
             build_dict([
+                ("mode", str_value("refreshed")),
                 ("files_indexed", VmValue::Int(0)),
                 ("files_skipped", VmValue::Int(0)),
+                ("files_reindexed", VmValue::Int(0)),
+                ("files_unchanged", VmValue::Int(0)),
+                ("files_added", VmValue::Int(0)),
+                ("files_removed", VmValue::Int(0)),
                 (
                     "elapsed_ms",
                     VmValue::Int(started.elapsed().as_millis() as i64),

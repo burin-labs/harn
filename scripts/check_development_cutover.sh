@@ -37,6 +37,21 @@ expected_version="$(release_next_patch_development "${latest_tag#v}")" || {
 }
 expected_branch="automation/development-$expected_version"
 
+# The next stable workspace lands before its tag. Until publication catches
+# up, the preceding release's development identity is no longer a useful debt.
+# This is an unproven publication state, never a successful cutover verdict.
+if [[ "$workspace_version" == "${expected_version%-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}}" ]]; then
+  description="publication pending: main $workspace_version, latest tag $latest_tag"
+  echo "main_ref=$main_ref"
+  echo "main_version=$workspace_version"
+  echo "latest_tag=$latest_tag"
+  echo "$description"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'state=pending\ndescription=%s\n' "$description" >> "$GITHUB_OUTPUT"
+  fi
+  exit 0
+fi
+
 if [[ -n "$pr_rows_file" ]]; then
   if [[ ! -f "$pr_rows_file" ]]; then
     echo "error: fixture PR rows file does not exist: $pr_rows_file" >&2
@@ -119,6 +134,6 @@ if [[ "$workspace_version" != "$expected_version" && "$open_count" -eq 0 ]]; the
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  echo "description=$description" >> "$GITHUB_OUTPUT"
+  printf 'state=success\ndescription=%s\n' "$description" >> "$GITHUB_OUTPUT"
 fi
 echo "development cutover monitor: $description"

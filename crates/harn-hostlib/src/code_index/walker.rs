@@ -7,6 +7,7 @@
 //! ignore configuration.
 
 use std::collections::HashSet;
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 
 /// Maximum file size accepted by the indexer. Larger files are skipped to
@@ -220,10 +221,13 @@ const BASE_CONTAINS: &[&str] = &[
 const SENSITIVE_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg"];
 
 /// Walk `root` recursively, yielding every absolute path that passes the
-/// indexer's filters. Walks are depth-first; the order within a directory
+/// indexer's filters together with the `symlink_metadata` the filters
+/// already had to read. Handing the metadata back lets an incremental
+/// refresh decide "unchanged" from mtime and size without a second
+/// `stat` per file. Walks are depth-first; the order within a directory
 /// is sorted lexicographically so two runs over identical inputs return
 /// identical lists (helpful for snapshot tests).
-pub(crate) fn walk_indexable<F: FnMut(&Path)>(root: &Path, mut on_file: F) {
+pub(crate) fn walk_indexable<F: FnMut(&Path, &Metadata)>(root: &Path, mut on_file: F) {
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     let skip_dirs: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
     while let Some(dir) = stack.pop() {
@@ -264,7 +268,7 @@ pub(crate) fn walk_indexable<F: FnMut(&Path)>(root: &Path, mut on_file: F) {
                 if is_sensitive(&entry) {
                     continue;
                 }
-                on_file(&entry);
+                on_file(&entry, &metadata);
             }
         }
     }
@@ -350,7 +354,7 @@ mod tests {
         .unwrap();
 
         let mut found: Vec<String> = Vec::new();
-        walk_indexable(root, |p| {
+        walk_indexable(root, |p, _meta| {
             found.push(
                 p.strip_prefix(root)
                     .unwrap()

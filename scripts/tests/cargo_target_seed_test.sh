@@ -69,6 +69,38 @@ if [[ ! -f "${restored_target}/debug/deps/libreusable.rlib" \
   echo "restore did not project the seed into the empty target" >&2
   exit 1
 fi
+# A restored tree must carry this tree's age, not the seed's. The copy
+# reproduces the seed's timestamps exactly, so before this was stamped a target
+# restored seconds ago reported an mtime from whenever the seed was published
+# and the target-cache GC retired it as a cold cache before its first build.
+# Backdate the seed itself so the restore has an old age to inherit, then read
+# the restored tree's age back.
+touch -t 202001010000 \
+  "${seed_dir}" "${seed_dir}/debug" "${seed_dir}/debug/deps/libreusable.rlib"
+stamped_target="${tmp_root}/stamped target"
+mkdir -p "${stamped_target}"
+env "${seed_env[@]}" "${seed_tool}" restore "${stamped_target}" "${storage_root}" >/dev/null
+restore_epoch="$(date +%s)"
+for stamped in "${stamped_target}" "${stamped_target}/debug"; do
+  stamped_epoch="$(stat -c %Y "${stamped}" 2>/dev/null || stat -f %m "${stamped}" 2>/dev/null)"
+  if [[ -z "${stamped_epoch}" ]] || (( restore_epoch - stamped_epoch > 600 )); then
+    echo "a just-restored tree reported the seed's age at ${stamped}: ${stamped_epoch:-unreadable}" >&2
+    exit 1
+  fi
+done
+# The control that keeps the fix honest. Stamping the artifacts too would be an
+# easy way to pass the assertion above and would destroy the reuse the seed
+# exists for, because Cargo decides freshness by comparing these mtimes against
+# source files. Only the directories the GC reads may move.
+artifact_epoch="$(
+  stat -c %Y "${stamped_target}/debug/deps/libreusable.rlib" 2>/dev/null \
+    || stat -f %m "${stamped_target}/debug/deps/libreusable.rlib" 2>/dev/null
+)"
+if [[ -z "${artifact_epoch}" ]] || (( restore_epoch - artifact_epoch < 600 )); then
+  echo "the restore touched a seed artifact, which invalidates Cargo's freshness reuse" >&2
+  exit 1
+fi
+
 printf '%s\n' 'lane-local mutation' > "${restored_target}/debug/deps/libreusable.rlib"
 if ! grep -Fxq 'reusable dependency artifact' "${seed_dir}/debug/deps/libreusable.rlib"; then
   echo "a restored lane mutated the immutable seed" >&2
