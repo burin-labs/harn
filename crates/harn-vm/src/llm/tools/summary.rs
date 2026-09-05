@@ -6,13 +6,23 @@
 //! the native wire payload and the training-corpus projection — so a corpus
 //! cannot record a description the model was never served.
 //!
-//! The text tool catalog is rendered in Harn, by `__agent_tool_summary` in
-//! `stdlib/agent/preflight.harn`, against the same [`MIN_SUMMARY_CHARS`] floor
-//! and the same whole-sentence rule. That is a second implementation of one
-//! policy and a real drift seam: the two are held in parity by their tests
-//! (`tests/compact_tools.rs` here, `agent_tool_compact_listing.harn` there)
-//! rather than by a shared owner, because the stdlib has no builtin to call
-//! into this module. Changing the rule means changing both.
+//! Harn's text catalog calls this same owner through `tool_description_summary`.
+
+use crate::stdlib::macros::harn_builtin;
+use crate::value::{VmError, VmValue};
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_description_summary(description: string) -> string",
+    category = "tools",
+    doc = "Return the compact description served by native and text tool catalogs."
+)]
+fn tool_description_summary_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let description = crate::stdlib::args::Args::thrown("tool_description_summary", args)
+        .string(0, "description")?;
+    Ok(VmValue::String(tool_summary(description).into()))
+}
 
 /// Below this length a summary is not worth its own paragraph, so the next
 /// sentence is pulled in. Without a floor the rule degenerates: a description
