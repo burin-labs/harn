@@ -4,6 +4,7 @@ import {
   __dispatch_results_list,
   __tool_result_ok,
 } from "std/agent/loop_result_status"
+import { AgentSpec } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import {
@@ -135,7 +136,7 @@ pub fn agent_completion_claim_tool(registry: ToolRegistry? = nil) -> ToolRegistr
  * @errors: [validation]
  * @api_stability: experimental
  */
-pub fn agent_completion_claim_apply_options(options: dict? = nil) -> dict {
+pub fn agent_completion_claim_apply_options(options: AgentSpec? = nil) -> AgentSpec {
   const opts = options ?? {}
   const enabled = opts?.completion_tool ?? false
   if type_of(enabled) != "bool" {
