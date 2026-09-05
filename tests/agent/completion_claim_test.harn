@@ -248,6 +248,25 @@ pipeline test_disabled_completion_tool_is_exactly_inert(harness: Harness, task: 
   assert_eq(disabled.serialized, without.serialized)
 }
 
+pipeline test_completion_tool_preserves_a_list_backed_registry(harness: Harness, task: unknown) {
+  const opts = agent_completion_claim_apply_options(
+    {
+      completion_tool: true,
+      tools: [
+        {
+          name: "inspect",
+          description: "Inspect the task.",
+          parameters: {},
+          handler: { _args -> {status: "ready"} },
+        },
+      ],
+    },
+  )
+  const names = opts.tools.tools.map({ entry -> entry.name }).to_list()
+  assert(contains(names, "inspect"))
+  assert(contains(names, "task_complete"))
+}
+
 pipeline test_unavailable_tool_keeps_the_actual_judge_prompt_byte_identical(
   harness: Harness,
   task: unknown,

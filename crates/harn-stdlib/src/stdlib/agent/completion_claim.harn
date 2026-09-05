@@ -11,7 +11,7 @@ import {
   AgentTranscriptToolLifecycle,
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
-import { ToolRegistry } from "std/tools"
+import { ToolRegistry, tool_registry_from } from "std/tools"
 
 const __COMPLETION_CLAIM_TOOL_NAME = "task_complete"
 
@@ -146,8 +146,14 @@ pub fn agent_completion_claim_apply_options(options: AgentSpec? = nil) -> AgentS
     return opts
   }
   const requirement_ids = __completion_claim_requirement_ids(opts)
+  const existing_tools = opts?.tools
+  const registry: ToolRegistry = if type_of(existing_tools) == "list" {
+    tool_registry_from(existing_tools)
+  } else {
+    existing_tools ?? tool_registry()
+  }
   return __with_prompt_fragment(
-    opts + {tools: agent_completion_claim_tool(opts?.tools)},
+    opts + {tools: agent_completion_claim_tool(registry)},
     {
       id: "completion_claim",
       source: "std/agent/completion_claim",
