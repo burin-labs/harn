@@ -20,12 +20,12 @@ fn catalog_renderers_read_source_changes_without_rebuilding() {
         sources.join("catalog_sources/catalog.toml"),
         concat!(
             include_str!("../../../harn-vm/src/llm/providers.toml"),
-            "\n[models.\"mock/source-falsifier-8062\"]\nname = \"Source falsifier 8062\"\nprovider = \"mock\"\ncontext_window = 8192\n"
-        ),
+            "\n[providers.mock]\ndisplay_name = \"Mock source fixture\"\nauth_style = \"none\"\n\n[models.\"mock/source-falsifier-8062\"]\nname = \"Source falsifier 8062\"\nprovider = \"mock\"\ncontext_window = 8192\n"
+        ).replacen("unverified = [", "unverified = [\"mock\",", 1),
     ).unwrap();
     fs::write(
         sources.join("capability_sources/capabilities.toml"),
-        "[[provider.mock]]\nmodel_match = \"source-falsifier-8062\"\nstreaming = true\n",
+        "[[provider.mock]]\nmodel_match = \"source-falsifier-8062\"\nstreaming = true\nprompt_caching = true\n",
     )
     .unwrap();
     for surface in ["matrix", "support"] {
@@ -42,6 +42,20 @@ fn catalog_renderers_read_source_changes_without_rebuilding() {
         );
         assert!(!text.contains("source-falsifier-8063"));
     }
+    let support = harn_e2e_command()
+        .current_dir(root.path())
+        .args(["provider", "catalog", "support", "--json"])
+        .output()
+        .unwrap();
+    assert!(support.status.success());
+    let support: serde_json::Value = serde_json::from_slice(&support.stdout).unwrap();
+    let mock = support["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == "mock")
+        .expect("source provider reached support renderer");
+    assert_eq!(mock["capabilities"]["prompt_or_context_cache"], true);
     fs::write(
         sources.join("capability_sources/capabilities.toml"),
         "[[invalid",

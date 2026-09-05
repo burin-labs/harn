@@ -6,7 +6,7 @@ use harn_vm::llm::capabilities::{
     self, Capabilities, LiveEndpointFamily, ProviderCapabilityMatrixRow,
 };
 use harn_vm::provider_catalog::{
-    self, CatalogModel, CatalogProvider, DeprecationStatus, ProviderCatalogArtifact,
+    CatalogModel, CatalogProvider, DeprecationStatus, ProviderCatalogArtifact,
     ProviderClassification,
 };
 use serde::{Deserialize, Serialize};
@@ -221,11 +221,12 @@ pub(crate) fn build_report(
     notes_path: &Path,
     empirical_paths: &[PathBuf],
 ) -> Result<ProviderSupportReport, String> {
-    let catalog = provider_catalog::artifact();
+    let snapshot = super::providers::load_source_snapshot()?;
     let notes = load_notes(notes_path)?;
     let empirical = load_empirical(empirical_paths)?;
     Ok(build_report_from_parts(
-        catalog,
+        snapshot.catalog,
+        &snapshot.capabilities,
         notes_source_label(notes_path),
         notes,
         empirical,
@@ -234,6 +235,7 @@ pub(crate) fn build_report(
 
 fn build_report_from_parts(
     catalog: ProviderCatalogArtifact,
+    capabilities: &capabilities::CapabilitiesFile,
     notes_source: String,
     notes: SupportNotesFile,
     empirical: EmpiricalIndex,
@@ -257,7 +259,7 @@ fn build_report_from_parts(
     }
     let mut capability_rows_by_provider: BTreeMap<String, Vec<ProviderCapabilityMatrixRow>> =
         BTreeMap::new();
-    for row in capabilities::matrix_rows() {
+    for row in capabilities::matrix_rows_for_base(capabilities) {
         capability_rows_by_provider
             .entry(row.provider.clone())
             .or_default()
@@ -294,6 +296,7 @@ fn build_report_from_parts(
                 &capability_rows_by_provider,
                 &catalog.qc_defaults,
                 &empirical,
+                capabilities,
             )
         })
         .collect();
@@ -357,6 +360,7 @@ fn build_entry(
     capability_rows_by_provider: &BTreeMap<String, Vec<ProviderCapabilityMatrixRow>>,
     qc_defaults: &BTreeMap<String, String>,
     empirical: &EmpiricalIndex,
+    capabilities: &capabilities::CapabilitiesFile,
 ) -> ProviderSupportEntry {
     let catalog_provider = note
         .and_then(|entry| entry.catalog_provider.as_deref())
@@ -380,7 +384,7 @@ fn build_entry(
     let caps = if model_id == "*" {
         Capabilities::default()
     } else {
-        capabilities::lookup(catalog_provider, &model_id)
+        capabilities::lookup_with_base_file(catalog_provider, &model_id, capabilities)
     };
     let recommended_tool_format = note
         .and_then(|entry| entry.recommended_tool_format.as_deref())
@@ -402,7 +406,9 @@ fn build_entry(
         .and_then(|entry| entry.display_name.clone())
         .or_else(|| provider.map(|provider| provider.display_name.clone()))
         .unwrap_or_else(|| id.to_string());
-    let batch_api = harn_vm::llm_config::effective_batch_api_supported(catalog_provider, &caps);
+    let batch_api = caps.batch_api
+        || provider
+            .is_some_and(|provider| provider.features.iter().any(|feature| feature == "batch"));
 
     ProviderSupportEntry {
         id: id.to_string(),

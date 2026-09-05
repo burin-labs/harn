@@ -10,12 +10,14 @@ use crate::cli::{
 mod artifacts;
 mod build;
 mod overlay_audit;
+mod source_snapshot;
 mod tool_probe_audit;
 mod tool_probe_request;
 
 pub(crate) use artifacts::{run_export, run_validate};
 pub(crate) use build::run_generate;
 pub(crate) use overlay_audit::run_overlay_audit;
+pub(crate) use source_snapshot::load_source_snapshot;
 pub(crate) use tool_probe_audit::run as run_audit;
 pub(crate) use tool_probe_request::{
     render as render_tool_probe_request, resolve_probe_wire_model,
@@ -98,8 +100,15 @@ fn refresh_run_args(args: &ProvidersRefreshArgs) -> Vec<OsString> {
 }
 
 pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
-    let rows = crate::commands::check::provider_matrix::filtered_rows(args.filter.as_deref());
-    let catalog = crate::commands::check::provider_matrix::load_catalog_for_docs(&args.empirical)?;
+    let snapshot = load_source_snapshot()?;
+    let rows = crate::commands::check::provider_matrix::filter_rows(
+        harn_vm::llm::capabilities::matrix_rows_for_base(&snapshot.capabilities),
+        args.filter.as_deref(),
+    );
+    let catalog = crate::commands::check::provider_matrix::catalog_with_empirical(
+        snapshot.catalog,
+        &args.empirical,
+    )?;
     let generated = crate::commands::check::provider_matrix::generate_markdown(&rows, &catalog);
     if args.check {
         match fs::read_to_string(&args.output) {

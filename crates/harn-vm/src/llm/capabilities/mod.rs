@@ -76,8 +76,8 @@ pub use admission::{
 };
 pub use audit::{
     audit_builtin_catalogued_chat_model_tool_capabilities,
-    audit_catalogued_chat_model_tool_capabilities, matrix_rows, ProviderCapabilityMatrixRow,
-    ToolCapabilityAuditGap, ToolCapabilityAuditReport,
+    audit_catalogued_chat_model_tool_capabilities, matrix_rows, matrix_rows_for_base,
+    ProviderCapabilityMatrixRow, ToolCapabilityAuditGap, ToolCapabilityAuditReport,
 };
 pub use lookup::{
     builtin_file, clear_user_overrides, lookup, lookup_with_base_file, lookup_with_user_overrides,
