@@ -1033,7 +1033,7 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_local_callables() 
 #[test]
 fn capability_apply_ignores_ambient_builtin_names_shadowed_by_callable_parameters() {
     let (result, updated) = apply_single(
-        "fn call() -> string { return read_file(\"value.txt\") }\nfn callback_call(call: fn() -> int) -> int { return call() }\nfn callback_git(git: fn() -> int) -> int { return git() }\nfn callback_interpolation(call: fn() -> int) -> string { return \"${call()}\" }\n",
+        "fn call() -> string { return read_file(\"value.txt\") }\nfn callback_call(call: fn() -> int) -> int { return call() }\nfn callback_git(git: fn() -> int) -> int { return git() }\nfn callback_default(call: fn() -> int, value: int = call()) -> int { return value }\nfn callback_interpolation(call: fn() -> int) -> string { return \"${call()}\" }\n",
     );
 
     assert_eq!(
@@ -1051,6 +1051,10 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_callable_parameter
     assert!(
         updated.contains("fn callback_interpolation(call: fn() -> int) -> string"),
         "interpolated callback calls must use the same lexical resolution:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn callback_default(call: fn() -> int, value: int = call()) -> int"),
+        "default expressions must use left-to-right lexical resolution:\n{updated}"
     );
 }
 

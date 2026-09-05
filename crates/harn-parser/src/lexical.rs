@@ -305,6 +305,24 @@ pub fn lexically_resolved_identifier_spans(
 ) -> HashSet<(usize, usize)> {
     let mut analysis =
         LexicalAnalysis::new_with_source(&MatchPatternCatalog::default(), Some(source));
+    // Parameter defaults execute left to right. An earlier parameter can
+    // shadow a builtin in a later default, while the current and later
+    // parameters are not visible yet.
+    let mut visible_params = Scope::new();
+    for param in params {
+        if let Some(default) = &param.default_value {
+            analysis.walk_node(
+                default,
+                std::slice::from_ref(&visible_params),
+                false,
+                &BindingOwner::Current,
+            );
+        }
+        visible_params.extend(parameter_scope(
+            std::slice::from_ref(param),
+            &BindingOwner::Current,
+        ));
+    }
     analysis.walk_body_with_bindings(
         body,
         Vec::new(),
