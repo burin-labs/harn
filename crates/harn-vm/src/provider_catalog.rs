@@ -56,15 +56,14 @@ mod supersession_tests;
 mod tests;
 #[cfg(test)]
 mod tests_parity_provenance;
-mod types;
 mod validation;
 
 pub use bindings::{swift_binding, swift_binding_embedded, typescript_declarations};
 pub(crate) use from_artifact::config_from_artifact;
 pub use harn_binding::harn_declarations;
+pub use harn_provider_catalog::artifact::*;
 pub use remote::{refresh_runtime_catalog, CatalogRefreshOptions, CatalogRefreshReport};
 pub use schema::{schema_json, schema_value};
-pub use types::*;
 pub use validation::{validate_artifact, validate_current};
 
 pub fn artifact() -> ProviderCatalogArtifact {

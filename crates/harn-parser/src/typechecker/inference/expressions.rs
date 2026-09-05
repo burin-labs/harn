@@ -10,7 +10,7 @@
 //! also runs from contexts that should stay silent (e.g. probing a
 //! `Ternary`'s arm types for `infer_type`'s union merge).
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::ControlFlow};
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -430,11 +430,7 @@ impl TypeChecker {
             }
 
             Node::Identifier(name) => {
-                // A defined local shadows a same-named function — return its
-                // type even when statically unknown (`None`), rather than
-                // falling through to the function reference below. (Flattening
-                // to `None` and falling through would mis-resolve a shadowing
-                // `var x = …` to a function `x` of the same name.)
+                // An untyped local still owns its name over a module function.
                 if let Some(var_ty) = scope.get_var(name) {
                     return var_ty.clone();
                 }
@@ -463,6 +459,10 @@ impl TypeChecker {
                 type_args,
                 args,
             } => {
+                if let ControlFlow::Break(return_type) = self.infer_lexical_call_return(name, scope)
+                {
+                    return return_type;
+                }
                 let source_defined = scope
                     .get_fn(name)
                     .is_some_and(|signature| signature.definition_span.is_some());

@@ -153,6 +153,9 @@ mod ambient_prefixed_lookup_tests {
 
     #[test]
     fn ambient_lookup_resolves_declared_capability_global_names() {
+        let _guard = crate::legacy_ambient_capabilities_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Ensure contracts are visible the same way the CLI installs them.
         let _ = harn_capability_contracts::manifest();
         std::env::set_var("HARN_LEGACY_AMBIENT_CAPABILITIES", "1");

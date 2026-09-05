@@ -50,8 +50,13 @@ pub struct IndexState {
     pub trigrams: TrigramIndex,
     /// Identifier-token inverted index.
     pub words: WordIndex,
-    /// Forward + reverse import graph.
+    /// Forward + reverse import graph. Explicit import statements only;
+    /// ask [`IndexState::imports_of`] for the full dependency answer,
+    /// which folds in implicit same-module visibility.
     pub deps: DepGraph,
+    /// Module membership for languages where a file's module is implied
+    /// by its location. Rebuilt whenever the path set changes.
+    pub(crate) modules: imports::ModuleIndex,
     /// Append-only log of file mutations.
     pub versions: VersionLog,
     /// Live agents + advisory locks.
@@ -110,6 +115,29 @@ impl RefreshOutcome {
     }
 }
 
+/// One language's row in [`IndexState::import_census`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportCensusRow {
+    /// Language tag as the file table records it.
+    pub language: String,
+    /// The resolution strategy this language declares.
+    pub strategy: imports::ResolutionStrategy,
+    /// Indexed files of this language.
+    pub files: u64,
+    /// Files from which at least one import string was extracted.
+    pub files_with_imports: u64,
+    /// Files whose own import statements resolved to at least one
+    /// workspace file. Deliberately separate from
+    /// [`Self::files_with_module_peers`]: a language with implicit
+    /// module membership would otherwise report every file as resolved
+    /// while its import-path resolver did nothing at all, which is
+    /// exactly the failure this census exists to catch.
+    pub files_with_resolved_imports: u64,
+    /// Files that see at least one other file through module membership
+    /// rather than through an import statement.
+    pub files_with_module_peers: u64,
+}
+
 impl IndexState {
     /// Build a fresh index over `root`. Returns the populated state plus a
     /// summary of how many files were indexed vs skipped.
@@ -122,6 +150,7 @@ impl IndexState {
             trigrams: TrigramIndex::new(),
             words: WordIndex::new(),
             deps: DepGraph::new(),
+            modules: imports::ModuleIndex::default(),
             versions: VersionLog::new(),
             agents: AgentRegistry::new(),
             symbols: SymbolGraph::new(),
@@ -145,6 +174,7 @@ impl IndexState {
                 }
             }
         });
+        state.refresh_module_index();
         for (id, rel) in to_resolve {
             state.rebuild_deps(id, &rel);
             state.rebuild_symbol_graph_for(id);
@@ -255,6 +285,7 @@ impl IndexState {
             // A path appearing or disappearing can resolve or dangle an
             // import in a file that did not itself change, so redo the
             // whole resolution table. Pure map lookups, no disk reads.
+            self.refresh_module_index();
             let all: Vec<(FileId, String)> = self
                 .files
                 .values()
@@ -299,6 +330,7 @@ impl IndexState {
             .map(|f| f.relative_path.clone())
             .unwrap_or_default();
         if !rel.is_empty() {
+            self.refresh_module_index();
             self.rebuild_deps(id, &rel);
             self.rebuild_symbol_graph_for(id);
             self.link_symbol_imports();
@@ -328,6 +360,14 @@ impl IndexState {
         self.words.remove_file(id);
         self.deps.remove_file(id);
         self.symbols.remove_file(id);
+        // Module membership is derived from the path table, so a
+        // removal has to be reflected here or every sibling keeps
+        // answering with a file that is gone. Guarded on the file
+        // actually belonging to a module: the rebuild is O(paths), and
+        // the common removal is a file no module ever contained.
+        if self.modules.home_of(id).is_some() {
+            self.refresh_module_index();
+        }
     }
 
     /// Read `abs` and install (or update) its row in every flat
@@ -410,6 +450,50 @@ impl IndexState {
         Some((id, true))
     }
 
+    /// Recompute module membership from the current path table. O(paths),
+    /// so it runs once per path-set change rather than once per file.
+    fn refresh_module_index(&mut self) {
+        self.modules = imports::ModuleIndex::build(&self.path_to_id);
+    }
+
+    /// [`Self::refresh_module_index`] for the snapshot-restore path,
+    /// which fills the path table in from disk rather than by walking.
+    pub(crate) fn rebuild_module_index(&mut self) {
+        self.refresh_module_index();
+    }
+
+    /// Every file `id` depends on: the targets of its own import
+    /// statements, plus every other file in its module for languages
+    /// where same-module visibility needs no import statement.
+    ///
+    /// The second half is not stored as edges. A module of N files would
+    /// need N squared of them, which is the shape that made the symbol
+    /// graph unusable in issue #8081. Membership is O(N) in
+    /// [`Self::modules`] and expanded per query instead.
+    pub fn imports_of(&self, id: FileId) -> Vec<FileId> {
+        let mut out = self.deps.imports_of(id);
+        out.extend(self.modules.files_in_roots(self.deps.module_imports_of(id)));
+        out.extend(self.modules.siblings_of(id));
+        out.sort_unstable();
+        out.dedup();
+        out.retain(|other| *other != id);
+        out
+    }
+
+    /// Reverse of [`Self::imports_of`]. Same-module visibility is
+    /// symmetric, so the sibling half is identical in both directions.
+    pub fn importers_of(&self, id: FileId) -> Vec<FileId> {
+        let mut out = self.deps.importers_of(id);
+        if let Some(home) = self.modules.home_of(id) {
+            out.extend(self.deps.module_importers_of(home));
+        }
+        out.extend(self.modules.siblings_of(id));
+        out.sort_unstable();
+        out.dedup();
+        out.retain(|other| *other != id);
+        out
+    }
+
     fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
         let Some(file) = self.files.get(&id).cloned() else {
             return;
@@ -419,7 +503,9 @@ impl IndexState {
             relative_path,
             &file.language,
             &self.path_to_id,
+            &self.modules,
         );
+        self.deps.set_module_imports(id, resolved.modules);
         self.deps
             .set_edges(id, resolved.resolved, resolved.unresolved);
     }
@@ -464,6 +550,11 @@ impl IndexState {
     pub(super) fn link_symbol_imports(&mut self) {
         let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
         for id in self.files.keys() {
+            // Explicit import statements only. Module-wide visibility
+            // would put one Module→Module edge in the symbol graph per
+            // pair of files in a target, which is the cross-product
+            // issue #8081 removed. The call resolver consults module
+            // membership directly instead.
             resolved.insert(*id, self.deps.imports_of(*id));
         }
         self.symbols.link_imports(&resolved);
@@ -493,6 +584,57 @@ impl IndexState {
                 tracing::warn!(%error, "Harn reference relink failed; cleared stale REFS edges");
             }
         }
+    }
+
+    /// Per-language import-resolution census.
+    ///
+    /// This exists because the aggregate number is the only one that
+    /// catches the failure it was written for. Every per-language unit
+    /// test passed while Rust, Swift, Go and Harn resolved nothing at
+    /// all across a real workspace, because each language's resolver was
+    /// declared `noop` and a zero from "no resolver" looked exactly like
+    /// a zero from "nothing to resolve".
+    ///
+    /// [`ImportCensusRow::strategy`] is therefore part of the answer, not
+    /// decoration: a row reading `unresolved-by-design` is reporting that
+    /// nothing was attempted, which is a different claim from a row that
+    /// tried and found no target.
+    pub fn import_census(&self) -> Vec<ImportCensusRow> {
+        let mut by_language: HashMap<&str, ImportCensusRow> = HashMap::new();
+        for file in self.files.values() {
+            let row = by_language
+                .entry(file.language.as_str())
+                .or_insert_with(|| ImportCensusRow {
+                    language: file.language.clone(),
+                    strategy: imports::strategy_for(&file.language),
+                    files: 0,
+                    files_with_imports: 0,
+                    files_with_resolved_imports: 0,
+                    files_with_module_peers: 0,
+                });
+            row.files += 1;
+            if !file.imports.is_empty() {
+                row.files_with_imports += 1;
+            }
+            // Explicit import statements only. Folding membership in
+            // here would let a broken import-path resolver read as a
+            // working one.
+            if !self.deps.imports_of(file.id).is_empty()
+                || !self.deps.module_imports_of(file.id).is_empty()
+            {
+                row.files_with_resolved_imports += 1;
+            }
+            if !self.modules.siblings_of(file.id).is_empty() {
+                row.files_with_module_peers += 1;
+            }
+        }
+        let mut rows: Vec<ImportCensusRow> = by_language.into_values().collect();
+        rows.sort_by(|a, b| {
+            b.files
+                .cmp(&a.files)
+                .then_with(|| a.language.cmp(&b.language))
+        });
+        rows
     }
 
     /// Look up a file by either its workspace-relative path or its
@@ -551,6 +693,7 @@ impl IndexState {
             trigrams: TrigramIndex::new(),
             words: WordIndex::new(),
             deps: DepGraph::new(),
+            modules: imports::ModuleIndex::default(),
             versions: VersionLog::new(),
             agents: AgentRegistry::new(),
             symbols: SymbolGraph::new(),
@@ -687,9 +830,12 @@ mod tests {
         assert_eq!(state.files.len(), 2);
         let main_id = state.path_to_id["src/main.rs"];
         let util_id = state.path_to_id["src/util.rs"];
-        // Rust uses `noop` resolution, so dep graph is empty.
-        assert_eq!(state.deps.imports_of(main_id), Vec::<FileId>::new());
-        let _ = util_id;
+        // This assertion used to read "Rust uses `noop` resolution, so
+        // dep graph is empty", which encoded the defect rather than a
+        // requirement: `use crate::util::helper` names `src/util.rs` and
+        // always did. Rust module resolution now anchors on the crate
+        // root and says so.
+        assert_eq!(state.deps.imports_of(main_id), vec![util_id]);
     }
 
     #[test]
@@ -753,5 +899,72 @@ mod tests {
         let result = state.reindex_file(&root.join("src/a.ts"));
         assert!(result.is_none());
         assert!(!state.path_to_id.contains_key("src/a.ts"));
+    }
+
+    #[test]
+    fn swift_target_membership_is_stored_per_module_not_per_pair() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("Sources/Core")).unwrap();
+        fs::create_dir_all(dir.path().join("Sources/App")).unwrap();
+        for name in ["A", "B", "C"] {
+            fs::write(
+                dir.path().join(format!("Sources/Core/{name}.swift")),
+                format!("struct {name} {{}}\n"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            dir.path().join("Sources/App/Main.swift"),
+            "import Core\nlet a = A()\n",
+        )
+        .unwrap();
+
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let main_id = state.path_to_id["Sources/App/Main.swift"];
+        let a_id = state.path_to_id["Sources/Core/A.swift"];
+        let b_id = state.path_to_id["Sources/Core/B.swift"];
+        let c_id = state.path_to_id["Sources/Core/C.swift"];
+
+        // The answer names every file in the imported target.
+        assert_eq!(state.imports_of(main_id), vec![a_id, b_id, c_id]);
+
+        // Same-target files see each other with no import statement at
+        // all, and never themselves.
+        assert_eq!(state.imports_of(a_id), vec![b_id, c_id]);
+
+        // The falsifier for the storage claim: none of that is written
+        // out as one dependency edge per file. `Main.swift` holds a
+        // single module row, and `A.swift` holds none.
+        assert!(state.deps.imports_of(main_id).is_empty());
+        assert_eq!(state.deps.module_imports_of(main_id), ["Sources/Core"]);
+        assert!(state.deps.module_imports_of(a_id).is_empty());
+
+        // The reverse direction is answered from the same rows.
+        assert!(state.importers_of(a_id).contains(&main_id));
+    }
+
+    #[test]
+    fn deleting_a_swift_file_shrinks_its_targets_membership() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("Sources/Core")).unwrap();
+        fs::create_dir_all(dir.path().join("Sources/App")).unwrap();
+        fs::write(dir.path().join("Sources/Core/A.swift"), "struct A {}\n").unwrap();
+        fs::write(dir.path().join("Sources/Core/B.swift"), "struct B {}\n").unwrap();
+        fs::write(
+            dir.path().join("Sources/App/Main.swift"),
+            "import Core\nlet a = A()\n",
+        )
+        .unwrap();
+
+        let (mut state, _) = IndexState::build_from_root(dir.path());
+        let main_id = state.path_to_id["Sources/App/Main.swift"];
+        assert_eq!(state.imports_of(main_id).len(), 2);
+
+        fs::remove_file(dir.path().join("Sources/Core/B.swift")).unwrap();
+        state.reindex_file(&dir.path().join("Sources/Core/B.swift"));
+
+        // Membership is derived, so removing a file must remove it from
+        // every answer without anyone re-resolving an import statement.
+        assert_eq!(state.imports_of(main_id).len(), 1);
     }
 }

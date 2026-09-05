@@ -41,6 +41,13 @@
 // events, not the receipt's own `reason`. The receipt and the actor feedback are
 // two projections of one string, and reading the receipt alone would have
 // reported this defect fixed while the actor still received the amputated text.
+// FIXTURE NOTE. The gate reading below says `verified`, not
+// `verified_after_write`. On the after-write reading the runtime holds a typed
+// green terminal and answers the boundary itself, so no judge is called and this
+// contract's mechanism never gets a chance to fire (harn#8110). `verified` — a
+// green verifier with no source write behind it — is the reading that isolates
+// the mechanism under test from that skip. Every clause below and every line of
+// the `.expected` beside it is unchanged.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_done, with_llm_script } from "std/testing"
@@ -97,7 +104,7 @@ fn run_case(harness: Harness, label: string, detail: string) {
         done_sentinel: "##DONE##",
         max_iterations: 4,
         final_wrapup: false,
-        verify_completion: gate_observing("passed", "verified_after_write"),
+        verify_completion: gate_observing("passed", "verified"),
         verify_completion_judge: {provider: "mock", max_invocations: 2},
       }
       const captured = agent_capture_events(

@@ -1,158 +1,269 @@
 {
   "_comment": "Hostlib import-resolution rules. Strategies and field semantics are documented in src/code_index/imports.rs.",
   "languages": {
-    "python": {
-      "strategy": "dotted",
-      "stripPrefixes": ["from ", "import "],
-      "takeFirstAfterStrip": true,
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".py", "/__init__.py"],
-      "allowSuffixMatch": false,
-      "kind": "import"
-    },
-    "typescript": {
-      "strategy": "relative",
-      "requirePrefixes": ["./", "../", "/"],
-      "candidateExtensions": ["ts", "tsx", "js", "jsx", "mjs", "cjs"],
-      "indexFallbacks": ["index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs", "index.cjs"],
-      "kind": "import"
-    },
-    "javascript": {
-      "strategy": "relative",
-      "requirePrefixes": ["./", "../", "/"],
-      "candidateExtensions": ["js", "jsx", "mjs", "cjs", "ts", "tsx"],
-      "indexFallbacks": ["index.js", "index.jsx", "index.mjs", "index.cjs"],
-      "kind": "import"
-    },
-    "java": {
-      "strategy": "dotted",
-      "stripPrefixes": ["import ", "static "],
-      "stripSuffixes": [";", ".*"],
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".java"],
-      "allowSuffixMatch": true,
-      "kind": "import"
-    },
-    "kotlin": {
-      "strategy": "dotted",
-      "stripPrefixes": ["import "],
-      "stripSuffixes": [";", ".*"],
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".kt", ".kts"],
-      "allowSuffixMatch": true,
-      "kind": "import"
-    },
-    "scala": {
-      "strategy": "dotted",
-      "stripPrefixes": ["import "],
-      "stripSuffixes": [";"],
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".scala"],
-      "allowSuffixMatch": true,
-      "kind": "import"
-    },
-    "csharp": {
-      "strategy": "dotted",
-      "stripPrefixes": ["using "],
-      "stripSuffixes": [";"],
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".cs"],
-      "allowSuffixMatch": true,
-      "lastSegmentOnly": true,
-      "kind": "using"
-    },
-    "php": {
-      "strategy": "dotted",
-      "stripPrefixes": ["use "],
-      "stripSuffixes": [";"],
-      "aliasSeparator": " as ",
-      "separator": "\\",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".php"],
-      "allowSuffixMatch": true,
-      "kind": "use"
-    },
-    "elixir": {
-      "strategy": "dotted",
-      "stripPrefixes": ["alias ", "import ", "require ", "use "],
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".ex", ".exs"],
-      "allowSuffixMatch": true,
-      "lastSegmentOnly": true,
-      "camelToSnake": true,
-      "kind": "alias"
-    },
-    "haskell": {
-      "strategy": "dotted",
-      "stripPrefixes": ["import ", "qualified "],
-      "takeFirstAfterStrip": true,
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".hs", ".lhs"],
-      "allowSuffixMatch": true,
-      "kind": "import"
-    },
-    "lua": {
-      "strategy": "dotted-literal",
-      "separator": ".",
-      "replaceSeparator": "/",
-      "candidateSuffixes": [".lua", "/init.lua"],
-      "allowSuffixMatch": true,
-      "kind": "require"
-    },
-    "ruby": {
-      "strategy": "relative",
-      "relativeOnlyIfContains": ["require_relative"],
-      "candidateExtensions": ["rb"],
-      "allowSuffixMatch": true,
-      "appendExtensionIfMissing": "rb",
-      "kind": "require"
-    },
     "c": {
-      "strategy": "relative",
-      "skipIfContainsAngleBracket": true,
-      "candidateExtensions": [],
       "allowSuffixMatch": true,
-      "kind": "include"
+      "candidateExtensions": [],
+      "kind": "include",
+      "skipIfContainsAngleBracket": true,
+      "strategy": "relative"
     },
     "cpp": {
-      "strategy": "relative",
-      "skipIfContainsAngleBracket": true,
-      "candidateExtensions": [],
       "allowSuffixMatch": true,
-      "kind": "include"
-    },
-    "zig": {
-      "strategy": "relative",
-      "requireLiteralContains": [".", "/"],
       "candidateExtensions": [],
-      "allowSuffixMatch": false,
-      "kind": "import"
+      "kind": "include",
+      "skipIfContainsAngleBracket": true,
+      "strategy": "relative"
     },
-    "r": {
-      "strategy": "relative",
-      "relativeOnlyIfContains": ["source"],
-      "candidateExtensions": [],
-      "allowSuffixMatch": false,
-      "kind": "source"
+    "csharp": {
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".cs"
+      ],
+      "kind": "using",
+      "lastSegmentOnly": true,
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "using "
+      ],
+      "stripSuffixes": [
+        ";"
+      ]
     },
-    "rust": {
-      "strategy": "noop",
-      "kind": "use"
+    "elixir": {
+      "allowSuffixMatch": true,
+      "camelToSnake": true,
+      "candidateSuffixes": [
+        ".ex",
+        ".exs"
+      ],
+      "kind": "alias",
+      "lastSegmentOnly": true,
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "alias ",
+        "import ",
+        "require ",
+        "use "
+      ]
     },
     "go": {
-      "strategy": "noop",
-      "kind": "import"
+      "kind": "import",
+      "strategy": "unresolved-by-design"
+    },
+    "harn": {
+      "candidateExtensions": [
+        "harn"
+      ],
+      "kind": "import",
+      "requirePrefixes": [
+        "./",
+        "../"
+      ],
+      "strategy": "relative"
+    },
+    "haskell": {
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".hs",
+        ".lhs"
+      ],
+      "kind": "import",
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "import ",
+        "qualified "
+      ],
+      "takeFirstAfterStrip": true
+    },
+    "java": {
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".java"
+      ],
+      "kind": "import",
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "import ",
+        "static "
+      ],
+      "stripSuffixes": [
+        ";",
+        ".*"
+      ]
+    },
+    "javascript": {
+      "candidateExtensions": [
+        "js",
+        "jsx",
+        "mjs",
+        "cjs",
+        "ts",
+        "tsx"
+      ],
+      "indexFallbacks": [
+        "index.js",
+        "index.jsx",
+        "index.mjs",
+        "index.cjs"
+      ],
+      "kind": "import",
+      "requirePrefixes": [
+        "./",
+        "../",
+        "/"
+      ],
+      "strategy": "relative"
+    },
+    "kotlin": {
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".kt",
+        ".kts"
+      ],
+      "kind": "import",
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "import "
+      ],
+      "stripSuffixes": [
+        ";",
+        ".*"
+      ]
+    },
+    "lua": {
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".lua",
+        "/init.lua"
+      ],
+      "kind": "require",
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted-literal"
+    },
+    "php": {
+      "aliasSeparator": " as ",
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".php"
+      ],
+      "kind": "use",
+      "replaceSeparator": "/",
+      "separator": "\\",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "use "
+      ],
+      "stripSuffixes": [
+        ";"
+      ]
+    },
+    "python": {
+      "allowSuffixMatch": false,
+      "candidateSuffixes": [
+        ".py",
+        "/__init__.py"
+      ],
+      "kind": "import",
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "from ",
+        "import "
+      ],
+      "takeFirstAfterStrip": true
+    },
+    "r": {
+      "allowSuffixMatch": false,
+      "candidateExtensions": [],
+      "kind": "source",
+      "relativeOnlyIfContains": [
+        "source"
+      ],
+      "strategy": "relative"
+    },
+    "ruby": {
+      "allowSuffixMatch": true,
+      "appendExtensionIfMissing": "rb",
+      "candidateExtensions": [
+        "rb"
+      ],
+      "kind": "require",
+      "relativeOnlyIfContains": [
+        "require_relative"
+      ],
+      "strategy": "relative"
+    },
+    "rust": {
+      "kind": "use",
+      "strategy": "rust-module"
+    },
+    "scala": {
+      "allowSuffixMatch": true,
+      "candidateSuffixes": [
+        ".scala"
+      ],
+      "kind": "import",
+      "replaceSeparator": "/",
+      "separator": ".",
+      "strategy": "dotted",
+      "stripPrefixes": [
+        "import "
+      ],
+      "stripSuffixes": [
+        ";"
+      ]
     },
     "swift": {
-      "strategy": "noop",
-      "kind": "import"
+      "kind": "import",
+      "strategy": "swift-target"
+    },
+    "typescript": {
+      "candidateExtensions": [
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "mjs",
+        "cjs"
+      ],
+      "indexFallbacks": [
+        "index.ts",
+        "index.tsx",
+        "index.js",
+        "index.jsx",
+        "index.mjs",
+        "index.cjs"
+      ],
+      "kind": "import",
+      "requirePrefixes": [
+        "./",
+        "../",
+        "/"
+      ],
+      "strategy": "relative"
+    },
+    "zig": {
+      "allowSuffixMatch": false,
+      "candidateExtensions": [],
+      "kind": "import",
+      "requireLiteralContains": [
+        ".",
+        "/"
+      ],
+      "strategy": "relative"
     }
   }
 }

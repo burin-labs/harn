@@ -1,0 +1,73 @@
+import { read_yaml } from "std/fs"
+import {
+  RELEASE_STAGING_CONSUMERS,
+  release_rehearsal_ci_errors,
+  release_staging_errors,
+} from "../release_staging"
+
+fn with_steps(workflow: dict, consumer: dict, steps: list<dict>) -> dict {
+  let changed = json_parse(json_stringify(workflow))
+  changed.jobs[consumer.job].steps = steps
+  return changed
+}
+
+@test
+pipeline rehearsal_cannot_skip_main_or_disappear_from_the_required_gate(
+  harness: Harness,
+  task: unknown,
+) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/ci.yml", nil)
+  assert_eq(release_rehearsal_ci_errors(workflow), [])
+  let main_skip = json_parse(json_stringify(workflow))
+  main_skip.jobs["release-contract"]["if"] = "needs.changes.outputs.release_contract == 'true'"
+  assert(join(release_rehearsal_ci_errors(main_skip), "\n").contains("job release-contract"))
+  let missing = json_parse(json_stringify(workflow))
+  missing.jobs["release-contract"].steps = []
+  assert(join(release_rehearsal_ci_errors(missing), "\n").contains("job release-contract"))
+  let optional = json_parse(json_stringify(workflow))
+  optional.jobs["ci-status"].needs = []
+  assert(join(release_rehearsal_ci_errors(optional), "\n").contains("job ci-status"))
+  let paths = json_parse(json_stringify(workflow))
+  paths.jobs.changes.steps = []
+  assert(join(release_rehearsal_ci_errors(paths), "\n").contains("job changes"))
+}
+
+@test
+pipeline canonical_staging_is_required_in_each_real_consumer(harness: Harness, task: unknown) {
+  assert_eq(len(RELEASE_STAGING_CONSUMERS), 2)
+  for consumer in RELEASE_STAGING_CONSUMERS {
+    const workflow = read_yaml(harness.fs, "../../.github/workflows/" + consumer.workflow, nil)
+    assert_eq(release_staging_errors(workflow, consumer), [])
+    const steps = workflow.jobs[consumer.job].steps
+    const owner = steps.find({ step -> step?.id == "stage-release-tools" })
+    assert(owner != nil)
+    const without_owner = steps.filter({ step -> step?.id != "stage-release-tools" }).to_list()
+    const mutations = [
+      {name: "removed", steps: without_owner},
+      {name: "duplicated", steps: steps + [owner]},
+      {
+        name: "hand-copy",
+        steps: without_owner
+          + [owner + {run: "mkdir -p release-tools; cp scripts/release_ship.sh release-tools/"}],
+      },
+      {name: "comment-only", steps: without_owner + [owner + {run: "# " + owner.run}]},
+      {name: "conditional", steps: without_owner + [owner + {if: "false"}]},
+      {
+        name: "duplicate-within-step",
+        steps: without_owner + [owner + {run: owner.run + "\n" + owner.run}],
+      },
+      {name: "duplicate-in-other-step", steps: steps + [{run: "set -e\n" + owner.run}]},
+    ]
+    for mutation in mutations {
+      const errors = release_staging_errors(
+        with_steps(workflow, consumer, mutation.steps),
+        consumer,
+      )
+      assert(len(errors) > 0)
+      assert(join(errors, "\n").contains("job " + consumer.job))
+      harness.stdio.println(
+        "negative control ${consumer.workflow}/${consumer.job} ${mutation.name}: rejected",
+      )
+    }
+  }
+}

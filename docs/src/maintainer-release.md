@@ -52,6 +52,23 @@ and the exact command that returns the user to strict mode. A compatibility
 path may support review, but it must not manufacture evidence or weaken the
 final production/export gate.
 
+## Rehearse release changes offline
+
+Before tagging, run the fixture rehearsal with an installed Harn binary:
+
+```bash
+HARN_BIN="$(command -v harn)" bash scripts/release_rehearsal.sh
+```
+
+The rehearsal executes the same staging script used by publication jobs, then
+checks archive provenance, publication policy, and development cutover in local
+fixtures. It creates no remote tags or releases. Missing staged dependencies,
+copied or duplicated staging steps, and an unreported cutover must fail.
+
+CI runs this rehearsal for release-related pull requests and every main push.
+Its verdict is required by `CI status`. This fixture proof does not replace the
+hosted platform certification or prove that live publication credentials work.
+
 ## Hosted platform certification
 
 Release preparation is fail-closed on the frozen remote source SHA. Before the

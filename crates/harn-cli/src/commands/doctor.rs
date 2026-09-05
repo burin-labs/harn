@@ -21,10 +21,12 @@ use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
 mod next_step;
+mod process_sandbox;
 mod repo_checks;
 mod targets;
 
 use next_step::next_step_suggestion;
+use process_sandbox::{process_sandbox_info, ProcessSandboxInfo};
 use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
 use targets::collect_targets;
 
@@ -85,7 +87,7 @@ impl DoctorCheck {
 /// Stable schema version for `harn doctor --json`. Bump when the JSON shape
 /// changes in a way that downstream consumers (host preflight, Harn
 /// Cloud onboarding) need to react to.
-pub(crate) const DOCTOR_SCHEMA_VERSION: u32 = 2;
+pub(crate) const DOCTOR_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DoctorOptions {
@@ -246,6 +248,8 @@ pub(crate) struct HostInfo {
     pub rust_toolchain: Option<String>,
     /// `cargo --version` first line, when Cargo is on PATH.
     pub cargo_version: Option<String>,
+    /// Runtime-owned child-process filesystem-confinement fact for this host.
+    pub process_sandbox: ProcessSandboxInfo,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -376,6 +380,7 @@ fn build_host_info(toolchain_checks: &[DoctorCheck]) -> HostInfo {
         harn_version: env!("CARGO_PKG_VERSION").to_string(),
         rust_toolchain,
         cargo_version,
+        process_sandbox: process_sandbox_info(),
     }
 }
 
@@ -513,7 +518,7 @@ fn stdlib_capability_matrix() -> Vec<CapabilityInfo> {
             .collect()
     };
     let in_process = names(true);
-    let subprocess = names(os_sandbox_available()); // only os_hardened needs it
+    let subprocess = names(process_sandbox_info().active); // only os_hardened needs it
 
     let mut entries = Vec::new();
     for name in [
@@ -547,31 +552,6 @@ fn stdlib_capability_matrix() -> Vec<CapabilityInfo> {
         });
     }
     entries
-}
-
-#[cfg(target_os = "macos")]
-fn os_sandbox_available() -> bool {
-    which::which("sandbox-exec").is_ok()
-}
-
-#[cfg(target_os = "linux")]
-fn os_sandbox_available() -> bool {
-    // Landlock requires kernel ≥5.13. /sys/kernel/security/lsm enumerates
-    // active LSMs — fall back to checking that /proc is accessible because
-    // a working seccomp + Landlock stack always exposes one.
-    std::path::Path::new("/sys/kernel/security/lsm").exists()
-}
-
-#[cfg(target_os = "windows")]
-fn os_sandbox_available() -> bool {
-    // AppContainer is always present on supported Windows builds. Stub for
-    // now; refine once the Windows sandbox engine lands a self-test.
-    true
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-fn os_sandbox_available() -> bool {
-    false
 }
 
 fn serialize_model_defaults() -> serde_json::Value {
@@ -1035,6 +1015,22 @@ fn check_portal() -> Vec<DoctorCheck> {
 /// help the contributor understand what features will work on this machine.
 fn check_platform_capabilities() -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
+
+    let sandbox = process_sandbox_info();
+    checks.push(DoctorCheck {
+        id: "platform:process-sandbox".to_string(),
+        status: if sandbox.active {
+            DoctorStatus::Ok
+        } else {
+            DoctorStatus::Warn
+        },
+        label: "process-sandbox".to_string(),
+        detail: format!(
+            "backend={} filesystem_mechanism={} active={}",
+            sandbox.backend, sandbox.filesystem_mechanism, sandbox.active
+        ),
+        ..Default::default()
+    });
 
     // File watching — `harn run --watch`, `harn test --watch`, and the
     // playground depend on the `notify` crate's recommended backend.
@@ -1915,6 +1911,8 @@ pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
         assert_eq!(info.os, std::env::consts::OS);
         assert_eq!(info.arch, std::env::consts::ARCH);
         assert_eq!(info.harn_version, env!("CARGO_PKG_VERSION"));
+        assert!(!info.process_sandbox.backend.is_empty());
+        assert!(!info.process_sandbox.filesystem_mechanism.is_empty());
     }
 
     #[test]
@@ -1953,6 +1951,7 @@ pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
         let ids: std::collections::BTreeSet<&str> = checks.iter().map(|c| c.id.as_str()).collect();
         assert!(ids.contains("platform:file-watcher"), "ids: {ids:?}");
         assert!(ids.contains("platform:browser-opener"), "ids: {ids:?}");
+        assert!(ids.contains("platform:process-sandbox"), "ids: {ids:?}");
         // None of the platform checks should ever be FAIL — they're
         // best-effort capability probes with documented fallbacks.
         for check in &checks {

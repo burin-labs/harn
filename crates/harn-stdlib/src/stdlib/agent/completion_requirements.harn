@@ -206,6 +206,32 @@ pub fn completion_requirement_contract(value: unknown) -> CompletionRequirementC
  * @api_stability: experimental
  * @example: completion_requirement_assessments_schema(contract)
  */
+/**
+ * The requirement ids this contract hands the judge, in contract order.
+ *
+ * The one authority for what a judge is allowed to name. Any attribution the
+ * judge offers is constrained to this list at the schema, and anything outside
+ * it is normalized to unattributed rather than matched against text.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_ids(contract)
+ */
+pub fn completion_requirement_ids(contract: CompletionRequirementContract?) -> list<string> {
+  guard contract != nil else {
+    return []
+  }
+  let ids: list<string> = []
+  for requirement in contract.requirements {
+    const id = trim(to_string(requirement?.requirement_id ?? ""))
+    if id != "" && !ids.contains(id) {
+      ids = ids + [id]
+    }
+  }
+  return ids
+}
+
 pub fn completion_requirement_assessments_schema(
   contract: CompletionRequirementContract?,
 ) -> dict? {
@@ -219,7 +245,16 @@ pub fn completion_requirement_assessments_schema(
     items: {
       type: "object",
       properties: {
-        requirement_id: {type: "string"},
+        requirement_id: {
+          type: "string",
+          // Constrained to the ledger's own ids for the same reason the gap
+          // side is (#8104). The reader already rejects a row naming an id
+          // the ledger never issued, but it can only do so after the fact,
+          // by adding "Unknown requirement" to the pending set and blocking
+          // a completion the judge may otherwise have been right about. The
+          // schema is where that is cheap to prevent.
+          enum: completion_requirement_ids(contract),
+        },
         met: {type: "boolean"},
         evidence_refs: {type: "array", items: {type: "integer"}},
       },

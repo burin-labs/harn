@@ -172,13 +172,18 @@ jobs:
               - '.github/workflows/build-release-binaries.yml'
               - '.github/workflows/bump-release.yml'
               - '.github/workflows/publish-release.yml'
+              - '.github/workflows/release*'
               - 'CHANGELOG.md'
               - 'Cargo.toml'
               - 'scripts/lib/release_version.sh'
               - 'scripts/prepare_development_version.sh'
               - 'scripts/publish*'
-              - 'scripts/release_*'
+              - 'scripts/release*'
               - 'scripts/verify_release_*'
+              - 'scripts/stage_release_tools.sh'
+              - 'scripts/*development*'
+              - 'scripts/tests/*release*'
+              - 'scripts/tests/*development*'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -463,10 +468,9 @@ jobs:
   release-contract:
     name: Harn and release orchestrator agree
     needs: [changes]
-    # Skipped when nothing that can move release semantics was touched.
-    # ci-status below treats that skip as PASS only when this filter agrees it
-    # was not touched, so a skip cannot stand in for a missing verdict.
-    if: needs.changes.outputs.release_contract == 'true'
+    # Every main push rehearses the tail, including changes outside the PR filter.
+    # The required aggregate accepts a skip only on an unrelated PR.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -514,6 +518,9 @@ jobs:
           harn run --no-sandbox \
             .release-orchestrator/check_release_contract.harn \
             -- --repo "${GITHUB_WORKSPACE}" --base "${BASE_REF}" --contract-ref HEAD
+
+      - name: Rehearse release staging and development cutover offline
+        run: bash scripts/release_rehearsal.sh
 
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
@@ -718,7 +725,7 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
-          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
+          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -997,7 +1004,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
+          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
 
   rust-security:
     name: Run Linux sandbox tests
@@ -1046,6 +1053,8 @@ jobs:
           "$GITHUB_SHA"
       - name: Run Linux sandbox tests
         id: release-audit-rust-security
+        env:
+          HARN_SANDBOX_ENFORCEMENT_RECEIPT: ${{ runner.temp }}/harn-sandbox-enforcement.txt
         # No --locked: nextest rejects it alongside --archive-file. This step
         # replays prebuilt binaries and never resolves dependencies, so there is
         # no lock for the flag to hold.
@@ -1054,7 +1063,27 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
+          -E 'test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
+      - name: Report process filesystem confinement
+        env:
+          HARN_SANDBOX_ENFORCEMENT_RECEIPT: ${{ runner.temp }}/harn-sandbox-enforcement.txt
+        run: |
+          set -euo pipefail
+          receipt="$HARN_SANDBOX_ENFORCEMENT_RECEIPT"
+          if [[ ! -f "$receipt" ]] || [[ "$(wc -l < "$receipt")" -ne 1 ]]; then
+            echo "sandbox enforcement probe produced no single-line receipt" >&2
+            exit 1
+          fi
+          IFS= read -r marker < "$receipt"
+          case "$marker" in
+            harn.sandbox_enforcement*) ;;
+            *) echo "sandbox enforcement probe produced an invalid receipt" >&2; exit 1 ;;
+          esac
+          {
+            echo "### Process filesystem confinement"
+            echo
+            echo "\`$marker\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   harn-audit:
     name: ${{ matrix.name }}
@@ -2477,6 +2506,7 @@ jobs:
         env:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
+          RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
         run: |
           # Hard-required lanes: a hard failure here must fail the aggregate,
           # because the lanes that `needs` them would all skip and skips are
@@ -2527,7 +2557,7 @@ jobs:
           # which is the exact way this gate failed before it was required.
           # A cancellation is not a skip and is not tolerated here.
           release_contract_result="${{ needs['release-contract'].result }}"
-          release_contract_expected="${{ needs.changes.outputs.release_contract }}"
+          release_contract_expected="$RELEASE_CONTRACT_EXPECTED"
           echo "Release contract: $release_contract_result (expected=$release_contract_expected)"
           if [ "$release_contract_result" != "success" ]; then
             if [ "$release_contract_result" = "skipped" ] \

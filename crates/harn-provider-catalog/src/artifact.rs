@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::llm_config::{
-    self, AliasToolCallingDef, LocalMemoryDef, ModelArchitectureDef, ModelAvailability,
+use crate as llm_config;
+use crate::{
+    AliasToolCallingDef, LocalMemoryDef, ModelArchitectureDef, ModelAvailability,
     ModelFamilyDimensionDef, ModelFamilyPresetDef, ModelPricing, RateLimitsDef,
     ServingPerformanceDef,
 };

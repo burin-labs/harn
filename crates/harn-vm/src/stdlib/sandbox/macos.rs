@@ -36,6 +36,10 @@ impl SandboxBackend for Backend {
         "macos"
     }
 
+    fn filesystem_mechanism() -> &'static str {
+        "macos_sandbox_exec"
+    }
+
     fn available() -> bool {
         Path::new(SANDBOX_EXEC_PATH).exists()
     }

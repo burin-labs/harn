@@ -57,6 +57,7 @@ pub import {
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_gaps_unattributed_count,
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
 import {
@@ -786,6 +787,12 @@ fn __judge_directive(
     pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
     converted_from: verdict?.converted_from,
     gap_class: verdict?.gap_class,
+    // Attribution coverage for this refusal, so a set of gaps that names no
+    // acceptance row is visible instead of silently absent. A non-zero count
+    // means either the ledger does not cover what the judge objected to, or the
+    // judge objected outside the contract (#8104).
+    gap_count: len(verdict?.gaps ?? []),
+    gaps_unattributed: __judge_gaps_unattributed_count(verdict?.gaps ?? []),
     verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
@@ -946,8 +953,45 @@ fn __completion_policy_run_stage(
       // Decide whether the LLM confirmation is needed BEFORE announcing that a
       // judge started. A skipped judge never ran, so emitting a started event
       // for it would put a call in the timeline that no decision ever answers.
+      //
+      // THE VERIFICATION DECIDES FIRST, for BOTH slots. The deterministic oracle
+      // already answered this boundary's question: the declared verifier passed
+      // over a source write and the turn is the sealed final answer. A model call
+      // here can only agree, disagree with the runtime's own reading, or fail to
+      // return before the headless wall — and all three have been observed. One
+      // predicate, read by both callers, so the rule cannot be half-applied.
+      // See harn#8110.
+      if __completion_typed_green_terminal(
+        {
+          deterministic_invoked: evaluation.invoked.deterministic,
+          deterministic_reason: evaluation.deterministic_reason,
+          observed: to_string(payload.verification?.observed ?? "not_run"),
+          stop_reason: payload.stop_reason,
+          final_text: payload.text,
+          pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
+        },
+      ) {
+        const verified_terminal = {
+          vetoed: false,
+          verdict: "done",
+          source: "gate",
+          judge_outcome: "skipped_verified_after_write",
+          reason: COMPLETION_VERIFIED_AFTER_WRITE_REASON,
+          judge_duration_ms: 0,
+          trigger: trigger,
+        }
+        __judge_emit_decision(harness.agent, payload.session_id, iteration, verified_terminal)
+        return evaluation + {verdict: verified_terminal}
+      }
       match slot {
         Verification() -> {
+          // SUBORDINATE to the reading above, deliberately. This rule is
+          // catalog-declared: a model row opts into `light` scrutiny and the
+          // judge is skipped on a sentinel the gate accepted. It never reads the
+          // verification at all, so on a typed green terminal it was deciding —
+          // by a model's catalog row — a question the oracle had answered. It now
+          // only decides what the verification did not, and its own receipt
+          // (`source: "catalog"`) still says which rule fired.
           if agent_completion_review_should_skip_llm(
             agent_completion_review(harness.llm, opts),
             evaluation,
@@ -966,33 +1010,8 @@ fn __completion_policy_run_stage(
           }
         }
         Completion() -> {
-          // The deterministic oracle already answered this boundary's question:
-          // the declared verifier passed over a source write and the turn is the
-          // sealed final answer. A model call here can only agree, disagree with
-          // the runtime's own reading, or fail to return before the headless wall
-          // — and all three have been observed. See harn#8110.
-          if __completion_typed_green_terminal(
-            {
-              deterministic_invoked: evaluation.invoked.deterministic,
-              deterministic_reason: evaluation.deterministic_reason,
-              observed: to_string(payload.verification?.observed ?? "not_run"),
-              stop_reason: payload.stop_reason,
-              final_text: payload.text,
-              pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
-            },
-          ) {
-            const verified_terminal = {
-              vetoed: false,
-              verdict: "done",
-              source: "gate",
-              judge_outcome: "skipped_verified_after_write",
-              reason: COMPLETION_VERIFIED_AFTER_WRITE_REASON,
-              judge_duration_ms: 0,
-              trigger: trigger,
-            }
-            __judge_emit_decision(harness.agent, payload.session_id, iteration, verified_terminal)
-            return evaluation + {verdict: verified_terminal}
-          }
+          // No catalog rule reaches this slot; the reading above is the whole
+          // skip decision for it.
         }
       }
       __judge_emit_started(harness.agent, payload.session_id, iteration, trigger)

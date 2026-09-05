@@ -1,0 +1,111 @@
+import { read_yaml } from "std/fs"
+
+pub type ReleaseStagingConsumer = {workflow: string, job: string, directory: string}
+
+type WorkflowFilters = dict<string, list<string>>
+
+pub const RELEASE_STAGING_CONSUMERS = [
+  {workflow: "build-release-binaries.yml", job: "release", directory: "release-provenance-policy"},
+  {workflow: "publish-release.yml", job: "publish", directory: "release-tools"},
+]
+
+/**
+ * Keep the executable step deliberately closed: a conditional call, copied
+ * implementation, or prose mentioning the owner cannot substitute for staging.
+ */
+pub fn release_staging_errors(workflow: dict, consumer: ReleaseStagingConsumer) -> list<string> {
+  const label = consumer.workflow + " job " + consumer.job
+  const steps = workflow?.jobs?.get(consumer.job)?.steps ?? []
+  const command = "scripts/stage_release_tools.sh \"$RUNNER_TEMP/" + consumer.directory + "\""
+  const staging = steps.filter({ step -> step?.id == "stage-release-tools" }).to_list()
+  const invocations = steps.filter(
+    { step -> to_string(step?.run ?? "").contains("scripts/stage_release_tools.sh") },
+  )
+    .to_list()
+  if len(staging) != 1 || len(invocations) != 1 {
+    return [
+      "${label}: expected one staging step and one canonical invocation; steps=${len(staging)} invocations=${len(invocations)}",
+    ]
+  }
+  const step = staging[0]
+  if trim(to_string(step?.run ?? "")) != command || step?.uses != nil || step?.if != nil {
+    return ["${label}: stage-release-tools must unconditionally call the canonical staging owner"]
+  }
+  return []
+}
+
+pub fn release_rehearsal_ci_errors(workflow: dict) -> list<string> {
+  const job = workflow?.jobs?.get("release-contract")
+  const expected =
+    "github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true'"
+  if job?.if != expected {
+    return [
+      "ci.yml job release-contract: rehearsal must run on every main push and release-related PR",
+    ]
+  }
+  const steps = (job?.steps ?? []).filter(
+    { step -> step?.run == "bash scripts/release_rehearsal.sh" },
+  )
+    .to_list()
+  if len(steps) != 1 || steps[0]?.if != nil || steps[0]?.get("continue-on-error") != nil {
+    return ["ci.yml job release-contract: missing unconditional offline rehearsal"]
+  }
+  const aggregate = workflow?.jobs?.get("ci-status")
+  const verifier = (aggregate?.steps ?? []).find(
+    { step -> step?.name == "Verify required CI jobs" },
+  )
+  const expression = "$" + "{{ " + expected + " }}"
+  if !(aggregate?.needs ?? []).contains("release-contract")
+    || verifier?.env?.RELEASE_CONTRACT_EXPECTED != expression {
+    return [
+      "ci.yml job ci-status: release rehearsal must be required with the same main/PR condition",
+    ]
+  }
+  const filter = (workflow?.jobs?.changes?.steps ?? []).find(
+    { step -> step?.id == "surface_filter" },
+  )
+  const loaded = schema_check(
+    yaml_parse(to_string(filter?.with?.filters ?? "")),
+    schema_of(WorkflowFilters),
+  )
+  guard is_ok(loaded) else {
+    return ["ci.yml job changes: release rehearsal filter is missing or invalid"]
+  }
+  const filters: WorkflowFilters = unwrap(loaded)
+  for path in [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release*",
+    ".github/workflows/build-release-binaries.yml",
+    ".github/workflows/publish-release.yml",
+    "scripts/release*",
+    "scripts/stage_release_tools.sh",
+    "scripts/*development*",
+    "scripts/lib/release_version.sh",
+    "scripts/tests/*release*",
+    "scripts/tests/*development*",
+  ] {
+    if !(filters?.release_contract ?? []).contains(path) {
+      return ["ci.yml job changes: release rehearsal filter is missing " + path]
+    }
+  }
+  return []
+}
+
+fn main(harness: Harness) {
+  let failures: list<string> = []
+  for consumer in RELEASE_STAGING_CONSUMERS {
+    const workflow = read_yaml(harness.fs, ".github/workflows/" + consumer.workflow, nil)
+    failures = failures + release_staging_errors(workflow, consumer)
+  }
+  failures = failures
+    + release_rehearsal_ci_errors(read_yaml(harness.fs, ".github/workflows/ci.yml", nil))
+  for failure in failures {
+    harness.stdio.eprintln(failure)
+  }
+  harness.stdio.println(
+    "Release staging: consumers=${len(RELEASE_STAGING_CONSUMERS)} failing=${len(failures)}",
+  )
+  if len(failures) > 0 {
+    harness.runtime.exit(1)
+  }
+}

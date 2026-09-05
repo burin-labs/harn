@@ -15,6 +15,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
+    ops::ControlFlow,
 };
 
 use crate::ast::*;
@@ -1249,6 +1250,10 @@ impl TypeChecker {
         scope: &mut TypeScope,
         span: Span,
     ) -> CallTarget {
+        if self.check_lexical_value_call(name, args, scope, span) {
+            return CallTarget::Other;
+        }
+
         // Source and imported callables shadow builtins at runtime. Preserve
         // that resolution for callers that attach builtin-only flow semantics
         // after ordinary signature checking.
@@ -1258,16 +1263,7 @@ impl TypeChecker {
         // `assert` is a VM intrinsic rather than a typed-signature builtin, so
         // include it explicitly in the same resolution result.
         let native_builtin = name == "assert" || self.lookup_builtin(name).is_some();
-        // Values are callable too: a closure bound with `const assert = ...`
-        // wins over the intrinsic at runtime just like a source function does.
-        // Even a non-callable binding must remain `Other`, because its eventual
-        // call error cannot establish builtin-only flow facts.
-        let value_defined = scope.get_var(name).is_some();
-        let call_target = if !source_defined
-            && !value_defined
-            && !self.name_is_imported(name)
-            && native_builtin
-        {
+        let call_target = if !source_defined && !self.name_is_imported(name) && native_builtin {
             CallTarget::Builtin
         } else {
             CallTarget::Other
@@ -1358,6 +1354,51 @@ impl TypeChecker {
             }
         }
         call_target
+    }
+
+    /// Resolve the lexical owner of a bare call before module functions.
+    /// Gradual values remain runtime-checked; a known function type receives
+    /// the ordinary static argument checks.
+    fn check_lexical_value_call(
+        &mut self,
+        name: &str,
+        args: &[SNode],
+        scope: &mut TypeScope,
+        span: Span,
+    ) -> bool {
+        let Some(bound_type) = scope.get_var_before_fn(name).cloned() else {
+            return false;
+        };
+        if bound_type
+            .as_ref()
+            .is_some_and(|ty| matches!(self.resolve_alias(ty, scope), TypeExpr::FnType { .. }))
+        {
+            let callee = SNode::new(Node::Identifier(name.to_owned()), span);
+            self.check_value_call(&callee, args, scope, span);
+        } else {
+            for arg in args {
+                self.check_node(arg, scope);
+            }
+        }
+        true
+    }
+
+    pub(in crate::typechecker) fn infer_lexical_call_return(
+        &self,
+        name: &str,
+        scope: &TypeScope,
+    ) -> ControlFlow<Option<TypeExpr>> {
+        let Some(bound_type) = scope.get_var_before_fn(name) else {
+            return ControlFlow::Continue(());
+        };
+        ControlFlow::Break(
+            bound_type
+                .as_ref()
+                .and_then(|ty| match self.resolve_alias(ty, scope) {
+                    TypeExpr::FnType { return_type, .. } => Some(*return_type),
+                    _ => None,
+                }),
+        )
     }
 
     /// Whether `name` was brought into scope by an `import` in the

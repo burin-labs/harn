@@ -4,26 +4,58 @@
   "title": "code_index.imports_for response",
   "type": "object",
   "properties": {
-    "path": { "type": "string" },
+    "path": {
+      "type": "string"
+    },
     "imports": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Import" }
+      "items": {
+        "$ref": "#/$defs/Import"
+      }
+    },
+    "resolution_strategy": {
+      "type": "string",
+      "enum": [
+        "dotted",
+        "dotted-literal",
+        "relative",
+        "rust-module",
+        "swift-target",
+        "unresolved-by-design"
+      ],
+      "description": "How this file's language resolves imports to workspace files. `unresolved-by-design` means no resolver exists for the language, so an empty `resolved_paths` on every entry reports that nothing was attempted rather than that nothing matched."
     }
   },
-  "required": ["path", "imports"],
+  "required": [
+    "path",
+    "imports",
+    "resolution_strategy"
+  ],
   "additionalProperties": false,
   "$defs": {
     "Import": {
       "type": "object",
       "properties": {
-        "module": { "type": "string" },
-        "resolved_path": { "type": ["string", "null"] },
+        "module": {
+          "type": "string"
+        },
+        "resolved_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace files this import names. Usually one, but a Swift import names a build target and resolves to every file in it. Empty means the target is outside the workspace, or that the language declares no resolver."
+        },
         "kind": {
           "type": "string",
           "description": "Language-specific kind (e.g. \"use\", \"import\", \"require\", \"include\")."
         }
       },
-      "required": ["module", "kind"],
+      "required": [
+        "module",
+        "kind",
+        "resolved_paths"
+      ],
       "additionalProperties": false
     }
   }

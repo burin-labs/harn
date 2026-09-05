@@ -322,6 +322,10 @@ impl IndexState {
         state.last_built_unix_ms = snap.meta.indexed_at_ms;
         state.git_head = snap.meta.git_head;
         state.set_next_file_id(snap.next_file_id);
+        // Module membership is derived from the path table, not stored:
+        // a snapshot that predates a resolver would otherwise restore a
+        // stale answer that no refresh with an unchanged path set fixes.
+        state.rebuild_module_index();
         state
     }
 

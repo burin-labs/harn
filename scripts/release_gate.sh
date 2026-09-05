@@ -496,7 +496,7 @@ release_rust_test() {
   # generated metadata-only commits over a merge-queue-proven parent, so the
   # hosted release audit must preserve that same partition instead of turning
   # a missing host kernel feature into a product failure.
-  local host_bound_filter='test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
+  local host_bound_filter='test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
   if [[ "${HARN_RUNNER_TIER:-}" == "blacksmith" ]]; then
     echo "release rust audit: Blacksmith tier; Landlock-only tests remain owned by GitHub Ubuntu CI"
     make test ARGS="--workspace -E 'not (${host_bound_filter})'"

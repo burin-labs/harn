@@ -347,16 +347,17 @@ fn imports_for_returns_resolved_and_unresolved() {
     );
     let response = extract_dict(&response);
     let imports = extract_list(response.get("imports").unwrap());
-    let pairs: Vec<(String, Option<String>, String)> = imports
+    let pairs: Vec<(String, Vec<String>, String)> = imports
         .iter()
         .map(|item| {
             let d = extract_dict(item);
             let module = extract_str(d.get("module").unwrap());
-            let resolved = match d.get("resolved_path").unwrap() {
-                VmValue::Nil => None,
-                VmValue::String(s) => Some(s.to_string()),
-                other => panic!("expected str|nil, got {other:?}"),
-            };
+            // A list, not one optional path: one import can name a whole
+            // module's worth of files.
+            let resolved: Vec<String> = extract_list(d.get("resolved_paths").unwrap())
+                .iter()
+                .map(extract_str)
+                .collect();
             let kind = extract_str(d.get("kind").unwrap());
             (module, resolved, kind)
         })
@@ -366,16 +367,14 @@ fn imports_for_returns_resolved_and_unresolved() {
         .iter()
         .find(|(m, _, _)| m.contains("./util"))
         .expect("./util import surfaced");
-    assert_eq!(util_resolution.1.as_deref(), Some("src/util.ts"));
+    assert_eq!(util_resolution.1, vec!["src/util.ts".to_string()]);
     assert_eq!(util_resolution.2, "import");
 
-    // The other import points at a path that doesn't exist in the
-    // workspace — it should land in the response with `resolved_path: nil`.
     let other_resolution = pairs
         .iter()
         .find(|(m, _, _)| m.contains("./other"))
         .expect("./other import surfaced");
-    assert_eq!(other_resolution.1.as_deref(), Some("src/other.ts"));
+    assert_eq!(other_resolution.1, vec!["src/other.ts".to_string()]);
 }
 
 #[test]
