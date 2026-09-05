@@ -164,6 +164,30 @@ Every other `gap_class` vetoes exactly as before. The judge keeps sole authority
 over artifact clauses, manner and negative clauses, and authorization, and loses
 it only over the one question a deterministic oracle has already answered.
 
+### When the judge is not called at all
+
+On the `turn_end_condition` seam the judge is skipped outright when the runtime
+already holds the answer. All six of these must hold:
+
+| Clause | Required reading |
+| --- | --- |
+| the gate ran | the directive receipt's `invoked.deterministic` |
+| the gate allowed on a proven write | reason is exactly `verified_after_write` |
+| the reading agrees with the reason | threaded `observed` is `passed` |
+| the turn is the sealed final answer | `stop_reason` is `sentinel` |
+| there is an answer to hand back | the final response is non-empty |
+| nothing is deferred past the turn | `pending_tool_batch_effect_count` is zero |
+
+No provider call is made and no `judge_started` event is emitted. The directive
+seals as `accept` with `source: "gate"` and
+`outcome: "skipped_verified_after_write"`, and `invoked.turn_end_condition` stays
+false, so a reader can tell a judge that never ran from one that ran and agreed.
+
+`verified` is deliberately not `verified_after_write`. A green verifier with no
+source write behind it is an ordinary prose completion and still calls the
+judge, as do an unverified path, a red or unrun verifier, a non-sentinel
+boundary, and a run with no deterministic gate.
+
 Projection receipts name their selected actions and resolved evidence roles in
 `selected_actions`, so a host whose verifier declares no
 `completion_evidence_role` — and whose passing verification is therefore counted
