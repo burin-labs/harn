@@ -3,15 +3,16 @@
 //!
 //! The Harn runtime already records a `provider_call_response` event on
 //! every LLM call, carrying `provider`, `model`, token counts, cache
-//! telemetry, and the runtime-computed `cost_usd`. This command reuses
+//! telemetry, and the runtime-computed accounting certainty. This command reuses
 //! that data: it reads the same `agent.transcript.llm` topic that
 //! `harn portal` reads through the shared event-log reader, filters to
 //! `provider_call_response` records, and rolls them up by provider,
 //! model, agent-loop stage, or a day/week/month time series. Calls without a
 //! meaningful stage are grouped as `unattributed`.
 //!
-//! It does NOT recompute pricing — `cost_usd` is summed straight from
-//! the event payload. `mock`-provider rows are excluded by default.
+//! It does NOT recompute pricing. Measured cost and explicit unpriced/unknown
+//! counts are folded straight from the event payload. `mock`-provider rows are
+//! excluded by default.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
 /// Schema version for the `harn usage --json` envelope. Bump when the
 /// [`UsageReport`] shape changes in a way agents must detect.
-pub const USAGE_SCHEMA_VERSION: u32 = 1;
+pub const USAGE_SCHEMA_VERSION: u32 = 2;
 
 /// Kind stored on `provider_call_response` events (mirrors the `type`
 /// field the runtime observability writer sets before append).
@@ -46,12 +47,15 @@ struct UsageCall {
     model: String,
     stage: Option<String>,
     occurred_at_ms: i64,
+    provider_call_count: i64,
+    unpriced_calls: i64,
+    usage_unknown_calls: i64,
     input_tokens: i64,
     output_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
     cache_savings_usd: f64,
-    cost_usd: f64,
+    known_cost_usd: f64,
     response_ms: f64,
 }
 
@@ -59,25 +63,49 @@ struct UsageCall {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UsageGroup {
     pub key: String,
-    pub calls: u64,
-    pub cost_usd: f64,
+    /// Durable response records folded into this group.
+    pub responses: u64,
+    /// Physical provider requests represented by those response records.
+    pub provider_calls: i64,
+    /// Completeness of provider price accounting for this group.
+    pub cost_status: AccountingCompleteness,
+    /// Completeness of provider token accounting for this group.
+    pub usage_status: AccountingCompleteness,
+    /// Measured cost only. Unpriced calls are counted separately rather than
+    /// silently converted to zero.
+    pub known_cost_usd: f64,
+    pub unpriced_calls: i64,
+    pub usage_unknown_calls: i64,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub cache_savings_usd: f64,
-    /// Call-weighted mean cache-hit ratio across the group's calls.
-    pub cache_hit_ratio: f64,
+    /// Response-record-weighted mean cache-hit ratio across the group.
+    pub cache_hit_ratio: Option<f64>,
     pub mean_response_ms: f64,
     /// Running cost total through this row, for time-series group-bys.
     /// `None` for provider/model group-bys where order is not temporal.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cumulative_cost_usd: Option<f64>,
+    pub cumulative_known_cost_usd: Option<f64>,
     // Accumulators used while folding; not serialized.
     #[serde(skip)]
     response_ms_total: f64,
     #[serde(skip)]
     cache_hit_ratio_total: f64,
+    #[serde(skip)]
+    cache_hit_ratio_response_count: u64,
+}
+
+/// Completeness of one accounting dimension across a rollup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountingCompleteness {
+    #[default]
+    NoCalls,
+    Reported,
+    Partial,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,7 +115,9 @@ pub struct UsageReport {
     /// Absolute paths of the event logs that contributed rows.
     pub sources: Vec<String>,
     /// Number of `provider_call_response` rows aggregated (post-filter).
-    pub calls: u64,
+    pub responses: u64,
+    /// Physical provider requests represented by those rows.
+    pub provider_calls: i64,
     pub groups: Vec<UsageGroup>,
     pub totals: UsageGroup,
 }
@@ -96,7 +126,7 @@ pub(crate) async fn run(args: UsageArgs) -> i32 {
     if let Some(source) = &args.backfill {
         let message = format!(
             "--backfill {source} (provider-billing reconciliation) is not implemented yet; \
-             v1 aggregates the local event log only"
+             local event-log aggregation does not perform billing reconciliation"
         );
         return emit_error(args.json, "usage_backfill_unimplemented", &message);
     }
@@ -275,6 +305,25 @@ fn normalize_call(event: &LogEvent) -> Option<UsageCall> {
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
+    let accounting_status = payload
+        .get("accounting_status")
+        .and_then(|value| value.as_str());
+    let provider_call_count = optional_int_field(payload, "provider_call_count")
+        .unwrap_or(1)
+        .max(1);
+    let unpriced_calls = optional_int_field(payload, "unpriced_calls")
+        .unwrap_or_else(|| i64::from(accounting_status != Some("reported")) * provider_call_count)
+        .clamp(0, provider_call_count);
+    let usage_unknown_calls = optional_int_field(payload, "usage_unknown_calls")
+        .unwrap_or_else(|| i64::from(accounting_status != Some("reported")) * provider_call_count)
+        .clamp(0, provider_call_count);
+    let known_cost_usd = optional_float_field(payload, "known_cost_usd").unwrap_or_else(|| {
+        if accounting_status == Some("reported") {
+            optional_float_field(payload, "cost_usd").unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    });
     Some(UsageCall {
         provider,
         model,
@@ -285,14 +334,25 @@ fn normalize_call(event: &LogEvent) -> Option<UsageCall> {
             .filter(|stage| !stage.is_empty())
             .map(str::to_string),
         occurred_at_ms: event.occurred_at_ms,
+        provider_call_count,
+        unpriced_calls,
+        usage_unknown_calls,
         input_tokens: int_field(payload, "input_tokens"),
         output_tokens: int_field(payload, "output_tokens"),
         cache_read_tokens: int_field(payload, "cache_read_tokens"),
         cache_write_tokens: int_field(payload, "cache_write_tokens"),
         cache_savings_usd: float_field(payload, "cache_savings_usd"),
-        cost_usd: float_field(payload, "cost_usd"),
+        known_cost_usd,
         response_ms: float_field(payload, "response_ms"),
     })
+}
+
+fn optional_int_field(payload: &serde_json::Value, key: &str) -> Option<i64> {
+    payload.get(key).and_then(|value| value.as_i64())
+}
+
+fn optional_float_field(payload: &serde_json::Value, key: &str) -> Option<f64> {
+    payload.get(key).and_then(|value| value.as_f64())
 }
 
 fn int_field(payload: &serde_json::Value, key: &str) -> i64 {
@@ -340,13 +400,13 @@ fn aggregate(calls: &[UsageCall], group_by: UsageGroupBy, sources: Vec<String>) 
         // so lexical order is chronological. Fill the cumulative column.
         let mut running = 0.0;
         for group in &mut group_list {
-            running += group.cost_usd;
-            group.cumulative_cost_usd = Some(round_usd(running));
+            running += group.known_cost_usd;
+            group.cumulative_known_cost_usd = Some(round_usd(running));
         }
     } else {
         group_list.sort_by(|a, b| {
-            b.cost_usd
-                .partial_cmp(&a.cost_usd)
+            b.known_cost_usd
+                .partial_cmp(&a.known_cost_usd)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.key.cmp(&b.key))
         });
@@ -355,43 +415,68 @@ fn aggregate(calls: &[UsageCall], group_by: UsageGroupBy, sources: Vec<String>) 
     UsageReport {
         group_by: group_by_label(group_by).to_string(),
         sources,
-        calls: totals.calls,
+        responses: totals.responses,
+        provider_calls: totals.provider_calls,
         groups: group_list,
         totals,
     }
 }
 
 fn accumulate(group: &mut UsageGroup, call: &UsageCall) {
-    group.calls += 1;
-    group.cost_usd += call.cost_usd;
+    group.responses += 1;
+    group.provider_calls += call.provider_call_count;
+    group.known_cost_usd += call.known_cost_usd;
+    group.unpriced_calls += call.unpriced_calls;
+    group.usage_unknown_calls += call.usage_unknown_calls;
     group.input_tokens += call.input_tokens;
     group.output_tokens += call.output_tokens;
     group.cache_read_tokens += call.cache_read_tokens;
     group.cache_write_tokens += call.cache_write_tokens;
     group.cache_savings_usd += call.cache_savings_usd;
     group.response_ms_total += call.response_ms;
-    group.cache_hit_ratio_total += call_cache_hit_ratio(call);
+    if let Some(ratio) = call_cache_hit_ratio(call) {
+        group.cache_hit_ratio_total += ratio;
+        group.cache_hit_ratio_response_count += 1;
+    }
 }
 
 /// Per-call cache-hit ratio: cache_read / (input + cache_read). Matches
 /// the runtime's `cache_hit_ratio` intent (read tokens over the tokens
 /// that could have been cache-served), computed here from the durable
 /// token counts so the rollup stays self-contained.
-fn call_cache_hit_ratio(call: &UsageCall) -> f64 {
+fn call_cache_hit_ratio(call: &UsageCall) -> Option<f64> {
+    if call.usage_unknown_calls >= call.provider_call_count {
+        return None;
+    }
     let denom = call.input_tokens + call.cache_read_tokens;
     if denom <= 0 {
-        0.0
+        Some(0.0)
     } else {
-        call.cache_read_tokens as f64 / denom as f64
+        Some(call.cache_read_tokens as f64 / denom as f64)
     }
 }
 
 fn finalize(group: &mut UsageGroup) {
-    let calls = group.calls.max(1) as f64;
-    group.mean_response_ms = round2(group.response_ms_total / calls);
-    group.cache_hit_ratio = round4(group.cache_hit_ratio_total / calls);
-    group.cost_usd = round_usd(group.cost_usd);
+    let responses = group.responses.max(1) as f64;
+    group.mean_response_ms = round2(group.response_ms_total / responses);
+    group.cache_hit_ratio = (group.cache_hit_ratio_response_count > 0)
+        .then(|| round4(group.cache_hit_ratio_total / group.cache_hit_ratio_response_count as f64));
+    group.known_cost_usd = round_usd(group.known_cost_usd);
     group.cache_savings_usd = round_usd(group.cache_savings_usd);
+    group.cost_status = accounting_completeness(group.provider_calls, group.unpriced_calls);
+    group.usage_status = accounting_completeness(group.provider_calls, group.usage_unknown_calls);
+}
+
+fn accounting_completeness(provider_calls: i64, unknown_calls: i64) -> AccountingCompleteness {
+    if provider_calls == 0 {
+        AccountingCompleteness::NoCalls
+    } else if unknown_calls == 0 {
+        AccountingCompleteness::Reported
+    } else if unknown_calls < provider_calls {
+        AccountingCompleteness::Partial
+    } else {
+        AccountingCompleteness::Unknown
+    }
 }
 
 fn group_key(call: &UsageCall, group_by: UsageGroupBy) -> String {
@@ -485,7 +570,7 @@ fn group_by_label(group_by: UsageGroupBy) -> &'static str {
 }
 
 fn round_usd(value: f64) -> f64 {
-    (value * 1_000_000.0).round() / 1_000_000.0
+    (value * 1_000_000_000.0).round() / 1_000_000_000.0
 }
 
 fn round2(value: f64) -> f64 {
@@ -497,7 +582,7 @@ fn round4(value: f64) -> f64 {
 }
 
 fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
-    if report.calls == 0 {
+    if report.responses == 0 {
         println!("No LLM usage recorded (0 provider_call_response events matched).");
         if !report.sources.is_empty() {
             println!("Sources: {}", report.sources.join(", "));
@@ -506,18 +591,19 @@ fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
     }
 
     let header = group_by_label(group_by);
-    let time_series = report.totals.cumulative_cost_usd.is_some()
+    let time_series = report.totals.cumulative_known_cost_usd.is_some()
         || matches!(
             group_by,
             UsageGroupBy::Day | UsageGroupBy::Week | UsageGroupBy::Month
         );
 
     println!(
-        "harn usage — {} calls across {} source{}, {} by {}",
-        report.calls,
+        "harn usage — {} provider calls in {} responses across {} source{}, {} by {}",
+        report.provider_calls,
+        report.responses,
         report.sources.len(),
         if report.sources.len() == 1 { "" } else { "s" },
-        format_usd(report.totals.cost_usd),
+        format_accounted_cost(&report.totals),
         header,
     );
     println!();
@@ -525,34 +611,41 @@ fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
     if time_series {
         println!(
             "{:<12}  {:>6}  {:>10}  {:>12}  {:>10}  {:>9}  {:>7}",
-            header, "calls", "cost", "cumulative", "in_tok", "out_tok", "cache%"
+            header, "calls", "known cost", "known cumulative", "in_tok", "out_tok", "cache%"
         );
         for group in &report.groups {
             println!(
-                "{:<12}  {:>6}  {:>10}  {:>12}  {:>10}  {:>9}  {:>6.1}%",
+                "{:<12}  {:>6}  {:>10}  {:>12}  {:>10}  {:>9}  {:>7}",
                 group.key,
-                group.calls,
-                format_usd(group.cost_usd),
-                format_usd(group.cumulative_cost_usd.unwrap_or(0.0)),
+                group.provider_calls,
+                format_accounted_cost(group),
+                format_usd(group.cumulative_known_cost_usd.unwrap_or(0.0)),
                 group.input_tokens,
                 group.output_tokens,
-                group.cache_hit_ratio * 100.0,
+                format_cache_ratio(group.cache_hit_ratio),
             );
         }
     } else {
         println!(
             "{:<20}  {:>6}  {:>10}  {:>10}  {:>9}  {:>7}  {:>10}  {:>9}",
-            header, "calls", "cost", "in_tok", "out_tok", "cache%", "cache_save", "ms/call"
+            header,
+            "calls",
+            "known cost",
+            "in_tok",
+            "out_tok",
+            "cache%",
+            "cache_save",
+            "ms/response"
         );
         for group in &report.groups {
             println!(
-                "{:<20}  {:>6}  {:>10}  {:>10}  {:>9}  {:>6.1}%  {:>10}  {:>9.0}",
+                "{:<20}  {:>6}  {:>10}  {:>10}  {:>9}  {:>7}  {:>10}  {:>9.0}",
                 group.key,
-                group.calls,
-                format_usd(group.cost_usd),
+                group.provider_calls,
+                format_accounted_cost(group),
                 group.input_tokens,
                 group.output_tokens,
-                group.cache_hit_ratio * 100.0,
+                format_cache_ratio(group.cache_hit_ratio),
                 format_usd(group.cache_savings_usd),
                 group.mean_response_ms,
             );
@@ -561,39 +654,82 @@ fn print_table(report: &UsageReport, group_by: UsageGroupBy) {
 
     println!();
     println!(
-        "total: {} calls, {}, {} in / {} out tok, {} cache savings",
-        report.totals.calls,
-        format_usd(report.totals.cost_usd),
+        "total: {} provider calls, {}, {} in / {} out tok, {} cache savings",
+        report.totals.provider_calls,
+        format_accounted_cost(&report.totals),
         report.totals.input_tokens,
         report.totals.output_tokens,
         format_usd(report.totals.cache_savings_usd),
     );
+    if report.totals.usage_unknown_calls > 0 {
+        println!(
+            "warning: token usage is unknown for {} provider call{}; zero token fields are not measurements",
+            report.totals.usage_unknown_calls,
+            if report.totals.usage_unknown_calls == 1 { "" } else { "s" },
+        );
+    }
 }
 
 fn print_csv(report: &UsageReport) {
     println!(
-        "group,calls,cost_usd,input_tokens,output_tokens,cache_read_tokens,\
-cache_write_tokens,cache_savings_usd,cache_hit_ratio,mean_response_ms,cumulative_cost_usd"
+        "group,responses,provider_calls,cost_status,usage_status,known_cost_usd,unpriced_calls,\
+usage_unknown_calls,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,\
+cache_savings_usd,cache_hit_ratio,mean_response_ms,cumulative_known_cost_usd"
     );
     for group in &report.groups {
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             csv_field(&group.key),
-            group.calls,
-            group.cost_usd,
+            group.responses,
+            group.provider_calls,
+            completeness_label(group.cost_status),
+            completeness_label(group.usage_status),
+            group.known_cost_usd,
+            group.unpriced_calls,
+            group.usage_unknown_calls,
             group.input_tokens,
             group.output_tokens,
             group.cache_read_tokens,
             group.cache_write_tokens,
             group.cache_savings_usd,
-            group.cache_hit_ratio,
+            group
+                .cache_hit_ratio
+                .map(|ratio| ratio.to_string())
+                .unwrap_or_default(),
             group.mean_response_ms,
             group
-                .cumulative_cost_usd
+                .cumulative_known_cost_usd
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
         );
     }
+}
+
+fn format_accounted_cost(group: &UsageGroup) -> String {
+    match group.cost_status {
+        AccountingCompleteness::Reported => format_usd(group.known_cost_usd),
+        AccountingCompleteness::Partial => format!(
+            "{} known + {} unpriced",
+            format_usd(group.known_cost_usd),
+            group.unpriced_calls,
+        ),
+        _ => format!("unknown ({} unpriced)", group.unpriced_calls),
+    }
+}
+
+const fn completeness_label(status: AccountingCompleteness) -> &'static str {
+    match status {
+        AccountingCompleteness::NoCalls => "no_calls",
+        AccountingCompleteness::Reported => "reported",
+        AccountingCompleteness::Partial => "partial",
+        AccountingCompleteness::Unknown => "unknown",
+    }
+}
+
+fn format_cache_ratio(ratio: Option<f64>) -> String {
+    ratio
+        .map(|value| format!("{:.1}%", value * 100.0))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn csv_field(value: &str) -> String {
@@ -605,7 +741,11 @@ fn csv_field(value: &str) -> String {
 }
 
 fn format_usd(value: f64) -> String {
-    format!("${value:.4}")
+    if value != 0.0 && value.abs() < 0.0001 {
+        format!("${value:.8}")
+    } else {
+        format!("${value:.4}")
+    }
 }
 
 fn emit_error(json: bool, code: &str, message: &str) -> i32 {
@@ -637,12 +777,15 @@ mod tests {
             provider: provider.to_string(),
             model: model.to_string(),
             occurred_at_ms,
+            provider_call_count: 1,
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
             input_tokens: input,
             output_tokens: output,
             cache_read_tokens: cache_read,
             cache_write_tokens: 0,
             cache_savings_usd: 0.0,
-            cost_usd: cost,
+            known_cost_usd: cost,
             response_ms: 100.0,
         }
     }
@@ -661,22 +804,97 @@ mod tests {
             call("anthropic", "sonnet", 3_000, 300, 30, 0, 0.10),
         ];
         let report = aggregate(&calls, UsageGroupBy::Provider, vec![]);
-        assert_eq!(report.calls, 3);
+        assert_eq!(report.responses, 3);
+        assert_eq!(report.provider_calls, 3);
         assert_eq!(report.groups.len(), 2);
         // Ordered by descending cost: anthropic (0.10) before openrouter (0.05).
         assert_eq!(report.groups[0].key, "anthropic");
-        assert!((report.groups[0].cost_usd - 0.10).abs() < 1e-9);
+        assert!((report.groups[0].known_cost_usd - 0.10).abs() < 1e-9);
         assert_eq!(report.groups[1].key, "openrouter");
-        assert!((report.groups[1].cost_usd - 0.05).abs() < 1e-9);
+        assert!((report.groups[1].known_cost_usd - 0.05).abs() < 1e-9);
         assert_eq!(report.groups[1].input_tokens, 300);
         assert_eq!(report.groups[1].output_tokens, 30);
         assert_eq!(report.groups[1].cache_read_tokens, 50);
-        assert!((report.totals.cost_usd - 0.15).abs() < 1e-9);
+        assert!((report.totals.known_cost_usd - 0.15).abs() < 1e-9);
+        assert_eq!(report.totals.cost_status, AccountingCompleteness::Reported);
+        assert_eq!(report.totals.usage_status, AccountingCompleteness::Reported);
         assert_eq!(report.totals.input_tokens, 600);
     }
 
     #[test]
-    fn cache_hit_ratio_is_call_weighted() {
+    fn empty_report_does_not_claim_reported_zero_accounting() {
+        let report = aggregate(&[], UsageGroupBy::Provider, vec![]);
+        assert_eq!(report.responses, 0);
+        assert_eq!(report.provider_calls, 0);
+        assert_eq!(report.totals.cost_status, AccountingCompleteness::NoCalls);
+        assert_eq!(report.totals.usage_status, AccountingCompleteness::NoCalls);
+    }
+
+    #[test]
+    fn known_microcost_never_renders_as_free() {
+        let rendered = format_usd(0.000_001_25);
+        assert_eq!(rendered, "$0.00000125");
+        assert_ne!(rendered, "$0.0000");
+    }
+
+    #[test]
+    fn absent_accounting_fields_do_not_read_as_zero_cost_or_zero_usage() {
+        let event = LogEvent::new(
+            PROVIDER_CALL_RESPONSE_KIND,
+            serde_json::json!({
+                "provider": "openrouter",
+                "model": "priced/model",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+            }),
+        );
+        let call = normalize_call(&event).expect("provider response");
+        assert_eq!(call.provider_call_count, 1);
+        assert_eq!(call.unpriced_calls, 1);
+        assert_eq!(call.usage_unknown_calls, 1);
+        assert_eq!(call.known_cost_usd, 0.0);
+
+        let report = aggregate(&[call], UsageGroupBy::Provider, vec![]);
+        assert_eq!(report.totals.cost_status, AccountingCompleteness::Unknown);
+        assert_eq!(report.totals.usage_status, AccountingCompleteness::Unknown);
+        assert_eq!(report.totals.unpriced_calls, 1);
+        assert_eq!(report.totals.usage_unknown_calls, 1);
+        assert_eq!(
+            format_accounted_cost(&report.totals),
+            "unknown (1 unpriced)"
+        );
+    }
+
+    #[test]
+    fn cost_and_usage_completeness_are_independent() {
+        let mut usage_known = call("openrouter", "unpriced/model", 1_000, 12, 3, 0, 0.0);
+        usage_known.unpriced_calls = 1;
+        let usage_report = aggregate(&[usage_known], UsageGroupBy::Provider, vec![]);
+        assert_eq!(
+            usage_report.totals.cost_status,
+            AccountingCompleteness::Unknown
+        );
+        assert_eq!(
+            usage_report.totals.usage_status,
+            AccountingCompleteness::Reported
+        );
+
+        let mut cost_known = call("openrouter", "priced/model", 1_000, 0, 0, 0, 0.01);
+        cost_known.usage_unknown_calls = 1;
+        let cost_report = aggregate(&[cost_known], UsageGroupBy::Provider, vec![]);
+        assert_eq!(
+            cost_report.totals.cost_status,
+            AccountingCompleteness::Reported
+        );
+        assert_eq!(
+            cost_report.totals.usage_status,
+            AccountingCompleteness::Unknown
+        );
+    }
+
+    #[test]
+    fn cache_hit_ratio_is_response_weighted() {
         // Call A: 100 input, 0 cache -> ratio 0. Call B: 0 input, 100 cache -> ratio 1.
         let calls = vec![
             call("p", "m", 1_000, 100, 0, 0, 0.0),
@@ -684,7 +902,7 @@ mod tests {
         ];
         let report = aggregate(&calls, UsageGroupBy::Provider, vec![]);
         // (0 + 1) / 2 = 0.5.
-        assert!((report.groups[0].cache_hit_ratio - 0.5).abs() < 1e-9);
+        assert!((report.groups[0].cache_hit_ratio.unwrap() - 0.5).abs() < 1e-9);
     }
 
     #[test]
@@ -701,8 +919,8 @@ mod tests {
         assert_eq!(report.groups.len(), 2);
         assert_eq!(report.groups[0].key, "2026-01-01");
         assert_eq!(report.groups[1].key, "2026-01-02");
-        assert_eq!(report.groups[0].cumulative_cost_usd, Some(1.0));
-        assert_eq!(report.groups[1].cumulative_cost_usd, Some(3.0));
+        assert_eq!(report.groups[0].cumulative_known_cost_usd, Some(1.0));
+        assert_eq!(report.groups[1].cumulative_known_cost_usd, Some(3.0));
     }
 
     #[test]

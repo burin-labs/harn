@@ -59,6 +59,11 @@ fn call_event(
         "cache_write_tokens": 0,
         "cache_savings_usd": cache_savings_usd,
         "cost_usd": cost_usd,
+        "known_cost_usd": cost_usd,
+        "accounting_status": "reported",
+        "provider_call_count": 1,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0,
         "response_ms": response_ms,
     })
 }
@@ -133,21 +138,24 @@ fn usage_by_provider_json_totals_are_exact() {
     assert_eq!(data["group_by"], json!("provider"));
 
     // Mock row excluded: 3 real calls remain.
-    assert_eq!(data["calls"], json!(3));
+    assert_eq!(data["responses"], json!(3));
+    assert_eq!(data["provider_calls"], json!(3));
 
     let groups = data["groups"].as_array().unwrap();
     assert_eq!(groups.len(), 2);
     // Ordered by descending cost: anthropic (0.10) before openrouter (0.05).
     assert_eq!(groups[0]["key"], json!("anthropic"));
-    assert!((groups[0]["cost_usd"].as_f64().unwrap() - 0.10).abs() < 1e-9);
+    assert!((groups[0]["known_cost_usd"].as_f64().unwrap() - 0.10).abs() < 1e-9);
     assert_eq!(groups[1]["key"], json!("openrouter"));
-    assert!((groups[1]["cost_usd"].as_f64().unwrap() - 0.05).abs() < 1e-9);
+    assert!((groups[1]["known_cost_usd"].as_f64().unwrap() - 0.05).abs() < 1e-9);
     assert_eq!(groups[1]["input_tokens"], json!(300));
     assert_eq!(groups[1]["output_tokens"], json!(30));
     assert_eq!(groups[1]["cache_read_tokens"], json!(50));
 
     // Totals exclude the mock row.
-    assert!((data["totals"]["cost_usd"].as_f64().unwrap() - 0.15).abs() < 1e-9);
+    assert!((data["totals"]["known_cost_usd"].as_f64().unwrap() - 0.15).abs() < 1e-9);
+    assert_eq!(data["totals"]["cost_status"], json!("reported"));
+    assert_eq!(data["totals"]["usage_status"], json!("reported"));
     assert_eq!(data["totals"]["input_tokens"], json!(600));
     assert_eq!(data["totals"]["output_tokens"], json!(60));
 }
@@ -181,12 +189,12 @@ fn usage_by_stage_counts_attributed_and_unattributed_calls() {
     assert!(output.status.success());
     let data = stdout_json(&output)["data"].clone();
     assert_eq!(data["group_by"], json!("stage"));
-    assert_eq!(data["calls"], json!(3));
+    assert_eq!(data["responses"], json!(3));
     let groups = data["groups"].as_array().unwrap();
     assert_eq!(
         groups
             .iter()
-            .map(|group| group["calls"].as_u64().unwrap())
+            .map(|group| group["responses"].as_u64().unwrap())
             .sum::<u64>(),
         3,
     );
@@ -207,10 +215,54 @@ fn usage_provider_filter_narrows_rows() {
     let output = run_usage(dir.path(), &["--json", "--provider", "anthropic"]);
     assert!(output.status.success());
     let data = stdout_json(&output)["data"].clone();
-    assert_eq!(data["calls"], json!(1));
+    assert_eq!(data["responses"], json!(1));
     let groups = data["groups"].as_array().unwrap();
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0]["key"], json!("anthropic"));
+}
+
+#[test]
+fn usage_surfaces_legacy_missing_accounting_as_unknown() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_path_buf();
+    run_in_harn_runtime(move || async move {
+        let log = install_default_for_base_dir(&root).expect("install event log");
+        let topic = Topic::new("agent.transcript.llm").expect("transcript topic");
+        let legacy = json!({
+            "type": "provider_call_response",
+            "provider": "openrouter",
+            "model": "priced/model",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "response_ms": 10.0,
+        });
+        log.append(&topic, LogEvent::new("provider_call_response", legacy))
+            .await
+            .expect("append legacy provider response");
+        log.flush().await.expect("flush event log");
+    });
+
+    let json_output = run_usage(dir.path(), &["--json"]);
+    assert!(json_output.status.success());
+    let envelope = stdout_json(&json_output);
+    assert_eq!(envelope["schemaVersion"], json!(2));
+    let totals = &envelope["data"]["totals"];
+    assert_eq!(totals["cost_status"], json!("unknown"));
+    assert_eq!(totals["usage_status"], json!("unknown"));
+    assert_eq!(totals["provider_calls"], json!(1));
+    assert_eq!(totals["unpriced_calls"], json!(1));
+    assert_eq!(totals["usage_unknown_calls"], json!(1));
+    assert_eq!(totals["cache_hit_ratio"], Value::Null);
+
+    let text_output = run_usage(dir.path(), &[]);
+    assert!(text_output.status.success());
+    let stdout = String::from_utf8_lossy(&text_output.stdout);
+    assert!(stdout.contains("unknown (1 unpriced)"), "stdout:\n{stdout}");
+    assert!(
+        stdout.contains("zero token fields are not measurements"),
+        "stdout:\n{stdout}"
+    );
 }
 
 #[test]
