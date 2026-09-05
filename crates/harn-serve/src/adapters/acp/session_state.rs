@@ -126,8 +126,13 @@ impl AcpServer {
             return None;
         }
 
-        harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
-        Some(session_id)
+        match harn_vm::agent_sessions::open_or_create(Some(session_id.to_string())) {
+            Ok(_) => Some(session_id),
+            Err(error) => {
+                self.send_session_open_error(id, &error);
+                None
+            }
+        }
     }
 
     /// Register a session the live server never saw so its persisted
@@ -142,13 +147,13 @@ impl AcpServer {
         &mut self,
         session_id: &str,
         params: &serde_json::Value,
-    ) {
+    ) -> Result<(), harn_vm::agent_sessions::SessionOpenError> {
         let cwd = params
             .get("cwd")
             .and_then(|value| value.as_str())
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        self.insert_session(session_id.to_string(), cwd, SessionInfo::default());
+        self.insert_session(session_id.to_string(), cwd, SessionInfo::default())
     }
 
     /// Project root to consult for a session this server never saw, resolved
@@ -210,9 +215,15 @@ impl AcpServer {
             };
 
         if self.sessions.contains_key(&session_id) {
-            harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+            if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(session_id.clone())) {
+                self.send_session_open_error(id, &error);
+                return;
+            }
         } else if !replay_events.is_empty() {
-            self.register_restored_session(&session_id, params);
+            if let Err(error) = self.register_restored_session(&session_id, params) {
+                self.send_session_open_error(id, &error);
+                return;
+            }
         } else {
             // Nothing live and nothing observed. Existence is not the event
             // log's to decide — that sink is best-effort and is registered only
@@ -235,7 +246,10 @@ impl AcpServer {
             {
                 Ok(Some(persisted)) => {
                     replay_events = persisted;
-                    self.register_restored_session(&session_id, params);
+                    if let Err(error) = self.register_restored_session(&session_id, params) {
+                        self.send_session_open_error(id, &error);
+                        return;
+                    }
                 }
                 Ok(None) => {
                     // Neither store knows this id: a typo or a stale id, and the
@@ -325,7 +339,8 @@ impl AcpServer {
             return Err(format!("Unknown session: {session_id}"));
         }
         if !harn_vm::agent_sessions::exists(session_id) {
-            harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+            harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()))
+                .map_err(|error| error.to_string())?;
         }
         harn_vm::agent_sessions::set_pinned_model(session_id, model)
     }
@@ -347,7 +362,8 @@ impl AcpServer {
             return Err(format!("Unknown session: {session_id}"));
         }
         if !harn_vm::agent_sessions::exists(session_id) {
-            harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+            harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()))
+                .map_err(|error| error.to_string())?;
         }
         harn_vm::agent_sessions::set_pinned_reasoning_policy(session_id, policy)
     }

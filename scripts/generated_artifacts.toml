@@ -46,6 +46,9 @@ exempt_checks = [
   "check-test-case-performance",     # parallel per-test performance ratchet, not a generated mirror
   "check-ported-handler-loc",       # LOC ratchet (epic #2293), not a sync guard
   "check-source-file-lengths",      # merge-base repo source LOC ratchet, not a generated mirror
+  "check-stack-frames",             # re-entrant stack-frame budget ratchet, not a generated mirror
+  "check-test-target-coverage",     # census that hand-listed test files are run by a CI target, not a generated mirror
+  "check-gate-path-visibility",     # ratchet on the negated fs.exists guard in gate scripts, not a sync guard
   "check-python-boundary",          # repo-language boundary ratchet, not a sync guard
   "check-harn-syntax-sensitive-scans", # source-pattern guard, not a generated artifact mirror
   "check-agent-guidance",             # canonical agent-guidance topology and principle links
@@ -54,6 +57,7 @@ exempt_checks = [
   "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
+  "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
   "check-docs-portable",            # the half of check-docs a published release can judge
@@ -88,6 +92,23 @@ exempt_checks = [
 # ---------------------------------------------------------------------------
 # Fully-wired mirrors (gen + check + CI + make all, several also hooked)
 # ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "release-contract"
+description = "Typed Harn-owned release semantics consumed by the external release orchestrator, including version/fold/tag policy and cross-repository workflow identifiers."
+gen = "gen-release-contract"
+check = "check-release-contract"
+outputs = ["scripts/release_contract.json", "scripts/release_contract.env"]
+sources = [
+  "scripts/release_contract.harn",
+  "scripts/release_metadata.harn",
+  "scripts/release_ship.sh",
+  "scripts/lib/release_version.sh",
+  ".github/workflows/publish-release.yml",
+  ".github/workflows/build-release-binaries.yml",
+]
+ci = true
+make_all = true
 
 [[artifact]]
 id = "cli-aot"
@@ -604,6 +625,12 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-receipt-structs" = "source"
 "check-ported-handler-loc" = "source"
 "check-source-file-lengths" = "source"
+# Needs its own clippy run at a lowered threshold, so it can never be a fast
+# file-drift scan: a stale binary or a warm target directory reports the
+# previous threshold rather than this tree.
+"check-stack-frames" = "excluded"
+"check-test-target-coverage" = "source"
+"check-gate-path-visibility" = "source"
 "check-python-boundary" = "source"
 "check-harn-syntax-sensitive-scans" = "source"
 "check-agent-guidance" = "source"
@@ -613,11 +640,13 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-grammar-keywords" = "source"
 "check-grammar-fitness" = "excluded"
 "check-generated-registry" = "source"
+"check-release-contract" = "source"
 "check-release-audit-contract" = "source"
 "check-ci-cache-policy" = "source"
 "check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
 "check-cargo-lock-contract" = "source"
+"check-scheduled-workflows" = "source"
 "lint-test-patterns" = "source"
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"

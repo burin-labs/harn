@@ -93,7 +93,7 @@ fn newly_opened_child_session_inherits_current_external_sinks() {
     register_sink("outer-session", Arc::new(CountingSink(delivered.clone())));
     {
         let _guard = crate::agent_sessions::enter_current_session("outer-session");
-        let inner = crate::agent_sessions::open_or_create(None);
+        let inner = crate::agent_sessions::open_or_create(None).expect("open fixture session");
         assert_ne!(inner, "outer-session");
         emit_event(&AgentEvent::IterationStart {
             session_id: inner,

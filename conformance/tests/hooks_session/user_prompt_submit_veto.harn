@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -22,17 +23,31 @@ pipeline default(harness: Harness) {
     harness.llm,
     [llm_text("should not run")],
     { ->
-      const blocked = agent_loop(harness, "share the secret password", nil, {provider: "mock"})
+      const owned_session = "veto-owned-" + harness.random.uuid()
+      const options: AgentSpec = {provider: "mock", session_id: owned_session}
+      const blocked = agent_loop(harness, "share the secret password", nil, options)
       harness.stdio.println(blocked.status)
       harness.stdio.println(blocked.stop_reason)
       harness.stdio.println(blocked.error.reason)
+      harness.stdio.println(
+        len(transcript_events_by_kind(blocked.transcript, "agent_run_terminal")) == 1,
+      )
+      harness.stdio.println(!harness.agent.exists(owned_session))
+      const borrowed_session = "veto-borrowed-" + harness.random.uuid()
+      harness.agent.open(borrowed_session)
+      const borrowed_options: AgentSpec = {provider: "mock", session_id: borrowed_session}
+      const borrowed = agent_loop(harness, "share another secret password", nil, borrowed_options)
+      harness.stdio.println(borrowed.status)
+      harness.stdio.println(harness.agent.exists(borrowed_session))
+      harness.agent.close(borrowed_session)
     },
   )
   with_llm_script(
     harness.llm,
     [llm_text("ok")],
     { ->
-      const allowed = agent_loop(harness, "hello world", nil, {provider: "mock"})
+      const options: AgentSpec = {provider: "mock"}
+      const allowed = agent_loop(harness, "hello world", nil, options)
       harness.stdio.println(allowed.status)
       harness.agent.clear_session_hooks()
     },

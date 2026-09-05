@@ -12,5 +12,7 @@ pipeline default(harness: Harness) {
     agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: throwing_caller})
   }
   harness.stdio.println(is_err(result))
-  harness.stdio.println(unwrap_err(result))
+  const error = unwrap_err(result)
+  harness.stdio.println(error.cause)
+  harness.stdio.println(error.provider_call_count)
 }

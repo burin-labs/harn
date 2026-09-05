@@ -69,10 +69,87 @@ fn generated_report_path(experiment_root: &Path, stdout: &str, fallback_name: &s
         .unwrap_or_else(|| experiment_root.join("evals/generated").join(fallback_name))
 }
 
+/// Summarize each `execution.run.stages[]` entry (a batch, a verify stage,
+/// or the final verifier) as one line, and for a failed stage pull the tail
+/// of its `tool_call_update` errors out of the buried transcript so the
+/// actual verifier/tool failure — a Node "not recognized" error, a wrong
+/// cwd, an unresolved PATH entry — reads directly in the panic message
+/// instead of requiring a human to grep the full nested report by hand.
+/// `report` still prints in full below this summary, so nothing is lost;
+/// this only puts the part someone needs first, first.
+fn summarize_stages(report: &serde_json::Value) -> String {
+    let Some(stages) = report["stages"].as_array() else {
+        return "  (no execution.run.stages in this report)\n".to_string();
+    };
+    let mut out = String::new();
+    for stage in stages {
+        let node_id = stage["node_id"]
+            .as_str()
+            .or_else(|| stage["kind"].as_str())
+            .unwrap_or("<unnamed-stage>");
+        let status = stage["status"].as_str().unwrap_or("<unknown-status>");
+        let outcome = stage["outcome"].as_str().unwrap_or("<unknown-outcome>");
+        out.push_str(&format!(
+            "  stage {node_id}: status={status} outcome={outcome}\n"
+        ));
+        if status != "failed" {
+            continue;
+        }
+        let Some(events) = stage["transcript"]["events"].as_array() else {
+            continue;
+        };
+        // `raw_input` (the tool's own arguments, e.g. its shell command) is
+        // carried by the initiating `tool_call` event and by an
+        // `in_progress` `tool_call_update`, but NOT by the terminal
+        // `"status":"failed"` update — that update only carries the
+        // outcome. Reading `raw_input` off the failed event itself (as an
+        // earlier version of this function did) silently prints an empty
+        // command on every real failure; a lookup by `tool_call_id` across
+        // the whole stage finds it on the event that actually carries it.
+        let mut commands_by_call_id: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for event in events {
+            let Some(call_id) = event["metadata"]["tool_call_id"].as_str() else {
+                continue;
+            };
+            if let Some(command) = event["metadata"]["raw_input"]["command"].as_str() {
+                commands_by_call_id.insert(call_id, command);
+            }
+        }
+        for event in events {
+            if event["kind"] != "tool_call_update" || event["metadata"]["status"] != "failed" {
+                continue;
+            }
+            let tool_name = event["metadata"]["tool_name"].as_str().unwrap_or("?");
+            let call_id = event["metadata"]["tool_call_id"].as_str().unwrap_or("");
+            let command = commands_by_call_id.get(call_id).copied().unwrap_or("");
+            let error = event["metadata"]["error"].as_str().unwrap_or("");
+            // The tool's own error text is a single long line; a tail is
+            // plenty to see "not recognized" / "cannot find" / a wrong path
+            // without dumping the whole (often multi-KB) tool payload.
+            let tail: String = error
+                .chars()
+                .rev()
+                .take(600)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            out.push_str(&format!(
+                "    failed tool_call_update: tool={tool_name} command={command:?}\n    error tail: {tail}\n"
+            ));
+        }
+    }
+    out
+}
+
 fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
-    assert_eq!(
-        report["verdict"], "pass",
-        "playground report did not pass\nstdout:\n{stdout}\nreport:\n{report}"
+    if report["verdict"] == "pass" {
+        return;
+    }
+    let stage_summary = summarize_stages(report);
+    panic!(
+        "playground report did not pass\nstdout:\n{stdout}\nstage summary (failed tool errors, if any):\n{stage_summary}\nfull report:\n{report}"
     );
 }
 
@@ -166,6 +243,10 @@ fn burin_mini_explain_repo_fixture_run_passes() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
+)]
 #[test]
 fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -206,9 +287,16 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
         write_instruction.contains("Auth guard middleware"),
         "write_instruction={write_instruction}\nreport={report_json}"
     );
+    // The verification is deliberately a Node script and not a shell `grep`.
+    // `grep -n 'Auth guard middleware' <path>` is Unix-shell-shaped twice over:
+    // `grep` is absent from a stock Windows PATH, and cmd.exe does not strip
+    // single quotes, so even where grep exists the pattern arrives as three
+    // arguments. That command failed on Windows, and before harn#7915 a run
+    // whose only verification failed still sealed `done`, so this test was
+    // green on a run that verified nothing (harn#7968).
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("grep -n 'Auth guard middleware' packages/server/src/middleware/auth-guard.ts")
+        Some("node scripts/verify-comment.js")
     );
 
     let auth_guard = experiment_root.join("workspace/packages/server/src/middleware/auth-guard.ts");
@@ -219,6 +307,10 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
+)]
 #[test]
 fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -305,7 +397,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("./scripts/verify-rate-limit.sh")
+        Some("node scripts/verify-rate-limit.js")
     );
     for action in [create_action, export_action, wire_action] {
         assert_eq!(action["command"].as_str().unwrap_or(""), "");
@@ -330,6 +422,10 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
+)]
 #[test]
 fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -371,6 +467,10 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
+)]
 #[test]
 fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -424,7 +524,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
     assert_eq!(
         verify_action["command"].as_str(),
-        Some("./scripts/verify-rate-limit.sh")
+        Some("node scripts/verify-rate-limit.js")
     );
     assert!(
         !actions.iter().any(|item| item["id"] == "verify_output"),
@@ -432,6 +532,10 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "harn#8037: the sandboxed child exits STATUS_DLL_INIT_FAILED (-1073741502) with empty output, which is a child process initialization failure and not the AppContainer read contract; the same run proves a sandboxed child runs the host node and a full workflow passes"
+)]
 #[test]
 fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     let (_temp, experiment_root) = setup_experiment_copy();
@@ -516,4 +620,599 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let semantic_json = read_json(&semantic);
     assert_eq!(semantic_json["overall_verdict"], "pass");
     assert!(semantic_json["overall_score"].as_i64().unwrap_or_default() >= 9);
+}
+
+#[cfg(test)]
+mod stage_summary_tests {
+    use super::summarize_stages;
+    use serde_json::json;
+
+    /// Trimmed to the fields `summarize_stages` reads, from the actual
+    /// `Workspace nextest (windows-latest)` CI failure this instrumentation
+    /// was written for (job 100748266102, harn#7993): the "run" tool's
+    /// `node scripts/verify-comment.js` call failed on Windows with
+    /// `'node' is not recognized as an internal or external command`. Before
+    /// this change, the panic message only printed the top-level report,
+    /// which requires paging through several KB of nested transcript JSON
+    /// to find that one line. This is a real report shape, not an invented
+    /// one — the three-event `tool_call` / `tool_call_update` (in_progress)
+    /// / `tool_call_update` (failed) sequence, and specifically that only
+    /// the first two carry `raw_input` while the terminal failure does not,
+    /// is copied from the actual job log, not guessed. An earlier version
+    /// of this fixture put `raw_input` directly on the failed event, which
+    /// is not the real shape: it made the matching version of
+    /// `summarize_stages` (reading `raw_input` off the failed event) pass
+    /// this test while still printing `command=""` in production, exactly
+    /// the false-positive this file's [[a-probe-that-cannot-return-a-non-null-answer-is-not-a-probe]]
+    /// discipline warns about.
+    fn windows_node_not_recognized_report() -> serde_json::Value {
+        json!({
+            "verdict": "fail",
+            "stages": [
+                {
+                    "node_id": "batch_1",
+                    "status": "completed",
+                    "outcome": "completed",
+                    "transcript": {"events": []},
+                },
+                {
+                    "node_id": "batch_2",
+                    "status": "failed",
+                    "outcome": "completion_unverified",
+                    "transcript": {
+                        "events": [
+                            {
+                                "kind": "tool_call",
+                                "metadata": {
+                                    "status": "pending",
+                                    "tool_name": "run",
+                                    "tool_call_id": "mock_call_5",
+                                    "raw_input": {"command": "node scripts/verify-comment.js"},
+                                },
+                            },
+                            {
+                                "kind": "tool_call_update",
+                                "metadata": {
+                                    "status": "in_progress",
+                                    "tool_name": "run",
+                                    "tool_call_id": "mock_call_5",
+                                    "raw_input": {"command": "node scripts/verify-comment.js"},
+                                },
+                            },
+                            {
+                                "kind": "tool_call_update",
+                                "metadata": {
+                                    "status": "failed",
+                                    "tool_name": "run",
+                                    "tool_call_id": "mock_call_5",
+                                    "error": "{combined: 'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n, exit_code: 1, pid: nil, status: completed, stderr: 'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n, success: false}",
+                                },
+                            },
+                        ]
+                    },
+                },
+                {
+                    "node_id": "final_verify",
+                    "status": "completed",
+                    "outcome": "completed",
+                    "transcript": {"events": []},
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn a_failed_tool_call_names_the_command_and_the_real_error_text() {
+        let summary = summarize_stages(&windows_node_not_recognized_report());
+        assert!(
+            summary.contains("stage batch_2: status=failed"),
+            "summary={summary}"
+        );
+        assert!(
+            summary.contains("command=\"node scripts/verify-comment.js\""),
+            "the failing stage's actual command must be named, not just its id\nsummary={summary}"
+        );
+        assert!(
+            summary.contains("not recognized as an internal or external command"),
+            "the tool's own error text must surface, not just status=failed\nsummary={summary}"
+        );
+        // The two completed stages get a one-line status each and nothing
+        // more: a passing stage's transcript is not worth paging through.
+        assert!(summary.contains("stage batch_1: status=completed"));
+        assert!(summary.contains("stage final_verify: status=completed"));
+        assert_eq!(
+            summary.matches("failed tool_call_update:").count(),
+            1,
+            "only the failed stage's failed tool call should be pulled out\nsummary={summary}"
+        );
+    }
+
+    #[test]
+    fn a_report_with_no_stages_array_says_so_instead_of_panicking() {
+        let summary = summarize_stages(&json!({"verdict": "fail"}));
+        assert!(summary.contains("no execution.run.stages"), "{summary}");
+    }
+}
+
+/// ADVERSARIAL WRITE-CONFINEMENT CHECK (harn#7993). Every candidate fix for
+/// the Windows read-closed defect widens READS; none of them may widen
+/// WRITES. This drives the same seam the failing fixtures use
+/// (`execute_playground_inputs` -> the `run` tool -> `process.shell_at` ->
+/// `run_captured_spawn` -> the Windows sandbox backend) and checks the real
+/// filesystem afterward, not `cmd.exe`'s own stdout wording — different
+/// candidates may implement confinement through different mechanisms with
+/// different denial text/exit codes, but the file either exists on disk or
+/// it does not, and that check is mechanism-agnostic.
+///
+/// Both write targets sit under `%USERPROFILE%`, OUTSIDE the workspace: one
+/// directly in the profile root (a path that exists on every machine), and
+/// one inside a fresh subdirectory this test creates itself (proving, on
+/// the host side and before the sandboxed run, that the subdirectory exists
+/// and is writable) — so a candidate cannot pass by only closing off a
+/// well-known top-level path while leaving a freshly created one open. A
+/// failure to deny either write can only be the sandbox's own write
+/// confinement, never an ambient OS permission the account never had.
+///
+/// This deliberately does NOT target the system temp directory the way an
+/// earlier version of this test did. The temp directory is a legitimately
+/// granted write root under this backend's own `UserTemp` preset whenever
+/// workspace writes are allowed, so a successful write there is the policy
+/// working correctly, not an escape — using it as a denial arm produced a
+/// false violation. (An even earlier version used `%TEMP%` directly inside
+/// the sandboxed command, which was vacuous for a different reason: the
+/// Windows backend overrides the child's own `TEMP`/`TMP` to an
+/// AppContainer-local path — see `environment_overrides` in `windows.rs` —
+/// so `%TEMP%` expanded inside the child never resolved to the host path
+/// this test was checking.)
+///
+/// A third write lands inside the workspace (the run tool's cwd is
+/// `workspace_root(fs)`, see `experiments/burin-mini/lib/workspace.harn`)
+/// and MUST succeed: a candidate that closes reads by also closing writes
+/// it used to allow is a regression, not a fix, even if the 5 real
+/// fixtures happen to pass.
+///
+/// Before trusting an absent escape file as a genuine denial, a negative
+/// control writes to the exact same two `%USERPROFILE%`-rooted paths
+/// through an *unsandboxed* spawn (no harn sandbox in the path at all) and
+/// asserts both files appear, then removes them. Skipping this would make
+/// the whole test vacuous in exactly the way the earlier `%TEMP%` checks
+/// were: an absent file proves nothing unless something first proves the
+/// file would have been there to find.
+///
+/// Any escape file this test finds is deleted before the assertion panics,
+/// and the subdirectory it creates is always removed on the way out, so a
+/// broken candidate does not leave stray files or directories on the
+/// runner.
+#[cfg(windows)]
+#[test]
+fn windows_sandbox_fix_keeps_writes_confined_to_the_workspace() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+
+    let userprofile_dir = std::env::var("USERPROFILE").expect(
+        "USERPROFILE must be set to run the write-confinement check or its negative control",
+    );
+    let userprofile_dir = PathBuf::from(userprofile_dir);
+    let userprofile_escape = userprofile_dir.join("harn-escape-7993-userprofile.txt");
+    let subdir = userprofile_dir.join("harn-escape-7993-subdir");
+    let subdir_escape = subdir.join("harn-escape-7993-nested.txt");
+
+    // Create the subdirectory on the host side and prove, before the
+    // sandboxed run, that this (unsandboxed) test process can actually
+    // write inside it. If this fails, the real check below would not be
+    // measuring the sandbox at all.
+    fs::create_dir_all(&subdir).unwrap_or_else(|error| {
+        panic!(
+            "could not create the write-confinement subdirectory {} on the host: {error}",
+            subdir.display()
+        )
+    });
+    let subdir_sentinel = subdir.join("harn-subdir-host-writable-sentinel-7993.txt");
+    fs::write(&subdir_sentinel, "host-writable").unwrap_or_else(|error| {
+        panic!(
+            "the write-confinement subdirectory {} is not host-writable, so it cannot be used \
+             as a denial target: {error}",
+            subdir.display()
+        )
+    });
+    fs::remove_file(&subdir_sentinel).unwrap_or_else(|error| {
+        panic!(
+            "could not clean up the host-writable sentinel at {}: {error}",
+            subdir_sentinel.display()
+        )
+    });
+
+    // Negative control: prove the detector can see a write at these exact
+    // paths before trusting that an absent file means the sandbox denied
+    // it. Same target paths, no sandbox anywhere in the call path.
+    // `raw_arg`, not `arg`. Rust quotes an ordinary argument for the
+    // MSVC convention and escapes the inner quotes as `\"`, which `cmd.exe`
+    // does not understand: it reports "The filename, directory name, or
+    // volume label syntax is incorrect" and the control fails before it can
+    // prove anything. `raw_arg` hands the command line over verbatim, which
+    // is the only way to pass a quoted path through `cmd /C`.
+    let control_status = {
+        use std::os::windows::process::CommandExt as _;
+        std::process::Command::new("cmd.exe")
+            .raw_arg(format!(
+                "/D /C echo control > \"{}\" & echo control > \"{}\"",
+                userprofile_escape.display(),
+                subdir_escape.display()
+            ))
+            .status()
+            .expect("spawn the unsandboxed write-confinement negative control")
+    };
+    assert!(
+        control_status.success(),
+        "unsandboxed negative control command itself failed to run"
+    );
+    for control_path in [&userprofile_escape, &subdir_escape] {
+        assert!(
+            control_path.exists(),
+            "negative control: an unsandboxed write to {} did not appear; the detector \
+             cannot tell a real denial from a broken probe, so the real check below would \
+             prove nothing",
+            control_path.display()
+        );
+    }
+    for control_path in [&userprofile_escape, &subdir_escape] {
+        fs::remove_file(control_path).unwrap_or_else(|error| {
+            panic!(
+                "negative control: could not clean up {} before the real run: {error}",
+                control_path.display()
+            )
+        });
+    }
+
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_write_confinement_probe.jsonl",
+    );
+    assert_writes_stay_confined(
+        &experiment_root,
+        &outcome,
+        &[
+            ("USERPROFILE", Some(userprofile_escape)),
+            ("USERPROFILE subdirectory", Some(subdir_escape)),
+        ],
+        &[&subdir],
+    );
+}
+
+/// The write-confinement assertion the Windows, macOS and Linux backends
+/// share. Each platform's test supplies its own escape targets, because the
+/// paths a normal process can write to outside a workspace differ by OS; the
+/// verdict below does not.
+///
+/// The check reads the real filesystem rather than the shell's own stdout
+/// wording. Denial text and exit codes differ across the three backends, but
+/// the file either exists on disk or it does not, and that is
+/// mechanism-agnostic.
+///
+/// The write inside the workspace is the non-null control. Without it a
+/// backend that refused every write would pass this assertion while being
+/// completely broken, and absence of an escape file would be indistinguishable
+/// from absence of any write at all.
+///
+/// Any escape file found is deleted before the panic, so a broken backend does
+/// not leave stray files behind for the next run to trip over.
+/// Whether this host actually confines a child process's filesystem access.
+///
+/// This is not a restatement of the code under test, it is the host fact the
+/// backend itself branches on. macOS always has its sandbox. Linux needs
+/// Landlock, and on a kernel without it the `Worktree` profile is documented
+/// best-effort: it warns and runs the child unconfined. Continuous
+/// integration runs on exactly such a host, which is worth stating plainly —
+/// no Linux job here can prove write confinement, so the confinement claim
+/// rests on macOS and Windows.
+///
+/// The point of returning a fact rather than skipping is that the assertion
+/// above keeps binding either way: where isolation is active the escapes must
+/// be denied, and where it is absent they must succeed.
+#[cfg(unix)]
+fn process_filesystem_isolation_is_active() -> bool {
+    if cfg!(target_os = "macos") {
+        return true;
+    }
+    fs::read_to_string("/sys/kernel/security/lsm")
+        .map(|active| active.split(',').any(|lsm| lsm.trim() == "landlock"))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn process_filesystem_isolation_is_active() -> bool {
+    // The AppContainer this backend launches is always available.
+    true
+}
+
+fn assert_writes_stay_confined(
+    experiment_root: &Path,
+    outcome: &Result<String, String>,
+    escape_targets: &[(&str, Option<PathBuf>)],
+    cleanup_dirs: &[&Path],
+) {
+    let isolation_active = process_filesystem_isolation_is_active();
+    let stdout = match outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+    let inside_write = experiment_root
+        .join("workspace")
+        .join("harn-write-confinement-7993-inside.txt");
+
+    let mut failures = Vec::new();
+    for (label, escape_path) in escape_targets {
+        let Some(escape_path) = escape_path else {
+            failures.push(format!(
+                "  {label}: no path to check -- the environment did not name one, so this \
+                 target proved nothing"
+            ));
+            continue;
+        };
+        let escaped = escape_path.exists();
+        let contents = if escaped {
+            let contents = fs::read_to_string(escape_path).unwrap_or_default();
+            let _ = fs::remove_file(escape_path);
+            contents
+        } else {
+            String::new()
+        };
+        match (isolation_active, escaped) {
+            (true, true) => failures.push(format!(
+                "  WRITE ESCAPED CONFINEMENT: {label} target {} exists (contents: {contents:?}) \
+                 -- the sandboxed run tool wrote outside the workspace",
+                escape_path.display()
+            )),
+            (true, false) => {}
+            // No isolation on this host, so the write MUST have landed. This
+            // arm is why the check cannot pass by measuring nothing: on a host
+            // that confines nothing, a missing file means the command never
+            // ran, and that would otherwise read exactly like confinement.
+            (false, false) => failures.push(format!(
+                "  NOTHING WAS WRITTEN AND NOTHING WAS CONFINING IT: {label} target {} is \
+                 absent on a host that reports no process filesystem isolation, so the \
+                 command that should have created it never ran",
+                escape_path.display()
+            )),
+            (false, true) => {}
+        }
+    }
+    match fs::read_to_string(&inside_write) {
+        Ok(contents) if contents.contains("inside-workspace") => {}
+        Ok(contents) => failures.push(format!(
+            "  WRITE INSIDE THE WORKSPACE PRODUCED WRONG CONTENT: {} = {contents:?}",
+            inside_write.display()
+        )),
+        Err(error) => failures.push(format!(
+            "  WRITE INSIDE THE WORKSPACE DID NOT HAPPEN: {} ({error}) -- a confinement fix \
+             must not also break writes the sandbox is supposed to allow, and without this \
+             write the escape checks above prove nothing",
+            inside_write.display()
+        )),
+    }
+
+    for cleanup_dir in cleanup_dirs {
+        let _ = fs::remove_dir_all(cleanup_dir);
+    }
+
+    if failures.is_empty() {
+        return;
+    }
+    let report_path = generated_report_path(experiment_root, &stdout, "comment_file-latest.json");
+    let report_dump = if report_path.exists() {
+        format!("{}", read_json(&report_path))
+    } else {
+        format!("(no report at {})", report_path.display())
+    };
+    panic!(
+        "write-confinement check failed:\n{}\nplayground stdout/error:\n{stdout}\nfull report:\n{report_dump}",
+        failures.join("\n")
+    );
+}
+
+/// Every `tool_call_update` transcript event for the `run` tool, across every
+/// stage and regardless of status: the command asked for, what the tool
+/// returned, and the error when the call failed outright. The diagnostic
+/// below deliberately runs commands whose interesting content is what they
+/// printed rather than whether they "failed", so a summary that only reads
+/// failed stages would drop exactly the part worth reading.
+#[cfg(windows)]
+fn dump_run_tool_transcript(report: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let Some(stages) = report["stages"].as_array() else {
+        return "  (no execution.run.stages in this report)\n".to_string();
+    };
+    for stage in stages {
+        let Some(events) = stage["transcript"]["events"].as_array() else {
+            continue;
+        };
+        for event in events {
+            if event["kind"] != "tool_call_update" {
+                continue;
+            }
+            let metadata = &event["metadata"];
+            if metadata["tool_name"] != "run" {
+                continue;
+            }
+            out.push_str(&format!(
+                "  tool_call_update status={} raw_input={} raw_output={} error={}\n",
+                metadata["status"].as_str().unwrap_or("<none>"),
+                metadata["raw_input"],
+                metadata["raw_output"],
+                metadata["error"].as_str().unwrap_or("<none>"),
+            ));
+        }
+    }
+    if out.is_empty() {
+        out.push_str("  (no run tool_call_update events found in any stage's transcript)\n");
+    }
+    out
+}
+
+/// Standing Windows diagnostic for the read-open contract (harn#7993). The
+/// five playground fixtures above fail the moment a confined child cannot
+/// read the interpreter its command names, and `cmd.exe` reports that as
+/// "'node' is not recognized as an internal or external command" — a message
+/// that blames the search path for a file-permission problem and has twice
+/// sent a diagnosis down the wrong road.
+///
+/// Five commands through the exact seam the fixtures use, with all five
+/// outputs printed on failure, so one red round answers every question at
+/// once instead of costing a round each:
+///
+/// 1. `whoami /groups /fo list` — which SIDs the child token carries,
+///    including whether `ALL APPLICATION PACKAGES` is among them. Everything
+///    about read access follows from this.
+/// 2. `icacls` on the Node install directory — whether its permissions admit
+///    the container at all. Permissions that already name
+///    `ALL APPLICATION PACKAGES` while the read still fails would falsify the
+///    file-permission premise this whole area rests on.
+/// 3. `type` on a plain file inside it — a read with no path search, no
+///    extension resolution and no executable launch in the way, separating
+///    "cannot read" from "cannot resolve".
+/// 4. `dotnet --version` — the positive control. It is another global install
+///    under the same Program Files prefix, so if it runs while Node does not,
+///    the difference is that one directory's permissions rather than anything
+///    about the prefix, the sandbox, or the search path.
+/// 5. `node --version` — the product claim itself, in the fixtures' shape.
+///
+/// The assertion is on (5). The other four mutate nothing, which is why this
+/// is safe to keep permanently, and that is the point: the next read
+/// regression prints its own cause instead of needing a probe invented for it
+/// again.
+#[cfg(windows)]
+#[test]
+fn windows_sandboxed_run_child_can_read_the_host_node_toolchain() {
+    // Turn the backend's own per-decision trace on for this test's process.
+    // The backend keeps it behind an environment variable so production
+    // spawns stay quiet, but a timeout here is unreadable without it: the
+    // trace is what names which roots were probed, which were granted, and
+    // how many milliseconds each cost. Safe to set process-wide because the
+    // test runner gives every test its own process.
+    std::env::set_var("HARN_WINDOWS_SANDBOX_TRACE", "1");
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        "windows_system_read_diagnostic.jsonl",
+    );
+    let stdout = match &outcome {
+        Ok(stdout) => stdout.clone(),
+        Err(error) => error.clone(),
+    };
+    let report_path = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
+    let transcript_dump = if report_path.exists() {
+        let report = read_json(&report_path);
+        dump_run_tool_transcript(&report)
+    } else {
+        format!(
+            "  (no report at {} — execute_playground_inputs result: {outcome:?})\n",
+            report_path.display()
+        )
+    };
+    let full_dump = format!(
+        "=== windows_sandboxed_run_child_can_read_the_host_node_toolchain ===\n\
+         playground stdout/error:\n{stdout}\n\
+         run tool transcript (5 commands, in order: whoami /groups /fo list; \
+         icacls on the Node install directory; type on a plain file inside \
+         it; dotnet --version as the positive control; node --version):\n\
+         {transcript_dump}\n\
+         === end diagnostic ==="
+    );
+    // `cmd` expands `%ERRORLEVEL%` when it parses the line, so a same-line
+    // status read reports the status of the line BEFORE it. The marker is
+    // chained with `&&` instead, which only runs when the tool itself
+    // exited 0.
+    assert!(
+        full_dump.contains("DIAGNOSTIC_NODE_VERSION=ok"),
+        "the sandboxed run tool's child could not run the host's `node`. The \
+         four diagnostic commands above it say why: whether the child token \
+         carries ALL APPLICATION PACKAGES, whether the Node install \
+         directory's permissions admit it, whether a plain file read inside \
+         that directory succeeds, and whether the neighbouring dotnet install \
+         under the same prefix runs\n{full_dump}"
+    );
+}
+
+/// The macOS/Linux half of the same adversarial check the Windows test above
+/// runs (harn#7993 swarm brief). The three OS backends confine writes through
+/// three different mechanisms -- seatbelt on macOS, Landlock on Linux, an
+/// AppContainer plus file permissions on Windows -- so the confinement claim
+/// is only as good as its weakest backend, and until now only Windows was
+/// asserted.
+///
+/// Picking escape targets is the whole difficulty, and getting it wrong in
+/// either direction produces a test that proves nothing:
+///
+/// * The system temporary directory is NOT a valid target. The `UserTemp`
+///   preset grants writes there on purpose whenever workspace writes are
+///   allowed, so a file appearing in `/tmp` or `$TMPDIR` is the policy
+///   working, not an escape. An earlier version of this test aimed there and
+///   reported a false violation.
+/// * `$TMPDIR` is doubly wrong, because the sandbox also injects its own
+///   workspace-scoped temporary directory, so the child would write somewhere
+///   the test is not even looking and the absence would read as confinement.
+///
+/// Both targets below sit under the user's home directory, which no preset
+/// grants: the presets open specific subdirectories such as `~/.cargo` and
+/// `~/.gradle`, never the root and never an arbitrary sibling. One target is
+/// the home root itself. The other is a directory this test creates and
+/// proves writable by the parent process before the run, so a missing file
+/// afterwards cannot be an ambient permission the account never had. It is a
+/// temporary directory, removed when the test ends.
+///
+/// The created directory's path is not known until the test runs, so the
+/// fixture is a template and the concrete path is substituted into the copied
+/// experiment before the playground reads it.
+#[cfg(unix)]
+#[test]
+fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
+    let (_temp, experiment_root) = setup_experiment_copy();
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME names the user's home"));
+    // Under the home directory on purpose: the system temporary directory is a
+    // granted preset root, so an escape file there would be policy working.
+    let escape_dir =
+        TempDir::new_in(&home).expect("create the outside-the-workspace escape directory");
+
+    // Non-null control on the escape directory itself.
+    let control = escape_dir.path().join("parent-can-write.txt");
+    fs::write(&control, "the parent process can write here")
+        .expect("the escape directory must be writable by this process, or the check is vacuous");
+    fs::remove_file(&control).expect("remove the control file");
+
+    let template = fs::read_to_string(
+        repo_root()
+            .join("experiments/burin-mini/fixtures/unix_write_confinement_probe.jsonl.template"),
+    )
+    .expect("read the write-confinement fixture template");
+    let fixture_name = "unix_write_confinement_probe.jsonl";
+    fs::write(
+        experiment_root.join("fixtures").join(fixture_name),
+        template.replace(
+            "__HARN_ESCAPE_DIR__",
+            escape_dir
+                .path()
+                .to_str()
+                .expect("the escape directory path is valid UTF-8"),
+        ),
+    )
+    .expect("write the resolved write-confinement fixture");
+
+    let outcome = run_playground_case(
+        experiment_root.clone(),
+        "Comment what this file does".to_string(),
+        fixture_name,
+    );
+    assert_writes_stay_confined(
+        &experiment_root,
+        &outcome,
+        &[
+            (
+                "outside-the-workspace directory",
+                Some(escape_dir.path().join("harn-escape-7993-outside.txt")),
+            ),
+            ("HOME", Some(home.join("harn-escape-7993-home.txt"))),
+        ],
+        &[],
+    );
 }

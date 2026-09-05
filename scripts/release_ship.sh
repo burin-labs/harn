@@ -560,7 +560,7 @@ EOF
     pr_url="$(gh pr create \
       --base "$base" \
       --head "$branch" \
-      --title "Bump version to $next" \
+      --title "[Release] Bump version to $next" \
       --body-file "$body_file")"
     echo "$pr_url"
 

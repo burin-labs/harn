@@ -1,0 +1,7 @@
+turn=1 prior_drafts=0 judge_reason=0
+turn=2 prior_drafts=0 judge_reason=1
+turn=3 prior_drafts=0 judge_reason=2
+turn=4 prior_drafts=0 judge_reason=3
+run_completed=true
+user_turn_preserved=true
+one_accepted_report_survives=true

@@ -19,7 +19,7 @@ fn assistant_message(text: &str) -> VmValue {
 async fn execute_sub_agent_persists_one_stop_with_lineage() {
     crate::agent_sessions::reset_session_store();
     reset_llm_mock_state();
-    let parent = crate::agent_sessions::open_or_create(Some("parent-subagent".into()));
+    let parent = crate::agent_sessions::open_or_create_for_test(Some("parent-subagent".into()));
     crate::agent_events::clear_session_sinks(&parent);
     let lifecycle_log = std::sync::Arc::new(crate::event_log::AnyEventLog::Memory(
         crate::event_log::MemoryEventLog::new(16),

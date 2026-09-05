@@ -23,18 +23,22 @@ import {
 const PASSING =
   "running 2 tests\ntest a ... ok\ntest b ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
 
-// Verdict issuance reads the host execution store, so it rides the deterministic
-// host-tools gate; a real consumer (an eval / agent loop) has it enabled. Enable
-// it for the test session.
+/**
+ * Verdict issuance reads the host execution store, so it rides the deterministic
+ * host-tools gate; a real consumer (an eval / agent loop) has it enabled. Enable
+ * it for the test session.
+ */
 fn enable_verdict() -> nil {
   return nil
 }
 
-// THE FORGERY, CLOSED. A caller writes passing-looking test output to a real
-// file and cites it as the result handle. Because the host never RECORDED an
-// execution under that reference, it can never be a pass — it is honestly
-// indeterminate. Authoring evidence is not executing tests: this is the
-// provenance-forgery negative the earlier path-based design missed.
+/**
+ * THE FORGERY, CLOSED. A caller writes passing-looking test output to a real
+ * file and cites it as the result handle. Because the host never RECORDED an
+ * execution under that reference, it can never be a pass — it is honestly
+ * indeterminate. Authoring evidence is not executing tests: this is the
+ * provenance-forgery negative the earlier path-based design missed.
+ */
 pipeline test_caller_authored_evidence_is_never_a_pass(harness: Harness) {
   enable_verdict()
   const dir = harness.fs.mkdtemp_in_workspace("verdict-neg")
@@ -45,8 +49,10 @@ pipeline test_caller_authored_evidence_is_never_a_pass(harness: Harness) {
   assert_eq(verdict_is_pass(v), false)
 }
 
-// A fabricated handle string — one no `run_test` ever issued — is indeterminate,
-// never a pass. A caller cannot guess a handle into the host execution store.
+/**
+ * A fabricated handle string — one no `run_test` ever issued — is indeterminate,
+ * never a pass. A caller cannot guess a handle into the host execution store.
+ */
 pipeline test_fabricated_handle_is_indeterminate(harness: Harness) {
   enable_verdict()
   const v = verdict_from_run(harness.verdict, {result_handle: "htr-deadbeef-999999"})
@@ -54,8 +60,10 @@ pipeline test_fabricated_handle_is_indeterminate(harness: Harness) {
   assert_eq(verdict_is_pass(v), false)
 }
 
-// A run result carrying no handle at all cannot be a pass — there is no host
-// execution to attest, so the reference is empty and the verdict is undecided.
+/**
+ * A run result carrying no handle at all cannot be a pass — there is no host
+ * execution to attest, so the reference is empty and the verdict is undecided.
+ */
 pipeline test_run_result_without_handle_is_indeterminate(harness: Harness) {
   enable_verdict()
   const v = verdict_from_run(harness.verdict, {exit_code: 0, stdout: PASSING})
@@ -63,7 +71,7 @@ pipeline test_run_result_without_handle_is_indeterminate(harness: Harness) {
   assert_eq(verdict_evidence_ref(v), "")
 }
 
-// verdict_all: any fail dominates the aggregate (disposition == fail).
+/** verdict_all: any fail dominates the aggregate (disposition == fail). */
 pipeline test_verdict_all_with_a_fail_is_fail(harness: Harness) {
   const v = verdict_all(
     harness.verdict,
@@ -72,14 +80,16 @@ pipeline test_verdict_all_with_a_fail_is_fail(harness: Harness) {
   assert_eq(verdict_disposition(v), "fail")
 }
 
-// verdict_all: absent a fail, any indeterminate dominates — never a vacuous pass.
+/** verdict_all: absent a fail, any indeterminate dominates — never a vacuous pass. */
 pipeline test_verdict_all_with_an_indeterminate_is_indeterminate(harness: Harness) {
   const v = verdict_all(harness.verdict, [verdict_indeterminate("judge_unavailable", "")])
   assert_eq(verdict_disposition(v), "indeterminate")
 }
 
-// verdict_all: an empty aggregate is indeterminate, never a vacuously combined
-// pass over zero host-issued receipts.
+/**
+ * verdict_all: an empty aggregate is indeterminate, never a vacuously combined
+ * pass over zero host-issued receipts.
+ */
 pipeline test_verdict_all_empty_is_indeterminate(harness: Harness) {
   const v = verdict_all(harness.verdict, [])
   assert_eq(verdict_disposition(v), "indeterminate")

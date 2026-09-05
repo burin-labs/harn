@@ -1,0 +1,165 @@
+// MECHANISM CONTRACT (onramp tier): COMPLETION-JUDGE FEEDBACK REACHES THE ACTOR WHOLE.
+//
+//   CONTRACT: the instruction a completion judge writes is the instruction the
+//   actor receives. The decode boundary still bounds the string, but a bound
+//   that fires cuts on a word boundary and SAYS it cut, so a truncated
+//   instruction can never be mistaken for a complete one.
+//
+// WHY THIS EXISTS. The judge's `detail` was clamped to 240 characters with a
+// bare substring, and the same clamped string becomes the verdict's `feedback`,
+// `reasoning` and `next_step`. A judge detail is written complaint-first and
+// remedy-last — "X is not discriminating, ADJUST the fixture, then rerun the
+// verifier" — so the clamp systematically deleted the half the actor had to act
+// on and kept the half it could not.
+//
+// Measured on a live coding run (harn#8074): five `continue` verdicts, each
+// naming `gap_class: missing_artifact`, with details of 307/258/218/262/316
+// characters. The actor received 239/240/218/240/240. Four arrived cut
+// mid-word. The single reply that already fit under the limit is the only one
+// the actor demonstrably acted on. The objection raised on call one was raised
+// again on call four, and the run then exhausted its judge invocation budget.
+//
+// The schema could not prevent the overrun: it documents the limit in prose but
+// `schema_compat` strips `maxLength` for both OpenAI-strict and
+// Anthropic-strict, so the judge never saw a length constraint at all.
+//
+//   trigger  — a judge refusal whose detail is longer than the OLD 240-char
+//              limit and whose final clause is the remedy;
+//   effect   — the feedback delivered to the actor carries that final clause,
+//              verbatim and unmarked;
+//   negative — (a) a genuinely unbounded detail is STILL bounded and marked, so
+//              the fix did not simply delete the guarantee the clamp exists for;
+//              (b) a detail that fits gains no marker, so the marker is not a
+//              constant that would read as working against any input;
+//              (c) the bound holds even with no word boundary to cut on.
+//
+// Clause (a) is the load-bearing one. Removing the clamp entirely would pass
+// the positive case and look identical to a working fix, while handing an
+// unbounded string into feedback and telemetry.
+//
+// These clauses read the feedback the ACTOR was handed, from `feedback_injected`
+// events, not the receipt's own `reason`. The receipt and the actor feedback are
+// two projections of one string, and reading the receipt alone would have
+// reported this defect fixed while the actor still received the amputated text.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+
+// The verbatim first refusal from the observed run: 307 characters, remedy last.
+const OBSERVED_DETAIL =
+  "The status-filter test does not cover excluding a top-scoring run with a nonmatching status: both metric-bearing runs are COMPLETED, while the RUNNING run has no target metric. Add a metric-bearing higher-scoring nonmatching-status run and assert the filtered selection excludes it, then rerun the verifier."
+
+// The clause the old 240-char clamp deleted. This is the whole point.
+const REMEDY = "assert the filtered selection excludes it, then rerun the verifier."
+
+const MARKER = " [truncated]"
+
+fn gate_observing(observed: string, reason: string) {
+  return { _payload ->
+    {
+      confirm: true,
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+fn judge_refusing(detail: string) -> dict {
+  return {
+    text: json_stringify({verdict: "continue", detail: detail, gap_class: "missing_artifact"}),
+  }
+}
+
+/** What the ACTOR was handed, in order. Never the receipt's own projection. */
+fn injected_feedback(events: list) -> list {
+  return events.filter(
+    { event -> event.type == "feedback_injected" && event?.kind == "verify_completion" },
+  )
+    .map({ event -> to_string(event?.content ?? "") })
+    .to_list()
+}
+
+fn run_case(harness: Harness, label: string, detail: string) {
+  return with_llm_script(
+    harness.llm,
+    [llm_done(), judge_refusing(detail), llm_done(), judge_refusing(detail), llm_done()],
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        final_wrapup: false,
+        verify_completion: gate_observing("passed", "verified_after_write"),
+        verify_completion_judge: {provider: "mock", max_invocations: 2},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Apply the requested change.", nil, opts) },
+      )
+      const delivered = injected_feedback(captured.events)
+      const first = if len(delivered) > 0 {
+        delivered[0]
+      } else {
+        ""
+      }
+      return {delivered: first, count: len(delivered), delivered_len: len(first)}
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  // TRIGGER + EFFECT: the observed reply. The remedy reaches the actor.
+  const observed = run_case(harness, "observed", OBSERVED_DETAIL)
+  harness.stdio.println("observed_feedback_delivered=" + to_string(observed.count > 0))
+  harness.stdio.println(
+    "observed_carries_remedy=" + to_string(ends_with(observed.delivered, REMEDY)),
+  )
+  harness.stdio.println("observed_is_whole=" + to_string(observed.delivered == OBSERVED_DETAIL))
+  // The old limit. Pinned as a number so a future clamp that silently drops
+  // back under the remedy fails here rather than passing quietly.
+  harness.stdio.println("observed_exceeds_old_limit=" + to_string(len(observed.delivered) > 240))
+  harness.stdio.println("observed_unmarked=" + to_string(!ends_with(observed.delivered, MARKER)))
+  // THE DELIVERY LEG, stated as a length equality rather than a suffix match.
+  // A suffix assertion alone would still pass if the MIDDLE of the instruction
+  // were dropped; this pins that the actor received exactly as many characters
+  // as the judge wrote, no more and no fewer.
+  harness.stdio.println(
+    "observed_delivered_len_equals_judge_detail_len="
+      + to_string(observed.delivered_len == len(OBSERVED_DETAIL)),
+  )
+  // The absolute number, so the golden moves visibly if the clamp ever drops
+  // back under the length of one real instruction.
+  harness.stdio.println("observed_delivered_len=" + to_string(observed.delivered_len))
+  // Feedback was actually DELIVERED, not merely composed. A judge that accepts
+  // first pass records `feedback_delivery: "none"` and exercises none of this,
+  // which is exactly how this leg went unproven on the live cells: every trial
+  // passed before any refusal was ever handed back. This case forces a refusal.
+  harness.stdio.println("observed_feedback_count=" + to_string(observed.count))
+  // NEGATIVE (a): the bound is still a bound. Deleting the clamp would pass
+  // every clause above and fail this one.
+  const unbounded = run_case(harness, "unbounded", "gap. ".repeat(4000))
+  harness.stdio.println("unbounded_is_bounded=" + to_string(len(unbounded.delivered) <= 1000))
+  harness.stdio.println("unbounded_is_marked=" + to_string(ends_with(unbounded.delivered, MARKER)))
+  // NEGATIVE (b): a detail that fits gains nothing. A marker that always fired
+  // would satisfy clause (a) while telling a reader nothing.
+  const short = run_case(harness, "short", "Verification is green and the tests discriminate.")
+  harness.stdio.println("short_unmarked=" + to_string(!ends_with(short.delivered, MARKER)))
+  harness.stdio.println(
+    "short_is_whole="
+      + to_string(short.delivered == "Verification is green and the tests discriminate."),
+  )
+  // NEGATIVE (c): no space to cut on. The word boundary is a courtesy; the
+  // bound is the guarantee.
+  const notoken = run_case(harness, "notoken", "x".repeat(4000))
+  harness.stdio.println("notoken_is_bounded=" + to_string(len(notoken.delivered) <= 1000))
+  harness.stdio.println("notoken_is_marked=" + to_string(ends_with(notoken.delivered, MARKER)))
+}

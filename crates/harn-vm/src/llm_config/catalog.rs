@@ -41,6 +41,32 @@ pub fn data_controls_default_posture() -> DataPosture {
     effective_config().data_controls_policy.default_posture
 }
 
+/// The training posture that actually applies to one route.
+///
+/// A model row's own declaration wins over its provider's, because a provider
+/// that sells the posture per model id has no single provider-wide answer to
+/// give. A row that declares nothing inherits, so the uniform case stays one
+/// declaration on the provider.
+///
+/// `None` means neither level is researched. That is deliberately distinct
+/// from `Some(TrainingDefault::Unspecified)`, which is the stronger claim that
+/// someone looked and the provider publishes no answer.
+pub fn effective_training_default(provider: &str, model_id: &str) -> Option<TrainingDefault> {
+    if let Some(model_controls) = model_catalog_entry(model_id).and_then(|row| row.data_controls) {
+        return Some(model_controls.training_default);
+    }
+    provider_config(provider)
+        .and_then(|definition| definition.data_controls)
+        .map(|controls| controls.training_default)
+}
+
+/// The route's own data-controls note and sources, when it overrides its
+/// provider. Hosts surface this verbatim rather than re-wording a privacy
+/// claim.
+pub fn model_data_controls(model_id: &str) -> Option<ModelDataControlsDef> {
+    model_catalog_entry(model_id).and_then(|row| row.data_controls)
+}
+
 pub fn provider_protocol(name: &str) -> Option<String> {
     provider_config(name).and_then(|def| def.protocol)
 }
@@ -469,6 +495,11 @@ pub fn provider_names() -> Vec<String> {
 /// that suppresses a provider cannot leave a dangling recommendation.
 pub fn featured_provider_names() -> Vec<String> {
     let config = effective_config();
+    featured_provider_names_for_config(&config)
+}
+
+/// Resolve presentation order from an explicit catalog snapshot.
+pub fn featured_provider_names_for_config(config: &ProvidersConfig) -> Vec<String> {
     config
         .presentation
         .featured_providers
@@ -602,10 +633,23 @@ pub fn wire_model_id(model_id: &str) -> String {
 /// into capability lookup). Collision-free catalog ids may differ from the
 /// upstream creator/model slug that provider-family rules match.
 pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
-    if !provider_has_feature(provider, "wire_model_capabilities") {
+    capability_model_id_for_config(provider, model_id, &effective_config())
+}
+
+pub(crate) fn capability_model_id_for_config(
+    provider: &str,
+    model_id: &str,
+    config: &ProvidersConfig,
+) -> String {
+    if !config.providers.get(provider).is_some_and(|provider| {
+        provider
+            .features
+            .iter()
+            .any(|feature| feature == "wire_model_capabilities")
+    }) {
         return model_id.to_string();
     }
-    effective_config()
+    config
         .models
         .get(model_id)
         .filter(|model| model.provider == provider)

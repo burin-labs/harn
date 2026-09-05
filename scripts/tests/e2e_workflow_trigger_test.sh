@@ -7,7 +7,7 @@ workflow="${repo_root}/.github/workflows/e2e.yml"
 require_line() {
   local expected="$1"
   if ! grep -Fqx -- "${expected}" "${workflow}"; then
-    printf 'missing E2E workflow contract: %s\n' "${expected}" >&2
+    printf 'missing CLI end-to-end workflow contract: %s\n' "${expected}" >&2
     exit 1
   fi
 }
@@ -20,8 +20,8 @@ require_line "  cancel-in-progress: \${{ github.event_name == 'pull_request' && 
 
 # The synchronize trigger remains cost-gated by the PR's durable label state.
 if ! grep -Fq "contains(github.event.pull_request.labels.*.name, 'e2e')" "${workflow}"; then
-  echo 'E2E pull-request runs are no longer gated by the e2e label' >&2
+  echo 'CLI end-to-end pull-request runs are no longer gated by the e2e label' >&2
   exit 1
 fi
 
-echo 'E2E workflow trigger contract passed'
+echo 'CLI end-to-end workflow trigger contract passed'

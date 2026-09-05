@@ -20,6 +20,7 @@ mod scope;
 mod state;
 mod stdlib_artifact;
 pub mod subtask;
+mod task_cleanup;
 mod tool_callable;
 
 #[cfg(test)]
@@ -51,6 +52,7 @@ pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 pub(crate) use stdlib_artifact::prepare_stdlib_module_artifact;
+pub(crate) use task_cleanup::PendingTaskCleanup;
 
 pub(crate) use call_args::CallArgs;
 pub(crate) use state::{

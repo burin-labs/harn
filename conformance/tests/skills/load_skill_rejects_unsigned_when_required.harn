@@ -33,7 +33,10 @@ pipeline test(harness: Harness, task: unknown) {
           skills: skills,
         },
       )
-      assert(result.status == "done", "agent loop finishes")
+      // The unsigned skill is rejected and nothing else succeeds, so the run
+      // seals completion_unverified (harn#7915). This case is about the
+      // rejection reaching a terminal, not about the terminal being a success.
+      assert(result.status == "completion_unverified", "agent loop finishes")
       const calls = harness.llm.mock_calls()
       const second_messages = json_stringify(calls[1].messages)
       assert(

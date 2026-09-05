@@ -1,0 +1,101 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_session_finalize } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+/** Cancelling a pending SessionStart hook rolls back every host owner. */
+pipeline default(harness: Harness) {
+  const unique = harness.random.uuid()
+  const cancelled_session = "session-start-cancel-cleanup-" + unique
+  const transcript_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "session-start-cancel-cleanup-" + unique,
+  )
+  const store_root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "session-start-cancel-store-" + unique,
+  )
+  const entered = harness.runtime.channel("session-start-entered", 1)
+  const release = harness.runtime.channel("session-start-release", 1)
+  harness.agent.clear_session_hooks()
+  const cancelled_options: AgentSpec = {
+    provider: "mock",
+    session_id: cancelled_session,
+    llm_transcript_dir: transcript_dir,
+    root: store_root,
+  }
+  const handle = spawn {
+    harness.agent.register_session_hook(
+      "session_start",
+      { _hook_harness, _event ->
+        harness.runtime.send(entered, true)
+        harness.runtime.receive(release)
+        return nil
+      },
+    )
+    agent_loop(harness, "cancel during registered session setup", nil, cancelled_options)
+  }
+  const entered_receipt = harness.runtime.channel_select([entered], 1000)
+  if entered_receipt == nil {
+    const prestart = try {
+      await(handle)
+    }
+    throw "agent task ended before session_start hook: " + to_string(prestart)
+  }
+  cancel(handle)
+  harness.stdio.println(harness.agent.current_id() == nil)
+  const stale_finalize = try {
+    agent_session_finalize(
+      harness.agent,
+      cancelled_session,
+      {final_status: "done", stop_reason: "must-be-absent", iterations: 0},
+    )
+  }
+  harness.stdio.println(is_err(stale_finalize))
+  const cancelled_events = harness.agent.session_store_events(cancelled_session, {root: store_root})
+    .value
+  let started_count = 0
+  let terminal_count = 0
+  let measured_zero_count = 0
+  let transcript_event_count = 0
+  for event in cancelled_events {
+    const transcript_event = event.payload?.transcript_event ?? {}
+    if transcript_event.kind != nil {
+      transcript_event_count = transcript_event_count + 1
+    }
+    if transcript_event.kind == "agent_run_started" {
+      started_count = started_count + 1
+    }
+    if transcript_event.kind == "agent_run_terminal" {
+      terminal_count = terminal_count + 1
+      if transcript_event.metadata?.provider_call_count == 0 {
+        measured_zero_count = measured_zero_count + 1
+      }
+    }
+  }
+  harness.stdio.println(transcript_event_count)
+  harness.stdio.println(started_count)
+  harness.stdio.println(terminal_count)
+  harness.stdio.println(measured_zero_count)
+  harness.agent.clear_session_hooks()
+  with_llm_script(
+    harness.llm,
+    [llm_text("healthy")],
+    { ->
+      const healthy_options: AgentSpec = {
+        provider: "mock",
+        session_id: cancelled_session,
+        llm_transcript_dir: transcript_dir,
+        root: store_root,
+      }
+      const result = agent_loop(harness, "run after cancelled setup", nil, healthy_options)
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.agent.current_id() == nil)
+      const transcript_path = path_join(transcript_dir, "llm_transcript.jsonl")
+      harness.stdio.println(harness.fs.exists(transcript_path))
+      harness.stdio.println(
+        harness.fs.read_text(transcript_path).contains("agent_session_finalized"),
+      )
+    },
+  )
+}

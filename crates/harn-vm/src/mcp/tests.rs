@@ -374,8 +374,9 @@ async fn stable_input_required_result_dispatches_and_retries() {
         .run_until(async {
             let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
             let handle = stable_http_handle(&base_url).await;
-            let session_id =
-                crate::agent_sessions::open_or_create(Some("mcp-input-required".to_string()));
+            let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+                "mcp-input-required".to_string(),
+            ));
             let _session_lifecycle = SessionLifecycleGuard(session_id.clone());
             let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
             let captured_events = install_capturing_agent_sink(&session_id);
@@ -690,7 +691,8 @@ fn install_capturing_agent_sink(
 
 #[test]
 fn list_changed_notification_emits_catalog_changed_cue() {
-    let session_id = crate::agent_sessions::open_or_create(Some("mcp-list-changed".to_string()));
+    let session_id =
+        crate::agent_sessions::open_or_create_for_test(Some("mcp-list-changed".to_string()));
     let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
     let captured = install_capturing_agent_sink(&session_id);
 

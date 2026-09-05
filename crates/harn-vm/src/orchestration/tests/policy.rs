@@ -252,3 +252,72 @@ fn glob_match_patterns() {
     assert!(glob_match("read_file", "read_file"));
     assert!(!glob_match("read_file", "write_file"));
 }
+
+/// A `command_policy` consent gate must be able to ask its host while running
+/// under the ceiling of whichever tool triggered it.
+///
+/// A command-running tool declares `process: ["exec"]` and has no other use for
+/// a `permission` capability, so before this the gate's
+/// `host_call("permission.request", ...)` was refused inside the VM. The
+/// embedder caught the throw and the command failed with a sentence that reads
+/// as "there is nobody to ask" while the host was reachable and, on a
+/// non-interactive run with an authorized envelope, ready to approve.
+///
+/// Paired, because the grant has to be scoped to the hook and not to the tool:
+/// the same call outside the hook is still refused. Without the pairing this
+/// would pass just as well if the ceiling had been removed altogether.
+#[test]
+fn consent_gate_reaches_permission_request_under_a_process_only_ceiling() {
+    let host_call_permission_request = [crate::value::VmValue::String(arcstr::ArcStr::from(
+        "permission.request",
+    ))];
+    push_execution_policy(CapabilityPolicy {
+        tools: vec!["run".to_string()],
+        capabilities: BTreeMap::from([("process".to_string(), vec!["exec".to_string()])]),
+        side_effect_level: Some("process_exec".to_string()),
+        ..Default::default()
+    });
+
+    // Negative control first: a tool asking for consent on its own behalf,
+    // outside the VM's hook, is still measured against its own ceiling.
+    let direct = enforce_current_policy_for_builtin("host_call", &host_call_permission_request)
+        .expect_err("a tool calling permission.request itself must stay refused");
+    assert!(
+        matches!(
+            &direct,
+            VmError::CategorizedError { message, .. } if message.contains("exceeds capability ceiling")
+        ),
+        "{direct:?}"
+    );
+
+    // Inside the VM's own command-policy hook the same call carries the policy
+    // machinery's capability instead of the tool's.
+    let inside_hook = {
+        let _hook = crate::orchestration::command_policy::enter_command_policy_hook();
+        enforce_current_policy_for_builtin("host_call", &host_call_permission_request)
+    };
+
+    // A second unrelated host call proves the grant is one operation wide and
+    // not a hole in the ceiling for the whole hook.
+    let unrelated = {
+        let _hook = crate::orchestration::command_policy::enter_command_policy_hook();
+        enforce_current_policy_for_builtin(
+            "host_call",
+            &[crate::value::VmValue::String(arcstr::ArcStr::from(
+                "workspace.write_text",
+            ))],
+        )
+    };
+    pop_execution_policy();
+
+    inside_hook.expect("the consent gate must reach permission.request");
+    let unrelated =
+        unrelated.expect_err("the hook must not lift the ceiling for other capabilities");
+    assert!(
+        matches!(
+            &unrelated,
+            VmError::CategorizedError { message, .. } if message.contains("workspace.write_text")
+        ),
+        "{unrelated:?}"
+    );
+}

@@ -987,7 +987,10 @@ mod tests {
         let envelope = envelope_success(&outcome, false, None);
         let usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&envelope).clone().into()));
-        assert_eq!(usage["cost_usd"], serde_json::Value::Null);
+        // harn#7912: the priced attempt measured this, and an unpriced sibling
+        // does not unmeasure it. The unpriced attempt stays visible instead.
+        assert_eq!(usage["cost_usd"], serde_json::json!(one_cost));
+        assert_eq!(usage["accounting_status"], "partial");
         assert_eq!(usage["known_cost_usd"], serde_json::json!(one_cost));
         assert_eq!(usage["unpriced_calls"], 1);
         assert_eq!(usage["usage_unknown_calls"], 1);

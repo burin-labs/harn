@@ -2,6 +2,7 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 import "std/schema"
 import * as semver from "std/semver"
 import { BumpKind } from "std/semver"
+import { release_development_prerelease } from "./release_contract.harn"
 import { load_release_withdrawals, release_distribution_version } from "./release_withdrawals.harn"
 
 const RELEASE_WITHDRAWALS_PATH = ".github/release-withdrawals.json"
@@ -12,8 +13,6 @@ pub type ReleaseMetadataPlan = {
   manifests: list<string>,
   package_names: list<string>,
 }
-
-const DEVELOPMENT_PRERELEASE = "dev"
 
 type PackageManifestProjection = {package: {name: string}}
 
@@ -115,14 +114,17 @@ pub fn development_version_from_stable(version: string) -> string {
     + "."
     + to_string(parsed.patch + 1)
     + "-"
-    + DEVELOPMENT_PRERELEASE
+    + release_development_prerelease()
 }
 
 /** Strip the one prerelease identity admitted at the stable-release boundary. */
 pub fn stable_version_from_development(version: string) -> string {
   const parsed = semver.parse_release(version)
-  if parsed == nil || parsed.prerelease != DEVELOPMENT_PRERELEASE {
-    throw "release requires an exact X.Y.Z-dev workspace version: " + version
+  if parsed == nil || parsed.prerelease != release_development_prerelease() {
+    throw "release requires an exact X.Y.Z-"
+      + release_development_prerelease()
+      + " workspace version: "
+      + version
   }
   return to_string(parsed.major)
     + "."
@@ -321,9 +323,11 @@ pub fn release_metadata_plan(
   const current = current_version(fs, root)
   const manifests = workspace_package_manifests(fs, root)
   const names = package_names_for_manifests(fs, manifests)
-  const next = if current.ends_with("-" + DEVELOPMENT_PRERELEASE) {
+  const next = if current.ends_with("-" + release_development_prerelease()) {
     if bump != "patch" || prerelease_identifier != "" {
-      throw "development release can only strip -dev with a patch bump"
+      throw "development release can only strip -"
+        + release_development_prerelease()
+        + " with a patch bump"
     }
     stable_version_from_development(current)
   } else {
@@ -395,7 +399,7 @@ pub fn apply_release_metadata(
     text = rewrite_local_dependency_versions(text, plan.package_names, version)
     fs.write_text(manifest, text)
   }
-  const current_distribution = if current.ends_with("-" + DEVELOPMENT_PRERELEASE) {
+  const current_distribution = if current.ends_with("-" + release_development_prerelease()) {
     nil
   } else {
     distribution_version(fs, root, current)

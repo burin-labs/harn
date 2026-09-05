@@ -180,6 +180,7 @@ pub(super) fn required_hook_closure(
 #[harn_builtin(
     exposure = "harness.agent.register_persona_hook",
     effects = ["state.mutate@const=persona-hooks"],
+    runtime_control_plane = true,
     sig = "register_persona_hook(persona_pattern: string, event: string, handler: closure) -> nil",
     category = "workflow.host"
 )]
@@ -205,6 +206,7 @@ pub(super) fn register_persona_hook_builtin(
 #[harn_builtin(
     exposure = "harness.agent.register_step_hook",
     effects = ["state.mutate@const=step-hooks"],
+    runtime_control_plane = true,
     sig = "register_step_hook(persona_pattern: string, step_name: string, event: string, handler: closure) -> nil",
     category = "workflow.host"
 )]
@@ -240,6 +242,7 @@ pub(super) fn register_step_hook_builtin(
 #[harn_builtin(
     exposure = "harness.agent.clear_persona_hooks",
     effects = ["state.mutate@const=persona-hooks"],
+    runtime_control_plane = true,
     sig = "clear_persona_hooks() -> nil", category = "workflow.host"
 )]
 pub(super) fn clear_persona_hooks_builtin(
@@ -258,6 +261,7 @@ pub(super) fn clear_persona_hooks_builtin(
 #[harn_builtin(
     exposure = "harness.agent.register_session_hook",
     effects = ["state.mutate@const=session-hooks"],
+    runtime_control_plane = true,
     sig = "register_session_hook(event: string, pattern_or_handler: string|closure, handler?: closure) -> nil",
     category = "workflow.host"
 )]
@@ -292,6 +296,7 @@ pub(super) fn register_session_hook_builtin(
 #[harn_builtin(
     exposure = "harness.agent.clear_session_hooks",
     effects = ["state.mutate@const=session-hooks"],
+    runtime_control_plane = true,
     sig = "clear_session_hooks() -> nil", category = "workflow.host"
 )]
 pub(super) fn clear_session_hooks_builtin(
@@ -312,6 +317,7 @@ pub(super) fn clear_session_hooks_builtin(
 #[harn_builtin(
     exposure = "harness.agent.register_checkpoint_hook",
     effects = ["state.mutate@const=checkpoint-hooks"],
+    runtime_control_plane = true,
     sig = "register_checkpoint_hook(kinds: string|list|nil, handler: closure) -> nil",
     category = "workflow.host"
 )]
@@ -463,6 +469,7 @@ fn reminder_provider_event_list(
 #[harn_builtin(
     exposure = "harness.agent.register_reminder_provider",
     effects = ["state.mutate@const=reminder-providers"],
+    runtime_control_plane = true,
     sig = "register_reminder_provider(config: dict) -> nil",
     category = "workflow.host"
 )]
@@ -520,6 +527,7 @@ pub(super) fn register_reminder_provider_builtin(
 #[harn_builtin(
     exposure = "harness.agent.clear_reminder_providers",
     effects = ["state.mutate@const=reminder-providers"],
+    runtime_control_plane = true,
     sig = "clear_reminder_providers() -> nil", category = "workflow.host"
 )]
 pub(super) fn clear_reminder_providers_builtin(
@@ -538,6 +546,7 @@ pub(super) fn clear_reminder_providers_builtin(
 #[harn_builtin(
     exposure = "harness.agent.pipeline_on_finish",
     effects = ["state.mutate@const=pipeline-hooks"],
+    runtime_control_plane = true,
     sig = "pipeline_on_finish(callback: closure) -> nil",
     category = "workflow.host"
 )]

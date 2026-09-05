@@ -344,6 +344,14 @@ pub type AgentExecutionSpec = {
   native_tool_fallback?: string,
   stop_after_successful_tools?: list<string>,
   require_successful_tools?: list,
+  /**
+   * Paths this run must leave behind. A declared path that does not exist when
+   * the run reaches its own end seals `completion_unverified` rather than a
+   * natural completion (harn#7915). Existence only: contents are not read, and
+   * a path the host refuses to stat is reported as unverifiable rather than
+   * convicted. Default empty, which checks nothing and costs nothing.
+   */
+  require_artifacts?: list<string>,
   exit_when_verified?: bool,
   deadline_ms?: int,
   verify_completion?: any,
@@ -413,6 +421,8 @@ pub type AgentLifecycleSpec = {
 
 /** Transcript, prompt, skill, and task-context extensions. */
 pub type AgentContextSpec = {
+  /** Root for the canonical durable session store used by this run. */
+  root?: string,
   transcript_projection?: string | dict,
   scratchpad?: bool | dict,
   timestamp_messages?: bool,

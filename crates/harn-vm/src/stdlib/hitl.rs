@@ -2204,7 +2204,7 @@ pipeline test(harness: Harness, task: unknown) {
                 let sink: std::sync::Arc<dyn crate::agent_events::AgentEventSink> =
                     std::sync::Arc::new(CaptureSink(captured.clone()));
                 crate::agent_events::register_sink(session_id.clone(), sink);
-                crate::agent_sessions::open_or_create(Some(session_id.clone()));
+                crate::agent_sessions::open_or_create_for_test(Some(session_id.clone()));
                 let _guard = crate::agent_sessions::enter_current_session(session_id.clone());
 
                 let source = r#"

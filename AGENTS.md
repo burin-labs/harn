@@ -146,6 +146,35 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Public stdlib functions need explicit return types: named closed records,
   `Result<T, E>`, or typed maps rather than `any` or open `dict`.
 
+## Adding a model or provider to the catalog
+
+- Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
+  `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
+  `crates/harn-vm/src/llm/providers.toml` and
+  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  everything under `spec/provider-catalog/` and the provider docs. Edit the
+  source fragments only.
+- Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
+  `make gen-provider-support`, then verify with the matching `check-` targets.
+  All three generators read the current source fragments from the repository
+  root. Catalog-only edits don't require rebuilding the CLI. Matrix and support
+  use embedded defaults when source directories are absent; `generate` requires
+  sources. Invalid fragments fail explicitly.
+- **Ship every route the model is served on.** A model reachable both directly
+  and through an aggregator needs a catalog row and a capability rule on each
+  route. Adding only the direct route leaves the aggregated route falling
+  through to a default rule, which usually downgrades it to text tools. Read how
+  the neighbouring generation is carried before concluding one route is enough,
+  and record the reason in a comment when it genuinely is.
+- **Give every catalog test a negative control.** Provider inference routes any
+  plausibly shaped model string, so "the id resolves" is also true of a model
+  that does not exist. Assert that a neighbouring unserved id has no row, and
+  pin an adjacent generation's contrasting capability value so a new rule that
+  silently inherits the old one fails instead of passing.
+- Back a capability claim with a live probe rather than a model card, and record
+  what the probe returned beside the row. An endpoint that tolerates a field its
+  own guidance says to strip has not honored it, so tolerance is not support.
+
 ## Verification
 
 - Start with the narrowest check through the owning interface.
@@ -167,6 +196,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `npm run portal:build`.
 - VS Code changes need `(cd editors/vscode && npm run compile)`.
 - Tree-sitter changes need `(cd tree-sitter-harn && npm test)`.
+- Read one head's CI check state with
+  `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
+  latest verdict per check name, counts queued work as pending, and exits 3 when
+  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
@@ -207,7 +240,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Use a closing keyword only when the pull request resolves the whole issue:
   `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
   #N` when the issue is not enumerated. For partial work, use `Partial: #N
-  items: 1, 3` or `Refs #N`; never use a closing keyword.
+  items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
+  closing link from the keyword and ignores the text after it, so a keyword on
+  partial work closes the whole issue on merge however the line is worded.
+  Verify with `gh pr view <N> --json closingIssuesReferences`, which is the
+  check; the body text is not.
 
 ## Release
 

@@ -63,6 +63,13 @@ harn test conformance --filter my_test -v
 harn test conformance --timing --filter my_test
 ```
 
+Name the suite root, not a path inside it. Conformance cases are driven by their
+sibling `.expected` file, and `harn test <path>` discovers test pipelines, so a
+path form walks the tree, runs the two dozen files that happen to declare a
+pipeline, and prints a confident total over one percent of the suite. A target
+holding conformance fixtures is now refused, and every path run reports the case
+count beside the number of `.harn` files it walked.
+
 Use a narrow `--filter` while developing. Run the full suite with `--parallel`
 before shipping. Each conformance worker is a separate process with its own
 runtime state, and the parent combines results in stable path order. The
@@ -424,6 +431,21 @@ enumerating every optional classifier or judge:
 {"id":"main-1","scope":"agent.main","consume":"once","text":"MAIN"}
 {"id":"aux","scope":"shared","consume":"sticky","match":"*","text":"AUX"}
 ```
+
+Both schema versions are closed: an entry carrying a field the parser does not
+read is rejected, naming the key and the field you probably meant. Before this,
+an unknown key was accepted and silently dropped, which made a fixture that was
+never applied indistinguishable from one that was.
+
+Two consequences worth knowing before you write a fixture. A key beginning with
+an underscore is an author annotation, permitted at every version and every
+depth, so a note explaining why a fixture exists can live in the fixture rather
+than in a second file nothing keeps in sync. And `id`, `scope` and `consume`
+mean nothing without a `schemaVersion` header: a headerless document pins every
+entry to the default scope, so those three are rejected with the missing header
+named rather than a spelling guessed. A headerless document spells reuse with
+`consume_match`, which makes a glob one-shot; a glob is otherwise reusable and a
+FIFO entry is always consumed.
 
 Consumption receipts record `requested_scope`, `resolved_scope`, and
 `fell_through`, so a test can distinguish an exact match from either fallback.
@@ -854,5 +876,5 @@ modules opts out of Windows via `#![cfg(unix)]` because they exercise
 POSIX-only semantics (`bash`-fixture process spawning, SIGTERM-driven
 graceful shutdown). The full inventory and disposition lives at
 [Windows test coverage](./dev/windows-test-coverage.md), and the nightly
-`Windows nightly` GitHub Actions workflow runs the portable surface on
+`Windows workspace tests` GitHub Actions workflow runs the portable surface on
 `windows-latest` so cross-platform regressions surface within 24 hours.

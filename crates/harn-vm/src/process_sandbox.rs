@@ -23,7 +23,8 @@ pub use crate::stdlib::sandbox::{
     deterministic_message_locale_env, enforce_process_cwd, process_spawn_error,
     process_violation_error, push_process_sandbox_scope, render_policy_root, std_command_for,
     tokio_command_for, FsAccess, ProcessCommandConfig, ProcessSandboxScope,
-    ProcessSandboxScopeGuard, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
+    ProcessSandboxScopeGuard, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the

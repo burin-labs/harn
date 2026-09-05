@@ -115,6 +115,13 @@ impl ThrottleSignal {
         empty_completion: bool,
         provider_already_throttled: bool,
     ) -> Option<ThrottleSignal> {
+        // An account that cannot pay is not going too fast. It arrives as a
+        // 429 on several providers, and treating it as a throttle both slows
+        // the route for a condition backing off cannot clear and records the
+        // wrong cause. See the billing family in `llm::api::errors`.
+        if crate::llm::api::errors::is_billing_stop(body_lower, body_lower) {
+            return None;
+        }
         // 429 is the canonical rate-limit signal, from status or body.
         if http_status == Some(429)
             || body_lower.contains("rate_limit_error")

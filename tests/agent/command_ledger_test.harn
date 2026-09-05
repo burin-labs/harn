@@ -78,7 +78,7 @@ fn _row_by_handle(ledger: list, handle: string) {
   return nil
 }
 
-// --- normalization (harn#4456: defaults live here, once) --------------------
+/** --- normalization (harn#4456: defaults live here, once) -------------------- */
 pipeline test_command_wait_normalize_defaults(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   assert(cw.decision_base_ms == 30000)
@@ -101,7 +101,7 @@ pipeline test_command_wait_normalize_overrides(harness: Harness, task: unknown) 
   assert(cw2.decision_base_ms == 30000)
 }
 
-// --- ingest + hold precondition --------------------------------------------
+/** --- ingest + hold precondition -------------------------------------------- */
 pipeline test_ingest_creates_awaited_row(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
@@ -130,7 +130,7 @@ pipeline test_ingest_is_idempotent_per_handle(harness: Harness, task: unknown) {
   assert(len(ledger) == 1)
 }
 
-// --- coalescing + delta cursor ---------------------------------------------
+/** --- coalescing + delta cursor --------------------------------------------- */
 pipeline test_apply_updates_coalesces_latest_per_handle(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
@@ -153,7 +153,7 @@ pipeline test_apply_updates_marks_terminal(harness: Harness, task: unknown) {
   assert(row.status == "completed")
 }
 
-// --- delta gate + event triggers + schedule --------------------------------
+/** --- delta gate + event triggers + schedule -------------------------------- */
 pipeline test_decide_silent_rung_does_not_fire_and_doubles(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
@@ -215,7 +215,7 @@ pipeline test_decide_byte_stall_fires(harness: Harness, task: unknown) {
   assert(decision.fire)
 }
 
-// --- digest shape + post-digest retirement ---------------------------------
+/** --- digest shape + post-digest retirement --------------------------------- */
 pipeline test_build_digest_covers_all_and_uses_delta(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   let ledger = command_ledger_ingest(
@@ -272,7 +272,7 @@ pipeline test_terminal_replay_does_not_reopen_retired_handle(harness: Harness, t
   assert(len(ledger) == 0, "an immutable terminal replay cannot recreate an active row")
 }
 
-// --- lease transitions ------------------------------------------------------
+/** --- lease transitions ------------------------------------------------------ */
 pipeline test_release_flips_to_service_off_schedule(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
@@ -287,7 +287,7 @@ pipeline test_retire_removes_row(harness: Harness, task: unknown) {
   assert(len(command_ledger_retire(ledger, "hto-1")) == 0)
 }
 
-// --- ceiling escalation (first breach, before auto-resolve) -----------------
+/** --- ceiling escalation (first breach, before auto-resolve) ----------------- */
 pipeline test_ceiling_below_wall_does_not_breach(harness: Harness, task: unknown) {
   const cw = command_wait_normalize(nil)
   const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)

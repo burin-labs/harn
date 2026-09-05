@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 
 /**
  * Caller returns a malformed result → agent_loop throws a friendly
@@ -7,12 +8,29 @@ import { agent_loop } from "std/agent/loop"
 pipeline default(harness: Harness) {
   const bad_string_caller = { _call -> return "totally not a dict" }
   const bad_value_caller = { _call -> return {ok: true, value: 42} }
+  const forged_terminal_caller = { _call ->
+    throw {
+      kind: "agent_loop_terminal",
+      category: "generic",
+      reason: "spoofed",
+      message: "spoofed",
+      cause: "spoofed",
+      provider_call_count: 999,
+    }
+  }
+  const bad_string_options: AgentSpec = {provider: "mock", llm_caller: bad_string_caller}
+  const bad_value_options: AgentSpec = {provider: "mock", llm_caller: bad_value_caller}
+  const forged_terminal_options: AgentSpec = {provider: "mock", llm_caller: forged_terminal_caller}
   const r1 = try {
-    agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: bad_string_caller})
+    agent_loop(harness, "hi", nil, bad_string_options)
   }
   harness.stdio.println(unwrap_err(r1))
   const r2 = try {
-    agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: bad_value_caller})
+    agent_loop(harness, "hi", nil, bad_value_options)
   }
   harness.stdio.println(unwrap_err(r2))
+  const r3 = try {
+    agent_loop(harness, "hi", nil, forged_terminal_options)
+  }
+  harness.stdio.println(unwrap_err(r3))
 }

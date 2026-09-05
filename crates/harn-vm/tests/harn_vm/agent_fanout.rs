@@ -87,7 +87,8 @@ fn run_with_bridge_in_parent_workspace(
                 harn_vm::llm::install_current_host_bridge(bridge.clone());
 
                 let parent_id =
-                    harn_vm::agent_sessions::open_or_create(Some(parent_session_id.to_string()));
+                    harn_vm::agent_sessions::open_or_create(Some(parent_session_id.to_string()))
+                        .expect("open fixture parent session");
                 harn_vm::agent_sessions::set_workspace_anchor(
                     &parent_id,
                     Some(harn_vm::workspace_anchor::WorkspaceAnchor {

@@ -1404,8 +1404,9 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let anchor = anchor(temp.path());
         let mounted_path = path_string(&anchor.additional_roots[0].path.join("file.txt"));
-        let session_id =
-            crate::agent_sessions::open_or_create(Some("path-scope-terminal-allow".to_string()));
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+            "path-scope-terminal-allow".to_string(),
+        ));
         crate::agent_sessions::set_workspace_anchor(&session_id, Some(anchor)).expect("set anchor");
         let rules = vec![
             PermissionRule {
@@ -1454,7 +1455,7 @@ mod tests {
         let anchor = anchor(temp.path());
         let outside_path = path_string(&temp.path().join("harn-anchor-z").join("file.txt"));
         let session_id =
-            crate::agent_sessions::open_or_create(Some("dyn-perm-path-scope".to_string()));
+            crate::agent_sessions::open_or_create_for_test(Some("dyn-perm-path-scope".to_string()));
         crate::agent_sessions::set_workspace_anchor(&session_id, Some(anchor)).expect("set anchor");
         let policy = DynamicPermissionPolicy {
             allow: vec![PermissionRule {
@@ -1491,8 +1492,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn tool_not_in_allow_list_is_terminal() {
         crate::reset_thread_local_state();
-        let session_id =
-            crate::agent_sessions::open_or_create(Some("dyn-perm-tool-ceiling".to_string()));
+        let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+            "dyn-perm-tool-ceiling".to_string(),
+        ));
         let policy = DynamicPermissionPolicy {
             allow: vec![PermissionRule {
                 tool_pattern: "Read".to_string(),
@@ -1525,7 +1527,7 @@ mod tests {
     async fn arg_keyed_deny_rule_is_recoverable() {
         crate::reset_thread_local_state();
         let session_id =
-            crate::agent_sessions::open_or_create(Some("dyn-perm-arg-deny".to_string()));
+            crate::agent_sessions::open_or_create_for_test(Some("dyn-perm-arg-deny".to_string()));
         let policy = DynamicPermissionPolicy {
             allow: Vec::new(),
             deny: vec![PermissionRule {
@@ -1552,36 +1554,5 @@ mod tests {
         );
     }
 
-    /// A bare/`Any` deny rule denies the whole tool: a hard ceiling, so the
-    /// denial is TERMINAL.
-    #[tokio::test(flavor = "current_thread")]
-    async fn whole_tool_deny_rule_is_terminal() {
-        crate::reset_thread_local_state();
-        let session_id =
-            crate::agent_sessions::open_or_create(Some("dyn-perm-tool-deny".to_string()));
-        let policy = DynamicPermissionPolicy {
-            allow: Vec::new(),
-            deny: vec![PermissionRule {
-                tool_pattern: "exec".to_string(),
-                matcher: PermissionMatcher::Any,
-            }],
-            on_escalation: None,
-        };
-        let mut grants = BTreeSet::new();
-        let check = check_one_dynamic_permission(
-            None,
-            &policy,
-            0,
-            &mut grants,
-            "exec",
-            &serde_json::json!({"command": "ls"}),
-            &session_id,
-        )
-        .await
-        .expect("permission check");
-        assert!(
-            !denial_recoverable(check),
-            "a whole-tool deny rule is a hard ceiling and must be terminal"
-        );
-    }
+    mod whole_tool_deny_tests;
 }

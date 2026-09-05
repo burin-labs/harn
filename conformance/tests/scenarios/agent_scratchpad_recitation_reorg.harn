@@ -14,7 +14,7 @@ fn observe_tools() {
     "Return a deterministic observation.",
     {
       handler: fn(_args) { return "observed-value-42" },
-      parameters: {type: "object", properties: {}},
+      inputSchema: {type: "object", properties: {}},
     },
   )
   return tools
@@ -47,6 +47,19 @@ pipeline default(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       harness.stdio.println("status:" + result.status)
+      // harn#7950 gave a registry entry's input schema one spelling. Before it
+      // this scenario spelled its schema `parameters` with an object-root JSON
+      // Schema, which the registry read as two parameters named "type" and
+      // "properties", so `observe` was rejected at schema validation. No tool
+      // call succeeded, and the harn#7948 abandonment rule correctly sealed
+      // `completion_unverified`. The tool now dispatches, so `done` is the
+      // honest terminal. These lines pin WHY, so a regression to the old
+      // reading fails here naming the tool instead of only moving a status.
+      harness.stdio.println(
+        "observe_succeeded:" + to_string(contains(result.tools.successful, "observe")),
+      )
+      harness.stdio.println("tool_rejected_count:" + to_string(len(result.tools.rejected)))
+      harness.stdio.println("abandoned:" + to_string(result?.abandonment != nil))
       harness.stdio.println("calls:" + to_string(len(calls)))
       harness.stdio.println(
         "first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")),

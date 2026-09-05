@@ -1,0 +1,116 @@
+// MECHANISM CONTRACT (onramp tier): COMPLETION-JUDGE CONTINUE CONTEXT CARRY.
+//
+//   CONTRACT: when the completion judge answers `continue`, the turn it just
+//   rejected leaves the model's context. The judge's directive is the
+//   carry-forward; the rejected draft is not.
+//
+// WHY THIS EXISTS. The veto branch set `should_continue` and injected the
+// directive but never removed the turn it rejected, so the draft stayed in the
+// transcript and every later round re-read every earlier one. Measured on a
+// fixed-size reply, input tokens grew 950 -> 1640 -> 2511 across three rounds
+// for output that never changed. One reported session took twenty vetoes and
+// paid that growth twenty times.
+//
+//   trigger  — a run whose deterministic completion gate returns a veto string
+//              on the first rounds and accepts on the last;
+//   effect   — the assistant draft count in the message list handed to the
+//              provider stays at zero on every round after a veto;
+//   negative — (a) the judge's reason still reaches the model, so the fix
+//              cannot pass by sending nothing; (b) the user's own turn is never
+//              touched; and (c) exactly one accepted closing report survives,
+//              so a fix that dropped every assistant turn reads RED here.
+//
+// The clauses read `call.opts.messages`, the list the dispatcher hands the
+// caller, so they measure context and not presentation. The reporting host
+// already collapsed the rejected drafts on screen while persisting all of them;
+// a screen-shaped assertion would have read this defect as fixed.
+//
+// Per-turn state lives in no closure counter. Each turn prints its own golden
+// line keyed by `call.turn.iteration`, so a mock that silently replayed turn 0
+// would change the line set rather than pass quietly.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_session_messages } from "std/agent/state"
+import { contract_effect } from "./lib/mechanism_contract"
+
+const REPORT_MARKER: string = "CONTRACT-CLOSING-REPORT"
+
+const JUDGE_REASON: string = "CONTRACT-JUDGE-REASON name the file you changed"
+
+fn role_copies(messages: any, role: string, marker: string) -> int {
+  let seen = 0
+  for message in messages ?? [] {
+    if to_string(message?.role ?? "") == role
+      && contains(json_stringify(message?.content ?? ""), marker) {
+      seen = seen + 1
+    }
+  }
+  return seen
+}
+
+fn any_copies(messages: any, marker: string) -> int {
+  let seen = 0
+  for message in messages ?? [] {
+    if contains(json_stringify(message ?? ""), marker) {
+      seen = seen + 1
+    }
+  }
+  return seen
+}
+
+pipeline default(harness: Harness, task: unknown) {
+  // A fresh id per run. The session store is durable, so a fixed id makes the
+  // golden depend on whatever an earlier run of this file left behind.
+  const session = "judge-continue-context-carry-" + harness.random.uuid()
+  const caller = { call ->
+    harness.stdio.println(
+      "turn=" + to_string(call?.turn?.iteration ?? -1) + " prior_drafts="
+        + to_string(role_copies(call?.opts?.messages, "assistant", REPORT_MARKER))
+        + " judge_reason="
+        + to_string(any_copies(call?.opts?.messages, JUDGE_REASON)),
+    )
+    return {
+      ok: true,
+      value: {
+        text: "<user_response>" + REPORT_MARKER
+          + " I finished the task.</user_response>\n<done>##DONE##</done>",
+        provider: "mock",
+        model: "context-carry",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  const gate = { payload ->
+    if payload.iteration < 3 {
+      return JUDGE_REASON
+    }
+    return ""
+  }
+  const spec: AgentSpec = {
+    provider: "mock",
+    model: "context-carry",
+    session_id: session,
+    llm_caller: caller,
+    loop_until_done: true,
+    turn_end_condition: false,
+    max_iterations: 6,
+    tool_format: "text",
+    done_sentinel: "##DONE##",
+    final_wrapup: false,
+    verify_completion: gate,
+  }
+  const result = agent_loop(harness, "Write the closing report.", nil, spec)
+  const messages = agent_session_messages(harness.agent, session)
+  contract_effect(harness.stdio, "run_completed", to_string(result?.status) == "done")
+  contract_effect(
+    harness.stdio,
+    "user_turn_preserved",
+    role_copies(messages, "user", "Write the closing report.") == 1,
+  )
+  contract_effect(
+    harness.stdio,
+    "one_accepted_report_survives",
+    role_copies(messages, "assistant", REPORT_MARKER) == 1,
+  )
+}

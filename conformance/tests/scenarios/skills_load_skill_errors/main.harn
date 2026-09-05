@@ -31,7 +31,10 @@ pipeline test(harness: Harness, task: unknown) {
           skills: skills,
         },
       )
-      assert(result?.status == "done", "agent loop completes")
+      // Every skill load in this fixture fails, so no tool call succeeds and
+      // the run seals completion_unverified (harn#7915). The point here is that
+      // the loop terminates on the error path.
+      assert(result?.status == "completion_unverified", "agent loop terminates")
       const calls = harness.llm.mock_calls()
       const second_messages = json_stringify(calls[1].messages)
       assert(

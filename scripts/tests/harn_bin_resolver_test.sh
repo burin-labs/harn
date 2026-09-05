@@ -338,6 +338,11 @@ if [[ "$*" = "host lease run cargo --help" ]]; then
   echo '      --workload-timeout-ms <WORKLOAD_TIMEOUT_MS>'
   exit 0
 fi
+if [[ "$*" = "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" ]]; then
+  mkdir -p "$HARN_HOST_LEASE_ROOT"
+  : > "$HARN_HOST_LEASE_ROOT/host-leases.wake"
+  exit 0
+fi
 previous=""
 for arg in "$@"; do
   if [[ "$previous" = "--workload-timeout-ms" && -n "${FAKE_CARGO_LEASE_TIMEOUT_RECORD:-}" ]]; then
@@ -431,6 +436,66 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+
+# Binary setup promotes an ambient installed Harn to required lease authority
+# so the fixed-point build cannot overlap another Rust-heavy job. Drive that
+# full resolver-to-wrapper boundary with a command-compatible pre-wake-file
+# runner: compatibility must fail closed before either Cargo or the spinning
+# lease workload starts.
+stale_target_dir="$tmp_root/stale-runner-target"
+stale_runner_record="$tmp_root/stale-runner-record.txt"
+cat > "$fake_cargo_bin/harn" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${FAKE_STALE_RUNNER_RECORD:?}"
+case "$*" in
+  "host lease run cargo --help") exit 0 ;;
+  "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json")
+    mkdir -p "$HARN_HOST_LEASE_ROOT"
+    : > "$HARN_HOST_LEASE_ROOT/host-leases.sqlite"
+    exit 0
+    ;;
+  *)
+    echo "stale ambient lease runner reached workload execution" >&2
+    exit 97
+    ;;
+esac
+SH
+chmod +x "$fake_cargo_bin/harn"
+: > "$record"
+: > "$stale_runner_record"
+if env -u HARN_CARGO_LEASE_RUNNER \
+  HARN_CARGO_LEASE_MODE=auto \
+  CARGO_TARGET_DIR="$stale_target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_STALE_RUNNER_RECORD="$stale_runner_record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$minimum_bash" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/stale-runner.out" \
+    2> "$tmp_root/stale-runner.err"; then
+  echo "harn_bin resolver accepted a stale ambient lease runner" >&2
+  exit 1
+fi
+if ! grep -Fxq \
+    "host lease status --host harn-lease-runner-probe --resource-class rust-heavy --json" \
+    "$stale_runner_record"; then
+  echo "harn_bin resolver did not prove the ambient runner's idle-wait contract" >&2
+  cat "$stale_runner_record" >&2
+  exit 1
+fi
+if grep -Fq "host lease run cargo --owner" "$stale_runner_record"; then
+  echo "harn_bin resolver launched an ambient runner without the idle-wait contract" >&2
+  cat "$stale_runner_record" >&2
+  exit 1
+fi
+if [[ -s "$record" ]] \
+  || ! grep -Fq "must provide the idle host-lease wait contract" \
+    "$tmp_root/stale-runner.err"; then
+  echo "harn_bin resolver did not refuse the stale runner before Cargo" >&2
+  cat "$record" "$tmp_root/stale-runner.err" >&2
+  exit 1
+fi
+rm -f "$fake_cargo_bin/harn"
 
 # CI's default lease policy is off. The resolver and Cargo wrapper must agree
 # on that default so the build freshness input remains an ordinary process env
@@ -1334,6 +1399,52 @@ if ! grep -Fq "no fresh worktree harn binary found" "$tmp_root/env-no-build-miss
 fi
 if [[ -s "$record" ]]; then
   echo "HARN_BIN_NO_BUILD invoked cargo while reporting a missing binary" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+# Negative control for the missing-link note below: with no compiled artifact
+# under deps/, the resolver must NOT claim a link is missing. Without this the
+# note could be unconditional and the case below would pass vacuously.
+if grep -Fq "the uplifted copy at" "$tmp_root/env-no-build-missing.err"; then
+  echo "missing-build error wrongly reported a missing uplifted link" >&2
+  cat "$tmp_root/env-no-build-missing.err" >&2
+  exit 1
+fi
+
+# A compiled artifact under deps/ with no uplifted copy is a missing LINK, not
+# a missing build. "no binary found" alone reads as a compile failure and sends
+# the reader to rebuild something that is already built, so the resolver has to
+# name which of the two it saw.
+link_target="$tmp_root/missing-link-target"
+mkdir -p "$link_target/debug/deps"
+printf '#!/bin/sh\nexit 0\n' > "$link_target/debug/deps/harn-0123456789abcdef"
+chmod +x "$link_target/debug/deps/harn-0123456789abcdef"
+: > "$link_target/debug/deps/harn-0123456789abcdef.d"
+: > "$record"
+if CARGO_TARGET_DIR="$link_target" \
+  FAKE_CARGO_RECORD="$record" \
+  HARN_BIN_NO_BUILD=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/env-no-build-missing-link.out" \
+  2> "$tmp_root/env-no-build-missing-link.err"; then
+  echo "HARN_BIN_NO_BUILD accepted a binary that only exists under deps/" >&2
+  exit 1
+fi
+if ! grep -Fq "the uplifted copy at" "$tmp_root/env-no-build-missing-link.err"; then
+  echo "missing uplifted link was reported as a missing build" >&2
+  cat "$tmp_root/env-no-build-missing-link.err" >&2
+  exit 1
+fi
+if ! grep -Fq "compiled artifacts for this binary exist under" \
+  "$tmp_root/env-no-build-missing-link.err"; then
+  echo "missing-link error did not name the deps directory it found" >&2
+  cat "$tmp_root/env-no-build-missing-link.err" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  echo "HARN_BIN_NO_BUILD invoked cargo while reporting a missing link" >&2
   cat "$record" >&2
   exit 1
 fi

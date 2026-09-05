@@ -120,7 +120,7 @@ fn elapsed_seconds(job: GitHubJob) -> int? {
 }
 
 fn workflow_job(workflow: dict, display_name: string) -> dict? {
-  for entry in workflow?.jobs ?? {} {
+  for entry in (workflow?.jobs ?? {}) {
     const job = entry.value
     const configured_name = trim(to_string(job?.name ?? entry.key))
     if configured_name == display_name {

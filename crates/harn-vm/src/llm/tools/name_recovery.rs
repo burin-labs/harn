@@ -540,7 +540,7 @@ mod tests {
     async fn public_dispatch_recovers_unique_name_and_restores_outer_policy() {
         let ambient_registry = registry(&[("run", &["command"])]);
         let _registry_guard = ToolRegistryGuard::install(ambient_registry.clone());
-        let session_id = crate::agent_sessions::open_or_create(None);
+        let session_id = crate::agent_sessions::open_or_create_for_test(None);
         let outer = crate::orchestration::CapabilityPolicy {
             tools: vec!["look".into(), "edit".into()],
             workspace_roots: vec!["workspace".into()],

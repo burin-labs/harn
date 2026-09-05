@@ -27,6 +27,7 @@ pub(super) use config::{
 };
 pub(super) use execution::{
     ensure_worker_config_session_ids, execute_delegated_stage, spawn_worker_task,
+    worker_stage_session_id,
 };
 pub(super) use policy::{
     apply_worker_artifact_policy, apply_worker_transcript_policy, compact_worker_transcript,

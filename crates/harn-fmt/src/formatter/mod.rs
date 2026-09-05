@@ -15,6 +15,27 @@ use crate::helpers::*;
 /// body. The signature's own wrap decision has to budget for it.
 const SIGNATURE_BODY_BRACE_WIDTH: usize = 2;
 
+/// The text of a `for` header, up to and including the body's opening brace.
+///
+/// A `for` header ends where the body block begins, so an iterable whose own
+/// last character is `}` — an `if` or `match` used as an expression, or a
+/// nullish default that falls back to a dict — would print as `} {`, with the
+/// brace that closes the iterable and the brace that opens the body adjacent
+/// and nothing in the text saying which is which. Grouping the iterable
+/// restores that boundary. Every other iterable ends in a token that cannot be
+/// read as a block, so an ordinary header gains nothing.
+///
+/// Three surfaces format a `for` (statement, expression, and declaration
+/// bodies). They share this function so the boundary rule has one owner rather
+/// than three copies that can drift.
+pub(super) fn for_header(pattern: &str, iterable: &str) -> String {
+    if iterable.trim_end().ends_with('}') {
+        format!("for {pattern} in ({iterable}) {{")
+    } else {
+        format!("for {pattern} in {iterable} {{")
+    }
+}
+
 /// A captured comment with metadata.
 #[derive(Debug, Clone)]
 pub(crate) struct Comment {

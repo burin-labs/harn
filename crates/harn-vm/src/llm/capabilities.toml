@@ -1721,6 +1721,59 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# GPT-6 Astra narrows the effort ladder again: it accepts only
+# low/medium/high/xhigh. Both `none` and `max` are rejected by the live API,
+# even though OpenAI's model page lists `max` as supported — the published
+# doc and the deployed model disagree and the API is authoritative here.
+# Probed 2026-09-04 against gpt-6-astra on /v1/chat/completions:
+#   reasoning_effort=none    -> 400 "does not support 'none' with this model.
+#                                    Supported values are: 'low', 'medium',
+#                                    'high', and 'xhigh'."
+#   reasoning_effort=minimal -> 400 (same list)
+#   reasoning_effort=max     -> 400 (same list)
+#   temperature=0.2          -> 400 "Only the default (1) value is supported."
+#   top_p=0.5                -> 400 "Unsupported parameter: 'top_p' is not
+#                                    supported with this model."
+# Without this row `gpt-6-astra` parses as generation (6, 0) and falls through
+# to the generic `gpt-*` version_min = [5, 4] rule below, which advertises
+# `reasoning_none_supported = true` and leaves temperature/top_p unconstrained.
+# That combination turns a routine effort=none or temperature-bearing preset
+# into a provider 400 at request time, so keep this row ahead of the wildcard.
+[[provider.openai]]
+model_match = "gpt-6*"
+advanced_generation_options = ["logprobs", "verbosity"]
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+responses_api = true
+hosted_tools = ["web_search", "web_search_preview", "file_search", "code_interpreter", "image_generation", "computer_use", "mcp", "remote_mcp"]
+computer_use_style = "native_openai"
+screenshot_scaling = "original"
+safety_ack_flow = true
+remote_mcp = true
+conversation_state = true
+compaction = true
+background_mode = true
+tool_approval_policy = "provider_or_harn"
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_tools_require_responses = true
+temperature_supported = false
+top_p_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 # GPT-5.6 accepts none/low/medium/high/xhigh/max, but not the `minimal`
 # effort supported by earlier GPT-5 models. Keep this row ahead of the generic
 # version rule so Harn rejects an invalid effort before spending an API call.
@@ -1959,6 +2012,31 @@ structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Gateway GPT-6 slugs carry the same narrowed effort ladder and sampling
+# constraints as the direct OpenAI route. Keep this ahead of the broad gateway
+# GPT rule so `none`/`max` effort and temperature/top_p are rejected locally
+# rather than costing a round trip.
+[[provider.openai]]
+model_match = "openai/gpt-6*"
+native_tools = true
+preferred_tool_format = "native"
+requires_completion_tokens = true
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+temperature_supported = false
+top_p_supported = false
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -3580,6 +3658,52 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# --- source: 20-providers/34-meta.toml ---
+# ---------- Meta Model API (OpenAI-compatible /v1) ----------------------------
+# Muse Spark is served over Meta's own endpoint as an OpenAI chat-completions
+# drop-in, so it carries no dialect of its own.
+#
+# Every capability below was read off a live 2026-09-02 probe, not inferred
+# from the family or from Meta's docs:
+#   - native tools: a request with a tool schema came back with
+#     finish_reason "tool_calls" and an OpenAI-shaped tool_calls array.
+#   - prompt caching: a repeated prefix reported
+#     prompt_tokens_details.cached_tokens > 0.
+#   - reasoning is native and NOT optional. usage always reports
+#     reasoning_tokens, and the model spends them before it emits anything:
+#     "what is 2+2" answered only after 274 reasoning tokens, and a 16-token
+#     cap returned finish_reason "length" with null content.
+#
+# Reasoning is declared `enabled` rather than as an effort ladder.
+# `reasoning_effort` is accepted on the wire but appears inert: "low" and
+# "high" spent an identical 197 reasoning tokens on the same trivial prompt.
+# No effort levels are declared here, because a lever that does not move is
+# worse than an absent one. Re-probe before adding them.
+#
+# The `-contributor` ids are the same weights on Meta's training tier, so they
+# share this rule. What differs between the tiers is price and the data grant,
+# which lives on the model rows' `data_controls`, not here.
+
+[[provider.meta]]
+model_match = "muse-spark-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+reasoning_effort_supported = false
+vision = true
+vision_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # --- source: 20-providers/35-moonshot.toml ---
 # ---------- Moonshot AI — direct Kimi K2 (OpenAI-compatible /v1) -------------
 # Moonshot's first-party API serves the Kimi K2 family with native tool calls,
@@ -4940,7 +5064,7 @@ prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
-model_match = ["google/gemini-3.6*", "google/gemini-3.7*"]
+model_match = ["google/gemini-3.6*", "google/gemini-3.7*", "google/gemini-3.8*"]
 native_tools = true
 preferred_tool_format = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
@@ -5044,8 +5168,30 @@ reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
 reasoning_none_supported = false
 
+# Live probe of `gemini-3.8-flash` on 2026-09-03, every call against the real
+# endpoint with an unknown-id negative control returning 404 first:
+#   thinking_level low / medium / high  -> 200
+#   thinking_level minimal              -> 400 "Thinking level MINIMAL is not
+#                                          supported for this model"
+# so the effort ladder is the same three rungs 3.7 exposes and `none` is off.
+# Two further observations that are deliberately NOT read as support:
+#   * `thinkingConfig.thinkingBudget: 0` on the legacy generateContent dialect
+#     DID suppress thinking (5 total tokens, no thoughtsTokenCount). The 3.x
+#     rows drive the Interactions thinking_level ladder, which refuses the
+#     equivalent rung, so the two channels disagree and the ladder wins here.
+#   * temperature / top_p / top_k are ACCEPTED with HTTP 200 rather than
+#     refused, but Google's own model guidance says to strip them. A 200 proves
+#     the field was tolerated, never that it was honored, so these stay
+#     unsupported exactly as they are on the 3.6/3.7 rows.
 [[provider.gemini]]
-model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*"]
+model_match = ["gemini-3.8*", "models/gemini-3.8*"]
+extends = true
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+
+[[provider.gemini]]
+model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*", "gemini-3.8*", "models/gemini-3.8*"]
 advanced_generation_options = []
 native_tools = true
 preferred_tool_format = "native"

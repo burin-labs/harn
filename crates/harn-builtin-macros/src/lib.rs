@@ -86,6 +86,7 @@ struct CapabilityMethodInput {
     signature: Expr,
     doc: LitStr,
     effects_authorized_by: Option<LitStr>,
+    runtime_control_plane: Option<proc_macro2::Span>,
 }
 
 impl Parse for CapabilityMethodInput {
@@ -100,12 +101,29 @@ impl Parse for CapabilityMethodInput {
         let signature = input.parse()?;
         input.parse::<Token![,]>()?;
         let doc = input.parse()?;
-        let effects_authorized_by = if input.is_empty() {
-            None
-        } else {
+        // Optional trailing marker. Either a `"<capability>.<operation>"`
+        // string that delegates the declared (read-only) effects to that
+        // grant, or the bare ident `runtime_control_plane`, which says the
+        // operation mutates Harn's own control-plane state rather than the
+        // user's workspace or an external system. Never both.
+        let mut effects_authorized_by = None;
+        let mut runtime_control_plane = None;
+        if !input.is_empty() {
             input.parse::<Token![,]>()?;
-            Some(input.parse()?)
-        };
+            if input.peek(LitStr) {
+                effects_authorized_by = Some(input.parse()?);
+            } else {
+                let marker: Ident = input.parse()?;
+                if marker != "runtime_control_plane" {
+                    return Err(syn::Error::new(
+                        marker.span(),
+                        "expected a `\"<capability>.<operation>\"` effect authorization or \
+                         the marker `runtime_control_plane`",
+                    ));
+                }
+                runtime_control_plane = Some(marker.span());
+            }
+        }
         if !input.is_empty() {
             return Err(input.error("unexpected capability method tokens"));
         }
@@ -116,6 +134,7 @@ impl Parse for CapabilityMethodInput {
             signature,
             doc,
             effects_authorized_by,
+            runtime_control_plane,
         })
     }
 }
@@ -139,6 +158,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         effects: input.effects,
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
+        runtime_control_plane: input.runtime_control_plane,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -192,6 +212,7 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
         effects: input.effects,
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
+        runtime_control_plane: input.runtime_control_plane,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -224,6 +245,7 @@ struct BuiltinAttrs {
     effects: Vec<LitStr>,
     effects_declared: bool,
     effects_authorized_by: Option<LitStr>,
+    runtime_control_plane: Option<proc_macro2::Span>,
     category: Option<LitStr>,
     kind: BuiltinKind,
     parser_only: bool,
@@ -280,6 +302,11 @@ impl Parse for BuiltinAttrs {
                         }
                         "effects_authorized_by" => {
                             out.effects_authorized_by = Some(parse_lit_str(&nv.value)?);
+                        }
+                        "runtime_control_plane" => {
+                            if parse_lit_bool(&nv.value)? {
+                                out.runtime_control_plane = Some(nv.path.span());
+                            }
                         }
                         other => {
                             return Err(syn::Error::new(
@@ -534,12 +561,39 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
             ));
         }
     }
+    if let Some(span) = attrs.runtime_control_plane {
+        if attrs.effects.is_empty() {
+            return Err(syn::Error::new(
+                span,
+                "`runtime_control_plane` requires at least one declared effect: the \
+                 marker classifies declared effects outside the user-world side-effect \
+                 ladder, so a contract with none reads as audited while asserting nothing",
+            ));
+        }
+        if attrs.effects_authorized_by.is_some() {
+            return Err(syn::Error::new(
+                span,
+                "declare `effects_authorized_by` or `runtime_control_plane`, not both: \
+                 the first delegates an effect to another capability grant, the second \
+                 classifies runtime-owned control-plane state",
+            ));
+        }
+        validate_runtime_control_plane_effects(&attrs.effects, span)?;
+    }
     let raw = exposure.value();
     if attrs.effects_authorized_by.is_some() && !raw.starts_with("harness.") {
         return Err(syn::Error::new(
             exposure.span(),
             "`effects_authorized_by` is only valid for Harness methods",
         ));
+    }
+    if let Some(span) = attrs.runtime_control_plane {
+        if !raw.starts_with("harness.") {
+            return Err(syn::Error::new(
+                span,
+                "`runtime_control_plane` is only valid for Harness methods",
+            ));
+        }
     }
     match raw.as_str() {
         "pure" => {
@@ -641,6 +695,14 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
                         ),
                     )),
                 )
+            } else if attrs.runtime_control_plane.is_some() {
+                Ok(
+                    quote!(#support::BuiltinContract::harness_runtime_control_plane(
+                        #capability,
+                        #method,
+                        #effects,
+                    )),
+                )
             } else {
                 Ok(quote!(#support::BuiltinContract::harness(
                     #capability,
@@ -650,6 +712,37 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
             }
         }
     }
+}
+
+fn validate_runtime_control_plane_effects(
+    effects: &[LitStr],
+    marker_span: proc_macro2::Span,
+) -> syn::Result<()> {
+    let mut mutates_state = false;
+    for effect in effects {
+        let head = effect
+            .value()
+            .split_once('@')
+            .map_or_else(|| effect.value(), |(head, _)| head.to_string());
+        let Some((kind, access)) = head.split_once('.') else {
+            continue;
+        };
+        if kind != "state" {
+            return Err(syn::Error::new(
+                effect.span(),
+                "`runtime_control_plane` effects must target `state`; filesystem, process, \
+                 network, and other user-world effects remain governed by the side-effect ladder",
+            ));
+        }
+        mutates_state |= matches!(access, "write" | "mutate");
+    }
+    if !mutates_state {
+        return Err(syn::Error::new(
+            marker_span,
+            "`runtime_control_plane` requires at least one `state.write` or `state.mutate` effect",
+        ));
+    }
+    Ok(())
 }
 
 fn capability_expr(
@@ -774,4 +867,47 @@ fn parse_resource_selector(
 fn parse_selector_index(raw: &str, span: proc_macro2::Span) -> syn::Result<u16> {
     raw.parse::<u16>()
         .map_err(|_| syn::Error::new(span, format!("invalid argument index `{raw}`")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn effect(value: &str) -> LitStr {
+        LitStr::new(value, proc_macro2::Span::call_site())
+    }
+
+    #[test]
+    fn runtime_control_plane_validation_rejects_non_state_effects() {
+        let error = validate_runtime_control_plane_effects(
+            &[effect("fs.write@arg0")],
+            proc_macro2::Span::call_site(),
+        )
+        .expect_err("filesystem writes must remain governed by the ladder");
+        assert!(error.to_string().contains("must target `state`"));
+    }
+
+    #[test]
+    fn runtime_control_plane_validation_requires_a_state_mutation() {
+        let error = validate_runtime_control_plane_effects(
+            &[effect("state.read@arg0")],
+            proc_macro2::Span::call_site(),
+        )
+        .expect_err("read-only state effects do not define a control-plane mutation");
+        assert!(error
+            .to_string()
+            .contains("requires at least one `state.write` or `state.mutate`"));
+    }
+
+    #[test]
+    fn runtime_control_plane_validation_allows_state_reads_with_a_mutation() {
+        validate_runtime_control_plane_effects(
+            &[
+                effect("state.read@arg0"),
+                effect("state.mutate@const=agent-sessions"),
+            ],
+            proc_macro2::Span::call_site(),
+        )
+        .expect("state control-plane contract");
+    }
 }

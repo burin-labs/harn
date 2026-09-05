@@ -229,6 +229,42 @@ scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
 [[ "$(jq -r '.deferred[0]' <<< "$scope")" == "changelog.d/later.fixed.md" ]] \
   || { echo "FAIL: later fragment was not deferred: $scope" >&2; exit 1; }
 
+# The signed tag metadata is the durable owner after recovery cleans the
+# transient attempt ref. An annotated fixture is sufficient here because the
+# production publisher independently verifies the tag signature.
+git -C "$scoped" tag -d v0.10.999 >/dev/null
+git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: '"$candidate" "$scoped_tagged_commit"
+git -C "$scoped" branch -D "release-attempt/v0.10.999/$candidate" >/dev/null
+scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
+  --repo "$scoped" --version 0.10.999)
+[[ "$(jq -r '.resolved' <<< "$scope")" == "true" ]] \
+  || { echo "FAIL: signed tag candidate did not survive ref cleanup: $scope" >&2; exit 1; }
+[[ "$(jq -r '.candidate_commit' <<< "$scope")" == "$candidate" ]] \
+  || { echo "FAIL: signed tag resolved the wrong candidate: $scope" >&2; exit 1; }
+
+git -C "$scoped" tag -d v0.10.999 >/dev/null
+git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: not-a-commit' "$scoped_tagged_commit"
+scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
+  --repo "$scoped" --version 0.10.999)
+[[ "$(jq -r '.resolved' <<< "$scope")" == "false" ]] \
+  || { echo "FAIL: malformed signed candidate metadata did not fail closed: $scope" >&2; exit 1; }
+
+git -C "$scoped" tag -d v0.10.999 >/dev/null
+git -C "$scoped" switch -q -c mismatched-candidate "$candidate"
+printf '\nCandidate metadata points at a different changelog.\n' >> "$scoped/CHANGELOG.md"
+git -C "$scoped" add CHANGELOG.md
+git -C "$scoped" commit -q -m "mismatched candidate fixture"
+mismatched_candidate=$(git -C "$scoped" rev-parse HEAD)
+git -C "$scoped" switch -q --detach "$scoped_tagged_commit"
+git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: '"$mismatched_candidate" "$scoped_tagged_commit"
+scope=$(bash "$repo_root/scripts/lib/release_fragment_scope.sh" \
+  --repo "$scoped" --version 0.10.999)
+[[ "$(jq -r '.resolved' <<< "$scope")" == "false" ]] \
+  || { echo "FAIL: mismatched signed candidate metadata did not fail closed: $scope" >&2; exit 1; }
+
+git -C "$scoped" tag -d v0.10.999 >/dev/null
+git -C "$scoped" tag -a v0.10.999 -m $'Release v0.10.999\n\nHarn-Release-Candidate: '"$candidate" "$scoped_tagged_commit"
+
 scoped_metadata="$tmp_root/scoped-fake-release-metadata"
 cat > "$scoped_metadata" <<'EOF'
 #!/usr/bin/env bash

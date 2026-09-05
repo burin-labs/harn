@@ -953,3 +953,71 @@ fn billed_noncommittal_error() -> crate::value::VmError {
          with no dispatchable tool call or answer (upstream contract violation)",
     )))
 }
+
+/// harn#7912 reach test. The discarded attempt must actually arrive in the
+/// call's ledger through the real dispatch path, carrying its own typed
+/// unpriced reason rather than being rewritten to a known zero.
+///
+/// This route has no price table, so it is also the control the ruling names:
+/// a call that priced nothing at all still refuses its projection, and every
+/// USD ceiling consumer keeps failing closed on it. The partial-accounting
+/// falsifier needs a priced route and lives on `LlmUsage::aggregate` in
+/// `crates/harn-vm/src/llm/usage.rs`.
+#[test]
+fn a_discarded_empty_attempt_reaches_the_ledger_with_a_typed_reason() {
+    current_thread_runtime().block_on(async {
+        reset_agent_trace_state();
+        let baseline = {
+            let _guard =
+                install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("answered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])));
+            observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                .await
+                .expect("clean call")
+                .usage()
+        };
+        assert_eq!(
+            baseline.provider_call_count, 1,
+            "the baseline is one physical request"
+        );
+
+        let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(
+            FakeLlmTurn::stream(vec![
+                FakeLlmEvent::Token("answered".into()),
+                FakeLlmEvent::Done(FakeStopReason::EndTurn),
+            ]),
+        ));
+        let retried = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+            .await
+            .expect("empty completion retry should recover")
+            .usage();
+
+        assert_eq!(
+            retried.provider_call_count, 2,
+            "the discarded attempt is in the ledger, not dropped from it"
+        );
+        assert_eq!(
+            retried.unpriced_calls - baseline.unpriced_calls,
+            1,
+            "it keeps its own measured ledger; it is not rewritten to a known zero"
+        );
+        assert_eq!(
+            retried.unpriced_reason(),
+            Some(crate::llm::usage::UnpricedReason::PricingUnknown),
+            "this route has no price table, which is why nothing here is priced"
+        );
+        assert_eq!(
+            retried.projected_cost_usd(),
+            None,
+            "no price table means no bound at any token count, so a ceiling fails closed"
+        );
+        assert_eq!(
+            retried.accounting_status,
+            crate::llm::usage::UsageAccountingStatus::Unknown,
+            "nothing was priced, so this call still blacks out"
+        );
+        reset_agent_trace_state();
+    });
+}

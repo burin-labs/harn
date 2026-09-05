@@ -153,13 +153,19 @@ fn landlock_profile(
     let abi = landlock_abi_version();
     if abi == 0 {
         return match super::effective_fallback(profile) {
-            SandboxFallback::Enforce => Err(sandbox_rejection(
-                "Linux Landlock is not available; OsHardened profile requires it (set HARN_HANDLER_SANDBOX=warn or off, or pick the worktree profile, to run without filesystem isolation)".to_string(),
-            )),
+            SandboxFallback::Enforce => Err(super::SandboxMechanismUnavailable::new(
+                super::SandboxMechanism::LinuxLandlock,
+                super::SandboxMechanismAvailability::AbsentOnHost,
+                profile,
+            )
+            .into_error()),
             SandboxFallback::Warn => {
                 warn_once(
                     "handler_sandbox_linux_landlock_unavailable",
-                    "Linux Landlock is not available; process filesystem isolation is disabled",
+                    &super::mechanism_skipped_warning(
+                        super::SandboxMechanism::LinuxLandlock,
+                        super::SandboxMechanismAvailability::AbsentOnHost,
+                    ),
                 );
                 Ok(None)
             }
@@ -685,6 +691,15 @@ const fn target_arch() -> TargetArch {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+const SYS_FCHMODAT2: libc::c_long = libc::SYS_fchmodat2;
+
+// aarch64 and riscv64 use Linux's asm-generic syscall table. libc does not
+// currently expose SYS_fchmodat2 for those targets even though their kernels
+// assign it the same generic number.
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+const SYS_FCHMODAT2: libc::c_long = 452;
+
 fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
     let mut syscalls = vec![
         libc::SYS_brk,
@@ -715,6 +730,7 @@ fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
         libc::SYS_fchdir,
         libc::SYS_fchmod,
         libc::SYS_fchmodat,
+        SYS_FCHMODAT2,
         libc::SYS_fchown,
         libc::SYS_fchownat,
         libc::SYS_fcntl,

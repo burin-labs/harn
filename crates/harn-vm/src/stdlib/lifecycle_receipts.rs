@@ -32,6 +32,7 @@ pub(crate) fn register_lifecycle_receipt_builtins(vm: &mut Vm) {
 #[harn_builtin(
     exposure = "harness.agent.lifecycle_receipt_record_suspension",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "lifecycle_receipt_record_suspension(receipt: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -47,6 +48,7 @@ fn lifecycle_receipt_record_suspension_impl(
 #[harn_builtin(
     exposure = "harness.agent.lifecycle_receipt_record_resumption",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "lifecycle_receipt_record_resumption(receipt: dict) -> dict",
     category = "lifecycle_receipts"
 )]
@@ -62,6 +64,7 @@ fn lifecycle_receipt_record_resumption_impl(
 #[harn_builtin(
     exposure = "harness.agent.lifecycle_receipt_record_drain_decision",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "lifecycle_receipt_record_drain_decision(receipt: dict) -> dict",
     category = "lifecycle_receipts"
 )]

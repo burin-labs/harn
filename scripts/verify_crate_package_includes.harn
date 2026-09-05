@@ -1,5 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { decode_normal_literal } from "./check_rust_prompt_prose.harn"
+import { scan_glob } from "./path_visibility.harn"
 
 type IncludePath = {line: int, path: string}
 
@@ -64,7 +65,7 @@ fn within_root(path: string, root: string) -> bool {
 pub fn packaged_include_errors(fs: HarnessFs, root: string, crate: string) -> list<string> {
   const package_root = path_normalize(root)
   let errors: list<string> = []
-  for source in fs.glob("**/*.rs", package_root).sorted() {
+  for source in scan_glob(fs, "verify-crate-package-includes", "**/*.rs", package_root).sorted() {
     const text = fs.read_text(source)
     const source_rel = rel_path(source, package_root)
     for include_path in rust_include_paths(text) {

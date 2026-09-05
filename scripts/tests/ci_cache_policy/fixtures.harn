@@ -1,5 +1,6 @@
 import {
   CiCachePolicy,
+  MacosWorkspaceWarmPolicy,
   RELEASE_PATH_FILTER_ACTION,
   ReleaseWarmCachePathPolicy,
 } from "../../check_ci_cache_policy.harn"
@@ -10,14 +11,24 @@ pub fn gha_expression(body: string) -> string {
 
 pub fn windows_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-8vcpu-windows-2025' || 'windows-latest'",
+  )
+}
+
+pub fn windows_nightly_runner_expression() -> string {
+  return gha_expression(
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest'",
   )
 }
 
 pub fn windows_tier_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith'",
+    "vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted'",
   )
+}
+
+pub fn windows_timeout_expression() -> string {
+  return gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 60 || 90")
 }
 
 pub fn windows_warm_restore_step() {
@@ -27,7 +38,7 @@ pub fn windows_warm_restore_step() {
     "continue-on-error": true,
     env: {GH_TOKEN: gha_expression("github.token")},
     run:
-      "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
+      "./scripts/ci/workspace_warm_artifact.sh windows download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
   }
 }
 
@@ -103,9 +114,21 @@ pub fn windows_warm_policy() {
   }
 }
 
+pub fn macos_warm_policy() -> MacosWorkspaceWarmPolicy {
+  return {
+    artifact_name: "workspace-macos-warm",
+    manifest_schema: "harn.macos_workspace_warm.v1",
+    workflow: "macos-nightly.yml",
+    job: "nextest",
+    retention_days: 3,
+    max_bytes: 8589934592,
+    build_headroom_bytes: 17179869184,
+  }
+}
+
 pub fn policy() -> CiCachePolicy {
   return {
-    schema_version: 5,
+    schema_version: 6,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -113,6 +136,7 @@ pub fn policy() -> CiCachePolicy {
     remote_sccache: false,
     nextest_version: "0.9.132",
     windows_workspace_warm: windows_warm_policy(),
+    macos_workspace_warm: macos_warm_policy(),
     writers: [
       {
         workflow: "build-release-binaries.yml",
@@ -209,7 +233,7 @@ pub fn release_binary_workflow() {
       },
       prepare_cli_aot: {
         "runs-on": gha_expression(
-          "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
+          "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
         ),
       },
       build: {
@@ -403,6 +427,13 @@ pub fn workflows() {
             {uses: "actions/checkout@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
             {
+              name: "Restore macOS workspace warm artifact",
+              id: "macos-warm-restore",
+              "continue-on-error": true,
+              run:
+                "./scripts/ci/workspace_warm_artifact.sh macos download-and-restore --repo owner/repo",
+            },
+            {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
@@ -411,6 +442,7 @@ pub fn workflows() {
         },
         windows: {
           "runs-on": windows_runner_expression(),
+          "timeout-minutes": windows_timeout_expression(),
           permissions: {contents: "read", actions: "read"},
           env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
@@ -467,7 +499,7 @@ pub fn workflows() {
                 ),
               },
               run:
-                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
+                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n[[ \"$harn_bin\" -ef \"$harn_bin\" ]]\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
             },
             {
               name: "Report Windows storage (terminal)",
@@ -493,12 +525,15 @@ pub fn workflows() {
       permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {
-          "runs-on": "windows-latest",
+          "runs-on": windows_nightly_runner_expression(),
+          env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {
               name: "Set up Dev Drive",
-              if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'"),
+              if: gha_expression(
+                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
+              ),
               uses: "samypr100/setup-dev-drive@exact-pin",
               with: {
                 "drive-size": gha_expression(
@@ -517,12 +552,12 @@ pub fn workflows() {
               if: gha_expression("startsWith(github.ref_name, 'release-certify/')"),
               "continue-on-error": true,
               run:
-                "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo",
+                "./scripts/ci/workspace_warm_artifact.sh windows download-and-restore --repo owner/repo",
             },
             {
               name: "Stage Windows workspace warm artifact",
               if: gha_expression("github.ref == 'refs/heads/main'"),
-              run: "./scripts/ci/windows_workspace_warm_artifact.sh pack staging",
+              run: "./scripts/ci/workspace_warm_artifact.sh windows pack staging",
             },
             {
               name: "Upload Windows workspace warm artifact",
@@ -556,6 +591,7 @@ pub fn workflows() {
     },
     "macos-nightly.yml": {
       env: {RUSTFLAGS: "-D warnings"},
+      permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {
           steps: [
@@ -567,6 +603,29 @@ pub fn workflows() {
                 "shared-key": "workspace-macos",
                 "source-key": native_source_key(),
                 save: true,
+              },
+            },
+            {
+              name: "Restore macOS workspace warm artifact",
+              id: "macos-warm-restore",
+              if: gha_expression("github.event_name == 'pull_request'"),
+              "continue-on-error": true,
+              run:
+                "./scripts/ci/workspace_warm_artifact.sh macos download-and-restore --repo owner/repo",
+            },
+            {
+              name: "Stage macOS workspace warm artifact",
+              if: gha_expression("github.ref == 'refs/heads/main'"),
+              run: "./scripts/ci/workspace_warm_artifact.sh macos pack staging",
+            },
+            {
+              name: "Upload macOS workspace warm artifact",
+              if: gha_expression("github.ref == 'refs/heads/main'"),
+              uses: "actions/upload-artifact@exact-pin",
+              with: {
+                name: "workspace-macos-warm",
+                "if-no-files-found": "error",
+                "retention-days": 3,
               },
             },
           ],

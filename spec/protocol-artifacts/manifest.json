@@ -449,6 +449,7 @@
       "invalid_response",
       "model_unavailable",
       "empty_generation",
+      "billing_limit",
       "output_budget_exhausted",
       "unknown"
     ],
@@ -617,7 +618,7 @@
       "unavailable"
     ]
   },
-  "artifactVersion": "0.10.128-dev",
+  "artifactVersion": "0.10.131-dev",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",

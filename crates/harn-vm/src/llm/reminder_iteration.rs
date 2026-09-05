@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn unchanged_durable_provider_reminder_is_not_reissued() {
-        let session_id = crate::agent_sessions::open_or_create(None);
+        let session_id = crate::agent_sessions::open_or_create_for_test(None);
         let mut first = ReminderIterationState::new(&serde_json::json!({}));
         first
             .inject(
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn changed_or_expired_durable_reminder_is_reissued() {
-        let session_id = crate::agent_sessions::open_or_create(None);
+        let session_id = crate::agent_sessions::open_or_create_for_test(None);
         let mut first = ReminderIterationState::new(&serde_json::json!({}));
         first
             .inject(
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn finite_durable_provider_reminder_is_reissued_before_expiry() {
-        let session_id = crate::agent_sessions::open_or_create(None);
+        let session_id = crate::agent_sessions::open_or_create_for_test(None);
         let mut finite = durable_reminder("finite", "verify for two turns");
         finite.ttl_turns = Some(2);
 
@@ -496,8 +496,8 @@ mod tests {
 
     #[test]
     fn durable_reminder_dedupe_is_session_local() {
-        let session_a = crate::agent_sessions::open_or_create(None);
-        let session_b = crate::agent_sessions::open_or_create(None);
+        let session_a = crate::agent_sessions::open_or_create_for_test(None);
+        let session_b = crate::agent_sessions::open_or_create_for_test(None);
         for session_id in [&session_a, &session_b] {
             let mut state = ReminderIterationState::new(&serde_json::json!({}));
             state
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn concurrent_provider_evaluations_inject_one_durable_reminder() {
-        let session_id = crate::agent_sessions::open_or_create(None);
+        let session_id = crate::agent_sessions::open_or_create_for_test(None);
         let runtime = crate::agent_sessions::active_session_runtime();
         let reports = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..8)

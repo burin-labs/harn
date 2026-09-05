@@ -39,7 +39,7 @@ fn empty_generation_response() -> dict {
 }
 
 fn toolset() -> ToolRegistry {
-  let tools: ToolRegistry = tool_registry()
+  const tools: ToolRegistry = tool_registry()
   return tool_define(
     tools,
     "look",

@@ -260,6 +260,61 @@ where
     spawn(prepare(registry, future))
 }
 
+/// Run lifecycle cleanup independently of the caller's Tokio runtime.
+///
+/// VM destruction is synchronous and may coincide with embedding-runtime
+/// shutdown. Cleanup spawned on that runtime can therefore be cancelled
+/// before its first poll. This process-owned runtime is deliberately tiny and
+/// exists only for terminal persistence and release of task-owned sessions.
+pub(crate) fn spawn_lifecycle_cleanup<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    static CLEANUP_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
+        std::sync::OnceLock::new();
+    let runtime = CLEANUP_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(crate::RUNTIME_STACK_SIZE)
+            .worker_threads(1)
+            .thread_name("harn-lifecycle-cleanup")
+            .enable_all()
+            .build()
+            .expect("build Harn lifecycle cleanup runtime")
+    });
+    note_lifecycle_cleanup_spawn();
+    runtime.spawn(future)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Detached recovery tasks this thread has handed to the process-owned
+    /// runtime.
+    ///
+    /// Whether an execution transfers cleanup is decided synchronously as it
+    /// drops, so a count is the exact observable for "this drop scheduled no
+    /// recovery" — a claim no amount of waiting can establish. It is counted
+    /// per thread rather than per process because the decision happens on the
+    /// dropping thread: a process-wide total answers "did anything anywhere
+    /// schedule recovery", which a sibling case sharing the test binary can
+    /// move under the reader's feet, and a `before == after` assertion then
+    /// fails having observed someone else's work (harn#7960).
+    static LIFECYCLE_CLEANUP_SPAWNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_lifecycle_cleanup_spawn() {
+    LIFECYCLE_CLEANUP_SPAWNS.with(|count| count.set(count.get().saturating_add(1)));
+}
+
+#[cfg(not(test))]
+fn note_lifecycle_cleanup_spawn() {}
+
+#[cfg(test)]
+pub(crate) fn lifecycle_cleanup_spawn_count() -> u64 {
+    LIFECYCLE_CLEANUP_SPAWNS.with(std::cell::Cell::get)
+}
+
 /// Spawn a long-lived child that inherits execution policy but owns an
 /// independent session lifecycle.
 pub(crate) fn spawn_inherited_child<F>(

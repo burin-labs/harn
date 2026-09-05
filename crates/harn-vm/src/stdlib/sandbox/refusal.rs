@@ -10,12 +10,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::orchestration::CapabilityPolicy;
-use crate::value::VmError;
+use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
 use super::{
     effective_fallback, normalize_for_policy, path_is_within, sandbox_denial_error,
-    sandbox_signal_status, sandbox_user_home_dir, ActiveBackend, SandboxBackend, SandboxFallback,
+    sandbox_signal_status, sandbox_user_home_dir, warn_once, ActiveBackend, PrepareOutcome,
+    SandboxBackend, SandboxFallback,
 };
 
 /// How a child-process refusal was determined, and therefore how much its
@@ -191,3 +192,242 @@ pub(crate) fn process_sandbox_read_deny_roots(policy: &CapabilityPolicy) -> Vec<
 pub(crate) fn path_is_denied(candidate: &Path, denied: &[PathBuf]) -> bool {
     denied.iter().any(|root| path_is_within(candidate, root))
 }
+
+/// The platform mechanism a confined spawn depends on.
+///
+/// Typed so a consumer can say WHICH mechanism was missing without parsing a
+/// sentence. `#[non_exhaustive]`: a new host backend arrives as a variant a
+/// consumer is told about rather than as new prose it has to match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SandboxMechanism {
+    LinuxLandlock,
+    MacosSandboxExec,
+    WindowsAppContainer,
+}
+
+impl SandboxMechanism {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LinuxLandlock => "linux_landlock",
+            Self::MacosSandboxExec => "macos_sandbox_exec",
+            Self::WindowsAppContainer => "windows_app_container",
+        }
+    }
+
+    /// The mechanism fact in words. This is the ONLY thing Harn's own refusal
+    /// text states; the remedy sentence belongs to whoever owns the control.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::LinuxLandlock => "Linux Landlock",
+            Self::MacosSandboxExec => "macOS sandbox-exec",
+            Self::WindowsAppContainer => "Windows AppContainer",
+        }
+    }
+}
+
+/// Why the mechanism could not confine this spawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SandboxMechanismAvailability {
+    /// The host does not provide it (no Landlock ABI, no `sandbox-exec`).
+    AbsentOnHost,
+    /// The host provides it, but this spawn entry point cannot carry it:
+    /// Windows can only attach an AppContainer through the `Output`-returning
+    /// path, which owns the `STARTUPINFOEX` plumbing.
+    EntryPointCannotAttach,
+}
+
+impl SandboxMechanismAvailability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AbsentOnHost => "absent_on_host",
+            Self::EntryPointCannotAttach => "entry_point_cannot_attach",
+        }
+    }
+}
+
+/// Which requirement the missing mechanism failed to satisfy.
+///
+/// This is the field an embedder reads to decide whether the ambient fallback
+/// selector is even a control here: under [`SandboxRequirement::Profile`] the
+/// profile mandates the mechanism and no selector value can weaken it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SandboxRequirement {
+    /// The requested profile requires the mechanism outright.
+    Profile,
+    /// The profile tolerates the gap; the resolved fallback policy is what
+    /// demanded the mechanism.
+    Fallback,
+}
+
+impl SandboxRequirement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Profile => "profile",
+            Self::Fallback => "fallback",
+        }
+    }
+
+    /// Whether the ambient fallback selector has any effect on this refusal.
+    pub fn selector_is_honored(self) -> bool {
+        matches!(self, Self::Fallback)
+    }
+}
+
+/// A typed refusal for a spawn that required a platform sandbox mechanism the
+/// host could not supply.
+///
+/// Replaces advice prose. Harn owns the mechanism fact — which mechanism, which
+/// profile asked for it, which requirement went unsatisfied — and nothing else:
+/// the remedy sentence depends on which controls an operator actually has,
+/// which only the embedding product knows. An embedder that hardens its default
+/// makes the fallback selector inert, and may use a Harn ladder name (say
+/// `worktree`) for a profile of its own, so any sentence Harn appends about
+/// those two inverts exactly where this refusal fires most.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxMechanismUnavailable {
+    pub schema: String,
+    pub mechanism: SandboxMechanism,
+    pub availability: SandboxMechanismAvailability,
+    /// The profile the spawn requested, in Harn's vocabulary. An embedder maps
+    /// this to its own name; it must not be echoed as advice.
+    pub profile: SandboxProfile,
+    pub requirement: SandboxRequirement,
+}
+
+impl SandboxMechanismUnavailable {
+    pub const SCHEMA: &'static str = "harn.process.sandbox_mechanism_unavailable.v1";
+
+    /// One owner for the requirement derivation: `OsHardened` requires the
+    /// mechanism by profile, every other confining profile only reaches a
+    /// refusal because the resolved fallback said enforce.
+    pub(crate) fn new(
+        mechanism: SandboxMechanism,
+        availability: SandboxMechanismAvailability,
+        profile: SandboxProfile,
+    ) -> Self {
+        let requirement = if matches!(profile, SandboxProfile::OsHardened) {
+            SandboxRequirement::Profile
+        } else {
+            SandboxRequirement::Fallback
+        };
+        Self {
+            schema: Self::SCHEMA.to_string(),
+            mechanism,
+            availability,
+            profile,
+            requirement,
+        }
+    }
+
+    pub fn category(&self) -> ErrorCategory {
+        ErrorCategory::ToolRejected
+    }
+
+    pub(crate) fn into_error(self) -> VmError {
+        VmError::SandboxMechanismUnavailable(Box::new(self))
+    }
+
+    /// The value a `catch` binding observes: every field typed, so a consumer
+    /// branches on structure instead of substring-matching the message.
+    pub fn thrown_value(&self) -> VmValue {
+        let mut cause = std::collections::BTreeMap::new();
+        cause.put_str("schema", self.schema.as_str());
+        cause.put_str("mechanism", self.mechanism.as_str());
+        cause.put_str("availability", self.availability.as_str());
+        cause.put_str("profile", self.profile.as_str());
+        cause.put_str("requirement", self.requirement.as_str());
+        cause.insert(
+            "selector_honored".to_string(),
+            VmValue::Bool(self.requirement.selector_is_honored()),
+        );
+
+        let mut dict = std::collections::BTreeMap::new();
+        dict.put_str("category", self.category().as_str());
+        dict.put_str("message", self.to_string());
+        dict.put_str("source", "sandbox_mechanism");
+        dict.insert("sandbox_mechanism".to_string(), VmValue::dict(cause));
+        VmValue::dict(dict)
+    }
+}
+
+impl std::fmt::Display for SandboxMechanismUnavailable {
+    /// The mechanism fact alone. No selector name, no profile name: both are
+    /// structured fields above, and both are things an embedder may have
+    /// remapped or made inert.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fact = match self.availability {
+            SandboxMechanismAvailability::AbsentOnHost => {
+                format!(
+                    "{} is not available on this host",
+                    self.mechanism.display_name()
+                )
+            }
+            SandboxMechanismAvailability::EntryPointCannotAttach => format!(
+                "{} cannot be attached through this spawn entry point",
+                self.mechanism.display_name()
+            ),
+        };
+        let requirement = match self.requirement {
+            SandboxRequirement::Profile => "the requested sandbox profile requires it",
+            SandboxRequirement::Fallback => "the resolved sandbox fallback requires it",
+        };
+        write!(f, "{fact}; {requirement}")
+    }
+}
+
+/// Helper for backends that can't attach confinement at all (macOS
+/// without `/usr/bin/sandbox-exec`, Windows when called through the
+/// `Command`-returning entry points): either fail loudly under
+/// `OsHardened` / `enforce`, or warn once and proceed direct.
+///
+/// Linux and OpenBSD don't reach this path — they install confinement
+/// in `pre_exec` and surface unavailability through `landlock_profile`
+/// directly. The dead-code lint allow keeps the helper compilable on
+/// targets where no backend uses it.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+pub(crate) fn unavailable(
+    mechanism: SandboxMechanism,
+    availability: SandboxMechanismAvailability,
+    profile: SandboxProfile,
+) -> Result<PrepareOutcome, VmError> {
+    match effective_fallback(profile) {
+        SandboxFallback::Off | SandboxFallback::Warn => {
+            warn_once(
+                "handler_sandbox_unavailable",
+                &mechanism_skipped_warning(mechanism, availability),
+            );
+            Ok(PrepareOutcome::Direct)
+        }
+        SandboxFallback::Enforce => {
+            Err(SandboxMechanismUnavailable::new(mechanism, availability, profile).into_error())
+        }
+    }
+}
+
+/// The warn-and-proceed sentence: the mechanism fact and the consequence. The
+/// remedy belongs to whoever owns the control, so it is not stated here.
+pub(crate) fn mechanism_skipped_warning(
+    mechanism: SandboxMechanism,
+    availability: SandboxMechanismAvailability,
+) -> String {
+    let fact = match availability {
+        SandboxMechanismAvailability::AbsentOnHost => "is not available on this host",
+        SandboxMechanismAvailability::EntryPointCannotAttach => {
+            "cannot be attached through this spawn entry point"
+        }
+    };
+    format!(
+        "{} {fact}; process filesystem isolation is disabled",
+        mechanism.display_name()
+    )
+}
+
+#[cfg(test)]
+#[path = "refusal_tests.rs"]
+mod refusal_tests;

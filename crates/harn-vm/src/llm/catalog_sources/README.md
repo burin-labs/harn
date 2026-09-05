@@ -13,6 +13,35 @@ and every checked-in provider catalog projection match the fragments. Direct
 edits to `../providers.toml` are invalid because the next generation pass will
 overwrite them.
 
+## Rebuild between `generate` and `matrix`
+
+`generate` and `matrix` do not read the same input, so one build is not enough:
+
+```sh
+cargo build -p harn-cli --bin harn     # 1. build
+harn provider catalog generate         # 2. reads THESE fragments off disk
+cargo build -p harn-cli --bin harn     # 3. build AGAIN -- see below
+harn provider catalog matrix           # 4. reads the COMPILED-IN table
+harn provider catalog support
+```
+
+`generate` reads the fragments in this directory and writes `../providers.toml`
+and `../capabilities.toml`. Those two files are `include_str!`-ed into the VM,
+so the binary that ran `generate` still holds the *previous* table. `matrix`
+and `support` render from that compiled-in table, not from the fragments.
+
+Skipping step 3 does not produce an error. `matrix` renders from the old table,
+emits output byte-identical to the committed `docs/src/provider-matrix.md`, and
+prints `wrote docs/src/provider-matrix.md`. `git status` shows no change, which
+reads as "this edit does not affect the matrix" when it actually means "the
+matrix was rendered from a table that predates the edit". CI builds from the
+committed `capabilities.toml`, renders a matrix that does include the change,
+and fails `check-provider-matrix` with `provider capability matrix is stale or
+missing`.
+
+Tracked in burin-labs/harn#8062, which proposes making `matrix` and `support`
+read the same on-disk fragments `generate` reads so one build suffices.
+
 Fragments use the same `ProvidersConfig` schema as user overrides and package
 manifest `[llm]` sections. File names are sorted lexicographically, so keep
 numeric prefixes when adding a fragment that depends on earlier table context

@@ -726,40 +726,13 @@ mod tests {
     use super::*;
     use crate::aws_sigv4::AwsSigV4Input;
     use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
+    use crate::llm::test_env::ScopedEnvVar;
     use chrono::TimeZone;
     use serde_json::json;
 
     #[cfg(feature = "cloud-aws")]
-    struct ScopedEnvVar {
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
     #[cfg(feature = "cloud-aws")]
-    impl ScopedEnvVar {
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
-            Self { key, previous }
-        }
-
-        fn remove(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            std::env::remove_var(key);
-            Self { key, previous }
-        }
-    }
-
     #[cfg(feature = "cloud-aws")]
-    impl Drop for ScopedEnvVar {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
     #[test]
     fn converse_body_maps_messages_system_inference_and_tools() {
         let body = BedrockProvider::build_request_body(&base_request());

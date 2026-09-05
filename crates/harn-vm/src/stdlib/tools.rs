@@ -7,6 +7,7 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use crate::vm::Vm;
 
+mod input_schema;
 mod registry;
 use registry::TOOL_REGISTRY_IMPL_DEF;
 
@@ -712,13 +713,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     }
 
-    let parameters = config.get("parameters");
-    let input_schema = config.get("input_schema");
-    if parameters.is_some() && input_schema.is_some() {
-        return Err(VmError::Runtime(
-            "tool_define: use either 'parameters' or 'input_schema', not both".to_string(),
-        ));
-    }
+    let declared_schema = input_schema::declared_schema(config, &name)?;
     let output_schema = config
         .get("returns")
         .or_else(|| config.get("output_schema"))
@@ -730,19 +725,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
     tool_entry.insert(crate::value::intern_key("handler"), handler);
-    if let Some(input_schema) = input_schema {
-        tool_entry.insert(
-            crate::value::intern_key("inputSchema"),
-            input_schema.clone(),
-        );
-    } else {
-        tool_entry.insert(
-            crate::value::intern_key("parameters"),
-            parameters
-                .cloned()
-                .unwrap_or_else(|| VmValue::dict(crate::value::DictMap::new())),
-        );
-    }
+    input_schema::insert_resolved_schema(&mut tool_entry, declared_schema);
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
     tool_entry.put_str("executor", resolved_executor);
@@ -777,6 +760,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "handler"
                 | "parameters"
                 | "input_schema"
+                | "inputSchema"
                 | "returns"
                 | "output_schema"
                 | "error_schema"

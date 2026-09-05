@@ -18,6 +18,7 @@ pub(crate) mod removed_llm_options;
 pub(crate) mod template_provider_identity;
 pub(crate) mod template_unknown_filter;
 pub(crate) mod template_variant_explosion;
+pub(crate) mod tool_handler_result;
 pub(crate) mod trailing_comma;
 pub(crate) mod unnecessary_parentheses;
 pub(crate) mod unnormalized_options;

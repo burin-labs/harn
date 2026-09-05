@@ -7,7 +7,7 @@ load-bearing (POSIX semantics under test) or simply lazy (the test does
 not exercise anything OS-specific and could run on Windows with minor
 care).
 
-The Windows nightly nextest matrix in
+The Windows workspace tests nextest matrix in
 `.github/workflows/windows-nightly.yml` runs the workspace test surface on
 `windows-latest`, so any test that is *not* gated below is expected to
 pass on Windows.
@@ -41,7 +41,7 @@ remains discoverable. The header comment in the test file should explain
 
 ## Adding new portable tests
 
-Default to *not* gating. The Windows nightly matrix will catch hidden
+Default to *not* gating. The Windows workspace tests matrix will catch hidden
 Unix assumptions (`/`-only paths, `\n`-only line endings, missing `.exe`
 suffix, etc.) and you can either fix them in place or add a per-test
 `#[cfg(unix)]` annotation if a single case turns out to be POSIX-bound.

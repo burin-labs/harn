@@ -1,4 +1,4 @@
-import { AgentResult } from "std/agent/contracts"
+import { AgentFinalizationRetry, AgentResult } from "std/agent/contracts"
 
 // Thin Harn wrappers over host session-state primitives. These are CRUD only;
 // no decision logic lives here. The agent loop holds the session dict locally
@@ -32,7 +32,7 @@ pub fn agent_session_init(
  * agent_session_finalize.
  *
  * @effects: [host]
- * @errors: []
+ * @errors: [runtime]
  * @api_stability: experimental
  */
 pub type AgentSessionFinalization = {
@@ -44,7 +44,7 @@ pub type AgentSessionFinalization = {
 
 pub fn agent_session_finalize(
   agent: HarnessAgent,
-  session_id: any,
+  session_id: string,
   status: string | AgentSessionFinalization,
 ) -> AgentResult {
   const finalization = if type_of(status) == "string" {
@@ -53,6 +53,22 @@ pub fn agent_session_finalize(
     status
   }
   return agent.session_finalize(session_id, finalization)
+}
+
+/**
+ * Resume the exact retained terminal write named by a failed finalization.
+ * The host rejects a stale receipt rather than applying it to a successor run
+ * that reused the same session id.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_session_retry_finalization(
+  agent: HarnessAgent,
+  receipt: AgentFinalizationRetry,
+) -> AgentResult {
+  return agent.session_finalize(receipt.session_id, {retry_run_id: receipt.run_id})
 }
 
 /**
@@ -75,6 +91,45 @@ pub fn agent_session_flush(agent: HarnessAgent, session_id: any) -> nil {
  */
 pub fn agent_session_messages(agent: HarnessAgent, session_id: any) {
   return agent.session_messages(session_id)
+}
+
+pub type AgentSessionControlEvent = {
+  schema: string,
+  kind: "control",
+  action: "stop" | "steer" | "interrupt" | "queue",
+  method: string,
+  control_id: string,
+  status: string,
+  requested_mode?: string,
+  delivery_mode?: string,
+  message_id?: string,
+  text?: string,
+  actor?: unknown,
+  provenance: "recorded" | "heuristic",
+}
+
+/**
+ * The accepted control words this session recorded.
+ *
+ * The read half of the seam `record_control_event` writes at acceptance, so an
+ * exit authority derives what a run is held to from the control record rather
+ * than from a mode stamped on a delivered message (harn#7875). An accepted stop
+ * has no delivered message at all, so a message-derived reading cannot
+ * represent one.
+ *
+ * An empty list means this session recorded no control OR that it is not open
+ * on this VM thread. A caller must not read that absence as proof no control
+ * happened.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_control_events(
+  agent: HarnessAgent,
+  session_id: any,
+) -> list<AgentSessionControlEvent> {
+  return agent.session_control_events(session_id)
 }
 
 /**

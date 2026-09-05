@@ -78,7 +78,7 @@ reviewed_exclusions = [
   { name = "CURRENT_TOOL_CALL_STACK", reason = "tool-call breadcrumb is pushed and popped within one synchronous dispatch frame" },
   { name = "VM_TRACE_STACK", reason = "log trace breadcrumb is attribution only and is not read by child interpreters" },
   { name = "ACTIVE_DISPATCH_CONTEXT", reason = "trigger-dispatch context belongs to the dispatcher runner, not fan-out workers" },
-  { name = "CURRENT_WORKFLOW_SKILL_CONTEXT", reason = "workflow stages remain on their workflow LocalSet and do not cross this seam" },
+  { name = "CURRENT_WORKFLOW_STAGE_CONTEXT", reason = "workflow stages remain on their workflow LocalSet and do not cross this seam" },
 ]
 
 [[thread_local]]
@@ -95,7 +95,13 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/agent_sessions.rs"
-statics = ["ACTIVE_SESSION_RUNTIME", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
+statics = ["CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
+category = "runtime_registry"
+plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/agent_sessions/runtime_store.rs"
+statics = ["ACTIVE_SESSION_RUNTIME"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
 
@@ -316,6 +322,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/llm/test_env.rs"
+statics = ["DEPTH"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/llm/trace.rs"
 statics = ["LLM_TRACE", "LLM_TRACING_ENABLED"]
 category = "logical_task"
@@ -392,7 +404,13 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/orchestration/command_policy.rs"
-statics = ["COMMAND_POLICY_STACK", "COMMAND_POLICY_HOOK_DEPTH"]
+statics = ["COMMAND_POLICY_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/orchestration/command_policy/hook_depth.rs"
+statics = ["COMMAND_POLICY_HOOK_DEPTH"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -422,7 +440,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/orchestration/mod.rs"
-statics = ["CURRENT_MUTATION_SESSION", "CURRENT_WORKFLOW_SKILL_CONTEXT"]
+statics = ["CURRENT_MUTATION_SESSION", "CURRENT_WORKFLOW_STAGE_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -853,5 +871,17 @@ plan = "thread_private_test"
 [[thread_local]]
 path = "src/test_env.rs"
 statics = ["OVERRIDES"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/vm/subtask.rs"
+statics = ["LIFECYCLE_CLEANUP_SPAWNS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/test_panic_silence.rs"
+statics = ["SILENT"]
 category = "thread_private"
 plan = "thread_private_test"

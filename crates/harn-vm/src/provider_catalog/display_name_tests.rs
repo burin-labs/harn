@@ -64,6 +64,9 @@ fn downstream_bindings_project_and_decode_model_display_name() {
     let swift = swift_binding().expect("Swift binding renders");
     assert!(swift.contains("public let displayName: String"));
     assert!(swift.contains(
+        "dataControls = try container.decodeIfPresent(HarnModelDataControls.self, forKey: .dataControls)"
+    ));
+    assert!(swift.contains(
         "displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name"
     ));
 }

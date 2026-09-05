@@ -1,0 +1,42 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_session_finalize } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+/** A failing SessionStart hook cannot leak a host or ambient session. */
+pipeline default(harness: Harness) {
+  const failed_session = "session-start-error-cleanup"
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "session_start",
+    { _hook_harness, _event ->
+      throw "hostile session-start hook"
+    },
+  )
+  const failed_options: AgentSpec = {provider: "mock", session_id: failed_session}
+  const failed = try {
+    agent_loop(harness, "fail during registered session setup", nil, failed_options)
+  }
+  const terminal = unwrap_err(failed)
+  harness.stdio.println(terminal.provider_call_count)
+  harness.stdio.println(harness.agent.current_id() == nil)
+  const stale_finalize = try {
+    agent_session_finalize(
+      harness.agent,
+      failed_session,
+      {final_status: "done", stop_reason: "must-be-absent", iterations: 0},
+    )
+  }
+  harness.stdio.println(is_err(stale_finalize))
+  harness.agent.clear_session_hooks()
+  with_llm_script(
+    harness.llm,
+    [llm_text("healthy")],
+    { ->
+      const healthy_options: AgentSpec = {provider: "mock"}
+      const result = agent_loop(harness, "run after failed setup", nil, healthy_options)
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.agent.current_id() == nil)
+    },
+  )
+}

@@ -1,0 +1,85 @@
+// Run: harn test tests/agent/completion_judge_detail_truncation_test.harn
+//
+// A completion judge writes its detail complaint-first and remedy-last: "X is
+// not discriminating, ADJUST the fixture, then rerun the verifier." The decode
+// boundary clamps that detail, and the SAME clamped string becomes the
+// verdict's `feedback`, `reasoning` and `next_step`. So a clamp that is too
+// tight does not merely shorten a receipt — it hands the actor the complaint
+// with the remedy cut off, and the actor cannot act on what it was not told.
+//
+// Observed live before the fix (#8074): five `continue` verdicts, each naming
+// `gap_class: missing_artifact`, with details of 307/258/218/262/316
+// characters. The 240-character clamp delivered 239/240/218/240/240. Four were
+// cut mid-word. The one that already fit whole is the one the actor
+// demonstrably acted on. The objection raised on call one was raised again on
+// call four, and the run then exhausted its judge invocation budget.
+//
+// The schema cannot prevent the overrun: it documents the limit in prose but
+// `schema_compat` strips `maxLength` for both OpenAI-strict and
+// Anthropic-strict, so the judge never sees a length constraint and is
+// behaving correctly against the schema it was actually given.
+import { __judge_clamp_completion_detail, __judge_completion_verdict_read } from "std/agent/judge"
+
+// The verbatim reply from the first refusal of the observed run, 307 chars.
+const OBSERVED_DETAIL =
+  "The status-filter test does not cover excluding a top-scoring run with a nonmatching status: both metric-bearing runs are COMPLETED, while the RUNNING run has no target metric. Add a metric-bearing higher-scoring nonmatching-status run and assert the filtered selection excludes it, then rerun the verifier."
+
+pipeline test_observed_reply_keeps_its_remedy(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "continue", detail: OBSERVED_DETAIL, gap_class: "missing_artifact"},
+  )
+  // The falsifier. Before the fix this read
+  // "...nonmatching-status run and" and the assertion below failed.
+  assert(ends_with(decoded.detail, "then rerun the verifier."))
+  assert_eq(decoded.detail, OBSERVED_DETAIL)
+  // The gap is still named, so nothing about the refusal is laundered.
+  assert_eq(decoded.gap_class, "missing_artifact")
+  assert_eq(decoded.verdict, "continue")
+}
+
+pipeline test_every_observed_detail_survives_whole(harness: Harness, task: unknown) {
+  // All five refusals from the run, by length. None may be cut.
+  const details = [
+    OBSERVED_DETAIL,
+    "The tests do not genuinely distinguish last-step ranking or experiment scoping: the expected runs would remain the same if peak values or cross-experiment runs were incorrectly considered. Add discriminating fixtures/assertions (and rerun the mandated test).",
+    "The last-step test is not discriminating: peak-based ranking would still select max_run for max mode and min_run for min mode. Adjust fixture values so peak ranking yields a different run, then rerun the mandated test.",
+    "The status-filter test is not behavior-sensitive: the nonmatching RUNNING run scores 0.7, below the completed max run's last-step 0.8, so it would pass even if status filtering were ignored. Make the nonmatching run highest-scoring, then rerun the mandated test.",
+    "Tests pass, but the fixture does not prove two required exclusions: the other experiment's score is not higher than the selected run, and the missing-metric run's different-key value is not higher than target values. Update fixtures/assertions so those cases would fail if scope or metric-key filtering were ignored.",
+  ]
+  for detail in details {
+    assert_eq(__judge_clamp_completion_detail(detail), detail)
+  }
+}
+
+pipeline test_the_bound_still_holds(harness: Harness, task: unknown) {
+  // The guarantee the clamp exists for: an unbounded string never reaches
+  // feedback or telemetry, however it arrived.
+  const overlong = __judge_clamp_completion_detail("gap. ".repeat(4000))
+  assert(len(overlong) <= 1000)
+  assert(ends_with(overlong, " [truncated]"))
+}
+
+pipeline test_a_cut_is_marked_and_lands_on_a_word_boundary(harness: Harness, task: unknown) {
+  // Silence is the part that made this invisible: a truncated instruction read
+  // exactly like an instruction the judge chose to end there.
+  const cut = __judge_clamp_completion_detail("alpha ".repeat(400) + "omega")
+  assert(ends_with(cut, " [truncated]"))
+  // Word boundary: the text before the marker never ends mid-token.
+  assert(ends_with(substring(cut, 0, len(cut) - len(" [truncated]")), "alpha"))
+}
+
+pipeline test_a_single_overlong_token_still_obeys_the_bound(harness: Harness, task: unknown) {
+  // No spaces to break on. The bound is the guarantee; the word boundary is
+  // only a courtesy, so this must still be clamped rather than passed through.
+  const cut = __judge_clamp_completion_detail("x".repeat(4000))
+  assert(len(cut) <= 1000)
+  assert(ends_with(cut, " [truncated]"))
+}
+
+pipeline test_a_detail_that_fits_is_untouched(harness: Harness, task: unknown) {
+  // The negative control. A reply under the bound must gain no marker, or
+  // every receipt would claim a truncation that never happened.
+  const short = "Verification is green and the tests are discriminating."
+  assert_eq(__judge_clamp_completion_detail(short), short)
+  assert(!ends_with(__judge_clamp_completion_detail(short), " [truncated]"))
+}

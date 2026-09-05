@@ -18,6 +18,7 @@
 // falsifier for the rewrite being indiscriminate: a turn with no calls has
 // nothing to canonicalize and must come back verbatim.
 import { agent_loop } from "std/agent/loop"
+import { agent_options } from "std/agent/options"
 
 const FENCED_CALL = "```tool\n{\"name\": \"add\", \"args\": {\"left\": 2, \"right\": 3}}\n```"
 
@@ -41,9 +42,9 @@ fn _tools() {
   )
 }
 
-fn _bump(harness: Harness, cell: any) {
-  const snap = harness.runtime.shared_snapshot(cell)
-  harness.runtime.shared_cas(cell, snap, snap.value + 1)
+fn _bump(runtime: HarnessRuntime, cell: any) {
+  const snap = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snap, snap.value + 1)
 }
 
 /**
@@ -72,7 +73,7 @@ fn _remembered_history(
   )
   const mock_llm = { call ->
     const seen = harness.runtime.shared_snapshot(turns).value
-    _bump(harness, turns)
+    _bump(harness.runtime, turns)
     if seen == 0 {
       const first = {text: first_text, provider: "mock", model: "mock"}
       if first_native == nil {
@@ -96,17 +97,19 @@ fn _remembered_history(
     harness,
     "Add 2 and 3, then finish.",
     nil,
-    {
-      provider: "mock",
-      session_id: session,
-      tools: _tools(),
-      tool_format: tool_format,
-      loop_until_done: true,
-      done_sentinel: "##DONE##",
-      turn_end_condition: nil,
-      max_iterations: 3,
-      llm_caller: mock_llm,
-    },
+    agent_options(
+      {
+        provider: "mock",
+        session_id: session,
+        tools: _tools(),
+        tool_format: tool_format,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        turn_end_condition: nil,
+        max_iterations: 3,
+        llm_caller: mock_llm,
+      },
+    ),
   )
   return {result: result, history: harness.runtime.shared_snapshot(history).value}
 }

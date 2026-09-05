@@ -43,8 +43,9 @@ fn text_only_route_repairs_stale_native_history_format() {
 #[test]
 fn dispatch_receipt_overrides_stale_supported_text_grammar() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("fireworks-exact-text-history".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "fireworks-exact-text-history".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "json")
         .expect("stale session preference claims");
     seed_host_session_provider_model(
@@ -150,8 +151,9 @@ fn json_text_route_reserializes_native_surprise_in_its_own_grammar() {
 #[test]
 fn fireworks_stale_native_turn_records_text_channel_result_end_to_end() {
     reset_agent_session_host_state();
-    let session_id =
-        crate::agent_sessions::open_or_create(Some("fireworks-stale-native-history".to_string()));
+    let session_id = crate::agent_sessions::open_or_create_for_test(Some(
+        "fireworks-stale-native-history".to_string(),
+    ));
     crate::agent_sessions::claim_tool_format(&session_id, "native")
         .expect("stale native session lock claims");
     seed_host_session_provider_model(

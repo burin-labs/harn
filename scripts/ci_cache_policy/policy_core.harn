@@ -22,8 +22,25 @@ pub type WindowsWorkspaceWarmPolicy = {
   dev_drive_size_release_certify: string,
 }
 
+/**
+ * The macOS warm block, which is the Windows block without the Dev Drive.
+ *
+ * Dev Drive is a Windows storage feature with no macOS analogue, so those three
+ * sizes are absent here rather than defaulted. A shared type carrying them
+ * would make an inapplicable knob look configurable.
+ */
+pub type MacosWorkspaceWarmPolicy = {
+  artifact_name: string,
+  manifest_schema: string,
+  workflow: string,
+  job: string,
+  retention_days: int,
+  max_bytes: int,
+  build_headroom_bytes: int,
+}
+
 pub type CiCachePolicy = {
-  schema_version: 5,
+  schema_version: 6,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
@@ -31,6 +48,7 @@ pub type CiCachePolicy = {
   remote_sccache: bool,
   nextest_version: string,
   windows_workspace_warm: WindowsWorkspaceWarmPolicy,
+  macos_workspace_warm: MacosWorkspaceWarmPolicy,
   writers: list<CiCacheWriter>,
 }
 
@@ -84,7 +102,7 @@ pub const RELEASE_AOT_SETUP_PRIMARY = "$"
 pub const RELEASE_AOT_SETUP_STANDARD = "$"
   + "{{ steps.resolve.outputs.cli_aot_standard_runner }}"
 
-pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true'"
+pub const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_ENABLE_BLACKSMITH_LINUX == 'true'"
 
 pub const RELEASE_CACHE_BUDGET_IF =
   "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
@@ -153,7 +171,7 @@ pub const HOSTED_RUNNER_TIER = "github-hosted"
 
 pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
-pub const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
+pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
 pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
@@ -284,20 +302,67 @@ pub const WINDOWS_CACHE_TARGET_DIR = "$" + "{{ env.CARGO_TARGET_DIR }}"
 pub const WINDOWS_RELEASE_CERTIFY_CACHE_GUARD = "$"
   + "{{ !startsWith(github.ref_name, 'release-certify/') }}"
 
-pub const WINDOWS_WARM_PACK_MARKER = "windows_workspace_warm_artifact.sh pack"
+/**
+ * A producer that also runs on pull requests must not write there: each write
+ * mints an immutable cache generation and the shared namespace is 10 GiB.
+ */
+pub const PULL_REQUEST_RESTORE_ONLY_SAVE = "$"
+  + "{{ github.event_name != 'pull_request' }}"
 
-pub const WINDOWS_WARM_RESTORE_MARKER = "windows_workspace_warm_artifact.sh download-and-restore"
+/** The release build's own opt-in switch for writing its per-target cache. */
+pub const RELEASE_CACHE_SAVE_SWITCH = "$"
+  + "{{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}"
+
+/**
+ * Every conditional a declared cache writer may put on `save`.
+ *
+ * An allowlist rather than "anything that is not the string false", because an
+ * expression this checker cannot evaluate is indistinguishable from one that
+ * never saves. Without this the gate reports a healthy writer for a producer
+ * whose save was quietly conditioned on something nobody checked, which is the
+ * shape where a missing observation reads as a satisfied one.
+ */
+pub const RECOGNISED_SAVE_GUARDS = [PULL_REQUEST_RESTORE_ONLY_SAVE, RELEASE_CACHE_SAVE_SWITCH]
+
+/**
+ * Command markers for one platform's warm-artifact steps.
+ *
+ * The platform is part of the marker, not just of the policy block it reads.
+ * One script serves both platforms, so a marker matching the script name alone
+ * would also match the other platform's step, and a workflow missing its own
+ * step would read as one that has it.
+ */
+pub const WINDOWS_WARM_PACK_MARKER = "workspace_warm_artifact.sh windows pack"
+
+pub const WINDOWS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh windows download-and-restore"
+
+pub const MACOS_WARM_PACK_MARKER = "workspace_warm_artifact.sh macos pack"
+
+pub const MACOS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh macos download-and-restore"
 
 pub const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}"
+
+/** The macOS warm producer guard, identical in shape to the Windows one. */
+pub const MACOS_WARM_MAIN_GUARD = WINDOWS_WARM_MAIN_GUARD
+
+/** The macOS warm consumer guard on the nightly: pull requests only. */
+pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"
+  + "{{ github.event_name == 'pull_request' }}"
 
 pub const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
 
-pub const WINDOWS_BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_WINDOWS"
+pub const WINDOWS_BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_WINDOWS"
 
 pub const HOSTED_WINDOWS_RUNNER = "windows-latest"
 
 pub const BLACKSMITH_8CPU_WINDOWS_RUNNER = "blacksmith-8vcpu-windows-2025"
+
+// The nightly compiles and runs the WHOLE workspace, not an affected-crate
+// closure, so it is the one Windows lane where core count buys real wall time.
+// The cache generation it writes does not depend on vCPU count, so the producer
+// and its consumer may sit on different sizes of the same tier.
+pub const BLACKSMITH_16CPU_WINDOWS_RUNNER = "blacksmith-16vcpu-windows-2025"
 
 pub const WINDOWS_WARM_RESTORE_STEP = "Restore Windows workspace warm artifact"
 
@@ -316,6 +381,8 @@ pub const WINDOWS_STORAGE_TERMINAL_STEP = "Report Windows storage (terminal)"
 pub const WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP = "Report Windows storage (before build)"
 
 pub const WINDOWS_WARM_RESTORE_STEP_ID = "windows-warm-restore"
+
+pub const MACOS_WARM_RESTORE_STEP_ID = "macos-warm-restore"
 
 pub const WINDOWS_CACHE_FALLBACK_GUARD =
   "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && "
@@ -381,10 +448,24 @@ pub fn windows_workspace_warm_schema() {
   )
 }
 
+pub fn macos_workspace_warm_schema() {
+  return schema_closed_object(
+    {
+      artifact_name: schema_string() + {pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      manifest_schema: schema_string() + {pattern: "^harn[.][a-z0-9_]+[.]v[0-9]+$"},
+      workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
+      job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+      retention_days: schema_int() + {minimum: 1, maximum: 90},
+      max_bytes: schema_int() + {minimum: 1},
+      build_headroom_bytes: schema_int() + {minimum: 8589934592},
+    },
+  )
+}
+
 pub fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(5),
+      schema_version: schema_literal(6),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
@@ -392,6 +473,7 @@ pub fn policy_schema() {
       remote_sccache: schema_literal(false),
       nextest_version: nextest_version_schema(),
       windows_workspace_warm: windows_workspace_warm_schema(),
+      macos_workspace_warm: macos_workspace_warm_schema(),
       writers: schema_list(
         schema_closed_object(
           {
@@ -681,8 +763,9 @@ pub fn release_warm_cache_prune_errors(workflow: dict) -> list<string> {
 
 pub fn policy_from_validated(value: dict) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
+  const macos_warm = value.macos_workspace_warm
   return {
-    schema_version: 5,
+    schema_version: 6,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -700,6 +783,15 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
       dev_drive_size_default: warm.dev_drive_size_default,
       dev_drive_size_full_workspace: warm.dev_drive_size_full_workspace,
       dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
+    },
+    macos_workspace_warm: {
+      artifact_name: macos_warm.artifact_name,
+      manifest_schema: macos_warm.manifest_schema,
+      workflow: macos_warm.workflow,
+      job: macos_warm.job,
+      retention_days: macos_warm.retention_days,
+      max_bytes: macos_warm.max_bytes,
+      build_headroom_bytes: macos_warm.build_headroom_bytes,
     },
     writers: value.writers.map(
       { writer ->
@@ -739,9 +831,26 @@ pub fn step_uses(step: dict) -> string {
   return trim(step?.uses ?? "")
 }
 
+/**
+ * Whether this cache step actually writes the shared cache.
+ *
+ * `true` counts, and so does any conditional on the recognised list, each of
+ * which leaves the writer writing on the events that matter. Any other
+ * expression is refused. Reading an unrecognised expression as "saves" is the
+ * failure this exists to prevent: a producer whose save is conditioned on
+ * something nobody checked can silently stop writing while the gate keeps
+ * reporting a writer.
+ */
 pub fn save_requested(step: dict) -> bool {
   const value = step?.with?.save
-  return value != nil && lowercase(trim(to_string(value))) != "false"
+  if value == nil {
+    return false
+  }
+  const literal = lowercase(trim(to_string(value)))
+  if literal == "true" {
+    return true
+  }
+  return RECOGNISED_SAVE_GUARDS.contains(trim(to_string(value)))
 }
 
 pub fn writer_allowed(

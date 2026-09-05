@@ -191,6 +191,7 @@ pub type HarnProviderCatalogModel = {
   completion_review?: HarnProviderCatalogCompletionReview,
   context_window: int,
   current_snapshot?: string,
+  data_controls?: HarnProviderCatalogModelDataControls,
   deprecation: HarnProviderCatalogDeprecation,
   display_name: string,
   embedding_dim?: int,
@@ -239,6 +240,14 @@ pub type HarnProviderCatalogModelBatchSupport = {
   security_notes?: list<string>,
   turnaround_hours?: int,
   wire_format: "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai" | "bedrock",
+}
+
+pub type HarnProviderCatalogModelDataControls = {
+  checked_on: string,
+  note?: string,
+  retention_default?: "retained" | "not_retained" | "abuse_monitoring_only" | "unspecified",
+  sources: list<string>,
+  training_default: "trains" | "does_not_train" | "unspecified",
 }
 
 pub type HarnProviderCatalogModelEligibilityMeasurement = {

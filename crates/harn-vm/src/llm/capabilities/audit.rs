@@ -136,6 +136,13 @@ pub fn matrix_rows() -> Vec<ProviderCapabilityMatrixRow> {
     rows
 }
 
+/// Render an explicit base without ambient project overrides or embedded rules.
+pub fn matrix_rows_for_base(base: &CapabilitiesFile) -> Vec<ProviderCapabilityMatrixRow> {
+    let mut rows = Vec::new();
+    push_matrix_rows(&mut rows, base, "builtin");
+    rows
+}
+
 /// Audit the currently effective provider/model catalog against the currently
 /// effective capability rules. This is the user-facing path used by the CLI
 /// when authors are adding provider catalog or capability override rows.
@@ -478,6 +485,7 @@ preferred_tool_format = "native"
             vec![(
                 "acme-good-1".to_string(),
                 crate::llm_config::ModelDef {
+                    data_controls: None,
                     name: "Acme Good".to_string(),
                     display_name: None,
                     blurb: None,

@@ -31,7 +31,17 @@ pub fn comment_profile() {
     target_paths: ["packages/server/src/middleware/auth-guard.ts"],
     success_criteria: ["Add a short, accurate module comment.", "Do not change runtime behavior."],
     write_paths: ["packages/server/src/middleware/auth-guard.ts"],
-    verify_command: "grep -n 'Auth guard middleware' packages/server/src/middleware/auth-guard.ts",
+    // Node, not a shell `grep`. The command runs under whatever shell the host
+    // picked, which on Windows is cmd.exe, and cmd neither ships grep nor
+    // strips single quotes -- so the old pattern arrived as three arguments and
+    // the only verification this task had never ran (harn#7968). A `node`
+    // invocation with no quoting in it is unaffected by either cause.
+    //
+    // Portability here is necessary and was not sufficient: the same run also
+    // reached the child with a working directory cmd.exe refuses and with no
+    // search path at all. Both were harness defects and are fixed at their own
+    // seams; see `child_process_cwd` and the Windows environment allowlist.
+    verify_command: "node scripts/verify-comment.js",
     verification_contract: {
       required_paths: ["packages/server/src/middleware/auth-guard.ts"],
       required_text: ["Auth guard middleware"],
@@ -63,7 +73,7 @@ pub fn rate_limit_profile() {
       "packages/server/src/middleware/index.ts",
       "packages/server/src/routes/api.ts",
     ],
-    verify_command: "./scripts/verify-rate-limit.sh",
+    verify_command: "node scripts/verify-rate-limit.js",
     verification_contract: {
       required_identifiers: ["rateLimit"],
       required_paths: [
@@ -98,7 +108,7 @@ pub fn slow_verify_profile() {
   return rate_limit_profile()
     + {
       id: "slow_verify_auth",
-      verify_command: "./scripts/verify-slow.sh",
+      verify_command: "node scripts/verify-slow.js",
       background_after_ms: 250,
       success_criteria: [
         "Add a simple in-memory per-IP rate limiter.",

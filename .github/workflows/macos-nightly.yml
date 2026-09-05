@@ -1,4 +1,4 @@
-name: macOS nightly
+name: macOS workspace tests
 
 # Runs the full workspace nextest surface on macOS once per night, plus
 # on-demand from the Actions tab. This is the macOS analogue of
@@ -21,12 +21,44 @@ name: macOS nightly
 on:
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
-    # the Windows nightly so the two don't contend for the same cache lookups.
+    # the Windows workspace tests so the two don't contend for cache lookups.
     - cron: "30 7 * * *"
   workflow_dispatch:
+  pull_request:
+    # Only the code these lanes actually exercise. A fragment- or docs-only
+    # pull request cannot change what a workspace test run proves, so it does
+    # not pay for one, and the release's evidence reader treats a lane it never
+    # needed as satisfied rather than missing.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      # The nextest config decides what this lane runs and what budget it runs
+      # it under, so a change to it changes what the run proves. Without this
+      # the lane skips the very pull request that retimes it.
+      - ".config/nextest.toml"
+      - ".github/workflows/windows-nightly.yml"
+      - ".github/workflows/macos-nightly.yml"
 
 permissions:
   contents: read
+  # Reading a main-produced warm artifact from a pull-request run needs the
+  # Actions scope, the same grant the Windows workspace tests already carries.
+  actions: write
+
+# Supersede an in-flight pull-request run when the same pull request pushes
+# again. Only the final head becomes a merge parent, so a superseded run's
+# result is never read by anything.
+#
+# Non-pull-request runs each get their own group via `github.run_id`, never a
+# shared ref key. A shared key would make two dispatches on one ref queue behind
+# each other, and release certification dispatches this workflow at an exact
+# commit: the release evidence reader requires a `workflow_dispatch` run at that
+# exact head, so serializing or cancelling those would turn a capacity setting
+# into a release-path dependency.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,8 +68,13 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    runs-on: ${{ github.event_name == 'schedule' && 'macos-latest' || 'blacksmith-12vcpu-macos-15' }}
-    timeout-minutes: ${{ github.event_name == 'schedule' && 75 || 30 }}
+    # A pull-request run is cache-warming class, not exact-source proof, so it
+    # takes the same hosted runner and the same generous budget as the nightly.
+    # The paid M4 class requires an explicit release-incident opt-in. The 30
+    # minute budget would have timed out the hosted lane's p90 of 47 minutes,
+    # which the evidence reader would then have read as red rather than slow.
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}
+    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 30 || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -57,7 +94,44 @@ jobs:
           source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
-          save: true
+          # Sole writer for `workspace-macos`. Pull-request runs restore and do
+          # not write, so they never mint a cache generation of their own.
+          save: ${{ github.event_name != 'pull_request' }}
+      # A pull-request run reads the main-produced warm artifact. It runs after
+      # rust-cache so the artifact wins when both exist: the restore replaces
+      # the target directory wholesale, and a cache the namespace has already
+      # evicted has nothing to contribute anyway.
+      - name: Restore macOS workspace warm artifact
+        id: macos-warm-restore
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          receipt="${RUNNER_TEMP}/macos-warm-restore.txt"
+          set +e
+          ./scripts/ci/workspace_warm_artifact.sh macos download-and-restore \
+            --repo "${{ github.repository }}" \
+            --target-dir "${CARGO_TARGET_DIR:-target}" >"${receipt}" 2>&1
+          status=$?
+          set -e
+          cat "${receipt}"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "macos_warm_restore=hit" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos_warm_restore=miss" >> "$GITHUB_OUTPUT"
+          fi
+          exit "${status}"
+      - name: Report macOS warm restore outcome
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          outcome="${{ steps.macos-warm-restore.outputs.macos_warm_restore }}"
+          echo "macos_warm_restore=${outcome:-unreported}"
+          if [[ "${outcome}" != "hit" ]]; then
+            echo "No compatible macOS warm target; this lane builds cold."
+          fi
       - name: Install Go formatter
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -89,3 +163,27 @@ jobs:
           HARN_BIN: ./target/debug/harn
           HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64
         run: make check-test-case-performance
+      # Artifact name and retention are owned by .github/cache-policy.json
+      # macos_workspace_warm; keep these literals byte-compatible with that
+      # document or check-ci-cache-policy fails.
+      #
+      # This is the warm path that survives. The nightly's workspace-macos
+      # Actions cache is written successfully every night and then evicted the
+      # same day, because the 10 GiB namespace is full and a once-a-night entry
+      # is always the least recently used one (harn#8016). Artifact storage is
+      # not contended the same way.
+      - name: Stage macOS workspace warm artifact
+        if: ${{ github.ref == 'refs/heads/main' }}
+        shell: bash
+        run: |
+          ./scripts/ci/workspace_warm_artifact.sh macos pack \
+            "${RUNNER_TEMP}/workspace-macos-warm"
+      - name: Upload macOS workspace warm artifact
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workspace-macos-warm
+          path: ${{ runner.temp }}/workspace-macos-warm/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 6

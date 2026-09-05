@@ -117,7 +117,7 @@ mod tests {
         )
         .await
         .expect("prepare journal");
-        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
         crate::agent_sessions::install_journal(session_id, prepared.state)
             .expect("install journal");
     }

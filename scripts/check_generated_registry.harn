@@ -33,6 +33,7 @@
 //
 // Pure validation logic lives in the pub fns; main does the filesystem reads.
 import { generated_artifact_dependency_errors } from "./generated_artifacts_schema.harn"
+import { scan_glob } from "./path_visibility.harn"
 
 const REGISTRY = "scripts/generated_artifacts.toml"
 
@@ -524,7 +525,7 @@ pub fn audit_gate_invocation(runner_text: string) -> string {
  * (each followed by a newline).
  */
 fn read_workflows(fs: HarnessFs) -> string {
-  const globbed = fs.glob(WORKFLOWS_GLOB)
+  const globbed = scan_glob(fs, "check-generated-registry", WORKFLOWS_GLOB)
   let rels = []
   for g in globbed {
     const idx = g.index_of("/./")

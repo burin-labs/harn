@@ -1,0 +1,44 @@
+# ---------- Meta Model API (OpenAI-compatible /v1) ----------------------------
+# Muse Spark is served over Meta's own endpoint as an OpenAI chat-completions
+# drop-in, so it carries no dialect of its own.
+#
+# Every capability below was read off a live 2026-09-02 probe, not inferred
+# from the family or from Meta's docs:
+#   - native tools: a request with a tool schema came back with
+#     finish_reason "tool_calls" and an OpenAI-shaped tool_calls array.
+#   - prompt caching: a repeated prefix reported
+#     prompt_tokens_details.cached_tokens > 0.
+#   - reasoning is native and NOT optional. usage always reports
+#     reasoning_tokens, and the model spends them before it emits anything:
+#     "what is 2+2" answered only after 274 reasoning tokens, and a 16-token
+#     cap returned finish_reason "length" with null content.
+#
+# Reasoning is declared `enabled` rather than as an effort ladder.
+# `reasoning_effort` is accepted on the wire but appears inert: "low" and
+# "high" spent an identical 197 reasoning tokens on the same trivial prompt.
+# No effort levels are declared here, because a lever that does not move is
+# worse than an absent one. Re-probe before adding them.
+#
+# The `-contributor` ids are the same weights on Meta's training tier, so they
+# share this rule. What differs between the tiers is price and the data grant,
+# which lives on the model rows' `data_controls`, not here.
+
+[[provider.meta]]
+model_match = "muse-spark-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+reasoning_effort_supported = false
+vision = true
+vision_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"

@@ -1,0 +1,90 @@
+/**
+ * #7900: a suspended terminal must carry the cause that produced it.
+ *
+ * The loop already holds the cause in typed form: `agent_await_resumption`
+ * validates the reason and the resume conditions, and the suspend record keeps
+ * both. Before this test the finalize seam handed the host four keys that
+ * carried neither, so the terminal record said `suspended` as its kind and
+ * `suspended` again as its reason, and a host had to scan the transcript for a
+ * denial to say anything useful to the person.
+ *
+ * The run below is the observed shape: an edit is refused because the
+ * workspace is untrusted, the agent parks until the workspace is trusted, and
+ * the terminal record is the only thing a host reads.
+ */
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+fn terminal_checkpoint(events: list) -> dict {
+  for event in events {
+    if event?.type == "typed_checkpoint" && event?.checkpoint?.schema == "harn.agent_terminal.v1" {
+      return event.checkpoint
+    }
+  }
+  return {}
+}
+
+fn park_call(reason: string, conditions: dict) -> dict {
+  return {
+    tool_calls: [
+      {
+        id: "park_1",
+        name: "agent_await_resumption",
+        arguments: {reason: reason, conditions: conditions},
+      },
+    ],
+  }
+}
+
+fn run_suspension(harness: Harness, label: string, reason: string, conditions: dict) -> dict {
+  return with_llm_script(
+    harness.llm,
+    [park_call(reason, conditions)],
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Edit the project file.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tool_format: "native",
+            max_iterations: 2,
+            final_wrapup: false,
+          },
+        ) },
+      )
+      return terminal_checkpoint(captured.events)
+    },
+  )
+}
+
+pipeline main(harness: Harness) {
+  const denied = run_suspension(
+    harness,
+    "terminal-suspension-trust",
+    "Workspace is untrusted, so the edit was refused",
+    {on_event: "workspace_trusted"},
+  )
+  harness.stdio.println("kind=" + denied.terminal.kind)
+  harness.stdio.println("reason=" + denied.terminal.reason)
+  harness.stdio.println("message=" + to_string(denied.terminal?.message ?? "<absent>"))
+  harness.stdio.println("detail=" + to_string(denied.terminal?.detail ?? "<absent>"))
+  // Negative control: a suspension that declares no resume condition must
+  // still carry its reason, and must leave `detail` absent rather than
+  // reporting an empty condition set that reads as "nothing to wait for".
+  const unconditioned = run_suspension(
+    harness,
+    "terminal-suspension-open",
+    "waiting on the operator",
+    {},
+  )
+  harness.stdio.println("open_kind=" + unconditioned.terminal.kind)
+  harness.stdio.println("open_message=" + to_string(unconditioned.terminal?.message ?? "<absent>"))
+  harness.stdio.println("open_detail=" + to_string(unconditioned.terminal?.detail ?? "<absent>"))
+}

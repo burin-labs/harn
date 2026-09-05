@@ -366,7 +366,8 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
             "agent_subscribe(session_id, callback): callback must be a closure".into(),
         ));
     }
-    crate::agent_sessions::append_subscriber(&session_id, callback);
+    crate::agent_sessions::append_subscriber(&session_id, callback)
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
     Ok(VmValue::Nil)
 }
 
@@ -374,6 +375,7 @@ fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 #[harn_builtin(
     exposure = "harness.agent.inject_feedback",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
     category = "agent.host"
 )]
@@ -414,6 +416,7 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
 #[harn_builtin(
     exposure = "harness.agent.inject_host_event",
     effects = ["state.write@arg0"],
+    runtime_control_plane = true,
     sig = "agent_inject_host_event(session_id: string, injection: dict) -> dict",
     category = "agent.host"
 )]

@@ -69,6 +69,15 @@ pub enum LlmErrorReason {
     InvalidResponse,
     ModelUnavailable,
     EmptyGeneration,
+    /// The account cannot pay for the call: it is out of credit, its quota is
+    /// exhausted, or it has hit a configured spend ceiling.
+    ///
+    /// Separate from `RateLimit` because a backoff never clears it. Retrying
+    /// spends the rest of the run's wall clock and budget against a condition
+    /// that refuses identically every time, and the loop then sees an
+    /// exhausted retry budget rather than an account with no credit, so the
+    /// terminal record names the wrong cause.
+    BillingLimit,
     /// The call consumed its entire output budget and committed nothing. The
     /// same context under the same cap exhausts the same way, so this is a
     /// deterministic budget failure rather than a provider hiccup: recovery is
@@ -92,6 +101,7 @@ impl LlmErrorReason {
         Self::InvalidResponse,
         Self::ModelUnavailable,
         Self::EmptyGeneration,
+        Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
     ];
@@ -109,6 +119,7 @@ impl LlmErrorReason {
             Self::InvalidResponse => "invalid_response",
             Self::ModelUnavailable => "model_unavailable",
             Self::EmptyGeneration => "empty_generation",
+            Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
         }
@@ -127,6 +138,7 @@ impl LlmErrorReason {
             "invalid_response" => Some(Self::InvalidResponse),
             "model_unavailable" => Some(Self::ModelUnavailable),
             "empty_generation" => Some(Self::EmptyGeneration),
+            "billing_limit" => Some(Self::BillingLimit),
             "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
             _ => None,
@@ -154,6 +166,7 @@ impl LlmErrorReason {
             | Self::InvalidRequest
             | Self::InvalidResponse
             | Self::ModelUnavailable
+            | Self::BillingLimit
             | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
         }
@@ -624,6 +637,69 @@ pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmE
     }
 }
 
+/// Structured error codes that name a hard billing or quota stop.
+///
+/// Matched against the provider's own `error.code` / `error.type` first,
+/// because a code is a closed value the provider controls and a lowercased
+/// body scan is not. The scan stays as a fallback for providers that send the
+/// same condition as prose.
+const BILLING_STOP_CODES: &[&str] = &[
+    "insufficient_quota",
+    "billing_hard_limit_reached",
+    "billing_not_active",
+    "account_deactivated",
+];
+
+/// Message phrasings that name the same condition on providers that do not
+/// emit a code for it. Kept separate from the codes above so a reader can see
+/// which half of this is a contract and which half is pattern matching.
+const BILLING_STOP_PHRASES: &[&str] = &[
+    "credit balance is too low",
+    "exceeded your current quota",
+    "spend limit",
+    "spending limit",
+    "billing hard limit",
+];
+
+/// The provider's own error code and type, when the body is the usual
+/// `{"error": {...}}` envelope. Absence is not a billing stop; it just means
+/// the caller has to fall back to the phrase scan.
+fn provider_error_code_and_type(body: &str) -> (Option<String>, Option<String>) {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
+        return (None, None);
+    };
+    let error = json.get("error").unwrap_or(&json);
+    let field = |name: &str| {
+        error
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_ascii_lowercase)
+    };
+    (field("code"), field("type"))
+}
+
+/// Whether this response says the account cannot pay, rather than that it is
+/// going too fast.
+///
+/// `body` is used only for the structured read. A caller that holds only the
+/// lowercased copy may pass it for both: the codes are lowercase already, so
+/// the structured read still works, and nothing else here is case-sensitive.
+pub(crate) fn is_billing_stop(body: &str, body_lower: &str) -> bool {
+    let (code, kind) = provider_error_code_and_type(body);
+    let names_a_billing_code = |value: &Option<String>| {
+        value
+            .as_deref()
+            .is_some_and(|value| BILLING_STOP_CODES.contains(&value))
+    };
+    if names_a_billing_code(&code) || names_a_billing_code(&kind) {
+        return true;
+    }
+    BILLING_STOP_CODES
+        .iter()
+        .chain(BILLING_STOP_PHRASES.iter())
+        .any(|marker| body_lower.contains(marker))
+}
+
 fn classify_http_status_and_body(
     status: reqwest::StatusCode,
     body: &str,
@@ -640,11 +716,12 @@ fn classify_http_status_and_body(
     if is_auth_failure(&body_lower) || matches!(status.as_u16(), 401 | 403) {
         return (LlmErrorKind::Terminal, LlmErrorReason::AuthFailure);
     }
-    if status.as_u16() == 429
-        || body_lower.contains("rate_limit")
-        || body_lower.contains("insufficient_quota")
-        || body_lower.contains("billing_hard_limit_reached")
-    {
+    // Before the throttle arm, because these arrive as 429s and as bodies that
+    // also say "quota". A backoff never clears them.
+    if is_billing_stop(body, &body_lower) {
+        return (LlmErrorKind::Terminal, LlmErrorReason::BillingLimit);
+    }
+    if status.as_u16() == 429 || body_lower.contains("rate_limit") {
         return (LlmErrorKind::Transient, LlmErrorReason::RateLimit);
     }
     if matches!(status.as_u16(), 408 | 504 | 522 | 524) || body_lower.contains("timeout") {
@@ -711,11 +788,10 @@ fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorR
     if lower.contains("[invalid_response]") {
         return Some((LlmErrorKind::Terminal, LlmErrorReason::InvalidResponse));
     }
-    if lower.contains("[rate_limited]")
-        || lower.contains("too many requests")
-        || lower.contains("insufficient_quota")
-        || lower.contains("billing_hard_limit_reached")
-    {
+    if lower.contains("[billing_limit]") || is_billing_stop(msg, &lower) {
+        return Some((LlmErrorKind::Terminal, LlmErrorReason::BillingLimit));
+    }
+    if lower.contains("[rate_limited]") || lower.contains("too many requests") {
         return Some((LlmErrorKind::Transient, LlmErrorReason::RateLimit));
     }
     if lower.contains("[http_error]")

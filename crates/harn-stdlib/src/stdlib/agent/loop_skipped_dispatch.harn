@@ -1,0 +1,169 @@
+import { agent_budget_post_call_stop_reason } from "std/agent/budget"
+import {
+  __agent_loop_budget_exhaustion,
+  __agent_loop_emit_budget_exhausted,
+  __agent_loop_iteration_info,
+  __agent_loop_record_budget_stop,
+  __next_progress_count,
+  __next_text_only_count,
+} from "std/agent/loop_turn_options"
+import {
+  agent_emit_event,
+  agent_session_record_undispatched_tool_results,
+  agent_session_record_usage,
+} from "std/agent/state"
+
+/** Whether the turn loop breaks out or starts its next iteration. */
+pub type AgentLoopSkippedDispatchAction = "break" | "continue"
+
+/** Everything the skipped turn reads from the loop that owns it. */
+pub type AgentLoopSkippedDispatchContext = {
+  budget: any,
+  budget_decisions: any,
+  consecutive_text_only: int,
+  current_max: int,
+  iteration: int,
+  iteration_index: int,
+  last_tool_count: int,
+  llm_result: any,
+  loop_start_ms: int | float,
+  tool_calls: any,
+  turn_llm_opts: any,
+  turn_opts: any,
+  turns_since_progress: int,
+  visible_text: string,
+}
+
+/** The loop state this turn hands back, plus what the loop should do next. */
+pub type AgentLoopSkippedDispatchOutcome = {
+  action: AgentLoopSkippedDispatchAction,
+  final_status: string,
+  stop_reason: any,
+  budget_exhausted_emitted: bool,
+  budget_decisions: any,
+  consecutive_text_only: int,
+  turns_since_progress: int,
+  last_tool_count: int,
+}
+
+/**
+ * Close out a turn whose tool calls a user interrupt overtook before dispatch.
+ *
+ * Moved out of the run loop unchanged. It is expressed as an outcome rather
+ * than as inline control flow for one reason only: a function cannot `break`
+ * its caller's loop, so the two breaks and the trailing continue become an
+ * `action` the caller re-dispatches. Every other line is the code that was
+ * inline.
+ *
+ * The turn never dispatches. It records the undispatched results and the usage
+ * the model already spent, then either stops on an exhausted budget or takes
+ * another iteration with the no-tool-call counters advanced.
+ *
+ * @effects: [event, agent]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __agent_loop_skipped_dispatch_turn(harness, session, ctx)
+ */
+pub fn __agent_loop_skipped_dispatch_turn(
+  harness: Harness,
+  session: any,
+  ctx: AgentLoopSkippedDispatchContext,
+) -> AgentLoopSkippedDispatchOutcome {
+  const budget = ctx.budget
+  const current_max = ctx.current_max
+  const iteration = ctx.iteration
+  const iteration_index = ctx.iteration_index
+  const llm_result = ctx.llm_result
+  const loop_start_ms = ctx.loop_start_ms
+  const tool_calls = ctx.tool_calls
+  const turn_llm_opts = ctx.turn_llm_opts
+  const turn_opts = ctx.turn_opts
+  const visible_text = ctx.visible_text
+  let budget_decisions = ctx.budget_decisions
+  agent_session_record_undispatched_tool_results(
+    harness.agent,
+    session.session_id,
+    tool_calls,
+    "interrupted",
+    "a user interrupt arrived before this tool call was dispatched",
+  )
+  const tool_count_skipped = len(tool_calls)
+  const totals_skipped = agent_session_record_usage(
+    harness.agent,
+    session.session_id,
+    llm_result,
+    turn_llm_opts,
+    iteration_index + 1,
+  )
+  agent_emit_event(
+    harness.agent,
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: __agent_loop_iteration_info(
+        harness.agent,
+        harness.clock,
+        session.session_id,
+        llm_result,
+        tool_count_skipped,
+        visible_text,
+        totals_skipped,
+        loop_start_ms,
+      )
+        + {dispatch_skipped: true, skip_reason: "interrupt_immediate"},
+    },
+  )
+  const skipped_exhaustion = __agent_loop_budget_exhaustion(
+    harness.agent,
+    harness.clock,
+    session.session_id,
+    budget,
+    iteration,
+    totals_skipped,
+    loop_start_ms,
+    current_max,
+  )
+  if skipped_exhaustion.exhausted {
+    __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, skipped_exhaustion)
+    budget_decisions = __agent_loop_record_budget_stop(
+      budget_decisions,
+      iteration,
+      current_max,
+      skipped_exhaustion.kind,
+    )
+    return {
+      action: "break",
+      final_status: "budget_exhausted",
+      stop_reason: skipped_exhaustion.kind,
+      budget_exhausted_emitted: true,
+      budget_decisions: budget_decisions,
+      consecutive_text_only: ctx.consecutive_text_only,
+      turns_since_progress: ctx.turns_since_progress,
+      last_tool_count: ctx.last_tool_count,
+    }
+  }
+  const skipped_budget_stop = agent_budget_post_call_stop_reason(totals_skipped, turn_opts)
+  if skipped_budget_stop != "" {
+    return {
+      action: "break",
+      final_status: "budget_exhausted",
+      stop_reason: skipped_budget_stop,
+      budget_exhausted_emitted: false,
+      budget_decisions: budget_decisions,
+      consecutive_text_only: ctx.consecutive_text_only,
+      turns_since_progress: ctx.turns_since_progress,
+      last_tool_count: ctx.last_tool_count,
+    }
+  }
+  return {
+    action: "continue",
+    final_status: "",
+    stop_reason: nil,
+    budget_exhausted_emitted: false,
+    budget_decisions: budget_decisions,
+    consecutive_text_only: __next_text_only_count(0, ctx.consecutive_text_only),
+    turns_since_progress: __next_progress_count(false, ctx.turns_since_progress),
+    last_tool_count: 0,
+  }
+}

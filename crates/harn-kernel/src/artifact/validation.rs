@@ -338,6 +338,22 @@ fn hash_contract(hash: &mut AbiHasher, contract: &harn_builtin_meta::BuiltinCont
     for effect in contract.effects {
         hash_effect(hash, effect);
     }
+    match contract.effects_authorized_by {
+        Some(authorization) => {
+            hash.byte(1);
+            hash.string(authorization.capability.field_name());
+            hash.string(authorization.operation);
+        }
+        None => hash.byte(0),
+    }
+    hash.byte(contract.is_runtime_control_plane().into());
+}
+
+#[cfg(test)]
+pub(super) fn contract_fingerprint(contract: &harn_builtin_meta::BuiltinContract) -> [u8; 32] {
+    let mut hash = AbiHasher::new();
+    hash_contract(&mut hash, contract);
+    hash.finish()
 }
 
 fn hash_effect(hash: &mut AbiHasher, effect: &harn_builtin_meta::EffectSpec) {

@@ -343,8 +343,20 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // half, and the receipt describing them come from one plan and cannot
     // disagree. Under the `default` posture the plan is empty and the request
     // is untouched. The writes land inside, after every other body mutation.
+    // A route the catalog records as training on API traffic, with no control
+    // to stop it, cannot satisfy the strict posture. Refuse before the request
+    // is built rather than sending it and reporting `no_control_available`,
+    // which would read as a successful strict call.
+    if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
+        &opts.provider,
+        &opts.model,
+        opts.data_controls,
+    ) {
+        return Err(VmError::Runtime(refusal));
+    }
     let data_controls = crate::llm::api::data_controls::resolve(
         &opts.provider,
+        &opts.model,
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
     );

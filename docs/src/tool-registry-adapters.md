@@ -309,9 +309,14 @@ second label is `mcp` or `modelcontextprotocol` are reserved by MCP.
 
 All other owned records reject unknown fields. JSON Schema values remain open
 because their vocabulary evolves independently. They must be valid Draft
-2020-12 documents. Use `input_schema` for a complete object-root input schema;
-`parameters` remains the legacy per-parameter shorthand, whose nested `schema`
-field accepts either a boolean schema or a schema object. Output, error, and
+2020-12 documents. A `tool_define` config declares a complete object-root
+input schema as `input_schema` or MCP-style `inputSchema`, and either
+normalizes onto the entry key `inputSchema`, which is the only spelling the
+registry reads for a complete schema. `parameters` remains the legacy
+per-parameter map, whose nested `schema` field accepts either a boolean schema
+or a schema object; an object-root JSON Schema placed there is refused rather
+than read as parameters named `type` and `properties`. Declare one spelling
+per tool: two are refused by name. Output, error, and
 component positions also accept both standard forms. `components.schemas`
 holds named reusable schemas, and catalog input, output, or error schemas can
 reference them with `#/components/schemas/<name>`.

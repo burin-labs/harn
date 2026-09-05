@@ -25,6 +25,7 @@ pub fn capability_snapshot_id(snapshot: &serde_json::Value) -> String {
 pub(crate) mod acp_permission;
 mod agent_config;
 mod agent_host_primitives;
+mod agent_host_tool_dispatch;
 pub(crate) mod agent_observe;
 mod agent_result_projection;
 mod agent_runtime;
@@ -37,6 +38,7 @@ pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tool_governance;
 mod agent_tools;
+pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub mod api;
 #[cfg(test)]
 mod api_routing_credentials_tests;
@@ -313,29 +315,16 @@ pub(crate) mod tools;
 mod trace;
 pub(crate) mod trigger_predicate;
 
-/// Shared process-wide lock for tests that mutate LLM-related environment
-/// variables (LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, HARN_LLM_*). Any test that
-/// sets or removes one of these MUST hold this lock for its whole duration,
-/// including through any async LLM call, so concurrent tests from sibling
-/// modules cannot clobber each other's env and leak stale values into a
-/// streaming request.
+/// Process-environment mutation for the test suites, with one owner.
+///
+/// See [`test_env`]: there used to be three locks and eight copies of the
+/// scoped setter, so cases in different modules serialized against different
+/// mutexes and clobbered each other's variables (harn#7960).
 #[cfg(test)]
-pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
-    use std::sync::{Mutex, OnceLock};
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
+pub(crate) mod test_env;
 
-/// Acquire the env lock, recovering from poisoning. The mutex only
-/// serializes process-env mutation — a panicking holder leaves nothing
-/// corrupted behind — so treating poison as fatal just cascades one failing
-/// test into failures in every sibling test that touches LLM env vars.
 #[cfg(test)]
-pub(crate) fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-    env_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
+pub(crate) use test_env::{env_guard, env_lock};
 
 pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
 

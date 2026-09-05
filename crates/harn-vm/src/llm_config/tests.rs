@@ -121,6 +121,7 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
     overlay.models.insert(
         "gpt-4o".to_string(),
         ModelDef {
+            data_controls: None,
             name: "GPT-4o via OpenRouter".to_string(),
             display_name: None,
             blurb: None,
@@ -609,6 +610,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
     overlay.models.insert(
         "acme/model-fast".to_string(),
         ModelDef {
+            data_controls: None,
             name: "Acme Fast".to_string(),
             display_name: None,
             blurb: None,

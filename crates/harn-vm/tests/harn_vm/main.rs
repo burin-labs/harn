@@ -20,6 +20,7 @@ mod support;
 
 mod agent_call_stage_attribution;
 mod agent_fanout;
+mod agent_loop_boundary_terminal;
 mod agent_loop_final_wrapup;
 mod agent_loop_output_schema;
 mod agent_loop_steering_seams;
@@ -42,6 +43,7 @@ mod injection_classifier_loader;
 mod mcp_call_budget;
 mod orchestration_cutover;
 mod tool_handler_arity;
+mod tool_input_schema_spelling;
 // Formerly gated by a file-level `#![cfg(feature = "otel")]`; preserved as a
 // module-level gate so these tests exist only under `--features otel`.
 #[cfg(feature = "otel")]

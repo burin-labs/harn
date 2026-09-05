@@ -1,30 +1,7 @@
+use crate::llm::test_env::ScopedEnvVar;
 use arcstr::ArcStr;
 
 use super::api::options::base_opts;
-
-struct ScopedEnvVar {
-    key: &'static str,
-    previous: Option<String>,
-}
-
-impl ScopedEnvVar {
-    fn remove(key: &'static str) -> Self {
-        let previous = std::env::var(key).ok();
-        unsafe {
-            std::env::remove_var(key);
-        }
-        Self { key, previous }
-    }
-}
-
-impl Drop for ScopedEnvVar {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => unsafe { std::env::set_var(self.key, value) },
-            None => unsafe { std::env::remove_var(self.key) },
-        }
-    }
-}
 
 fn install_missing_key_providers(providers: &[(&str, &str)]) {
     let mut overlay = crate::llm_config::ProvidersConfig::default();

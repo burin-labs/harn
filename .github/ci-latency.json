@@ -98,6 +98,7 @@
       "harn-audit": { "budget_ms": 430000 },
       "ci-walltime-report": { "budget_ms": 120000 },
       "audit-scripts": { "budget_ms": 390000 },
+      "stack-frames": { "budget_ms": 600000 },
       "windows-plan": { "budget_ms": 30000 },
       "windows": { "budget_ms": 600000 },
       "windows-cross-check": { "budget_ms": 360000 },

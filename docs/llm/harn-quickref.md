@@ -2394,15 +2394,17 @@ preserves provider prompt prefixes; compaction remains the deliberate prefix
 break.
 
 Rendering is provider-neutral. Every route receives one
-`<context-directives>` envelope in its own trailing user message. Its directives
+`<context-directives speaker="...">` envelope in its own trailing user message.
+The speaker is `harness` when any directive in it came from harness machinery
+and `person` when every directive stands in for the person. Its directives
 are ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
 order. Finite directives render `ttl_turns="N"`; they apply only to the N
 assistant turns immediately after the message where they first appear, and a
 later historical copy does not renew that lifetime. Internal tags, dedupe keys,
 and runtime signatures are not rendered.
 The system prompt remains byte-stable as reminders change. Persisted
-`role_hint` values remain accepted for replay compatibility but do not control
-placement or voice.
+`role_hint` values remain accepted for replay compatibility and select the
+envelope speaker, but do not control placement or the wire role.
 
 Sub-agent handoffs carry a filtered `reminder_propagation` list.
 `propagate: "all"` reaches descendants, `"session"` reaches direct
@@ -2447,7 +2449,8 @@ use `<done>##DONE##</done>`, and no-tool sentinel loops use bare
 sentinel, or `nil` for no sentinel. Native-tool loop-until-done loops default
 to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"`.
 
-Returns the typed `AgentResult`: top-level `status`, `terminal`, `text`, `visible_text`
+Returns the typed `AgentResult`: top-level `status`, `terminal`, `text`, `visible_text`,
+`provider_call_count`
 (last iteration's prose with tool calls stripped), `task_ledger`,
 `transcript`, `daemon_state`, `daemon_snapshot_path`, `trace`, and
 `deferred_user_messages`; LLM execution metrics nested under `llm`
@@ -2455,6 +2458,14 @@ Returns the typed `AgentResult`: top-level `status`, `terminal`, `text`, `visibl
 invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 `mode`). Failed tool dispatches are fed back to the next model turn as
 error observations and appear under `tools.rejected`. The
+session-owned `provider_call_count` is always an integer, including measured
+zero, and counts physical provider dispatches even when transport, schema, or
+provider handling later fails. Cache/replay hits and routes rejected before
+dispatch do not increment it. Uncaught loop errors carry the same field on the
+typed `AgentLoopTerminalError` envelope. Its value is an integer when the
+session ledger was read, including measured zero, and `nil` only when that
+ledger itself was unavailable. Consumers therefore never reconstruct request
+counts from tokens, transcript absence, or error text. The
 resilience surface is the `llm_caller:` seam (see "Composable LLM
 callers"); the pre-0.10 `llm_retries` / `llm_backoff_ms` options were
 removed and the `removed-llm-options` lint hard-errors on them. Plus its

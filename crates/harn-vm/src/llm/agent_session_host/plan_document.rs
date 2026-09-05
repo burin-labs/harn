@@ -172,7 +172,7 @@ mod tests {
     fn resume_selects_the_latest_created_plan_document() {
         crate::reset_thread_local_state();
         let session_id = "latest-plan-session";
-        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
         let mut latest_document_id = String::new();
         for (index, content) in ["First plan", "Replacement plan"].iter().enumerate() {
             let plan = crate::llm::plan::normalize_plan_tool_call(
@@ -209,7 +209,7 @@ mod tests {
 
         crate::reset_thread_local_state();
         let session_id = "plan-resolution-session";
-        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        crate::agent_sessions::open_or_create_for_test(Some(session_id.to_string()));
         let initial_plan = crate::llm::plan::normalize_plan_tool_call(
             crate::llm::plan::UPDATE_PLAN_TOOL,
             &serde_json::json!({

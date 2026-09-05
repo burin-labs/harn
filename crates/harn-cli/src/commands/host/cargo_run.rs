@@ -91,7 +91,10 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
             );
         }
     };
-    let worker = match harn_hostlib::process::spawn_process(harn_hostlib::process::SpawnSpec {
+    // Observed before the spawn, so a rebuild that lands mid-run is visible
+    // when the worker is reaped without a terminal state of its own.
+    let binary = BinaryWitness::observe(PathBuf::from(&executable));
+    let spec = harn_hostlib::process::SpawnSpec {
         builtin: "harn_host_lease_run_cargo",
         program: executable,
         args: worker_args,
@@ -103,30 +106,204 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
         configure_process_group: true,
         owner_death: harn_hostlib::process::OwnerDeathPolicy::None,
         output_capture: harn_hostlib::process::OutputCapture::Inherit,
-    }) {
-        Ok(worker) => worker,
-        Err(error) => {
+    };
+    let supervised = match supervise_worker(store, &run.run_id, spec).await {
+        Ok(supervised) => supervised,
+        Err(SuperviseError::Spawn(error)) => {
             return fail_run_start(
                 store,
                 &run.run_id,
                 harn_hostlib::HostLeaseRunStartFailure::WorkerSpawn,
-                &error.to_string(),
+                &error,
             );
         }
+        Err(SuperviseError::Wait(error)) => {
+            return print_error("host_lease_run_cargo", &error, false)
+        }
     };
-    let completion = match wait_for_worker(worker).await {
-        Ok(completion) => completion,
-        Err(error) => return print_error("host_lease_run_cargo", &error, false),
-    };
-    match finalize_run(store, &run.run_id, completion) {
+    // Say how many workers this run consumed. A run that needed replacements
+    // and one that needed none otherwise produce the same terminal receipt,
+    // which would hide the very failure the supervisor exists to absorb.
+    if supervised.restarts > 0 {
+        eprintln!(
+            "note: host lease run {} replaced {} worker(s) that exited before acquiring",
+            run.run_id, supervised.restarts,
+        );
+    }
+    match finalize_run(store, &run.run_id, supervised.completion, &binary) {
         Ok(exit) => exit,
         Err(error) => print_error("host_lease_run_cargo_receipt", &error, false),
+    }
+}
+
+/// How many times the supervisor will replace a worker that died before it
+/// acquired.
+///
+/// The bound exists so a worker that cannot start at all fails the run instead
+/// of respawning until the wait limit expires. It is not the real stop
+/// condition: the wait limit is, and a run whose limit has passed does not get
+/// another worker regardless of this number.
+const MAX_PRE_ACQUIRE_WORKER_RESTARTS: u32 = 8;
+
+/// Why the supervisor could not carry a run to a terminal worker state.
+enum SuperviseError {
+    /// The worker process could not be created.
+    Spawn(String),
+    /// Waiting on the worker itself failed, which is a supervisor defect
+    /// rather than anything the run did.
+    Wait(String),
+}
+
+/// A worker seen through to a terminal state, and what it took to get there.
+struct SupervisedWorker {
+    completion: WorkerCompletion,
+    /// Replacement workers spawned for this run. Reported so a run that needed
+    /// several attempts does not read as a run that needed none.
+    restarts: u32,
+}
+
+/// What the supervisor should do about a worker that exited before acquiring.
+enum RestartDecision {
+    /// Spawn a replacement. The run is still queued and still inside its wait.
+    Restart { elapsed_ms: u64, remaining_ms: u64 },
+    /// Stop, for the stated reason.
+    Stop,
+}
+
+/// Own one run's worker until it acquires, is cancelled, or runs out of wait.
+///
+/// A worker that dies before acquiring used to end the run, even with hours of
+/// configured wait left, because nothing was responsible for the waiter after
+/// the process it happened to be running in went away. The wait limit is a
+/// property of the run, so the supervisor is the thing that has to outlive any
+/// one worker.
+///
+/// Queue position survives a replacement without any work here: the waiter is
+/// keyed by `run_id` and ranked by the run's own `requested_at_ms`, so a
+/// replacement re-enters the queue at the rank the run has always had rather
+/// than at the back. Only one worker exists at a time, because the supervisor
+/// waits for the previous one to be reaped before spawning the next, so a
+/// replacement cannot admit a second owner for the same waiter.
+async fn supervise_worker(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    spec: harn_hostlib::process::SpawnSpec,
+) -> Result<SupervisedWorker, SuperviseError> {
+    let mut restarts = 0u32;
+    loop {
+        let worker = harn_hostlib::process::spawn_process(spec.clone())
+            .map_err(|error| SuperviseError::Spawn(error.to_string()))?;
+        let completion = wait_for_worker(worker)
+            .await
+            .map_err(SuperviseError::Wait)?;
+        // An accepted cancellation is a decision, not a casualty. Replacing a
+        // cancelled worker would make stop mean nothing.
+        if matches!(completion, WorkerCompletion::Cancelled) {
+            return Ok(SupervisedWorker {
+                completion,
+                restarts,
+            });
+        }
+        match restart_decision(store, run_id, restarts) {
+            RestartDecision::Restart {
+                elapsed_ms,
+                remaining_ms,
+            } => {
+                restarts += 1;
+                eprintln!(
+                    "warning: host lease worker for run {run_id} exited before acquiring; \
+                     replacing it (attempt {restarts} of {MAX_PRE_ACQUIRE_WORKER_RESTARTS}, \
+                     waited {}, {} of the configured wait remains)",
+                    format_duration_ms(elapsed_ms),
+                    format_duration_ms(remaining_ms),
+                );
+            }
+            RestartDecision::Stop => {
+                return Ok(SupervisedWorker {
+                    completion,
+                    restarts,
+                })
+            }
+        }
+    }
+}
+
+/// Whether a run whose worker just died still deserves another one.
+///
+/// Reads the durable receipt rather than anything the dead worker reported: a
+/// worker that acquired and then died is no longer pending, and replacing it
+/// would hand a second owner a lease the first one still holds.
+fn restart_decision(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    restarts: u32,
+) -> RestartDecision {
+    if restarts >= MAX_PRE_ACQUIRE_WORKER_RESTARTS {
+        return RestartDecision::Stop;
+    }
+    let Ok(run) = store.load_run(run_id) else {
+        return RestartDecision::Stop;
+    };
+    let harn_hostlib::HostLeaseRunState::Pending { requested_at_ms } = run.status else {
+        return RestartDecision::Stop;
+    };
+    let elapsed_ms = elapsed_since_ms(requested_at_ms);
+    let remaining_ms = run.wait_limit_ms.saturating_sub(elapsed_ms);
+    if remaining_ms == 0 {
+        return RestartDecision::Stop;
+    }
+    RestartDecision::Restart {
+        elapsed_ms,
+        remaining_ms,
     }
 }
 
 enum WorkerCompletion {
     Exited(harn_hostlib::process::ExitStatus),
     Cancelled,
+}
+
+/// Identity of the executable the supervisor resolved, at one moment.
+///
+/// Length and modification time rather than a content hash: the binary is
+/// large, this is read on every supervised run, and a rebuild moves both.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BinaryIdentity {
+    len: u64,
+    modified: std::time::SystemTime,
+}
+
+/// The executable the supervisor spawned, and what it looked like then.
+///
+/// A worker that dies without writing a terminal state leaves no clue about
+/// why. One recoverable cause is visible from the supervisor alone: the file
+/// it launched is no longer the file at that path.
+struct BinaryWitness {
+    path: PathBuf,
+    at_spawn: Option<BinaryIdentity>,
+}
+
+impl BinaryWitness {
+    fn observe(path: PathBuf) -> Self {
+        let at_spawn = binary_identity(&path);
+        Self { path, at_spawn }
+    }
+
+    /// `None` when either observation failed, so an unreadable path never
+    /// reads as a verified-unchanged binary.
+    fn replaced_since_spawn(&self) -> Option<bool> {
+        let at_spawn = self.at_spawn.as_ref()?;
+        let now = binary_identity(&self.path)?;
+        Some(&now != at_spawn)
+    }
+}
+
+fn binary_identity(path: &Path) -> Option<BinaryIdentity> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(BinaryIdentity {
+        len: metadata.len(),
+        modified: metadata.modified().ok()?,
+    })
 }
 
 async fn wait_for_worker(
@@ -200,6 +377,7 @@ fn finalize_run(
     store: &harn_hostlib::HostLeaseStore,
     run_id: &str,
     completion: WorkerCompletion,
+    binary: &BinaryWitness,
 ) -> Result<i32, String> {
     let current = store.load_run(run_id).map_err(|error| error.to_string())?;
     let worker_exit_code = match &completion {
@@ -215,6 +393,7 @@ fn finalize_run(
                 // Discarding it is what collapsed an external kill, a startup
                 // failure, and a genuine early return into one opaque label.
                 worker_exit: Some(process_exit(&status)),
+                worker_binary_replaced: binary.replaced_since_spawn(),
             },
             WorkerCompletion::Cancelled => harn_hostlib::HostLeaseRunState::CancelledBeforeStart {
                 finished_at_ms: unix_now_ms(),
@@ -288,6 +467,18 @@ fn format_worker_exit(exit: Option<&harn_hostlib::HostLeaseProcessExit>) -> Stri
     }
 }
 
+/// Render whether the executable was swapped underneath a running invocation.
+///
+/// `unverified` is deliberately distinct from `unchanged`: a path the
+/// supervisor could not read twice proves nothing either way.
+fn format_worker_binary(replaced: Option<bool>) -> &'static str {
+    match replaced {
+        Some(true) => "replaced-during-run",
+        Some(false) => "unchanged",
+        None => "unverified",
+    }
+}
+
 /// Render the wait facts that decide whether a failure was starvation.
 ///
 /// Elapsed, configured limit, and queue position travel with the terminal
@@ -342,13 +533,17 @@ fn terminal_projection(
 ) -> Result<TerminalProjection, String> {
     let projection = match state {
         harn_hostlib::HostLeaseRunState::StartFailed {
-            error, worker_exit, ..
+            error,
+            worker_exit,
+            worker_binary_replaced,
+            ..
         } => TerminalProjection {
             exit_code: EX_TEMPFAIL,
             diagnostic: Some(format!(
-                "error: Cargo workload did not start (state=start-failed error={} worker_exit={}{})",
+                "error: Cargo workload did not start (state=start-failed error={} worker_exit={} worker_binary={}{})",
                 error.as_str(),
                 format_worker_exit(worker_exit.as_ref()),
+                format_worker_binary(*worker_binary_replaced),
                 format_wait_context(receipt)
             )),
         },
@@ -413,6 +608,7 @@ fn fail_run_start(
         observed_at_ms: unix_now_ms(),
         error,
         worker_exit: None,
+        worker_binary_replaced: None,
     };
     let recorded = match store.transition_run(run_id, terminal.clone()) {
         Ok(receipt) => Some(receipt),
@@ -548,6 +744,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
                     observed_at_ms: unix_now_ms(),
                     error: harn_hostlib::HostLeaseRunStartFailure::ResourceAcquire,
                     worker_exit: None,
+                    worker_binary_replaced: None,
                 },
             );
             eprintln!("error: {error}");
@@ -1076,6 +1273,7 @@ fn fail_acquired_before_running(
             observed_at_ms: unix_now_ms(),
             error,
             worker_exit: None,
+            worker_binary_replaced: None,
         },
     );
 }
@@ -1091,6 +1289,7 @@ fn record_start_failure(
             observed_at_ms: unix_now_ms(),
             error,
             worker_exit: None,
+            worker_binary_replaced: None,
         },
     );
 }
@@ -1115,303 +1314,4 @@ fn status_code(status: harn_hostlib::process::ExitStatus) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        finalize_run, format_lease_wait, path_argument, terminal_projection,
-        wait_for_cargo_workload, WorkerCompletion, EX_TEMPFAIL, EX_TIMEOUT,
-    };
-    use harn_hostlib::process::{
-        EnvMode, MockProcessConfig, MockSpawner, OutputCapture, OwnerDeathPolicy, ProcessSpawner,
-        SpawnSpec,
-    };
-    use std::collections::BTreeMap;
-    use std::path::Path;
-    use tempfile::TempDir;
-
-    #[test]
-    fn pending_worker_exit_is_persisted_as_start_failed_not_cargo_failure() {
-        let temp = TempDir::new().unwrap();
-        let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
-        let run = store
-            .begin_run(
-                "waiting-lane",
-                harn_hostlib::HostLeasePriorityClass::Measurement,
-                harn_hostlib::HostLeaseResourceKey {
-                    machine: "fixture".to_string(),
-                    resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
-                    domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
-                },
-                harn_hostlib::HostLeaseExecutionContext::cargo(
-                    Path::new("/workspace/project"),
-                    Path::new("/tmp/target"),
-                    None,
-                ),
-                5_000,
-            )
-            .unwrap();
-
-        let exit = finalize_run(
-            &store,
-            &run.run_id,
-            WorkerCompletion::Exited(harn_hostlib::process::ExitStatus::from_code(101)),
-        )
-        .unwrap();
-
-        assert_eq!(exit, EX_TEMPFAIL);
-        // The durable half of the #7829 falsifier: the receipt itself must
-        // carry the worker's status, so a later reader can tell an external
-        // kill from an early return without the process still being alive.
-        let status = store.load_run(&run.run_id).unwrap().status;
-        let harn_hostlib::HostLeaseRunState::StartFailed {
-            error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
-            worker_exit,
-            ..
-        } = status
-        else {
-            panic!("pending worker exit was not persisted as a start failure: {status:?}");
-        };
-        assert_eq!(
-            worker_exit,
-            Some(harn_hostlib::HostLeaseProcessExit {
-                code: Some(101),
-                signal: None,
-            }),
-            "the receipt discarded the only evidence of why the worker is gone"
-        );
-    }
-
-    #[test]
-    fn start_failed_uses_a_reserved_supervisor_status_and_stable_diagnostic() {
-        let projection = terminal_projection(
-            &harn_hostlib::HostLeaseRunState::StartFailed {
-                observed_at_ms: 1,
-                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
-                worker_exit: None,
-            },
-            101,
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(projection.exit_code, EX_TEMPFAIL);
-        assert_eq!(
-            projection.diagnostic.as_deref(),
-            Some(
-                "error: Cargo workload did not start (state=start-failed error=worker-exited-before-acquire worker_exit=unrecorded waited=unrecorded limit=unrecorded queue_position=unrecorded)"
-            )
-        );
-    }
-
-    /// The falsifier for #7829: a signalled worker and one that returned early
-    /// must not produce the same receipt or the same operator-facing line.
-    #[test]
-    fn a_signalled_pre_acquire_worker_is_distinguishable_from_an_early_return() {
-        let signalled = terminal_projection(
-            &harn_hostlib::HostLeaseRunState::StartFailed {
-                observed_at_ms: 1,
-                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
-                worker_exit: Some(harn_hostlib::HostLeaseProcessExit {
-                    code: None,
-                    signal: Some(9),
-                }),
-            },
-            0,
-            None,
-        )
-        .unwrap();
-        let returned = terminal_projection(
-            &harn_hostlib::HostLeaseRunState::StartFailed {
-                observed_at_ms: 1,
-                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
-                worker_exit: Some(harn_hostlib::HostLeaseProcessExit {
-                    code: Some(75),
-                    signal: None,
-                }),
-            },
-            0,
-            None,
-        )
-        .unwrap();
-
-        let signalled = signalled.diagnostic.expect("signalled death is diagnosed");
-        let returned = returned.diagnostic.expect("early return is diagnosed");
-        assert!(
-            signalled.contains("worker_exit=signal:9"),
-            "signalled worker did not name its signal: {signalled}"
-        );
-        assert!(
-            returned.contains("worker_exit=code:75"),
-            "returning worker did not name its code: {returned}"
-        );
-        assert_ne!(
-            signalled, returned,
-            "two different pre-acquire deaths still read identically"
-        );
-    }
-
-    /// An expired wait is a lease outcome, not a silent one. Before #7829 a
-    /// deferred run printed only a receipt path, so starvation and success
-    /// were the same terminal output.
-    #[test]
-    fn an_expired_wait_names_itself_instead_of_printing_nothing() {
-        let projection = terminal_projection(
-            &harn_hostlib::HostLeaseRunState::Deferred {
-                observed_at_ms: 2,
-                waited_ms: 3_600_000,
-            },
-            0,
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(projection.exit_code, EX_TEMPFAIL);
-        let diagnostic = projection.diagnostic.expect("an expired wait is diagnosed");
-        assert!(
-            diagnostic.contains("state=deferred"),
-            "expired wait did not name its terminal state: {diagnostic}"
-        );
-    }
-
-    #[test]
-    fn completed_workload_preserves_the_real_cargo_status() {
-        let projection = terminal_projection(
-            &harn_hostlib::HostLeaseRunState::Completed {
-                lease_id: "lease".to_string(),
-                acquire_wait_ms: 0,
-                hold_ms: 1,
-                worker_pid: 7,
-                exit: harn_hostlib::HostLeaseProcessExit {
-                    code: Some(101),
-                    signal: None,
-                },
-                release: harn_hostlib::HostLeaseRunReleaseOutcome::Released,
-                finished_at_ms: 2,
-            },
-            101,
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(projection.exit_code, 101);
-        assert!(projection.diagnostic.is_none());
-    }
-
-    #[test]
-    fn wait_progress_projects_holder_queue_and_elapsed_time() {
-        let receipt = harn_hostlib::HostLeaseAcquireReceipt {
-            schema_version: 4,
-            status: harn_hostlib::HostLeaseAcquireStatus::Deferred,
-            observed_at_ms: 31_000,
-            waited_ms: 31_000,
-            handle: None,
-            defer: Some(harn_hostlib::HostLeaseDeferReceipt {
-                host: "fixture".to_string(),
-                resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
-                domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
-                deferred_reason: harn_hostlib::HostLeaseDeferReason::Contended,
-                observed_at_ms: 31_000,
-                next_wake_at_ms: None,
-                deadline_at_ms: Some(90_000),
-                active: Some(harn_hostlib::HostLeaseHandle {
-                    schema_version: 4,
-                    host: "fixture".to_string(),
-                    resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
-                    domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
-                    execution_context: None,
-                    lease_id: "opaque".to_string(),
-                    owner: "compile-lane".to_string(),
-                    priority_class: harn_hostlib::HostLeasePriorityClass::Measurement,
-                    acquired_at_ms: 0,
-                    updated_at_ms: 0,
-                    expires_at_ms: None,
-                    owner_pid: None,
-                    owner_process_identity: None,
-                    reason: None,
-                    metadata: BTreeMap::new(),
-                }),
-            }),
-            recovered_stale_lease: false,
-            recovered: None,
-            queue: Some(harn_hostlib::HostLeaseQueueEvidence {
-                waiter_id: "waiter".to_string(),
-                requested_at_ms: 0,
-                position: 2,
-                predecessor_waiter_id: Some("first".to_string()),
-            }),
-        };
-
-        assert_eq!(
-            format_lease_wait(&receipt),
-            "Waiting for rust-heavy lease held by compile-lane (queue position 2, elapsed 31.0s)"
-        );
-
-        let mut queued = receipt;
-        let queued_defer = queued.defer.as_mut().unwrap();
-        queued_defer.deferred_reason = harn_hostlib::HostLeaseDeferReason::Queued;
-        queued_defer.active = None;
-        assert_eq!(
-            format_lease_wait(&queued),
-            "Waiting for rust-heavy lease admission (queue position 2, elapsed 31.0s)"
-        );
-
-        let mut registry_busy = queued;
-        registry_busy.defer.as_mut().unwrap().deferred_reason =
-            harn_hostlib::HostLeaseDeferReason::RegistryBusy;
-        assert_eq!(
-            format_lease_wait(&registry_busy),
-            "Waiting for rust-heavy lease registry (queue position 2, elapsed 31.0s)"
-        );
-    }
-
-    #[test]
-    fn child_process_paths_strip_windows_drive_verbatim_prefixes() {
-        assert_eq!(
-            path_argument(Path::new(r"\\?\E:\target\debug")).unwrap(),
-            r"E:\target\debug"
-        );
-    }
-
-    #[test]
-    fn child_process_paths_strip_windows_unc_verbatim_prefixes() {
-        assert_eq!(
-            path_argument(Path::new(r"\\?\UNC\server\share\target")).unwrap(),
-            r"\\server\share\target"
-        );
-    }
-
-    #[test]
-    fn child_process_paths_preserve_non_verbatim_spelling() {
-        for path in [r"E:\target\debug", r"\\server\share\target", "/tmp/target"] {
-            assert_eq!(path_argument(Path::new(path)).unwrap(), path);
-        }
-    }
-
-    #[test]
-    fn cargo_workload_timeout_starts_at_the_worker_boundary() {
-        let spawner = MockSpawner::new();
-        spawner.enqueue(MockProcessConfig {
-            force_timeout: true,
-            ..MockProcessConfig::default()
-        });
-        let mut child = spawner
-            .spawn(SpawnSpec {
-                builtin: "test",
-                program: "cargo".to_string(),
-                args: vec!["check".to_string()],
-                cwd: None,
-                env: BTreeMap::new(),
-                env_remove: Vec::new(),
-                env_mode: EnvMode::InheritClean,
-                use_stdin: true,
-                configure_process_group: false,
-                owner_death: OwnerDeathPolicy::None,
-                output_capture: OutputCapture::Inherit,
-            })
-            .unwrap();
-
-        assert_eq!(
-            wait_for_cargo_workload(child.as_mut(), Some(600_000)),
-            EX_TIMEOUT
-        );
-    }
-}
+mod tests;

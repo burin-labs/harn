@@ -7,7 +7,7 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
 pub(super) mod approval_denials;
 pub(super) mod denials;
-mod handler_result;
+pub(super) mod handler_result;
 pub(super) mod hash;
 
 use handler_result::agent_tool_handler_result_text;
@@ -336,36 +336,6 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
     }
 }
 
-/// Coerce a Harn tool handler's return value into the tool-result payload.
-/// Preserve explicit text envelopes, computer screenshots, and typed domain
-/// outcomes. Boolean `ok` or `success` distinguishes return from operation
-/// success; other values retain historical display rendering.
-pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
-    let json = crate::llm::vm_value_to_json(val);
-    if agent_tool_handler_result_text(&json).is_some()
-        || json_carries_screenshot(&json)
-        || handler_result::carries_typed_outcome(val, &json)
-    {
-        json
-    } else {
-        serde_json::Value::String(val.display())
-    }
-}
-
-/// Whether a JSON value contains a screenshot dict (`{base64, scale_factor}`
-/// with a non-empty base64) anywhere in its tree — the distinctive `ScreenImage`
-/// signature the computer tool returns.
-fn json_carries_screenshot(value: &serde_json::Value) -> bool {
-    if crate::llm::content::is_screenshot_dict(value) {
-        return true;
-    }
-    match value {
-        serde_json::Value::Object(map) => map.values().any(json_carries_screenshot),
-        serde_json::Value::Array(items) => items.iter().any(json_carries_screenshot),
-        _ => false,
-    }
-}
-
 pub(super) fn is_denied_tool_result(value: &serde_json::Value) -> bool {
     if is_denied_tool_result_object(value) {
         return true;
@@ -460,6 +430,9 @@ fn ok_result_failure_category_object(value: &serde_json::Value) -> Option<&'stat
 pub(super) struct ToolDispatchOutcome {
     pub result: Result<serde_json::Value, VmError>,
     pub executor: Option<ToolExecutor>,
+    /// A failure the handler declared in its return value, read while that
+    /// value was still structured (harn#7884).
+    pub declared_failure: Option<&'static str>,
 }
 
 /// Dispatch a single tool invocation to its execution backend, recording
@@ -516,7 +489,11 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     let declared = declared_executor_for_tool(tools_val, tool_name);
     let mut attempt = 0usize;
     let mut executor: Option<ToolExecutor> = None;
+    // Reset per attempt: a retry re-runs the handler and re-reads whatever the
+    // new return value declares.
+    let mut declared_failure: Option<&'static str>;
     loop {
+        declared_failure = None;
         let result = if matches!(declared.as_deref(), Some("provider_native")) {
             // The runtime never dispatches provider-native tools — the
             // model returns the already-executed result inline. Reaching
@@ -539,6 +516,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             let Some(bridge) = bridge else {
                 executor = Some(ToolExecutor::HostBridge);
                 return ToolDispatchOutcome {
+                    declared_failure: None,
                     result: Err(VmError::CategorizedError {
                         message: format!(
                             "tool '{tool_name}' is declared executor: \"host_bridge\" \
@@ -585,6 +563,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 // Harn-side `handler` overrides (custom MCP wrappers).
                 let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                     return ToolDispatchOutcome {
+                        declared_failure: None,
                         result: Err(VmError::CategorizedError {
                             message: format!(
                                 "tool '{tool_name}' is MCP-served but no child VM context was available"
@@ -602,7 +581,12 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                     ctx.forward_output(&captured);
                 }
                 match outcome {
-                    Ok(val) => Ok(harn_handler_result_value(&val)),
+                    Ok(val) => {
+                        let (payload, failure) =
+                            handler_result::coerce_and_classify_handler_result(&val);
+                        declared_failure = failure;
+                        Ok(payload)
+                    }
                     Err(VmError::CategorizedError {
                         message,
                         category: ErrorCategory::ToolRejected,
@@ -655,6 +639,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             });
             let Some(mut vm) = ctx.map(crate::vm::AsyncBuiltinCtx::child_vm) else {
                 return ToolDispatchOutcome {
+                    declared_failure: None,
                     result: Err(VmError::CategorizedError {
                         message: format!(
                             "tool '{tool_name}' is Harn-owned but no child VM context was available"
@@ -672,7 +657,12 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 ctx.forward_output(&captured);
             }
             match outcome {
-                Ok(val) => Ok(harn_handler_result_value(&val)),
+                Ok(val) => {
+                    let (payload, failure) =
+                        handler_result::coerce_and_classify_handler_result(&val);
+                    declared_failure = failure;
+                    Ok(payload)
+                }
                 Err(VmError::CategorizedError {
                     message,
                     category: ErrorCategory::ToolRejected,
@@ -723,26 +713,29 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 category: ErrorCategory::ToolRejected,
             })
         };
-        match &result {
-            Ok(_) => break ToolDispatchOutcome { result, executor },
-            Err(VmError::CategorizedError {
-                category: ErrorCategory::ToolRejected,
-                ..
-            }) => break ToolDispatchOutcome { result, executor },
-            // An internal engine/wiring bug (undefined builtin, corrupt
-            // bytecode) will never resolve on retry. Break immediately so the
-            // error propagates to the agent loop, which re-raises it instead of
-            // burning the retry budget and folding it into a tool observation.
-            Err(e) if crate::value::error_to_category(e).is_internal() => {
-                break ToolDispatchOutcome { result, executor }
-            }
-            Err(_) if attempt < tool_retries => {
-                attempt += 1;
-                let delay = tool_backoff_ms * (1u64 << attempt.min(5));
-                crate::clock_mock::sleep(tokio::time::Duration::from_millis(delay)).await;
-            }
-            Err(_) => break ToolDispatchOutcome { result, executor },
+        // Retry only a transient dispatch error with budget left. An internal
+        // engine/wiring bug (undefined builtin, corrupt bytecode) will never
+        // resolve on retry, so it breaks immediately and propagates to the
+        // agent loop rather than burning the budget as a tool observation.
+        let retryable = matches!(&result, Err(error)
+            if !matches!(
+                error,
+                VmError::CategorizedError {
+                    category: ErrorCategory::ToolRejected,
+                    ..
+                }
+            ) && !crate::value::error_to_category(error).is_internal()
+            && attempt < tool_retries);
+        if !retryable {
+            break ToolDispatchOutcome {
+                result,
+                executor,
+                declared_failure,
+            };
         }
+        attempt += 1;
+        let delay = tool_backoff_ms * (1u64 << attempt.min(5));
+        crate::clock_mock::sleep(tokio::time::Duration::from_millis(delay)).await;
     }
 }
 

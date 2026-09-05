@@ -323,6 +323,21 @@ pub(crate) fn append_llm_observability_entry(
     let _ = try_append_llm_observability_entry(event_type, fields);
 }
 
+pub(crate) fn append_llm_observability_entry_to_dir(
+    event_type: &str,
+    mut fields: serde_json::Map<String, serde_json::Value>,
+    dir: &str,
+) {
+    fields.insert("type".to_string(), serde_json::json!(event_type));
+    fields
+        .entry("timestamp".to_string())
+        .or_insert_with(|| serde_json::json!(chrono_now()));
+    fields
+        .entry("span_id".to_string())
+        .or_insert_with(|| serde_json::json!(crate::tracing::current_span_id()));
+    let _ = try_append_llm_transcript_entry_to_dir(&serde_json::Value::Object(fields), Some(dir));
+}
+
 fn try_append_llm_observability_entry(
     event_type: &str,
     mut fields: serde_json::Map<String, serde_json::Value>,

@@ -61,6 +61,45 @@ impl NodeKind {
         }
     }
 
+    /// Every kind, so an exhaustiveness test can enumerate them.
+    pub const ALL: [NodeKind; 8] = [
+        NodeKind::Function,
+        NodeKind::Type,
+        NodeKind::Field,
+        NodeKind::EnumCase,
+        NodeKind::Module,
+        NodeKind::Import,
+        NodeKind::CallSite,
+        NodeKind::Macro,
+    ];
+
+    /// Whether a node of this kind can be named from another file by a
+    /// bare identifier, and is therefore a legitimate target for the
+    /// `REFS` name heuristic.
+    ///
+    /// Two kinds are excluded for different reasons, and both exclusions
+    /// are load-bearing:
+    ///
+    /// - [`NodeKind::CallSite`] is a *use*, not a declaration. Pointing a
+    ///   REFS edge at one asserts that module A references a call
+    ///   expression inside module B, which is not a fact anybody wants.
+    ///   It is also where essentially all the edges came from: on a
+    ///   7,038-file workspace, call sites absorbed 80.9M of 87.0M REFS
+    ///   edges, because a name like `assert` has 32,343 call sites and
+    ///   seven actual declarations.
+    /// - [`NodeKind::Field`] and [`NodeKind::EnumCase`] are scoped to
+    ///   their container. A module that happens to contain the word
+    ///   `path` is not referencing all 469 struct fields named `path`.
+    ///
+    /// [`NodeKind::Import`] is excluded because its name is a raw import
+    /// string, which never word-matches.
+    pub fn is_name_addressable(self) -> bool {
+        matches!(
+            self,
+            NodeKind::Function | NodeKind::Type | NodeKind::Macro | NodeKind::Module
+        )
+    }
+
     /// Parse a case-sensitive Cypher label.
     pub fn parse(label: &str) -> Option<Self> {
         match label {
@@ -572,6 +611,13 @@ impl SymbolGraph {
         out
     }
 
+    /// Add every cross-file declaration named `word` to `bag`.
+    ///
+    /// `by_name` indexes every node, including call sites, because the
+    /// CALLS resolver and the Cypher executor both need that. The REFS
+    /// heuristic is narrower: it wants declarations a bare identifier in
+    /// another file could actually be naming, so it filters to
+    /// [`NodeKind::is_name_addressable`].
     fn absorb_word_refs(&self, word: &str, this_file: FileId, bag: &mut BTreeSet<NodeId>) {
         if word.len() < 3 {
             return;
@@ -580,10 +626,13 @@ impl SymbolGraph {
             return;
         };
         for nid in ids {
-            let same_file = self.nodes.get(nid).is_some_and(|n| n.file_id == this_file);
-            if !same_file {
-                bag.insert(*nid);
+            let Some(node) = self.nodes.get(nid) else {
+                continue;
+            };
+            if node.file_id == this_file || !node.kind.is_name_addressable() {
+                continue;
             }
+            bag.insert(*nid);
         }
     }
 
@@ -794,6 +843,142 @@ mod tests {
         let (kind, reversed) = EdgeKind::parse_with_direction("CALLS").unwrap();
         assert_eq!(kind, EdgeKind::Calls);
         assert!(!reversed);
+    }
+
+    /// The `REFS` name heuristic must point only at declarations another
+    /// file could name. Before this was enforced, a call site was a legal
+    /// target, so a workspace with N call sites of a popular name grew
+    /// REFS quadratically: 80.9M of 87.0M edges on a real 7,038-file
+    /// workspace pointed at call sites (#8081).
+    #[test]
+    fn refs_never_point_at_a_call_site() {
+        let mut g = SymbolGraph::new();
+        // One declaration of `helper`, in its own file.
+        g.rebuild_file(
+            1,
+            "src/decl.rs",
+            Language::Rust,
+            "pub fn helper() -> i32 { 1 }\n",
+            &[],
+        );
+        // A file full of calls to it. Each call is a CallSite node named
+        // `helper`, and each is a candidate REFS target under the old rule.
+        g.rebuild_file(
+            2,
+            "src/uses.rs",
+            Language::Rust,
+            "fn a() { helper(); helper(); helper(); }\n",
+            &[],
+        );
+        // A third file that merely mentions the word.
+        g.rebuild_file(
+            3,
+            "src/mentions.rs",
+            Language::Rust,
+            "fn b() { let _ = \"helper\"; helper(); }\n",
+            &[],
+        );
+
+        // Positive control: the heuristic still fires. The mentioning
+        // module reaches the real declaration.
+        let decl = *g
+            .nodes_named("helper")
+            .iter()
+            .find(|id| g.node(**id).is_some_and(|n| n.kind == NodeKind::Function))
+            .expect("the function declaration exists");
+        let mentions_mod = g.module_node_for_file(3).unwrap();
+        assert!(
+            g.outgoing(mentions_mod)
+                .iter()
+                .any(|e| e.kind == EdgeKind::Refs && e.to == decl),
+            "a module naming a cross-file function must still get a REFS edge"
+        );
+
+        // The property: no REFS edge anywhere lands on a non-addressable
+        // node. Asserted over the whole graph, not just the one module,
+        // so a future kind cannot quietly re-enter through another path.
+        let call_sites = g
+            .iter_nodes()
+            .filter(|n| n.kind == NodeKind::CallSite)
+            .count();
+        assert!(
+            call_sites >= 4,
+            "fixture must contain call sites to exclude"
+        );
+        for id in g.all_node_ids() {
+            for edge in g.outgoing(id) {
+                if edge.kind != EdgeKind::Refs {
+                    continue;
+                }
+                let target = g.node(edge.to).expect("edge target exists");
+                assert!(
+                    target.kind.is_name_addressable(),
+                    "REFS edge points at a {} node named `{}`, which no bare \
+                     identifier in another file can be naming",
+                    target.kind.as_str(),
+                    target.name
+                );
+            }
+        }
+    }
+
+    /// A field name is scoped to its container, so a module that merely
+    /// contains the same word is not referencing it.
+    #[test]
+    fn refs_never_point_at_a_field_or_enum_case() {
+        let mut g = SymbolGraph::new();
+        g.rebuild_file(
+            1,
+            "src/model.rs",
+            Language::Rust,
+            "pub struct Doc { pub path: String }\npub enum Mode { Fastpath }\n",
+            &[],
+        );
+        g.rebuild_file(
+            2,
+            "src/other.rs",
+            Language::Rust,
+            "fn go() { let path = 1; let Fastpath = 2; }\n",
+            &[],
+        );
+        assert!(
+            g.iter_nodes().any(|n| n.kind == NodeKind::Field),
+            "fixture must declare a field to exclude"
+        );
+        let other_mod = g.module_node_for_file(2).unwrap();
+        for edge in g.outgoing(other_mod) {
+            if edge.kind != EdgeKind::Refs {
+                continue;
+            }
+            let target = g.node(edge.to).unwrap();
+            assert!(
+                target.kind.is_name_addressable(),
+                "REFS edge points at a container-scoped {} named `{}`",
+                target.kind.as_str(),
+                target.name
+            );
+        }
+    }
+
+    /// Every kind is classified deliberately. A kind added later fails
+    /// this test until someone decides which side it belongs on, rather
+    /// than defaulting into the heuristic and re-opening #8081.
+    #[test]
+    fn every_node_kind_has_a_deliberate_addressability_verdict() {
+        for kind in NodeKind::ALL {
+            let expected = match kind {
+                NodeKind::Function | NodeKind::Type | NodeKind::Macro | NodeKind::Module => true,
+                NodeKind::Field | NodeKind::EnumCase | NodeKind::CallSite | NodeKind::Import => {
+                    false
+                }
+            };
+            assert_eq!(
+                kind.is_name_addressable(),
+                expected,
+                "{} changed sides; decide deliberately and update #8081's reasoning",
+                kind.as_str()
+            );
+        }
     }
 
     #[test]

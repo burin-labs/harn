@@ -98,9 +98,14 @@ The target passes `--run-ignored all`, so tests marked `#[ignore]` because they
 are slow binary-surface coverage still run in this suite.
 Runs on:
 
+- Every push to `main` (`.github/workflows/e2e.yml`), on a self-hosted big
+  runner when the fleet has one online, and on a hosted runner otherwise
 - Schedule: nightly at 3 AM UTC (`.github/workflows/e2e.yml`)
 - `e2e` PR label: add the label to opt in before merge
 - Merge queue: the `e2e` job in `ci.yml` runs before a PR lands
+
+A failing unattended run (main push or nightly) opens a deduplicated tracking
+issue, so main is never called green while its last executed slow run is red.
 
 ### Preferred Rust test path
 
@@ -612,10 +617,26 @@ a ` ```mermaid ` fence.
 ### Linking issues
 
 A pull request that resolves an issue says which of the issue's listed sub-asks
-it closes. Use `Closes #N items: 1, 3` when the issue enumerates sub-asks, and
-`Single-ask: #N` when it does not. Close an issue only once every listed sub-ask
-is verified on `main`. If a sub-ask survives the pull request, rescope the issue
-or file the remainder so the work keeps an owner.
+it closes.
+
+Use a closing keyword only when the pull request resolves the whole issue:
+`Closes #N items: 1, 2, ...` naming every enumerated sub-ask, or
+`Single-ask: #N` when the issue is not enumerated. For partial work write
+`Partial: #N items: 1, 3` or `Refs #N`, and never a closing keyword.
+
+The reason the partial form avoids the keyword is mechanical, not stylistic.
+GitHub builds the closing link from the keyword alone and ignores whatever
+follows it, so `Closes #N items: 1, 3` closes the whole issue on merge while
+reading as a partial close, and the sub-asks it did not land lose their owner.
+The pull request's closing-reference field is the check, not its body text:
+
+```sh
+gh pr view <N> --json closingIssuesReferences
+```
+
+A partial pull request should report an empty list there. Close an issue only
+once every listed sub-ask is verified on `main`. If a sub-ask survives the pull
+request, rescope the issue or file the remainder so the work keeps an owner.
 
 Keep write-ups repository-agnostic, per
 [Keep write-ups repository-agnostic](#keep-write-ups-repository-agnostic).

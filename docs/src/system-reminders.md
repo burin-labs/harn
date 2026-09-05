@@ -342,8 +342,8 @@ reminders and runtime feedback:
 2. whitespace-normalized duplicate bodies collapse by authority, then recency;
 3. survivors are ordered `contract`, `corrective`, then `advisory`;
 4. every survivor renders as `<directive authority="...">...</directive>` in
-   one `<context-directives>` envelope; finite directives also render their
-   `ttl_turns` contract on that element;
+   one `<context-directives speaker="...">` envelope; finite directives also
+   render their `ttl_turns` contract on that element;
 5. the envelope becomes one new trailing user turn and never edits an existing
    message.
 
@@ -352,8 +352,15 @@ routes. The system string remains byte-stable as directives change. Diagnostic
 identity such as source, tags, dedupe key, and runtime feedback kind stays in
 typed events and is never copied into the model-visible envelope. The lifetime
 is the exception because a durable historical message must tell the model when
-its instruction stopped applying. `role_hint` remains readable on historical
-transcripts but does not create a second rendering path.
+its instruction stopped applying. The envelope's `speaker` attribute is the
+other: it says whether harness machinery or the person wrote the block, so the
+model can act on a harness directive without answering it back to the reader.
+`role_hint` selects that speaker (`user_block` means the person, every other
+hint means the harness) but does not create a second rendering path.
+
+The envelope always travels as a `user` message. `user` is the only
+mid-conversation role every provider dialect accepts, so the speaker is carried
+by the attribute rather than the wire role.
 
 ## Append-only placement
 

@@ -131,13 +131,17 @@ GATES=(
   check-provider-catalog-drift
   check-ported-handler-loc
   check-source-file-lengths
+  check-test-target-coverage
+  check-gate-path-visibility
   check-python-boundary
   check-harn-syntax-sensitive-scans
   check-loud-boundaries
   check-ci-cache-policy
   check-rust-test-lane-policy
+  check-scheduled-workflows
   check-crate-sibling-versions
   check-dependabot-groups
+  check-release-contract
   check-release-audit-contract
   check-vm-rss-soak
 )

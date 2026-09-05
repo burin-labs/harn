@@ -115,14 +115,16 @@ pub(crate) use raw_provider_capture::{
     RawProviderResponseFailureCapture,
 };
 
+#[cfg(test)]
+pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
     record_capability_snapshot_definition, record_served_message_definition,
     served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
-    current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
-    swap_llm_transcript_ambient, LlmTranscriptAmbient,
+    current_transcript_path, push_llm_transcript_dir, remove_llm_transcript_dir,
+    swap_llm_transcript_ambient, LlmTranscriptAmbient, TranscriptDirFrame,
 };
 
 fn next_call_id() -> String {
@@ -275,7 +277,9 @@ use retry_request::{
     escalate_options_output_budget,
 };
 use transcript_observability::*;
-pub(crate) use transcript_observability::{append_llm_observability_entry, record_template_render};
+pub(crate) use transcript_observability::{
+    append_llm_observability_entry, append_llm_observability_entry_to_dir, record_template_render,
+};
 /// Extract retry-after delay from an error message if present.
 ///
 /// Supports both forms defined by RFC 7231 §7.1.3:
@@ -303,21 +307,48 @@ pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
     parse_retry_after(msg)
 }
 
-/// Parse the value of a `retry-after:` header embedded anywhere in `msg`.
+/// The exact shape `classify_provider_http_error` appends when it has read a
+/// `Retry-After` header off the response. Matched before any other occurrence
+/// so our own record of the header beats text the provider wrote.
+const APPENDED_RETRY_AFTER_PREFIX: &str = " (retry-after: ";
+
+/// Parse a `retry-after` hint out of an error message.
+///
+/// This is the FALLBACK, not the contract. The authority is the typed
+/// `retry_after_ms` field that `provider_http_error` puts on the thrown
+/// dictionary, and `extract_retry_after_ms` reads that first and returns
+/// without ever reaching here. A message is only consulted for error shapes
+/// that carry no structured value at all.
+///
+/// It has to prefer our own appended suffix, because a provider body can
+/// contain the text `retry-after:` itself: an echoed request header, a nested
+/// upstream error, a proxy's own message. Taking the first occurrence in the
+/// assembled message read the provider's number instead of the header's. On a
+/// 429 whose header said 2 seconds and whose body text said 900, that returned
+/// 60000 ms (the clamp) rather than 2000 ms, a thirty-fold overshoot on a hint
+/// meant to make a retry prompt.
 ///
 /// Exposed for unit tests; the public entry point is
 /// `extract_retry_after_ms`.
 #[expect(
     clippy::string_slice,
-    reason = "pos comes from find() on the byte-length-preserving ASCII-lowercased copy of \
-              msg and end from find() on the sliced tail, so both are char boundaries"
+    reason = "every index comes from find()/rfind() on the byte-length-preserving \
+              ASCII-lowercased copy of msg, or from find() on a slice of it, so all \
+              of them are char boundaries"
 )]
 pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     let lower = msg.to_ascii_lowercase();
-    let pos = lower.find("retry-after:")?;
-    let after = &msg[pos + "retry-after:".len()..];
-    // End at CRLF so we don't grab a neighboring header.
-    let end = after.find(['\r', '\n']).unwrap_or(after.len());
+    let (pos, marker_len) = match lower.rfind(APPENDED_RETRY_AFTER_PREFIX) {
+        Some(pos) => (pos, APPENDED_RETRY_AFTER_PREFIX.len()),
+        // No suffix of ours, so the message is provider text or a flattened
+        // shape. Fall back to the last occurrence rather than the first: if
+        // anything in this message is ours it was appended at the end.
+        None => (lower.rfind("retry-after:")?, "retry-after:".len()),
+    };
+    let after = &msg[pos + marker_len..];
+    // End at our closing parenthesis or at a CRLF, so neither the rest of the
+    // sentence nor a neighbouring header is swallowed.
+    let end = after.find(['\r', '\n', ')']).unwrap_or(after.len());
     let value = after[..end].trim();
     if value.is_empty() {
         return None;
@@ -395,7 +426,24 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 /// Capability proving that the transcript request event was emitted before a
 /// single-route provider primitive can run. Only this module can construct the
 /// token; logical callers must use the observed API entry points.
-pub(crate) struct ObservedAttemptToken(());
+#[derive(Clone)]
+pub(crate) struct ObservedAttemptToken {
+    session_id: Option<String>,
+}
+
+impl ObservedAttemptToken {
+    fn for_current_session() -> Self {
+        Self {
+            session_id: super::agent_runtime::current_agent_session_id(),
+        }
+    }
+
+    pub(super) fn record_provider_dispatch(&self) {
+        if let Some(session_id) = self.session_id.as_deref() {
+            super::agent_session_host::record_provider_dispatch(session_id);
+        }
+    }
+}
 
 /// Make one LLM call with full observability: call-id generation, bridge
 /// notifications (call_start / call_progress / call_end), span annotation,
@@ -538,7 +586,7 @@ pub(crate) async fn observed_llm_call(
             &effective_tool_format,
             opts,
         )?;
-        let observed_attempt = ObservedAttemptToken(());
+        let observed_attempt = ObservedAttemptToken::for_current_session();
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
@@ -679,6 +727,12 @@ pub(crate) async fn observed_llm_call(
                     )
                 {
                     let retry_usage = result.usage();
+                    // The discarded attempt keeps its own measured ledger,
+                    // including its typed unpriced reason. Rewriting it to a
+                    // known zero would assert it cost nothing, which nobody
+                    // measured. The aggregate reports partial accounting
+                    // instead, so one discarded attempt no longer nulls the
+                    // priced siblings' cost.
                     completed_retry_usage.push(retry_usage.clone());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[

@@ -39,6 +39,7 @@ mod generated_rust_binding;
 
 mod external_action_roundtrip;
 mod llm_outcome_vocabulary;
+mod open_vocabulary_projection;
 mod prepared_session;
 mod session_recap;
 mod session_update_payloads;

@@ -1015,7 +1015,8 @@ mod budget_rearm_tests {
     #[tokio::test(flavor = "current_thread")]
     async fn active_prompt_takeover_is_handled_on_the_preemptive_control_lane() {
         let session_id = format!("session-{}", uuid::Uuid::now_v7());
-        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()))
+            .expect("open fixture session");
         harn_vm::agent_sessions::attach_live_client(
             &session_id,
             harn_vm::agent_sessions::AttachLiveClient {
@@ -1073,7 +1074,8 @@ mod budget_rearm_tests {
     #[tokio::test(flavor = "current_thread")]
     async fn preemptive_control_lane_rejects_unauthenticated_takeover() {
         let session_id = format!("session-{}", uuid::Uuid::now_v7());
-        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()))
+            .expect("open fixture session");
         for (client_id, mode) in [
             (
                 "desktop",

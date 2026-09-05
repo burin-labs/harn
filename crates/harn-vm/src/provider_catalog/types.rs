@@ -254,6 +254,11 @@ pub struct CatalogAlias {
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
+    /// Per-route training/retention posture, present only when this route
+    /// differs from its provider's declaration. Carried through the artifact
+    /// unchanged so every downstream projection reads the same fact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls: Option<llm_config::ModelDataControlsDef>,
     pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blurb: Option<String>,

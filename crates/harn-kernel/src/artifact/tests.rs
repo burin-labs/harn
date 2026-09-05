@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use crate::Constant;
 use crate::{DataValue, Execution, GrantSet, PortableSourceModule};
 
-use super::validation::{semantic_abi_fingerprint, validate_code};
+use super::validation::{contract_fingerprint, semantic_abi_fingerprint, validate_code};
 use super::wire::{
     encode_wire_program, ArtifactReader, WireChunk, WireFunction, WireLocalSlot, WireParam,
     WireProgram,
@@ -615,6 +615,50 @@ fn semantic_abi_provenance_is_stable_hex() {
         .collect::<String>();
     assert_eq!(semantic_abi_fingerprint_hex(), expected);
     assert_eq!(expected.len(), 64);
+}
+
+#[test]
+fn semantic_abi_hash_includes_contract_policy_semantics() {
+    use harn_builtin_meta::{
+        BuiltinContract, CapabilityId, EffectAccess, EffectAuthorization, EffectKind, EffectSpec,
+        ResourceSelector,
+    };
+
+    const RESOURCES: &[ResourceSelector] = &[ResourceSelector::Constant("agent-sessions")];
+    const EFFECTS: &[EffectSpec] = &[EffectSpec::new(
+        EffectKind::State,
+        EffectAccess::Mutate,
+        RESOURCES,
+    )];
+    const READ_EFFECTS: &[EffectSpec] = &[EffectSpec::new(
+        EffectKind::State,
+        EffectAccess::Read,
+        RESOURCES,
+    )];
+    let ordinary = BuiltinContract::harness(CapabilityId::Agent, "open", EFFECTS);
+    let control =
+        BuiltinContract::harness_runtime_control_plane(CapabilityId::Agent, "open", EFFECTS);
+    let delegated = BuiltinContract::harness_with_effect_authorization(
+        CapabilityId::Agent,
+        "open",
+        READ_EFFECTS,
+        EffectAuthorization::new(CapabilityId::Agent, "open"),
+    );
+
+    assert_ne!(
+        contract_fingerprint(&ordinary),
+        contract_fingerprint(&control),
+        "runtime-control classification changes policy behavior and must invalidate portable artifacts"
+    );
+    assert_ne!(
+        contract_fingerprint(&BuiltinContract::harness(
+            CapabilityId::Agent,
+            "open",
+            READ_EFFECTS,
+        )),
+        contract_fingerprint(&delegated),
+        "effect delegation changes policy behavior and must invalidate portable artifacts"
+    );
 }
 
 #[test]

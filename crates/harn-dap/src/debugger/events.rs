@@ -329,6 +329,7 @@ mod telemetry_tests {
             provider_call_count: 1,
             unpriced_calls: 0,
             usage_unknown_calls: 0,
+            unpriced: None,
         };
 
         let payload = llm_telemetry_payload("call-1", "model-1", &usage, 42, 3);

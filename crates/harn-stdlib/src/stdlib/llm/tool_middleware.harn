@@ -302,8 +302,11 @@ pub fn tools_use_middleware(registry: dict, transform: any) {
  *
  * Helper for schema-time middleware: given a tool registry entry, returns
  * a new entry whose existing tool-input schema includes the given parameter.
- * Registry entries may spell that schema `parameters`, `input_schema`, or
- * `inputSchema`; the helper preserves the existing spelling so middleware
+ * A registry entry spells that schema exactly two ways: `inputSchema` for a
+ * complete object-root JSON Schema, or legacy `parameters` for a per-parameter
+ * map. `tool_define` normalizes its config spellings (including
+ * `input_schema`) onto those two keys, and the registry refuses anything else,
+ * so the helper preserves whichever of the two the entry already uses and
  * cannot shadow a complete schema with legacy parameter shorthand.
  * Honors both the bare `{x: "string"}` shorthand and the full JSON-schema
  * `{type: "object", properties: {...}, required: [...]}` shape.
@@ -330,9 +333,7 @@ pub fn tool_inject_param(entry: dict, name: string, schema_fragment: dict, opts:
     schema_fragment
   }
   const entry_keys = entry.keys()
-  const schema_key = if contains(entry_keys, "input_schema") {
-    "input_schema"
-  } else if contains(entry_keys, "inputSchema") {
+  const schema_key = if contains(entry_keys, "inputSchema") {
     "inputSchema"
   } else if contains(entry_keys, "parameters") {
     "parameters"

@@ -561,11 +561,13 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
   )
 }
 
-// --- Regression: the turn-ender vetoing verified-green work -----------------
-// Reproduces eval-py-smoke-20260829-181741-76315a65-66f, where five completion
-// judge calls each returned `done` with `met: true` and were each forced to
-// `continue` because the cited evidence included the tool actions the packet
-// itself had listed.
+/**
+ * --- Regression: the turn-ender vetoing verified-green work -----------------
+ * Reproduces eval-py-smoke-20260829-181741-76315a65-66f, where five completion
+ * judge calls each returned `done` with `met: true` and were each forced to
+ * `continue` because the cited evidence included the tool actions the packet
+ * itself had listed.
+ */
 fn trial_shaped_packet(verification_measurement: string) -> CompletionRequirementEvidencePacket {
   return {
     // Positive indices: the actions the packet showed the judge.
@@ -602,8 +604,10 @@ fn trial_shaped_packet(verification_measurement: string) -> CompletionRequiremen
   }
 }
 
-// The whole-task catch-all Burin synthesizes when no acceptance items are
-// frozen: one requirement, no declared evidence roles, name = the task text.
+/**
+ * The whole-task catch-all Burin synthesizes when no acceptance items are
+ * frozen: one requirement, no declared evidence roles, name = the task text.
+ */
 fn catch_all_contract() -> CompletionRequirementContract {
   return {
     requirements: [
@@ -728,8 +732,10 @@ pipeline test_pending_feedback_names_the_item_and_its_evidence_kind(
   assert(feedback.contains("Accepted evidence kinds: deterministic_verification"))
 }
 
-// The whole-task catch-all for a task that writes nothing. One row, no declared
-// evidence roles, so it accepts assistant_output and deterministic_verification.
+/**
+ * The whole-task catch-all for a task that writes nothing. One row, no declared
+ * evidence roles, so it accepts assistant_output and deterministic_verification.
+ */
 fn no_write_contract() -> CompletionRequirementContract {
   return {requirements: [{requirement_id: "say-hello", name: "Say hello."}]}
 }
@@ -750,10 +756,12 @@ fn no_write_judge_opts(session: string, cap: int) -> AgentSpec {
   }
 }
 
-// harn#7823. A judge that answers `done` and never itemizes is the party that
-// failed to assess. Before the fix this vetoed as `completion_requirements_pending`
-// — feedback addressed to an actor who does not write assessments, identical on
-// every iteration, so the run could only thrash.
+/**
+ * harn#7823. A judge that answers `done` and never itemizes is the party that
+ * failed to assess. Before the fix this vetoed as `completion_requirements_pending`
+ * — feedback addressed to an actor who does not write assessments, identical on
+ * every iteration, so the run could only thrash.
+ */
 pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
   harness: Harness,
   task: unknown,
@@ -802,8 +810,10 @@ pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
   )
 }
 
-// The retry is asked of the JUDGE, not the actor. One re-ask that itemizes
-// closes the ledger on evidence the runtime already recorded.
+/**
+ * The retry is asked of the JUDGE, not the actor. One re-ask that itemizes
+ * closes the ledger on evidence the runtime already recorded.
+ */
 pipeline test_itemization_retry_closes_the_no_write_row(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
@@ -837,8 +847,10 @@ pipeline test_itemization_retry_closes_the_no_write_row(harness: Harness, task: 
   )
 }
 
-// Negative control for the retry. A judge that DID itemize and left the row out
-// is a real actor gap: no retry, and the existing pending vocabulary stands.
+/**
+ * Negative control for the retry. A judge that DID itemize and left the row out
+ * is a real actor gap: no retry, and the existing pending vocabulary stands.
+ */
 pipeline test_itemized_report_that_omits_a_row_is_still_an_actor_gap(
   harness: Harness,
   task: unknown,
@@ -902,9 +914,11 @@ fn itemization_retries(events: list) -> list {
     .to_list()
 }
 
-// An explicitly empty acceptance set is a readable declaration that nothing is
-// checkable, not an unreadable contract. Today it throws, which is strictly
-// worse than the thrash it was meant to prevent: the run cannot start at all.
+/**
+ * An explicitly empty acceptance set is a readable declaration that nothing is
+ * checkable, not an unreadable contract. Today it throws, which is strictly
+ * worse than the thrash it was meant to prevent: the run cannot start at all.
+ */
 pipeline test_an_empty_acceptance_set_is_a_satisfied_ledger_not_an_error(
   harness: Harness,
   task: unknown,
@@ -916,8 +930,10 @@ pipeline test_an_empty_acceptance_set_is_a_satisfied_ledger_not_an_error(
   assert(!contains(schema.properties.keys(), "requirement_report"))
 }
 
-// The bc#7759 `Say hello.` shape, run through the loop with no ledger. A bare
-// scalar `done` must terminate the run on the FIRST judge call.
+/**
+ * The bc#7759 `Say hello.` shape, run through the loop with no ledger. A bare
+ * scalar `done` must terminate the run on the FIRST judge call.
+ */
 pipeline test_a_ledger_free_task_completes_on_one_judge_call(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
@@ -942,15 +958,17 @@ pipeline test_a_ledger_free_task_completes_on_one_judge_call(harness: Harness, t
       const receipts = completion_receipts(captured.events)
       const last = receipts[len(receipts) - 1]
       assert_eq(last.action, "accept")
-      assert_eq(last?.requirements ?? nil, nil)
+      assert_eq(last?.requirements, nil)
     },
   )
 }
 
-// Negative control for the two above. A DECLARED ledger keeps every binding:
-// the judge is still handed the report property, an omitted report is still
-// re-asked exactly once, and the completion still falls closed. Without this a
-// widened empty-set rule would read as green while having disabled the gate.
+/**
+ * Negative control for the two above. A DECLARED ledger keeps every binding:
+ * the judge is still handed the report property, an omitted report is still
+ * re-asked exactly once, and the completion still falls closed. Without this a
+ * widened empty-set rule would read as green while having disabled the gate.
+ */
 pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
   harness: Harness,
   task: unknown,
@@ -985,22 +1003,24 @@ pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
   )
 }
 
-// RULING (bc#7759, 2026-09-02). A declared verifier does NOT become a ledger
-// row: the verifier gate already owns that acceptance decision
-// deterministically, and a row over the same fact is a second, weaker authority,
-// which is the duplication the ruling forbids. Burin implements that, so nothing
-// here needs to change to accommodate a verifier row.
-//
-// FINDING, not a fix. Closing an UNREPORTED
-// verification-only row from its passing receipt was tried and reverted. It
-// reads as obviously right and is not: the receipt says one verifier passed,
-// while a row narrowed to `deterministic_verification` may be about something
-// that verifier never exercised. Turning the missing row met broke
-// `test_requirement_report_fails_closed_on_missing_duplicate_and_unsupported_rows`,
-// `test_pending_feedback_names_the_item_and_its_evidence_kind`, and
-// `test_requirement_schema_is_optional_for_legacy_judges`, which encode that
-// invariant deliberately. These pin the CURRENT behavior so the next reader
-// does not re-derive the same wrong idea.
+/**
+ * RULING (bc#7759, 2026-09-02). A declared verifier does NOT become a ledger
+ * row: the verifier gate already owns that acceptance decision
+ * deterministically, and a row over the same fact is a second, weaker authority,
+ * which is the duplication the ruling forbids. Burin implements that, so nothing
+ * here needs to change to accommodate a verifier row.
+ *
+ * FINDING, not a fix. Closing an UNREPORTED
+ * verification-only row from its passing receipt was tried and reverted. It
+ * reads as obviously right and is not: the receipt says one verifier passed,
+ * while a row narrowed to `deterministic_verification` may be about something
+ * that verifier never exercised. Turning the missing row met broke
+ * `test_requirement_report_fails_closed_on_missing_duplicate_and_unsupported_rows`,
+ * `test_pending_feedback_names_the_item_and_its_evidence_kind`, and
+ * `test_requirement_schema_is_optional_for_legacy_judges`, which encode that
+ * invariant deliberately. These pin the CURRENT behavior so the next reader
+ * does not re-derive the same wrong idea.
+ */
 pipeline test_an_unreported_verification_row_stays_unassessed(harness: Harness, task: unknown) {
   const verification_only: CompletionRequirementContract = {
     requirements: [
@@ -1036,10 +1056,12 @@ pipeline test_an_unreported_verification_row_stays_unassessed(harness: Harness, 
   assert_eq(refused.rows[0].status, "unmet")
 }
 
-// harn#7865 residual. The `done` path stopped charging an omitted report to the
-// actor; the `continue` path still did. A judge that refuses AND itemizes
-// nothing has assessed nothing, so the run must carry the judge's own reason,
-// not a ledger complaint naming evidence kinds the actor cannot supply.
+/**
+ * harn#7865 residual. The `done` path stopped charging an omitted report to the
+ * actor; the `continue` path still did. A judge that refuses AND itemizes
+ * nothing has assessed nothing, so the run must carry the judge's own reason,
+ * not a ledger complaint naming evidence kinds the actor cannot supply.
+ */
 pipeline test_declining_judge_that_itemizes_nothing_keeps_its_own_reason(
   harness: Harness,
   task: unknown,

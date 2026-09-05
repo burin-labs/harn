@@ -92,6 +92,17 @@ provider = "openai"
 id = "gpt-5.6-sol"
 provider = "openai"
 
+# GPT-6 ships a single model, so the family alias and the marketing name both
+# resolve to the one id. Kept as aliases rather than extra catalog rows so
+# receipts and cost projections stay on the canonical `gpt-6-astra`.
+[aliases."gpt-6"]
+id = "gpt-6-astra"
+provider = "openai"
+
+[aliases.astra]
+id = "gpt-6-astra"
+provider = "openai"
+
 # The small tier default stays on an open-weight host by policy (see
 # test_resolve_tier_model_default_aliases). Was Qwen/Qwen3.5-9B on
 # OpenRouter — that route went stale (Burin suppresses it); Gemma 4

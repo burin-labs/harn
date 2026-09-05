@@ -18,8 +18,12 @@ mkdir -p "$destination"
 for source in \
   release_ship.sh \
   release_gate.sh \
+  release_contract.harn \
+  release_contract.json \
+  release_contract.env \
   release_metadata.harn \
   release_withdrawals.harn \
+  path_visibility.harn \
   npm_ci_with_retry.sh \
   publish.sh \
   publish.harn \

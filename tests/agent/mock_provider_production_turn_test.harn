@@ -23,7 +23,7 @@
 // admission seam.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentSpec } from "std/agent/options"
+import { AgentSpec, agent_options } from "std/agent/options"
 import { assert_throws } from "std/testing"
 
 fn production_turn_tools() {
@@ -153,13 +153,15 @@ pipeline test_restricted_mock_still_refuses_unsupported_options(harness: Harness
     harness,
     "Answer briefly.",
     nil,
-    {
-      provider: "mock",
-      model: "mock-minimal",
-      cache: true,
-      loop_until_done: false,
-      max_iterations: 1,
-    },
+    agent_options(
+      {
+        provider: "mock",
+        model: "mock-minimal",
+        cache: true,
+        loop_until_done: false,
+        max_iterations: 1,
+      },
+    ),
   )
   assert_eq(cache_result.status, "exception")
   assert(

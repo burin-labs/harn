@@ -138,7 +138,7 @@ pub fn task_reference(task_id: string) {
         "Research middleware exports, route wiring, and the exact verify requirements before writing.",
         "First batch creates packages/server/src/middleware/rate-limit.ts and exports rateLimit from the middleware index.",
         "Second batch wires rateLimit into api.ts while preserving the existing withMiddleware architecture.",
-        "Final verify runs ./scripts/verify-rate-limit.sh and stops once it passes.",
+        "Final verify runs node scripts/verify-rate-limit.js and stops once it passes.",
       ],
       rubric: [
         "Reward verifier-exact identifier usage, especially the export name rateLimit.",

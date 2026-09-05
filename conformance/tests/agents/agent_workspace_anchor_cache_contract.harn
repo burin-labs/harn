@@ -63,7 +63,9 @@ pipeline default(harness: Harness) {
           == first.transcript.metadata.system_prompt.content,
       )
       harness.stdio.println(first_directives.role == "user")
-      harness.stdio.println(contains(first_directives.content, "<context-directives>"))
+      harness.stdio.println(
+        contains(first_directives.content, "<context-directives speaker=\"harness\">"),
+      )
       harness.stdio.println(contains(first_directives.content, "primary: /workspace/a"))
       harness.stdio.println(contains(second_directives.content, "primary: /workspace/b"))
       harness.stdio.println(

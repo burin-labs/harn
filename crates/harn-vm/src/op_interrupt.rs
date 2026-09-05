@@ -611,6 +611,48 @@ pub fn signal_pid_tree_group_and_token_with_report(
     }
 }
 
+/// Terminate a pid, its process group, its visible descendants and its
+/// cleanup-token cohort with escalation: SIGTERM, up to
+/// [`SUBPROCESS_TERM_GRACE`] of grace, then SIGKILL.
+///
+/// This is the pid-addressed twin of
+/// [`terminate_child_group_with_cleanup_token_report`], for the callers that
+/// hold a pid and a cleanup token rather than a `std::process::Child`: a
+/// background command handle reclaimed when its agent session ends has long
+/// since handed its `Child` to a waiter thread. Those callers previously sent
+/// SIGKILL directly, so a child never got the chance to flush, remove a lock
+/// file, or shut a socket down. The grace period is the same constant the
+/// child-handle path uses, because there is one escalation policy and it lives
+/// here.
+///
+/// The SIGKILL sweep is unconditional rather than survivor-gated. It re-scans
+/// the tree, so it costs a pass over already-dead pids and closes the case
+/// where the named root exits on SIGTERM while a SIGTERM-immune descendant
+/// keeps running: a survivor check on the root alone would read that as a
+/// clean termination.
+pub fn terminate_pid_tree_group_and_token_with_report(
+    pid: u32,
+    cleanup_token: Option<&str>,
+) -> ProcessCleanupReport {
+    #[cfg(unix)]
+    {
+        const SIGTERM: i32 = 15;
+        let mut report = signal_pid_tree_group_and_token_with_report(pid, cleanup_token, SIGTERM);
+        wait_for_pid_and_report_children_to_exit(&report, pid, SUBPROCESS_TERM_GRACE);
+        report.merge(signal_pid_tree_group_and_token_with_report(
+            pid,
+            cleanup_token,
+            9,
+        ));
+        report.refresh_survivor_status();
+        report
+    }
+    #[cfg(not(unix))]
+    {
+        signal_pid_tree_group_and_token_with_report(pid, cleanup_token, 9)
+    }
+}
+
 /// Signal a process tree and cleanup-token cohort without signaling the
 /// `preserved_pgid`.
 ///
@@ -814,6 +856,32 @@ fn wait_for_report_children_to_exit(report: &ProcessCleanupReport, timeout: Dura
             .children
             .iter()
             .all(|child| !process_exists(child.pid))
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Like [`wait_for_report_children_to_exit`], but also waits on the root pid.
+///
+/// The escalation path names the root explicitly rather than trusting the
+/// report to contain it: the report's `children` are the *descendants* the
+/// scan found, so a root with no children would otherwise satisfy the
+/// all-gone test immediately and collapse the grace period to nothing.
+#[cfg(unix)]
+fn wait_for_pid_and_report_children_to_exit(
+    report: &ProcessCleanupReport,
+    pid: u32,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !process_exists(pid)
+            && report
+                .children
+                .iter()
+                .all(|child| !process_exists(child.pid))
         {
             return;
         }
@@ -1288,5 +1356,85 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(group_gone(), "process group {pgid} survived interrupt");
+    }
+
+    /// Both halves of the escalation, on one pid each.
+    ///
+    /// A dead pid on its own cannot tell TERM -> grace -> KILL apart from an
+    /// immediate KILL: both leave the same corpse. So the polite process
+    /// writes a marker from inside its SIGTERM handler, and that file is the
+    /// only evidence that the first signal was ever sent. Reverting
+    /// `terminate_pid_tree_group_and_token_with_report` to a bare SIGKILL
+    /// leaves the marker absent; reverting it to a bare SIGTERM leaves the
+    /// immune pid alive.
+    #[cfg(unix)]
+    #[test]
+    fn escalating_terminate_kills_a_term_immune_child_and_asks_a_polite_one_first() {
+        use std::process::{Command, Stdio};
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir.path().join("term-received.marker");
+
+        let mut immune = Command::new("sh")
+            .arg("-c")
+            .arg("trap '' TERM; while true; do sleep 0.05; done")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn term-immune child");
+        let mut polite = Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "trap 'printf TERM > {}; exit 0' TERM; while true; do sleep 0.05; done",
+                marker.display()
+            ))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn polite child");
+
+        let immune_pid = immune.id();
+        let polite_pid = polite.id();
+
+        // Liveness first: a child that never started would make every clause
+        // below pass for the wrong reason.
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(5)
+            && !(process_exists(immune_pid) && process_exists(polite_pid))
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            process_exists(immune_pid) && process_exists(polite_pid),
+            "both probe children must be running before the terminate"
+        );
+        assert!(
+            !marker.exists(),
+            "the SIGTERM marker must not exist before the terminate"
+        );
+
+        let immune_report = terminate_pid_tree_group_and_token_with_report(immune_pid, None);
+        let polite_report = terminate_pid_tree_group_and_token_with_report(polite_pid, None);
+
+        let _ = immune.wait();
+        let _ = polite.wait();
+
+        assert!(
+            !process_exists(immune_pid),
+            "a child that ignores SIGTERM must still be gone: {immune_report:?}"
+        );
+        assert!(
+            !process_exists(polite_pid),
+            "the polite child must be gone: {polite_report:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap_or_default(),
+            "TERM",
+            "the polite child must have handled SIGTERM before anything killed it"
+        );
+        assert!(
+            polite_report.attempted_signals.contains(&15),
+            "the escalation must record the SIGTERM it sent: {polite_report:?}"
+        );
     }
 }

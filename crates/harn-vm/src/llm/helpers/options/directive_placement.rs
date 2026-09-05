@@ -20,6 +20,8 @@
 //! nothing. Compaction is the one sanctioned prefix break — it starts a new
 //! prefix deliberately and is already evented.
 
+#[cfg(test)]
+use super::reminders::DirectiveSpeaker;
 use super::reminders::RenderedReminder;
 use super::reminders::DIRECTIVE_IDS_KEY;
 use std::collections::HashSet;
@@ -90,9 +92,10 @@ mod tests {
     use super::*;
 
     fn directive(body: &str) -> RenderedReminder {
-        RenderedReminder::untracked(format!(
-            "<directive authority=\"contract\">\n{body}\n</directive>"
-        ))
+        RenderedReminder::untracked(
+            format!("<directive authority=\"contract\">\n{body}\n</directive>"),
+            DirectiveSpeaker::Harness,
+        )
     }
 
     fn directive_text(reminder: &RenderedReminder) -> String {
@@ -130,6 +133,7 @@ mod tests {
         let pending = RenderedReminder::tracked(
             "reminder-1",
             "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify now\n</directive>",
+            DirectiveSpeaker::Harness,
         );
         let mut committed = serde_json::json!({
             "role": "user",
@@ -145,6 +149,7 @@ mod tests {
         let pending = RenderedReminder::tracked(
             "reminder-2",
             "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify now\n</directive>",
+            DirectiveSpeaker::Harness,
         );
         let mut committed = serde_json::json!({
             "role": "user",

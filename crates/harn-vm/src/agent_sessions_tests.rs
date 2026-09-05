@@ -8,20 +8,40 @@ use crate::value::VmDictExt;
 use futures::StreamExt as _;
 use std::sync::{Arc, Mutex};
 
+fn open_or_create(id: Option<String>) -> String {
+    super::open_or_create(id).expect("open fixture session")
+}
+
+fn open_or_create_with_actor_chain(id: Option<String>, actor: Option<ActorChain>) -> String {
+    super::open_or_create_with_actor_chain(id, actor).expect("open fixture session")
+}
+
+fn open_child_session(parent_id: &str, id: Option<String>) -> String {
+    super::open_child_session(parent_id, id).expect("open fixture child session")
+}
+
+fn open_child_session_with_actor(
+    parent_id: &str,
+    id: Option<String>,
+    actor: Option<&str>,
+) -> String {
+    super::open_child_session_with_actor(parent_id, id, actor).expect("open fixture child session")
+}
+
+fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
+    super::fork(src_id, dst_id).expect("fork fixture session")
+}
+
+fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<String> {
+    super::fork_at(src_id, keep_first, dst_id).expect("fork fixture session")
+}
+
+#[path = "agent_sessions_tests/host_attachment_tests.rs"]
+mod host_attachment_tests;
+#[path = "agent_sessions_tests/scratchpad_tests.rs"]
+mod scratchpad_tests;
 #[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
 mod truncation_boundary_tests;
-
-struct TestAttachmentResolver(crate::host_attachments::MaterializedAttachment);
-
-impl crate::host_attachments::HostAttachmentResolver for TestAttachmentResolver {
-    fn resolve(
-        &self,
-        _artifact_pointer: &str,
-        _media_type: &str,
-    ) -> Result<crate::host_attachments::MaterializedAttachment, String> {
-        Ok(self.0.clone())
-    }
-}
 
 fn make_msg(role: &str, content: &str) -> VmValue {
     let mut m: crate::value::DictMap = crate::value::DictMap::new();
@@ -256,6 +276,17 @@ impl AgentEventSink for CapturingSink {
             .lock()
             .expect("capture sink poisoned")
             .push(event.clone());
+    }
+}
+
+struct SessionExistenceSink(Arc<Mutex<Vec<(AgentEvent, bool)>>>);
+
+impl AgentEventSink for SessionExistenceSink {
+    fn handle_event(&self, event: &AgentEvent) {
+        self.0
+            .lock()
+            .expect("existence sink poisoned")
+            .push((event.clone(), exists(event.session_id())));
     }
 }
 
@@ -501,6 +532,50 @@ fn fork_preserves_transcript_budget_metadata() {
 }
 
 #[test]
+fn fork_publishes_compaction_after_destination_sink_registration() {
+    reset_session_store();
+    reset_all_sinks();
+    let _mock = install_budget_fallback_mock();
+    let parent = open_or_create(Some("fork-compaction-publish-parent".into()));
+    let large = "x".repeat(4_096);
+    inject_message(&parent, make_msg("user", &large)).unwrap();
+    inject_message(&parent, make_msg("assistant", &large)).unwrap();
+    inject_message(&parent, make_msg("user", &large)).unwrap();
+    inject_message(&parent, make_msg("assistant", &large)).unwrap();
+    let usage_bytes = SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let transcript = &sessions.get(&parent).expect("parent session").transcript;
+        serde_json::to_vec(&crate::llm::helpers::vm_value_to_json(transcript))
+            .expect("serialize transcript")
+            .len()
+    });
+    set_transcript_budget_policy(
+        &parent,
+        SessionTranscriptBudgetPolicy::compact(64, 64, 1).with_max_approx_bytes(Some(usage_bytes)),
+    )
+    .unwrap();
+    let child_id = "fork-compaction-publish-child";
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    register_sink(child_id, Arc::new(SessionExistenceSink(observed.clone())));
+    let child = fork(&parent, Some(child_id.to_string()))
+        .expect("fork must compact the lineage-expanded transcript");
+
+    assert!(exists(&child));
+    assert_eq!(session_external_sink_count(&child), 1);
+    assert_eq!(event_count_by_kind(&child, "transcript_budget"), 1);
+    let events = observed.lock().expect("existence sink poisoned");
+    assert_eq!(events.len(), 1, "fork must publish its deferred event once");
+    assert!(matches!(
+        &events[0],
+        (AgentEvent::TranscriptCompacted { session_id, .. }, true) if session_id == &child
+    ));
+    drop(events);
+
+    reset_all_sinks();
+    reset_session_store();
+}
+
+#[test]
 fn records_system_prompt_as_metadata_event_without_message() {
     reset_session_store();
     let id = open_or_create(Some("system-prompt-session".into()));
@@ -668,131 +743,6 @@ fn fork_inherits_parent_pinned_reasoning_policy_but_child_changes_stay_local() {
 }
 
 #[test]
-fn scratchpad_round_trips_through_session_state_snapshot_and_transcript_metadata() {
-    reset_session_store();
-    let id = open_or_create(Some("scratchpad-session".into()));
-
-    let version = set_scratchpad(
-        &id,
-        scratchpad_value("remember this"),
-        "test",
-        Some("seed".into()),
-        serde_json::json!({"iteration": 1}),
-    )
-    .expect("set scratchpad");
-
-    assert_eq!(version, 1);
-    assert_eq!(scratchpad_version(&id), Some(1));
-    assert_eq!(
-        scratchpad(&id).and_then(|value| crate::llm::helpers::vm_value_to_json(&value)
-            .pointer("/facts/0/text")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)),
-        Some("remember this".to_string())
-    );
-    let snapshot_json =
-        crate::llm::helpers::vm_value_to_json(&snapshot(&id).expect("session snapshot"));
-    assert_eq!(snapshot_json["scratchpad_version"], 1);
-    assert_eq!(
-        snapshot_json["scratchpad"]["facts"][0]["source_ref"],
-        "turn:1"
-    );
-    assert_eq!(
-        snapshot_json["metadata"]["agent_scratchpad"]["facts"][0]["text"],
-        "remember this"
-    );
-    let events = events_by_kind_json(&id, "agent_scratchpad");
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0]["metadata"]["action"], "set");
-    assert_eq!(events[0]["metadata"]["counts"]["facts"], 1);
-
-    let cleared = clear_scratchpad(&id, "test", Some("done".into()), serde_json::json!({}))
-        .expect("clear scratchpad");
-    assert_eq!(cleared, 2);
-    assert!(scratchpad(&id).is_none());
-    let snapshot_json =
-        crate::llm::helpers::vm_value_to_json(&snapshot(&id).expect("session snapshot"));
-    assert!(snapshot_json["scratchpad"].is_null());
-    assert_eq!(snapshot_json["scratchpad_version"], 2);
-
-    reset_session_store();
-}
-
-#[test]
-fn fork_inherits_scratchpad_but_reset_clears_it() {
-    reset_session_store();
-    let parent = open_or_create(Some("scratchpad-parent".into()));
-    set_scratchpad(
-        &parent,
-        scratchpad_value("carry forward"),
-        "test",
-        None,
-        serde_json::json!({}),
-    )
-    .expect("set scratchpad");
-
-    let child = fork(&parent, Some("scratchpad-child".into())).expect("fork");
-    assert_eq!(scratchpad_version(&child), Some(1));
-    assert_eq!(
-        scratchpad(&child).and_then(|value| crate::llm::helpers::vm_value_to_json(&value)
-            .pointer("/facts/0/text")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)),
-        Some("carry forward".to_string())
-    );
-    set_scratchpad(
-        &child,
-        scratchpad_value("child-only"),
-        "test",
-        None,
-        serde_json::json!({}),
-    )
-    .expect("update child");
-    assert_eq!(
-        scratchpad(&parent).and_then(|value| crate::llm::helpers::vm_value_to_json(&value)
-            .pointer("/facts/0/text")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)),
-        Some("carry forward".to_string())
-    );
-
-    assert!(reset_transcript(&child));
-    assert!(scratchpad(&child).is_none());
-    assert_eq!(scratchpad_version(&child), Some(0));
-
-    reset_session_store();
-}
-
-#[test]
-fn scratchpad_rejects_non_dict_and_oversized_values() {
-    reset_session_store();
-    let id = open_or_create(Some("scratchpad-validation".into()));
-
-    let non_dict_error = set_scratchpad(
-        &id,
-        VmValue::String(arcstr::ArcStr::from("nope")),
-        "test",
-        None,
-        serde_json::json!({}),
-    )
-    .unwrap_err();
-    assert!(non_dict_error.contains("must be a dict"));
-
-    let oversized = VmValue::dict(crate::value::DictMap::from_iter([(
-        "notes".to_string(),
-        VmValue::String(arcstr::ArcStr::from("x".repeat(MAX_SCRATCHPAD_BYTES + 1))),
-    )]));
-    let oversized_error =
-        set_scratchpad(&id, oversized, "test", None, serde_json::json!({})).unwrap_err();
-    assert!(
-        oversized_error.contains("max is"),
-        "oversized scratchpad should name the cap: {oversized_error}"
-    );
-
-    reset_session_store();
-}
-
-#[test]
 fn close_with_status_emits_terminal_event_and_clears_sinks() {
     reset_all_sinks();
     let id = open_or_create(Some("close-reason-session".into()));
@@ -806,7 +756,8 @@ fn close_with_status_emits_terminal_event_and_clears_sinks() {
         "timeout",
         "timeout",
         serde_json::json!({"idle_ms": 5000}),
-    ));
+    )
+    .expect("close idle session"));
 
     assert!(!exists(&id));
     assert_eq!(session_external_sink_count(&id), 0);
@@ -976,192 +927,6 @@ fn untrusted_host_tool_result_is_spotlighted_and_tainted_once() {
     assert_eq!(taint[0].endpoints, vec!["evil.test"]);
     let branch = fork(&id, Some("host-tool-security-branch".into())).unwrap();
     assert_eq!(session_taint_snapshot(&branch), taint);
-    reset_all_sinks();
-}
-
-#[test]
-fn inject_host_attachment_records_pointer_event_without_inline_bytes() {
-    reset_all_sinks();
-    reset_session_store();
-    let id = open_or_create(Some("host-attachment-session".into()));
-
-    let result = inject_host_event(
-        &id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "kind": "host_attachment",
-            "delivery": "immediate",
-            "payload": {
-                "media_type": "text/plain",
-                "flavor": "text_frame",
-                "artifact_pointer": ".burin/chat-assets/frame.txt",
-                "sha256": "b".repeat(64),
-                "size_bytes": 21,
-                "description": "visible terminal frame",
-                "description_model": "vision-model"
-            },
-            "provenance": {
-                "initiator": "host_auto",
-                "source": "auto_frame_capture",
-                "host": "tui",
-                "ts_ms": 1782000000001i64
-            }
-        })),
-    )
-    .expect("host attachment injects");
-
-    assert_eq!(result["sequence"], 1);
-    let transcript_events = events_by_kind_json(&id, "host_attachment");
-    assert_eq!(transcript_events.len(), 1);
-    assert_eq!(
-        transcript_events[0]["metadata"]["artifact_pointer"],
-        ".burin/chat-assets/frame.txt"
-    );
-    assert_eq!(
-        transcript_events[0]["metadata"]["sanitization"]["trust"],
-        "semi_trusted"
-    );
-    assert_eq!(
-        transcript_events[0]["metadata"]["rendered"],
-        "description_plus_pointer"
-    );
-    assert_eq!(
-        transcript_events[0]["metadata"]["sanitization"]["summary_model"],
-        "vision-model"
-    );
-    assert!(transcript_events[0]["text"]
-        .as_str()
-        .expect("text")
-        .contains("visible terminal frame"));
-    reset_all_sinks();
-}
-
-#[test]
-fn host_attachment_rejects_retired_host_owned_rendering_policy() {
-    reset_session_store();
-    let id = open_or_create(Some("host-attachment-invalid-policy-session".into()));
-    let error = inject_host_event(
-        &id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "kind": "host_attachment",
-            "payload": {
-                "media_type": "image/png",
-                "flavor": "image",
-                "artifact_pointer": "artifact:frame",
-                "sha256": "e".repeat(64),
-                "size_bytes": 42,
-                "rendered": "image_block"
-            },
-            "provenance": {
-                "initiator": "user",
-                "source": "user_attachment",
-                "ts_ms": 1782000000006i64
-            }
-        })),
-    )
-    .unwrap_err();
-    assert!(error.contains("unknown field `rendered`"), "{error}");
-}
-
-#[test]
-fn host_attachment_delivery_is_model_capability_aware() {
-    reset_all_sinks();
-    reset_session_store();
-    let id = open_or_create(Some("host-vision-attachment-session".into()));
-    set_pinned_model(&id, Some("gpt-4o".into())).unwrap();
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    register_sink(&id, Arc::new(CapturingSink(captured.clone())));
-    let _resolver = crate::host_attachments::register_host_attachment_resolver(Arc::new(
-        TestAttachmentResolver(crate::host_attachments::MaterializedAttachment::ImageUrl(
-            "https://example.test/frame.png".into(),
-        )),
-    ));
-
-    inject_host_event(
-        &id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "kind": "host_attachment",
-            "payload": {
-                "media_type": "image/png",
-                "flavor": "image",
-                "artifact_pointer": "artifact:frame",
-                "sha256": "c".repeat(64),
-                "size_bytes": 42
-            },
-            "provenance": {
-                "initiator": "user",
-                "source": "user_attachment",
-                "ts_ms": 1782000000003i64
-            }
-        })),
-    )
-    .unwrap();
-
-    let snapshot = snapshot(&id).unwrap();
-    let message = snapshot
-        .as_dict()
-        .and_then(|dict| dict.get("messages"))
-        .and_then(|messages| match messages {
-            VmValue::List(messages) => messages.first(),
-            _ => None,
-        })
-        .expect("injected message");
-    let message = crate::llm::helpers::vm_value_to_json(message);
-    assert_eq!(message["content"][1]["type"], "image");
-    assert_eq!(
-        message["content"][1]["url"],
-        "https://example.test/frame.png"
-    );
-    let events = captured.lock().unwrap();
-    assert!(events.iter().any(|event| matches!(
-        event,
-        AgentEvent::HostAttachment {
-            rendered: AttachmentRendering::ImageBlock,
-            ..
-        }
-    )));
-    reset_all_sinks();
-}
-
-#[test]
-fn host_attachment_resolution_failure_degrades_to_pointer_only() {
-    reset_all_sinks();
-    reset_session_store();
-    let id = open_or_create(Some("host-pointer-attachment-session".into()));
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    register_sink(&id, Arc::new(CapturingSink(captured.clone())));
-
-    inject_host_event(
-        &id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "kind": "host_attachment",
-            "payload": {
-                "media_type": "image/png",
-                "flavor": "image",
-                "artifact_pointer": "artifact:missing",
-                "sha256": "d".repeat(64),
-                "size_bytes": 42
-            },
-            "provenance": {
-                "initiator": "user",
-                "source": "user_attachment",
-                "ts_ms": 1782000000004i64
-            }
-        })),
-    )
-    .expect("pointer-only delivery must not fail");
-
-    let events = captured.lock().unwrap();
-    assert!(events.iter().any(|event| matches!(
-        event,
-        AgentEvent::HostAttachment {
-            rendered: AttachmentRendering::PointerOnly,
-            sanitization: SanitizationVerdict {
-                action: SanitizationAction::Pointerized,
-                ..
-            },
-            ..
-        }
-    )));
     reset_all_sinks();
 }
 
@@ -1398,6 +1163,115 @@ fn child_sessions_record_parent_lineage() {
 }
 
 #[test]
+fn link_refuses_atomically_when_the_cap_cannot_hold_both_sessions() {
+    reset_session_store();
+    set_session_cap(1);
+    let parent = open_or_create(Some("atomic-link-parent".into()));
+
+    let error = link_child_session(&parent, "atomic-link-child")
+        .expect_err("link must not evict either compound endpoint");
+
+    assert!(matches!(
+        error,
+        SessionOpenError::CapacityExhausted {
+            limit: 1,
+            active: 1,
+            protected: 1,
+        }
+    ));
+    assert!(exists(&parent));
+    assert!(!exists("atomic-link-child"));
+    assert!(child_ids(&parent).is_empty());
+    assert_eq!(parent_id("atomic-link-child"), None);
+    assert_eq!(SESSIONS.with(|sessions| sessions.borrow().len()), 1);
+
+    set_session_cap(DEFAULT_SESSION_CAP);
+    reset_session_store();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn link_rejects_a_terminal_child_without_mutating_any_lineage() {
+    reset_session_store();
+    let root = tempfile::tempdir().expect("temp root");
+    let old_parent = open_or_create(Some("sealed-link-old-parent".into()));
+    let new_parent = open_or_create(Some("sealed-link-new-parent".into()));
+    let child = open_child_session(&old_parent, Some("sealed-link-child".into()));
+    let mut options = crate::value::DictMap::new();
+    options.put_str("root", root.path().to_string_lossy().as_ref());
+    let prepared = crate::agent_session_journal::prepare(
+        &child,
+        &options,
+        "sealed-link-run".to_string(),
+        "sealed-link-turn".to_string(),
+    )
+    .await
+    .expect("prepare journal");
+    install_journal(&child, prepared.state).expect("install journal");
+    append_terminal_event_once(
+        &child,
+        crate::llm::helpers::transcript_event(
+            "agent_run_terminal",
+            "assistant",
+            "internal",
+            "terminal",
+            None,
+        ),
+    )
+    .expect("seal child");
+    let sealed_transcript = transcript(&child).expect("sealed transcript");
+
+    let error = super::link_child_session(&new_parent, &child)
+        .expect_err("terminal child must reject reparenting");
+
+    assert!(matches!(
+        error,
+        SessionOpenError::LineageRejected { ref session_id, .. } if session_id == &child
+    ));
+    assert_eq!(parent_id(&child).as_deref(), Some(old_parent.as_str()));
+    assert_eq!(child_ids(&old_parent), vec![child.clone()]);
+    assert!(child_ids(&new_parent).is_empty());
+    assert!(crate::values_equal(
+        &sealed_transcript,
+        &transcript(&child).expect("unchanged sealed transcript")
+    ));
+
+    clear_journal(&child);
+    reset_session_store();
+}
+
+#[test]
+fn fork_refuses_atomically_when_the_cap_cannot_hold_source_and_destination() {
+    reset_session_store();
+    set_session_cap(1);
+    let source = open_or_create(Some("atomic-fork-source".into()));
+    inject_message(&source, make_msg("user", "preserve me")).unwrap();
+    let before = transcript(&source).expect("source transcript");
+
+    let error = super::fork(&source, Some("atomic-fork-destination".into()))
+        .expect_err("fork must not evict its source to admit its destination");
+
+    assert!(matches!(
+        error,
+        SessionOpenError::CapacityExhausted {
+            limit: 1,
+            active: 1,
+            protected: 1,
+        }
+    ));
+    assert!(exists(&source));
+    assert!(!exists("atomic-fork-destination"));
+    assert!(child_ids(&source).is_empty());
+    assert!(crate::values_equal(
+        &before,
+        &transcript(&source).expect("unchanged source transcript")
+    ));
+    assert_eq!(SESSIONS.with(|sessions| sessions.borrow().len()), 1);
+
+    set_session_cap(DEFAULT_SESSION_CAP);
+    reset_session_store();
+}
+
+#[test]
 fn branch_event_index_counts_non_message_events() {
     reset_session_store();
     let src = open_or_create(Some("branch-event-index".into()));
@@ -1501,6 +1375,38 @@ async fn current_tool_call_scope_is_task_local() {
     assert_eq!(first_id.as_deref(), Some("first"));
     assert_eq!(second_id.as_deref(), Some("second"));
     assert_eq!(current_tool_call_id(), None);
+}
+
+#[test]
+fn exact_session_removal_preserves_newer_ambient_owner() {
+    reset_session_store();
+    let outer = push_current_session("shared".to_string()).expect("outer frame");
+    let inner = push_current_session("shared".to_string()).expect("inner frame");
+
+    assert!(remove_current_session(outer.clone()));
+    assert_eq!(current_session_id().as_deref(), Some("shared"));
+    assert!(!remove_current_session(outer));
+    assert_eq!(current_session_id().as_deref(), Some("shared"));
+    assert!(remove_current_session(inner));
+    assert_eq!(current_session_id(), None);
+}
+
+#[test]
+fn removed_session_frame_is_revoked_in_cloned_ambient_scope() {
+    reset_session_store();
+    let frame = push_current_session("revoked-parent".to_string()).expect("session frame");
+    let inherited = CURRENT_SESSION_STACK.with(|stack| stack.borrow().clone());
+
+    assert!(remove_current_session(frame));
+    assert_eq!(current_session_id(), None);
+
+    let previous = swap_current_session_stack(inherited);
+    assert_eq!(
+        current_session_id(),
+        None,
+        "a cloned async scope must not resurrect a terminal session owner"
+    );
+    let _ = swap_current_session_stack(previous);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]

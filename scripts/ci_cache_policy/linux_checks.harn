@@ -4,14 +4,14 @@ fn blacksmith_runner_expression(runner: string) -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_LINUX_RUNNER}' || (${paid_event} && '${runner}' || '${HOSTED_LINUX_RUNNER}') }}"
+    + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && '${runner}' || '${HOSTED_LINUX_RUNNER}' }}"
 }
 
 fn blacksmith_tier_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${paid_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
+    + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}' }}"
 }
 
 /**
@@ -63,7 +63,7 @@ fn blacksmith_timeout_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && ${PRODUCER_PAID_FUSE_MINUTES} || ${producer_hosted_ceiling_minutes()} }}"
+    + "{{ vars.${BLACKSMITH_ENABLE_VAR} == 'true' && ${paid_event} && ${PRODUCER_PAID_FUSE_MINUTES} || ${producer_hosted_ceiling_minutes()} }}"
 }
 
 fn step_named(job: dict, name: string) {
@@ -806,7 +806,7 @@ pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   errors = errors + live_artifact_handoff_errors(workflow)
   errors = errors + walltime_report_errors(workflow)
   errors = errors + rust_cache_refresh_errors(workflow)
-  for {key: job_name, value: job} in workflow?.jobs ?? {} {
+  for {key: job_name, value: job} in (workflow?.jobs ?? {}) {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
       && to_string(job_name)
         != "rust-check-inputs" {

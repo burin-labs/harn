@@ -654,12 +654,23 @@ impl AnthropicProvider {
             &caps,
             anthropic_cache_control(opts.prompt_cache_ttl),
         );
+        let tool_search_extensions =
+            crate::llm::provider::anthropic_tool_search_wire_extensions_enabled(
+                &opts.provider,
+                &opts.model,
+                opts.native_tools.as_deref().unwrap_or(&[]),
+            );
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
                 let sanitized: Vec<serde_json::Value> = tools
                     .iter()
                     .map(|tool| {
-                        sanitize_anthropic_tool_for_request(&opts.provider, &opts.model, tool)
+                        sanitize_anthropic_tool_for_request(
+                            &opts.provider,
+                            &opts.model,
+                            tool,
+                            tool_search_extensions,
+                        )
                     })
                     .collect();
                 body["tools"] = serde_json::json!(sanitized);
@@ -677,6 +688,7 @@ impl AnthropicProvider {
                     &opts.provider,
                     &opts.model,
                     tool,
+                    tool_search_extensions,
                 ));
             }
             body["tools"] = serde_json::json!(tools);
@@ -1084,18 +1096,26 @@ fn is_user_message_without_tool_result(message: &serde_json::Value) -> bool {
 
 /// Strip Harn-internal extensions that Anthropic's strict request validator
 /// rejects with HTTP 400 (`Extra inputs are not permitted`). Mirrors the
-/// equivalent helper in `openai_compat.rs`. Anthropic's native-tools shape
-/// keeps tool fields at the root (no `function` wrapper), so we strip
-/// only at that level.
+/// equivalent helper in `openai_compat.rs`, including its capability gate:
+/// `defer_loading` survives only on a route that advertises it AND carries the
+/// search meta-tool. Anthropic's native-tools shape keeps tool fields at the
+/// root (no `function` wrapper), so we strip only at that level.
 fn sanitize_anthropic_tool_for_request(
     provider: &str,
     model: &str,
     tool: &serde_json::Value,
+    tool_search_extensions: bool,
 ) -> serde_json::Value {
     let mut tool = tool.clone();
     if let Some(object) = tool.as_object_mut() {
         object.remove("x-harn-output-schema");
-        object.remove("defer_loading");
+        // `defer_loading` is a documented Anthropic tool field wherever the
+        // tool-search meta-tool is present, and rejected everywhere else.
+        // Stripping it unconditionally sent every deferred schema in full
+        // while the meta-tool sat beside it with nothing to surface.
+        if !tool_search_extensions {
+            object.remove("defer_loading");
+        }
         object.remove("namespace");
         object.remove("namespaces");
         if let Some(schema) = object.get("input_schema").cloned() {

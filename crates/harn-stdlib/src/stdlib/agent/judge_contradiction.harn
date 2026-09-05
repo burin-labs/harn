@@ -1,0 +1,73 @@
+import { JudgeCheckpointRequest, __judge_run_checkpoint } from "std/agent/judge_internals"
+import { agent_emit_event } from "std/agent/state"
+
+/** Judge response after at most one self-contradiction re-ask. */
+pub type JudgeContradictionResolution = {data: dict, reasked: bool}
+
+/**
+ * The instruction added to the user turn on the one contradiction re-ask.
+ *
+ * It names the contradiction and states both exits, because a judge that
+ * populated `gap_class` beside `done` is not choosing between them — it is
+ * filling a field it was offered. Telling it only "do not do that" leaves the
+ * same reply available; telling it which half to keep does not.
+ */
+const __JUDGE_CONTRADICTION_RETRY_PROMPT: string =
+  "\n\nYour previous reply set `verdict` to \"done\" and also populated `gap_class`. Those cannot both be true: `gap_class` names an obligation that is still unmet, and `done` says none is. Answer again, keeping exactly one. If the work is finished, reply `done` and OMIT `gap_class` entirely. If an obligation is still unmet, reply `continue`, name that obligation in `gap_class`, and say in `detail` what remains to be done."
+
+/**
+ * Resolve a judge response that accepted completion while naming a gap.
+ *
+ * `done` beside a populated `gap_class` is a self-contradiction the caller
+ * refuses (harn#7910). Refusing it is right; refusing it N times is not. The
+ * re-ask prompt is unchanged between invocations, so a judge whose reply is
+ * stable returns the identical contradiction on every call, the actor is handed
+ * feedback that asserts the work is finished, and the loop spends its whole
+ * invocation budget before dying at the cap on a run nothing ever refused.
+ *
+ * So the contradiction is resolved the way an unitemized approval already is:
+ * re-ask the JUDGE exactly once, with the contradiction named, on the user turn
+ * so the cached stable system prefix stays byte-identical. Whatever comes back
+ * is the reply of record. `reasked` says the resolution was attempted, which is
+ * what lets a later arbitration distinguish a first contradiction from one that
+ * survived being pointed out.
+ *
+ * `contradictory` is the caller's reading of the first reply, because the caller
+ * owns the verdict vocabulary. A re-ask whose checkpoint could not be read keeps
+ * the first reply rather than inventing one: the contradiction then stands and
+ * the caller refuses exactly as it does today.
+ *
+ * @effects: [llm, event]
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_resolve_contradiction(harness, request, data, true)
+ */
+pub fn __judge_resolve_contradiction(
+  harness: Harness,
+  request: JudgeCheckpointRequest,
+  data: dict,
+  contradictory: bool,
+) -> JudgeContradictionResolution {
+  if !contradictory {
+    return {data: data, reasked: false}
+  }
+  const reask = __judge_run_checkpoint(
+    harness,
+    request + {user: request.user + __JUDGE_CONTRADICTION_RETRY_PROMPT},
+  )
+  const readable = reask.checkpoint?.ok ?? false
+  agent_emit_event(
+    harness.agent,
+    request.payload?.session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.completion_judge_contradiction_retry.v1",
+      reask_status: to_string(reask.checkpoint?.status ?? "ok"),
+      reask_readable: readable,
+    },
+  )
+  if readable {
+    return {data: reask.checkpoint?.data ?? {}, reasked: true}
+  }
+  return {data: data, reasked: true}
+}

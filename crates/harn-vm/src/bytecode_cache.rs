@@ -964,11 +964,39 @@ struct ParsedHeader {
     payload: Vec<u8>,
 }
 
+/// True when the artifact at `path` was written for exactly `key` and carries
+/// `expected_kind`.
+///
+/// `harn precompile` writes to an explicit destination rather than a
+/// key-derived filename, so it cannot ask the shared-cache lookups whether its
+/// work is already done. Answering through the same header comparison every
+/// cache read uses means a reuse can never accept an artifact a load would
+/// reject. Not gated on [`cache_enabled`], because `store_at` is not either:
+/// gating only the read half would make the two disagree.
+fn artifact_at_matches(path: &Path, key: &CacheKey, expected_kind: u8) -> bool {
+    match read_header_if_matches(path, key, Some(&key.context_hash)) {
+        Ok(Some(header)) => header.kind == expected_kind,
+        _ => false,
+    }
+}
+
+/// True when `path` holds an entry chunk already compiled for `key`.
+pub fn entry_artifact_at_matches(path: &Path, key: &CacheKey) -> bool {
+    artifact_at_matches(path, key, KIND_ENTRY_CHUNK)
+}
+
+/// True when `path` holds a module artifact already compiled for `key`.
+pub fn module_artifact_at_matches(path: &Path, key: &CacheKey) -> bool {
+    artifact_at_matches(path, key, KIND_MODULE_ARTIFACT)
+}
+
 /// Read and validate a header.
 ///
 /// `expected_context` is `None` for entry chunks, which decide validity from
 /// the artifact's own manifest before they are willing to pay for the
-/// context hash. Every other field is checked the same way for both families.
+/// context hash. Every other field is checked the same way for both families,
+/// and both the reading and the reuse paths come through here, so the list of
+/// reasons an artifact does not describe `key` has one owner.
 fn read_header_if_matches(
     path: &Path,
     key: &CacheKey,

@@ -315,3 +315,166 @@ fn runtime_paths_uses_configurable_state_roots() {
     reset_process_state();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn child_cwd_drops_the_verbatim_prefix_a_shell_cannot_start_in() {
+    // The positive case: this is the exact shape `canonicalize` hands back on
+    // Windows, and the exact shape `cmd.exe` answered with "UNC paths are not
+    // supported" before starting in the Windows directory instead.
+    assert_eq!(
+        super::child_process_cwd(std::path::PathBuf::from(r"\\?\C:\work\repo")),
+        std::path::PathBuf::from(r"C:\work\repo"),
+    );
+    // A bare drive root still has a drive letter and still gets stripped.
+    assert_eq!(
+        super::child_process_cwd(std::path::PathBuf::from(r"\\?\C:\")),
+        std::path::PathBuf::from(r"C:\"),
+    );
+}
+
+#[test]
+fn child_cwd_leaves_every_path_that_is_not_a_verbatim_disk_path_alone() {
+    // The controls. Without these the test above would also pass for an
+    // implementation that stripped four characters off anything.
+    for path in [
+        // A true UNC verbatim path has no drive-letter form to fall back to.
+        r"\\?\UNC\server\share",
+        // Already startable.
+        r"C:\work\repo",
+        // POSIX, where the prefix never appears. This is the case that makes
+        // applying the rule unconditionally safe.
+        "/work/repo",
+        "relative/path",
+        // Prefix present but not followed by a drive letter.
+        r"\\?\Volume{9c8f1a}\work",
+    ] {
+        assert_eq!(
+            super::child_process_cwd(std::path::PathBuf::from(path)),
+            std::path::PathBuf::from(path),
+            "{path} must be handed to the child unchanged",
+        );
+    }
+}
+
+#[test]
+fn child_cwd_drops_the_forward_slash_spelling_a_harn_script_hands_back() {
+    // Every `std/path` helper normalizes its output to forward slashes
+    // (`stdlib/path.rs::to_posix`), so a canonicalized Windows path that
+    // passes through a Harn script — as `workspace_root(fs)` does in
+    // `experiments/burin-mini` — comes back `//?/C:/...`, not `\\?\C:\...`.
+    // Windows treats `/` and `\` as interchangeable path separators, so this
+    // is the same prefix and must be stripped the same way. This is the
+    // shape that reproduced the "UNC paths are not supported" / "'node' is
+    // not recognized" failure on a real Windows job even after the
+    // backslash form above was fixed (harn#7974 fixed the backslash
+    // spelling only).
+    assert_eq!(
+        super::child_process_cwd(std::path::PathBuf::from("//?/C:/work/repo")),
+        std::path::PathBuf::from("C:/work/repo"),
+    );
+    // Controls: a forward-slash UNC verbatim path still has no drive-letter
+    // form to fall back to, and an ordinary POSIX-looking path with no `?`
+    // marker must not be mistaken for the prefix.
+    for path in ["//?/UNC/server/share", "/work/repo", "relative/path"] {
+        assert_eq!(
+            super::child_process_cwd(std::path::PathBuf::from(path)),
+            std::path::PathBuf::from(path),
+            "{path} must be handed to the child unchanged",
+        );
+    }
+}
+
+/// A fake `PATH` directory holding one dummy "executable" (an empty file;
+/// `resolve_program_path` only checks `is_file`, matching what `Command`'s
+/// own OS-level PATH search does before it gets to permission bits).
+fn fake_path_dir(program_name: &str) -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let candidate = dir.path().join(program_name);
+    std::fs::write(&candidate, b"").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&candidate, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path_value = dir.path().to_string_lossy().into_owned();
+    (dir, path_value)
+}
+
+#[test]
+fn resolve_program_path_finds_a_bare_name_on_the_resolved_environments_path() {
+    let (dir, path_value) = fake_path_dir("myprog");
+    let resolved_environment = Some(vec![("PATH".to_string(), path_value)]);
+    let resolved = super::resolve_program_path("myprog", &resolved_environment, false, &[]);
+    assert_eq!(resolved, dir.path().join("myprog").to_string_lossy());
+}
+
+#[test]
+fn resolve_program_path_leaves_a_path_shaped_name_unchanged() {
+    // Contains a separator either way, so no PATH search should even be
+    // attempted — an empty env proves it, since a search would find nothing.
+    for program in ["/usr/bin/node", "./node", r"C:\nodejs\node.exe"] {
+        assert_eq!(
+            super::resolve_program_path(program, &None, false, &[]),
+            program,
+        );
+    }
+}
+
+#[test]
+fn resolve_program_path_falls_through_unchanged_when_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let resolved_environment = Some(vec![(
+        "PATH".to_string(),
+        dir.path().to_string_lossy().into_owned(),
+    )]);
+    assert_eq!(
+        super::resolve_program_path("nonexistent-program", &resolved_environment, false, &[]),
+        "nonexistent-program",
+    );
+}
+
+#[test]
+fn resolve_program_path_uses_the_env_clear_overlay_when_env_clear_is_set() {
+    let (dir, path_value) = fake_path_dir("myprog");
+    let overlay = vec![("PATH".to_string(), path_value)];
+    let resolved = super::resolve_program_path("myprog", &None, true, &overlay);
+    assert_eq!(resolved, dir.path().join("myprog").to_string_lossy());
+}
+
+#[test]
+fn resolve_program_path_falls_back_to_the_parent_process_env_in_merge_mode() {
+    // Merge mode with no closed session environment and no overlay override:
+    // the child inherits this process's own environment wholesale (`Command`
+    // never calls `env_clear` on that path), so resolution must search THIS
+    // process's real `PATH`, not the overlay (empty here) or a closed map
+    // (`None` here).
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let original_path = std::env::var_os("PATH");
+    let (dir, path_value) = fake_path_dir("myprog");
+    std::env::set_var("PATH", &path_value);
+    let resolved = super::resolve_program_path("myprog", &None, false, &[]);
+    match original_path {
+        Some(value) => std::env::set_var("PATH", value),
+        None => std::env::remove_var("PATH"),
+    }
+    assert_eq!(resolved, dir.path().join("myprog").to_string_lossy());
+}
+
+#[test]
+fn resolve_program_path_resolved_environment_wins_over_overlay_and_process_env() {
+    // A closed `resolved_environment` (the session-governed common case) is
+    // authoritative: neither the overlay nor this process's own `PATH`
+    // should be consulted once it is `Some`, so a program that exists only
+    // in the overlay's directory must NOT resolve.
+    let (_missing_dir, overlay_path_value) = fake_path_dir("myprog");
+    let empty_dir = tempfile::tempdir().unwrap();
+    let resolved_environment = Some(vec![(
+        "PATH".to_string(),
+        empty_dir.path().to_string_lossy().into_owned(),
+    )]);
+    let overlay = vec![("PATH".to_string(), overlay_path_value)];
+    let resolved = super::resolve_program_path("myprog", &resolved_environment, false, &overlay);
+    assert_eq!(resolved, "myprog", "overlay's PATH must not be consulted");
+}

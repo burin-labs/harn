@@ -563,10 +563,14 @@ struct RealKiller {
 
 impl ProcessKiller for RealKiller {
     fn kill(&self) -> ProcessCleanupReport {
-        let report = harn_vm::op_interrupt::signal_pid_tree_group_and_token_with_report(
+        // Escalating, not immediate: SIGTERM, grace, then SIGKILL. A cancelled
+        // background command is the well-behaved case far more often than not,
+        // and it deserves the chance to flush and unlink before it is shot.
+        // The escalation policy itself belongs to `op_interrupt`, so nothing
+        // here decides how long grace is.
+        let report = harn_vm::op_interrupt::terminate_pid_tree_group_and_token_with_report(
             self.pid,
             Some(&self.cleanup_token),
-            9,
         );
         #[cfg(target_os = "windows")]
         if let Some(job) = &self.owner_job {

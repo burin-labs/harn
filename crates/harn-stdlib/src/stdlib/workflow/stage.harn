@@ -1306,6 +1306,7 @@ fn __stage_flatten_compaction(options: dict, typed: dict, raw: dict?) {
  *   tools,            // tool spec, or nil when the stage exposes no tools
  *   skills,           // workflow-level skill registry (default only)
  *   skill_match,      // workflow-level skill match config (default only)
+ *   tool_search,      // workflow-level tool_search config (default only)
  *   policy,           // host-computed capability ceiling (tool spec ∩ stage)
  *   approval_policy,  // stage tool-approval policy
  *   session_id, tool_format,
@@ -1342,6 +1343,13 @@ pub fn workflow_flatten_agent_loop_options(config: dict? = nil) {
   }
   if !contains(options.keys(), "skill_match") && cfg?.skill_match != nil {
     options = options + {skill_match: cfg.skill_match}
+  }
+  // 2b. Run-level `tool_search` (progressive tool disclosure). Default only:
+  //     a stage that declared its own value keeps it. Without this the option
+  //     set once on `workflow_execute` never reaches any stage's agent loop,
+  //     and every deferred tool is served eagerly with no search meta-tool.
+  if !contains(options.keys(), "tool_search") && cfg?.tool_search != nil {
+    options = options + {tool_search: cfg.tool_search}
   }
   // 3. Hoist a command policy declared under `model_policy.policy` (unless the
   //    stage already set a top-level command_policy).

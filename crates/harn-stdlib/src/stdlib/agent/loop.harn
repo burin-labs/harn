@@ -1,5 +1,5 @@
 // @harn-entrypoint-category agent.stdlib
-import { AgentResult } from "std/agent/contracts"
+import { AgentLoopTerminalError, AgentResult } from "std/agent/contracts"
 import { __agent_loop_run } from "std/agent/loop_run"
 import "std/agent/loop_support"
 import {
@@ -25,7 +25,11 @@ pub fn __progress_nudge_text(
  * agent_loop.
  *
  * @effects: [host, agent]
- * @errors: []
+ * Throws `AgentLoopTerminalError` for every exceptional terminal. Its
+ * `provider_call_count` is an integer when measured and nil only when the
+ * session ledger itself is unavailable.
+ *
+ * @errors: [runtime]
  * @api_stability: experimental
  */
 pub fn agent_loop(
@@ -34,58 +38,88 @@ pub fn agent_loop(
   system_prompt: any = nil,
   options: any = nil,
 ) -> AgentResult {
-  let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
-  // Lifecycle composition owns the agent projection so direct callers and
-  // this default path share one validated, closure-preserving boundary.
-  opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
-  // Teaching the declaration grammar is part of the mechanism, so it lives
-  // with the mechanism rather than in each host's prompt prose. The fragment
-  // is empty unless the caller turned purpose labels on.
-  const purpose_fragment = agent_purpose_label_prompt_fragment(
-    agent_purpose_label_config(opts?.purpose_labels),
-  )
-  const effective_system = if purpose_fragment == "" {
-    system_prompt
-  } else if system_prompt == nil || system_prompt == "" {
-    purpose_fragment
-  } else {
-    to_string(system_prompt) + "\n\n" + purpose_fragment
-  }
-  if effective_system != nil && effective_system != "" {
-    opts = opts + {_primary_system: effective_system}
-  }
-  const session = agent_session_init(harness.agent, message, effective_system, opts)
-  if session.done {
-    return schema_expect(session.result, schema_of(AgentResult))
-  }
-  agent_scratchpad_init(harness.agent, session, opts)
-  if opts?._tool_format_override != nil {
-    agent_emit_event(
-      harness.agent,
-      session.session_id,
-      "tool_format_override",
-      opts._tool_format_override,
+  let session: dict? = nil
+  let session_finalized = false
+  // Private lexical provenance distinguishes an inner normalized terminal
+  // from a caller-supplied dictionary with the same public shape.
+  let inner_terminal: AgentLoopTerminalError? = nil
+  try {
+    let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
+    // Lifecycle composition owns the agent projection so direct callers and
+    // this default path share one validated, closure-preserving boundary.
+    opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
+    // Teaching the declaration grammar is part of the mechanism, so it lives
+    // with the mechanism rather than in each host's prompt prose. The fragment
+    // is empty unless the caller turned purpose labels on.
+    const purpose_fragment = agent_purpose_label_prompt_fragment(
+      agent_purpose_label_config(opts?.purpose_labels),
     )
-    const warning = agent_tool_format_override_warning_text(opts._tool_format_override)
-    if warning != nil {
-      harness.stdio.eprintln(warning)
+    const effective_system = if purpose_fragment == "" {
+      system_prompt
+    } else if system_prompt == nil || system_prompt == "" {
+      purpose_fragment
+    } else {
+      to_string(system_prompt) + "\n\n" + purpose_fragment
     }
-  }
-  if opts?._tool_format_capability_gap != nil {
-    agent_emit_event(
+    if effective_system != nil && effective_system != "" {
+      opts = opts + {_primary_system: effective_system}
+    }
+    const initialized_session = agent_session_init(harness.agent, message, effective_system, opts)
+    session = initialized_session
+    if initialized_session.done {
+      session_finalized = true
+      const completed_result = initialized_session.result
+      if !schema_is(completed_result, schema_of(AgentResult)) {
+        throw "agent_loop: completed session result violated AgentResult"
+      }
+      return completed_result
+    }
+    agent_scratchpad_init(harness.agent, initialized_session, opts)
+    if opts?._tool_format_override != nil {
+      agent_emit_event(
+        harness.agent,
+        initialized_session.session_id,
+        "tool_format_override",
+        opts._tool_format_override,
+      )
+      const warning = agent_tool_format_override_warning_text(opts._tool_format_override)
+      if warning != nil {
+        harness.stdio.eprintln(warning)
+      }
+    }
+    if opts?._tool_format_capability_gap != nil {
+      agent_emit_event(
+        harness.agent,
+        initialized_session.session_id,
+        "capability_gap",
+        opts._tool_format_capability_gap,
+      )
+    }
+    defer {
+      try {
+        __host_mcp_disconnect(initialized_session.session_id)
+      } catch (e) {
+      }
+    }
+    opts = __agent_loop_fire_resume_continuity(harness.agent, initialized_session, opts)
+    opts = agent_stance_prepare(harness, initialized_session, message, opts)
+    const outcome = __agent_loop_run(harness, message, initialized_session, opts)
+    if outcome.kind == "completed" {
+      session_finalized = true
+      return outcome.result
+    }
+    inner_terminal = outcome.error
+    throw outcome.error
+  } catch (error) {
+    if inner_terminal != nil {
+      throw inner_terminal
+    }
+    const terminal: AgentLoopTerminalError = __agent_loop_normalize_boundary_error(
       harness.agent,
-      session.session_id,
-      "capability_gap",
-      opts._tool_format_capability_gap,
+      session,
+      error,
+      session_finalized,
     )
+    throw terminal
   }
-  defer {
-    try {
-      __host_mcp_disconnect(session.session_id)
-    } catch (e) {
-    }
-  }
-  opts = __agent_loop_fire_resume_continuity(harness.agent, session, opts)
-  opts = agent_stance_prepare(harness, session, message, opts)
-  return __agent_loop_run(harness, message, session, opts)
 }

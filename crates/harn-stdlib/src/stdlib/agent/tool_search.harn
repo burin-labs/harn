@@ -17,6 +17,20 @@ fn __tool_search_config(value: dict | bool | string | nil) {
     }
   }
   if type_of(value) == "string" {
+    // A bare string is either a MODE word or a strategy variant. Reading a
+    // mode word as a strategy is not a silent mistake: it resolves fine on a
+    // provider with native tool search and throws
+    // `tool_search.strategy: ...` on every provider without it, so the same
+    // declaration works or crashes depending on the route.
+    if value == "auto" || value == "native" || value == "client" {
+      return {
+        variant: "bm25",
+        mode: value,
+        strategy: "bm25",
+        name: "__harn_tool_search",
+        always_loaded: [],
+      }
+    }
     return {
       variant: value,
       mode: "auto",

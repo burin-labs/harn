@@ -18,6 +18,8 @@
 // Usage:
 //   harn run scripts/gen_vm_capability_exposures.harn            # write
 //   harn run scripts/gen_vm_capability_exposures.harn -- --check # drift gate
+import { scan_glob } from "./path_visibility.harn"
+
 const SOURCE_GLOB = "crates/harn-vm/src/**/*.rs"
 
 const OUTPUT = "crates/harn-capability-contracts/src/vm_declared.rs"
@@ -88,7 +90,7 @@ pub fn render(pairs: list<string>) -> string {
 /** Sorted, de-duplicated pairs from every scanned file. */
 pub fn collect(fs: HarnessFs) -> list<string> {
   let seen: list<string> = []
-  for path in fs.glob(SOURCE_GLOB).sorted() {
+  for path in scan_glob(fs, "check-vm-exposures", SOURCE_GLOB).sorted() {
     for pair in exposures_in_text(fs.read_text(path)) {
       if !seen.contains(pair) {
         seen = seen + [pair]

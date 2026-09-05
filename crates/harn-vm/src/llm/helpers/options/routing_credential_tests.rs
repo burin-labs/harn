@@ -1,5 +1,6 @@
 use super::extract::extract_llm_options;
 use super::*;
+use crate::llm::test_env::ScopedEnvVar;
 use crate::llm_config::{AuthEnv, ProviderDef, ProvidersConfig};
 use crate::value::VmDictExt;
 
@@ -23,28 +24,6 @@ fn credentialed_test_provider(url: &str, env: &str) -> ProviderDef {
         auth_env: AuthEnv::Single(env.to_string()),
         chat_endpoint: "/chat/completions".to_string(),
         ..Default::default()
-    }
-}
-
-struct ScopedEnvVar {
-    key: &'static str,
-    previous: Option<String>,
-}
-
-impl ScopedEnvVar {
-    fn remove(key: &'static str) -> Self {
-        let previous = std::env::var(key).ok();
-        std::env::remove_var(key);
-        Self { key, previous }
-    }
-}
-
-impl Drop for ScopedEnvVar {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => std::env::set_var(self.key, value),
-            None => std::env::remove_var(self.key),
-        }
     }
 }
 

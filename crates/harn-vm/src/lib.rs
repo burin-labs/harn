@@ -22,11 +22,12 @@
 pub use harn_clock as clock;
 
 mod runtime_stack;
-pub use runtime_stack::RUNTIME_STACK_SIZE;
+pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
 
 pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
+mod agent_lifecycle_cleanup;
 pub(crate) mod agent_session_journal;
 pub mod agent_session_restore;
 pub mod agent_sessions;
@@ -248,6 +249,8 @@ pub mod clock_mock {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_panic_silence;
 pub(crate) mod text_index;
 pub mod typecheck;
 pub mod value;
@@ -872,6 +875,15 @@ impl TypeSchemaResolver {
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
         }
+        // The declared parameter list is the complete caller-owned API, so the
+        // advertised object is closed. Without this, an unknown named key
+        // validates against the advertised schema and is then silently dropped
+        // while binding arguments, which is a call the catalog said it would
+        // not accept being reported as a success.
+        schema.insert(
+            "additionalProperties".to_string(),
+            serde_json::Value::Bool(false),
+        );
         serde_json::Value::Object(schema)
     }
 }
@@ -1180,7 +1192,7 @@ mod reset_leak_tests {
     #[test]
     fn reset_drains_session_changed_paths() {
         let session = "sess-leak";
-        agent_sessions::open_or_create(Some(session.to_string()));
+        agent_sessions::open_or_create(Some(session.to_string())).expect("open fixture session");
         agent_sessions::record_session_changed_path(session, "/tmp/written-by-a-dead-run.txt");
         assert!(!agent_sessions::session_changed_paths(session).is_empty());
         reset_thread_local_state();

@@ -36,8 +36,8 @@ pipeline main(harness: Harness) {
       )
       const call = harness.llm.mock_calls()[0]
       const last = call.messages[len(call.messages) - 1]
-      harness.stdio.println(!contains(call.system, "<context-directives>"))
-      harness.stdio.println(contains(last.content, "<context-directives>"))
+      harness.stdio.println(!contains(call.system, "<context-directives speaker=\"harness\">"))
+      harness.stdio.println(contains(last.content, "<context-directives speaker=\"harness\">"))
       harness.stdio.println(contains(last.content, "authority=\"contract\""))
       harness.stdio.println(contains(last.content, "local reminder"))
       harness.stdio.println(!contains(last.content, "<system-reminder>"))

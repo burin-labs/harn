@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Retention falsifiers for the shared per-worktree Cargo target cache.
+#
+# Each case pins one decision the GC has to get right, and each was observed
+# failing before the retention pass existed:
+#
+#   1. A worktree directory that was deleted while its git administrative
+#      record survived. `git worktree list` still reports such a record, so a
+#      keep-set built from that listing protects the orphan forever. This is
+#      the case that let a cache entry outlive the thing it caches.
+#   2. A live worktree's entry is kept and named in the report.
+#   3. An entry a live process is building into is kept even though its mtime
+#      is ancient, because a build paused between steps reads as idle.
+#   4. The liveness probe must not match its own process ancestry. A GC
+#      launched from a command line that names an entry must still collect it.
+#   5. An empty cache root reports a scanned count, so "found no orphans" is
+#      distinguishable from "scanned nothing".
+#   6. The retention cap bounds what rule 1 keeps. Two live worktrees both hold
+#      warm trees nobody has built in months; with room for one, the newer is
+#      the working set and the older is cache.
+#   7. Rank alone must not retire anything. The same pair, with the idle bound
+#      widened past their age, keeps both.
+#   8. A live process outranks the cap. With room for nothing, a tree a build
+#      is holding is still kept.
+#   9. A restored seed's timestamps are not an idle reading. The entry's own
+#      mtime is frozen at seed time because Cargo writes into `debug/`, so a
+#      tree built into minutes ago must survive the idle bound, while a tree
+#      idle at every depth must still be retired.
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+gc="$repo_root/scripts/prune_stale_targets.sh"
+tmp_root=$(mktemp -d)
+live_pids=()
+
+cleanup() {
+  local pid
+  if [ "${#live_pids[@]}" -gt 0 ]; then
+    for pid in "${live_pids[@]}"; do
+      kill "$pid" 2>/dev/null || true
+    done
+  fi
+  rm -rf "$tmp_root"
+}
+trap cleanup EXIT
+
+fail() {
+  echo "prune_stale_targets_retention_test: $1" >&2
+  shift
+  local log
+  for log in "$@"; do
+    [[ -f "$log" ]] && { echo "--- $log ---" >&2; cat "$log" >&2; }
+  done
+  exit 1
+}
+
+storage="$tmp_root/storage"
+repos="$tmp_root/repos"
+targets="$storage/harn-target"
+mkdir -p "$targets" "$repos"
+
+# A live worktree, and a worktree deleted from disk whose git record survives.
+git -C "$repos" init -q live
+git -C "$repos/live" config user.email gc@example.invalid
+git -C "$repos/live" config user.name gc
+git -C "$repos/live" commit -q --allow-empty -m seed
+git -C "$repos/live" worktree add -q "$repos/deleted" -b deleted
+rm -rf "$repos/deleted"
+
+# Entry names mirror dev_setup.sh::derive_target_dir: <parent>-<leaf>.
+repos_leaf="$(basename "$repos")"
+live_entry="$targets/${repos_leaf}-live"
+ghost_entry="$targets/${repos_leaf}-deleted"
+lock_entry="$targets/${repos_leaf}-lockheld"
+cmdline_entry="$targets/${repos_leaf}-cmdline"
+mkdir -p "$live_entry" "$ghost_entry" "$lock_entry/debug" "$cmdline_entry"
+
+# Every entry is far older than any age bound, so only worktree existence and
+# process liveness may decide.
+touch -t 202001010000 "$live_entry" "$ghost_entry" "$lock_entry" "$cmdline_entry"
+
+# A build holding cargo's advisory lock, and a build that names its target dir
+# on its command line. Both are real processes; neither touches the tree again.
+# Each stand-in is exactly one process, so the cleanup trap can end it. A
+# wrapper shell would leave its `sleep` child holding this script's output
+# pipe, which stalls the whole suite rather than failing it.
+: > "$lock_entry/debug/.cargo-lock"
+sleep 600 9<"$lock_entry/debug/.cargo-lock" >/dev/null 2>&1 &
+live_pids+=("$!")
+bash -c 'exec -a "cargo build --target-dir $0" sleep 600' "$cmdline_entry" \
+  >/dev/null 2>&1 &
+live_pids+=("$!")
+touch -t 202001010000 "$lock_entry" "$cmdline_entry" "$lock_entry/debug"
+
+run_gc() {
+  HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+    HARN_TARGET_GC_ROOTS="$repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    bash "$gc" "$@"
+}
+
+dry="$tmp_root/dry.txt"
+run_gc --dry-run >"$dry" 2>&1
+
+grep -Fq "would remove orphan: ${repos_leaf}-deleted" "$dry" \
+  || fail "a cache entry whose worktree directory is gone was not collected" "$dry"
+grep -Fq "${repos_leaf}-live" "$dry" \
+  || fail "the kept live-worktree entry was not reported by name" "$dry"
+grep -Fq "${repos_leaf}-lockheld" "$dry" \
+  || fail "the kept lock-held entry was not reported by name" "$dry"
+grep -Fq "${repos_leaf}-cmdline" "$dry" \
+  || fail "the kept in-flight-build entry was not reported by name" "$dry"
+grep -Eq 'scanned=4' "$dry" \
+  || fail "the summary did not report how many entries it scanned" "$dry"
+for keeper in "$live_entry" "$lock_entry" "$cmdline_entry"; do
+  grep -Fq "would remove orphan: $(basename "$keeper")" "$dry" \
+    && fail "an entry that must be kept was selected for removal: $keeper" "$dry"
+done
+
+# The probe must exclude its own process ancestry. This launcher's command line
+# names the orphan, which is exactly the shape that manufactures a live owner
+# for the entry being scanned.
+selftest="$tmp_root/selftest.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  bash -c 'exec bash "$0" --dry-run' "$gc" "$ghost_entry" >"$selftest" 2>&1
+grep -Fq "would remove orphan: ${repos_leaf}-deleted" "$selftest" \
+  || fail "the liveness probe matched its own process ancestry" "$selftest"
+
+# Real run: read back every decision.
+run="$tmp_root/run.txt"
+run_gc >"$run" 2>&1
+[[ -e "$ghost_entry" ]] && fail "the orphan survived a real run" "$run"
+for keeper in "$live_entry" "$lock_entry" "$cmdline_entry"; do
+  [[ -d "$keeper" ]] || fail "a kept entry was removed: $keeper" "$run"
+done
+
+# Negative control: an empty cache root must report a scanned count of zero,
+# not exit quietly.
+empty_storage="$tmp_root/empty/harn-target"
+mkdir -p "$empty_storage"
+empty="$tmp_root/empty.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$tmp_root/empty" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  bash "$gc" --dry-run >"$empty" 2>&1
+grep -Fq 'scanned=0' "$empty" \
+  || fail "an empty cache root did not report a zero scanned count" "$empty"
+
+# The retention cap, over entries rule 1 keeps. Two more live worktrees, whose
+# trees differ only in which was built more recently.
+git -C "$repos/live" worktree add -q "$repos/warm-new" -b warm-new
+git -C "$repos/live" worktree add -q "$repos/warm-old" -b warm-old
+warm_new="$targets/${repos_leaf}-warm-new"
+warm_old="$targets/${repos_leaf}-warm-old"
+mkdir -p "$warm_new" "$warm_old"
+touch -t 202006010000 "$warm_new"
+touch -t 202001010000 "$warm_old"
+
+capped="$tmp_root/capped.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=1 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=1 \
+  bash "$gc" --dry-run >"$capped" 2>&1
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$capped" \
+  || fail "the coldest warm tree past the cap was not retired" "$capped"
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-new" "$capped" \
+  && fail "the most recent warm tree was retired" "$capped"
+
+# Rank alone decides nothing: widen the idle bound and the same pair survives.
+uncapped="$tmp_root/uncapped.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=1 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=99999999999 \
+  bash "$gc" --dry-run >"$uncapped" 2>&1
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$uncapped" \
+  && fail "a warm tree inside the idle bound was retired on rank alone" "$uncapped"
+
+# A live process outranks the cap even with room for nothing.
+nocap="$tmp_root/nocap.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=0 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=1 \
+  bash "$gc" --dry-run >"$nocap" 2>&1
+for held in "${repos_leaf}-lockheld" "${repos_leaf}-cmdline"; do
+  grep -Fq "would remove cold cache: $held" "$nocap" \
+    && fail "a tree a live process is holding was retired by the cap" "$nocap"
+done
+grep -Fq "would remove cold cache: ${repos_leaf}-warm-old" "$nocap" \
+  || fail "with room for nothing, an idle warm tree was still kept" "$nocap"
+
+# A restored seed's timestamps must not read as an idle tree. `cargo_target_seed.sh`
+# lays a tree down with the seed's own mtimes, and Cargo then writes into
+# `debug/` rather than the entry root for the rest of that tree's life, so the
+# entry's own mtime is frozen at seed time no matter how much is built. Ranking
+# on it retired a tree that a worktree was actively building into: measured on
+# the fleet cache, eight of fourteen entries read 2026-08-09 at the entry while
+# their `debug/` read 2026-09-04, and one was removed as a cold cache mid-build.
+git -C "$repos/live" worktree add -q "$repos/seeded" -b seeded
+git -C "$repos/live" worktree add -q "$repos/abandoned" -b abandoned
+seeded="$targets/${repos_leaf}-seeded"
+abandoned="$targets/${repos_leaf}-abandoned"
+mkdir -p "$seeded/debug" "$abandoned/debug"
+# The restored seed: entry stamped at seed time, built into just now.
+touch -t 202001010000 "$seeded"
+touch "$seeded/debug"
+# The control: nothing has touched this tree at any depth.
+touch -t 202001010000 "$abandoned/debug" "$abandoned"
+
+# Room for nothing, so rank protects no entry and only the idle bound can
+# decide. A tree built into within the bound must survive that bound being
+# measured at all.
+seedcap="$tmp_root/seedcap.txt"
+HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
+  HARN_TARGET_GC_ROOTS="$repos" \
+  HARN_TARGET_GC_MIN_AGE_SECS=1 \
+  HARN_TARGET_GC_KEEP_RECENT=0 \
+  HARN_TARGET_GC_MAX_IDLE_SECS=3600 \
+  bash "$gc" --dry-run >"$seedcap" 2>&1
+grep -Fq "would remove cold cache: ${repos_leaf}-seeded" "$seedcap" \
+  && fail "a tree built into minutes ago was retired on its restored seed mtime" "$seedcap"
+# Negative control on the same run: the fix must not simply stop retiring
+# things. A tree nothing has touched at any depth is still cache.
+grep -Fq "would remove cold cache: ${repos_leaf}-abandoned" "$seedcap" \
+  || fail "a tree idle at every depth was kept, so the idle bound now decides nothing" "$seedcap"
+
+# Print what the pass actually decided. A green run that shows only "ok"
+# cannot be told apart from one that scanned nothing.
+echo "--- retention report (dry run) ---"
+cat "$dry"
+echo "--- empty cache root (negative control) ---"
+cat "$empty"
+echo "--- retention cap ---"
+cat "$capped"
+echo "--- retention cap, idle bound widened (negative control) ---"
+cat "$uncapped"
+echo "--- restored-seed mtime and its negative control ---"
+cat "$seedcap"
+echo "prune_stale_targets_retention_test: ok"

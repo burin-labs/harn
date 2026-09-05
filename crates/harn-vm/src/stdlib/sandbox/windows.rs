@@ -45,15 +45,25 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::{
-    policy_allows_network, policy_allows_workspace_write,
-    process_sandbox_developer_toolchain_read_roots,
-    process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
-    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
+    policy_allows_network, process_sandbox_developer_toolchain_read_roots,
+    process_sandbox_package_manager_config_read_roots, process_sandbox_path_read_roots,
     process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
     SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
+
+// Declared here rather than in the sandbox module index: this backend is its
+// only consumer, and the index is a platform-neutral surface.
+#[path = "windows_system_roots.rs"]
+mod system_roots;
+
+// The ACL grant machinery answers a different question from process launch, and
+// carries the measurements that justify each rule.
+#[path = "windows_acl_grants.rs"]
+mod acl_grants;
+
+use acl_grants::WorkspaceAclGrants;
 
 pub(super) struct Backend;
 
@@ -79,8 +89,11 @@ impl SandboxBackend for Backend {
         _policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
+        // Only `command_output()` owns the `STARTUPINFOEX` plumbing an
+        // AppContainer needs; `std_command_for()` cannot carry one.
         unavailable(
-            "Windows process sandboxing requires command_output(); std_command_for() cannot attach an AppContainer to std::process::Command",
+            super::SandboxMechanism::WindowsAppContainer,
+            super::SandboxMechanismAvailability::EntryPointCannotAttach,
             profile,
         )
     }
@@ -92,8 +105,10 @@ impl SandboxBackend for Backend {
         _policy: &CapabilityPolicy,
         profile: SandboxProfile,
     ) -> Result<PrepareOutcome, VmError> {
+        // As above: `tokio_command_for()` cannot carry an AppContainer either.
         unavailable(
-            "Windows process sandboxing requires command_output(); tokio_command_for() cannot attach an AppContainer to tokio::process::Command",
+            super::SandboxMechanism::WindowsAppContainer,
+            super::SandboxMechanismAvailability::EntryPointCannotAttach,
             profile,
         )
     }
@@ -468,97 +483,27 @@ impl Drop for AppContainerProfile {
     }
 }
 
-struct WorkspaceAclGrants {
-    label: String,
-    sid: String,
-    paths: Vec<PathBuf>,
-}
-
-impl WorkspaceAclGrants {
-    fn grant(label: &str, sid: &str, policy: &CapabilityPolicy) -> io::Result<Self> {
-        // Read-execute for the entire profile when writes are denied;
-        // otherwise Modify on the writable roots. Read-only roots always
-        // get read-execute regardless of the workspace-write capability.
-        let workspace_permission = if policy_allows_workspace_write(policy) {
-            "(OI)(CI)M"
-        } else {
-            "(OI)(CI)RX"
-        };
-        let mut paths = Vec::new();
-        let writable = process_sandbox_roots(policy)
-            .into_iter()
-            .map(|root| (root, workspace_permission, false));
-        let read_only = process_sandbox_readonly_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
-        let process_read = process_sandbox_policy_read_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", false));
-        let preset_roots = process_sandbox_preset_acl_roots(policy)
-            .into_iter()
-            .map(|root| (root, "(OI)(CI)RX", true));
-        let process_write = if policy_allows_workspace_write(policy) {
-            process_sandbox_policy_write_roots(policy)
-                .into_iter()
-                .map(|root| (root, workspace_permission, false))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        for (root, permission, optional) in writable
-            .chain(read_only)
-            .chain(process_read)
-            .chain(preset_roots)
-            .chain(process_write)
-        {
-            if !root.exists() {
-                if optional {
-                    continue;
-                }
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("sandbox workspace root '{}' does not exist", root.display()),
-                ));
-            }
-            sandbox_trace(label, format!("icacls grant begin path={}", root.display()));
-            run_icacls(
-                &root,
-                ["/grant", &format!("*{sid}:{permission}"), "/T", "/C"],
-            )?;
-            sandbox_trace(label, "icacls grant ok");
-            paths.push(root);
-        }
-        Ok(Self {
-            label: label.to_string(),
-            sid: sid.to_string(),
-            paths,
-        })
-    }
-}
-
-impl Drop for WorkspaceAclGrants {
-    fn drop(&mut self) {
-        for path in &self.paths {
-            sandbox_trace(
-                &self.label,
-                format!("icacls remove begin path={}", path.display()),
-            );
-            match run_icacls(path, ["/remove:g", &format!("*{}", self.sid), "/T", "/C"]) {
-                Ok(()) => sandbox_trace(&self.label, "icacls remove ok"),
-                Err(error) => sandbox_trace(&self.label, format!("icacls remove failed: {error}")),
-            }
-        }
-    }
-}
-
 fn process_sandbox_preset_acl_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    if policy.process_sandbox.presets.is_none() {
-        return Vec::new();
-    }
-
+    // `presets: None` means "use the runtime defaults" per
+    // `ProcessSandboxPolicy`'s own documented contract (types.rs), and those
+    // defaults include `DeveloperToolchains` and `PackageManagerConfig`. This
+    // used to short-circuit on the raw `None` field and return nothing,
+    // silently granting neither preset's read roots on Windows for every
+    // policy that never explicitly customized `process_sandbox.presets` —
+    // the common case, since nothing in the burin-mini/playground path sets
+    // it. `process_sandbox_developer_toolchain_read_roots` and
+    // `process_sandbox_package_manager_config_read_roots` already resolve
+    // presets correctly via `effective_presets()`, so this guard was both
+    // redundant with their own checks and wrong when it disagreed with them
+    // (harn#7993).
     process_sandbox_developer_toolchain_read_roots(policy)
         .into_iter()
         .chain(process_sandbox_package_manager_config_read_roots(policy))
+        // Owned by `mod.rs` so the pre-launch coverage check reads the same
+        // set this loop grants an ACE for; see
+        // `process_sandbox_path_read_roots`. `optional: true` in the grant
+        // loop above already skips an entry that is not on disk.
+        .chain(process_sandbox_path_read_roots(policy))
         .collect()
 }
 
@@ -1070,13 +1015,29 @@ mod tests {
             .collect()
     }
 
+    /// `presets: None` means "use the runtime defaults", so an untouched policy
+    /// must resolve to exactly what naming those defaults resolves to. Before
+    /// harn#7993 this function short-circuited on the raw `None` field and
+    /// returned nothing, so every policy that never customized
+    /// `process_sandbox.presets` -- the common case -- silently lost both
+    /// presets' read roots on Windows. Comparing the two policies rather than
+    /// asserting a concrete path keeps the case meaningful on a host with no
+    /// home directory, where both sides are legitimately empty.
     #[test]
-    fn implicit_default_presets_do_not_materialize_home_acl_roots() {
-        let policy = CapabilityPolicy::default();
+    fn implicit_default_presets_match_explicitly_named_defaults() {
+        let implicit = CapabilityPolicy::default();
+        let explicit = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(ProcessSandboxPreset::default_presets().to_vec()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        assert!(
-            process_sandbox_preset_acl_roots(&policy).is_empty(),
-            "Windows should not recursively ACL home-scoped toolchain/cache roots unless presets were explicit"
+        assert_eq!(
+            process_sandbox_preset_acl_roots(&implicit),
+            process_sandbox_preset_acl_roots(&explicit),
+            "an untouched policy must resolve the same Windows ACL roots as one naming the default presets"
         );
     }
 

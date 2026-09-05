@@ -11,9 +11,19 @@
 //!   `pre_exec`, gated behind `PR_SET_NO_NEW_PRIVS`.
 //! * **macOS** ([`macos::Backend`]): a `sandbox-exec` profile rendered
 //!   from the active capability set wraps the spawn.
-//! * **Windows** ([`windows::Backend`]): low-integrity AppContainer +
-//!   restricted token + Job Object launched directly through
-//!   `CreateProcessW`.
+//! * **Windows** ([`windows::Backend`]): an AppContainer plus a Job
+//!   Object, launched directly through `CreateProcessW` with a
+//!   `SECURITY_CAPABILITIES` attribute. There is no restricted token
+//!   and no explicit integrity label: the AppContainer's own access
+//!   check is what confines the child. A read or a write succeeds only
+//!   where the object's DACL grants it to the container's package SID,
+//!   one of its capability SIDs, or `ALL APPLICATION PACKAGES` — a user
+//!   or group SID in the token never helps. That makes this the one
+//!   backend that is read-*closed* by construction, so the read roots
+//!   the other backends get for free have to be granted here with an
+//!   explicit `icacls` ACE. Writes are confined by the same implicit
+//!   deny rather than by a token restriction: every root this backend
+//!   grants outside the workspace is granted read and execute only.
 //! * **OpenBSD** ([`openbsd::Backend`]): pledge/unveil applied via
 //!   `pre_exec` on top of the standard `Command` plumbing.
 //!
@@ -47,6 +57,13 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{environment_io_error_thrown, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use read_roots::developer_toolchain_cache_write_roots_for_home;
+pub(crate) use read_roots::{
+    developer_toolchain_read_roots_for_home, package_manager_config_read_roots_for_home,
+    sandbox_user_home_dir,
+};
+
 use paths::{
     access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
     normalize_io_device_path, path_is_within, relocated_runtime_roots,
@@ -63,6 +80,7 @@ mod openbsd;
 mod paths;
 mod process_config;
 mod process_output;
+mod read_roots;
 mod refusal;
 pub use process_config::apply_active_rustc_wrapper_policy;
 use process_config::neutralize_rustc_wrapper;
@@ -77,8 +95,17 @@ pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod replace;
 
-pub use refusal::process_violation_error;
+// Each backend uses exactly one of these: the platform helpers call
+// `unavailable`, Linux installs confinement in `pre_exec` and warns directly.
+#[cfg(target_os = "linux")]
+pub(crate) use refusal::mechanism_skipped_warning;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use refusal::unavailable;
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
+pub use refusal::{
+    process_violation_error, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement,
+};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
 #[cfg(target_os = "windows")]
@@ -1324,13 +1351,11 @@ pub fn push_process_sandbox_scope(
     Ok(ProcessSandboxScopeGuard { pushed: true })
 }
 
-/// Close a freshly built command's environment under an active session policy.
-///
-/// This is the choke point that makes the environment contract structural: every
+/// Close a freshly built command's environment under an active session policy:
+/// the choke point that makes the environment contract structural, since every
 /// spawn seam in the VM and `harn-hostlib` reaches a child through the three
-/// funnel fns below, so a new seam cannot silently opt out. Callers still layer
-/// their own `env` / `env_remove` on top afterward. Sandbox confinement sets no
-/// env vars (wrapper-exec / seccomp / AppContainer), so clearing cannot weaken it.
+/// funnel fns below. Callers still layer `env`/`env_remove` on top afterward;
+/// sandbox confinement sets no env vars, so clearing cannot weaken it.
 macro_rules! close_env_for_session {
     ($command:expr, $program:expr) => {
         if let Some(env) =
@@ -1345,13 +1370,14 @@ macro_rules! close_env_for_session {
 }
 
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
+    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
         Some((policy, profile)) => {
-            build_std_command::<ActiveBackend>(program, args, policy, *profile)?
+            build_std_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
         }
         None => {
-            let mut command = Command::new(program);
+            let mut command = Command::new(&resolved_program);
             command.args(args);
             command
         }
@@ -1367,13 +1393,14 @@ pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
+    let resolved_program = crate::stdlib::process::resolve_program_path_for_spawn(program);
     let active = active_sandbox_policy();
     let mut command = match active.as_ref() {
         Some((policy, profile)) => {
-            build_tokio_command::<ActiveBackend>(program, args, policy, *profile)?
+            build_tokio_command::<ActiveBackend>(&resolved_program, args, policy, *profile)?
         }
         None => {
-            let mut command = tokio::process::Command::new(program);
+            let mut command = tokio::process::Command::new(&resolved_program);
             command.args(args);
             command
         }
@@ -1680,6 +1707,10 @@ fn coverage_jail_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     roots.extend(process_sandbox_package_manager_config_read_roots(policy));
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     roots.extend(process_sandbox_developer_toolchain_cache_roots(policy));
+    // The Windows backend grants an ACE on every `PATH` directory, so a path
+    // under one of them is inside the jail and must not be refused here.
+    #[cfg(target_os = "windows")]
+    roots.extend(process_sandbox_path_read_roots(policy));
     roots
 }
 
@@ -1745,31 +1776,6 @@ fn toolchain_cache_default_named_in_denial(
             detail.contains(&root.to_string_lossy().to_ascii_lowercase())
                 && !jail.iter().any(|jail_root| path_is_within(root, jail_root))
         })
-}
-
-/// Helper for backends that can't attach confinement at all (macOS
-/// without `/usr/bin/sandbox-exec`, Windows when called through the
-/// `Command`-returning entry points): either fail loudly under
-/// `OsHardened` / `enforce`, or warn once and proceed direct.
-///
-/// Linux and OpenBSD don't reach this path — they install confinement
-/// in `pre_exec` and surface unavailability through `landlock_profile`
-/// directly. The dead-code lint allow keeps the helper compilable on
-/// targets where no backend uses it.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-pub(crate) fn unavailable(
-    message: &str,
-    profile: SandboxProfile,
-) -> Result<PrepareOutcome, VmError> {
-    match effective_fallback(profile) {
-        SandboxFallback::Off | SandboxFallback::Warn => {
-            warn_once("handler_sandbox_unavailable", message);
-            Ok(PrepareOutcome::Direct)
-        }
-        SandboxFallback::Enforce => Err(sandbox_rejection(format!(
-            "{message}; set {HANDLER_SANDBOX_ENV}=warn or off to run unsandboxed"
-        ))),
-    }
 }
 
 /// Writable workspace roots derived from the active agent session's
@@ -1975,161 +1981,43 @@ pub(crate) fn process_sandbox_package_manager_config_read_roots(
     package_manager_config_read_roots_for_home(&home)
 }
 
-/// Per-user toolchain *cache* roots that JVM/iOS build tools read **and write**
-/// while a sandboxed build runs (Gradle, Maven, CocoaPods, Xcode, Kotlin
-/// Native). Unlike [`developer_toolchain_read_roots_for_home`] these are not
-/// read-only: a build legitimately populates `~/.gradle/caches`,
-/// `~/.m2/repository`, `~/Library/Developer/Xcode/DerivedData`, etc. They are
-/// gated on the `DeveloperToolchains` preset and granted *write* only when the
-/// active policy already permits workspace writes (mirroring `UserTemp`); under
-/// a read-only policy they fall back to read access so dependency resolution
-/// still works.
-// Cache *write* roots are only consumed by the macOS (seatbelt) and Linux
-// (Landlock) sandbox backends; the Windows backend deliberately does not grant
-// recursive home-scoped cache roots (see `windows.rs`). Gating to those two
-// targets keeps `-D warnings` happy on Windows, where this would otherwise be
-// dead code.
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-fn sandbox_user_home_dir() -> Option<PathBuf> {
-    // Only an absolute home grounds the user-scope read-roots below; a
-    // relative or unset home yields no extra roots (the safe direction).
-    crate::user_dirs::home_dir().filter(|path| path.is_absolute())
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-pub(crate) fn developer_toolchain_read_roots_for_home(home: &Path) -> Vec<PathBuf> {
-    let mut roots: Vec<_> = [
-        ".asdf",
-        ".bun",
-        ".cargo",
-        ".fnm",
-        ".juliaup",
-        ".local/bin",
-        ".local/share/mise",
-        ".local/share/uv",
-        ".nvm",
-        ".pyenv",
-        ".rbenv",
-        ".rustup",
-        ".sdkman",
-        ".swiftly",
-        ".volta",
-        "go",
-    ]
-    .into_iter()
-    .map(|entry| normalize_for_policy(&home.join(entry)))
-    .collect();
-    #[cfg(target_os = "windows")]
-    roots.extend(
-        [
-            "AppData/Local/Programs/Python",
-            "AppData/Local/uv",
-            "AppData/Roaming/uv",
-            "scoop",
-        ]
-        .into_iter()
-        .map(|entry| normalize_for_policy(&home.join(entry))),
-    );
-    roots.sort_unstable();
-    roots.dedup();
-    roots
-}
-
-/// Per-user JVM/iOS toolchain cache roots (read+write). Kept platform-shared so
-/// the macOS seatbelt and Linux Landlock backends render the same set; the
-/// macOS-only `~/Library/...` entries are simply absent on Linux disk and the
-/// `optional`/NotFound handling in each backend skips roots that do not exist.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec<PathBuf> {
-    let mut roots: Vec<_> = [
-        ".gradle",                             // Gradle (JVM/Android/Kotlin)
-        ".m2",                                 // Maven (JVM)
-        ".konan",                              // Kotlin/Native
-        "Library/Caches/CocoaPods",            // CocoaPods (iOS/macOS)
-        "Library/Developer/Xcode/DerivedData", // Xcode build products
-        // Go build + module caches. `go build`/`go test` write compiled
-        // package objects to GOCACHE and downloaded modules to GOMODCACHE;
-        // when neither is granted, the toolchain fails — and go reports the
-        // write miss as the misleading "package X is not in std (GOROOT/...)"
-        // rather than a permissions error, so it reads as a code defect. The
-        // default GOCACHE differs by OS (macOS `~/Library/Caches/go-build`,
-        // Linux `~/.cache/go-build`); listing both is safe because the
-        // OS-foreign entry is simply absent on disk and skipped. GOMODCACHE
-        // defaults to `$GOPATH/pkg/mod` (`~/go/pkg/mod`); `~/go` itself stays
-        // read-only via `developer_toolchain_read_roots_for_home`.
-        "Library/Caches/go-build", // Go build cache (GOCACHE, macOS default)
-        ".cache/go-build",         // Go build cache (GOCACHE, Linux default)
-        "go/pkg/mod",              // Go module cache (GOMODCACHE default)
-        // Harn's own package cache, which needs write and not merely read: an
-        // entry is claimed through a lock file under `locks/` before it is
-        // read, so a read-only grant denies the claim and the cached entry
-        // reads as unusable. Both OS defaults are listed for the same reason
-        // the Go caches above are; the OS-foreign one is simply absent.
-        // `HARN_CACHE_DIR` overrides the location, and the workspace env hands
-        // the child the resolved root so the two always agree.
-        "Library/Caches/harn", // Harn package cache (macOS default)
-        ".cache/harn",         // Harn package cache (Linux default)
-        // Go env config (GOENV). `go` rewrites `go/env` on first use (e.g. to
-        // record GOTOOLCHAIN); when its parent is not writable the toolchain
-        // fails with `writing go env config: ... operation not permitted`. The
-        // macOS default is `~/Library/Application Support/go/env`
-        // (`os.UserConfigDir()/go`). The Linux default `~/.config/go/env` sits
-        // under the read-only `.config` package-manager root, so granting it
-        // needs a nested carve-out and is tracked separately.
-        "Library/Application Support/go", // Go env config dir (GOENV, macOS default)
-        // Cargo registry + git caches. `cargo fetch`/`cargo build` unpack crate
-        // sources into `registry/src`, download tarballs into `registry/cache`,
-        // refresh the index under `registry/index`, and check out git deps under
-        // `git/db` + `git/checkouts`; a build fails to unpack ("failed to create
-        // directory .../registry/src/...: Operation not permitted") when these
-        // are read-only. These hold build artifacts only — Cargo credentials and
-        // config live at the CARGO_HOME root (`.cargo/credentials.toml`,
-        // `.cargo/config.toml`), OUTSIDE `registry`/`git`, and stay read-only
-        // (granted read via `.cargo` in `developer_toolchain_read_roots_for_home`
-        // and re-denied write by the package-manager preset). `.package-cache` is
-        // Cargo's advisory build lock at the CARGO_HOME root.
-        ".cargo/registry",       // crate cache/index/src (CARGO_HOME default)
-        ".cargo/git",            // git dependency db + checkouts
-        ".cargo/.package-cache", // Cargo's advisory build lock file
-    ]
-    .into_iter()
-    .map(|entry| normalize_for_policy(&home.join(entry)))
-    .collect();
-    roots.sort_unstable();
-    roots.dedup();
-    roots
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<PathBuf> {
-    let mut roots: Vec<_> = [
-        ".npmrc",
-        ".gitconfig",
-        ".netrc",
-        ".yarnrc.yml",
-        ".config",
-        ".npm",
-        ".cache",
-        ".pip",
-        ".pypirc",
-        ".cargo/config",
-        ".cargo/config.toml",
-        ".cargo/credentials",
-        ".cargo/credentials.toml",
-        // NOTE: `.cargo/registry` and `.cargo/git` are deliberately NOT here.
-        // They are build caches Cargo must WRITE, so they moved to
-        // `developer_toolchain_cache_write_roots_for_home`. Listing them here
-        // too would re-deny their writes: the macOS backend emits a
-        // `(deny file-write*)` for every package-manager read root AFTER the
-        // write-allow block, and last-match-wins would cancel the cache grant.
-        // `.cargo` itself stays readable via `developer_toolchain_read_roots`.
-    ]
-    .into_iter()
-    .map(|entry| normalize_for_policy(&home.join(entry)))
-    .collect();
-    roots.sort_unstable();
-    roots.dedup();
-    roots
+/// Windows-only: every directory on this process's own `PATH`, gated on the
+/// same `DeveloperToolchains` preset as the home-relative roots above.
+///
+/// This backend's AppContainer is read-closed by construction, so nothing
+/// outside an explicit `icacls` grant is visible to the child, and
+/// [`developer_toolchain_read_roots_for_home`] covers only *home-relative*
+/// installs (`~/.cargo`, `~/.nvm`, …). A global install on `PATH` — the
+/// official Node.js installer's `C:\Program Files\nodejs` is the case that
+/// exposed this — stays invisible, and `cmd.exe` reports the unreadable
+/// executable as "not recognized" rather than as a permission error. A `PATH`
+/// entry is, definitionally, a toolchain location.
+///
+/// This lives here rather than in the backend because two consumers need the
+/// same answer. The backend renders an `icacls` ACE per root, and
+/// [`coverage_jail_roots`] answers whether a path is inside the jail when a
+/// denial is being classified. While only the backend knew about these roots,
+/// the two views disagreed: a path under a `PATH` directory was granted by the
+/// backend and simultaneously reported as outside the jail, which is exactly
+/// the drift the read-root helpers say cannot happen because "backends render
+/// from it". Note what this does *not* reach: `check_fs_path_scope`, the check
+/// that actually refuses a builtin's path access, consults only the workspace
+/// and read-only roots and has never consulted any preset read root on any
+/// platform. Widening that is a cross-platform decision, not a Windows one.
+///
+/// Existence filtering stays with the backend's grant loop, which already
+/// skips a root that is not on disk, so a stray `PATH` entry costs nothing
+/// here either.
+#[cfg(target_os = "windows")]
+pub(crate) fn process_sandbox_path_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
+        return Vec::new();
+    }
+    std::env::var_os("PATH")
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|dir| normalize_for_policy(&dir))
+        .collect()
 }
 
 fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {

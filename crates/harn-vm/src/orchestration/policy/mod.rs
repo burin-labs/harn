@@ -5,6 +5,7 @@ mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
 mod capability_lattice;
+mod consent_capability;
 mod effect_call_cache;
 mod effects;
 mod nested_budget;
@@ -584,7 +585,13 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                     "host_call '{name}' must use capability.operation naming"
                 ));
             };
-            if !policy_allows_capability(&policy, capability, op) {
+            // The VM's own policy machinery may ask for consent regardless of
+            // the calling tool's ceiling; `consent_capability` owns that rule
+            // and explains why. Everything below is unchanged, including the
+            // side-effect ceiling and the never-approvable catastrophic floor.
+            if !consent_capability::is_policy_machinery_consent_call(capability, op)
+                && !policy_allows_capability(&policy, capability, op)
+            {
                 return reject_policy(format!(
                     "host_call {capability}.{op} exceeds capability ceiling"
                 ));

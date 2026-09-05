@@ -43,6 +43,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | Inception | `inception` | `INCEPTION_API_KEY` |
 | Llamacpp | `llamacpp` | none — runs without a key |
 | Local | `local` | none — runs without a key |
+| Meta | `meta` | `META_API_KEY` |
 | Minimax | `minimax` | `MINIMAX_API_KEY` |
 | Mistral | `mistral` | `MISTRAL_API_KEY` |
 | Mlx | `mlx` | none — runs without a key |
@@ -80,7 +81,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
+| `Gemini API` | Gemini generateContent | `gemini:gemini-3.5-flash-lite` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
 | `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.6-27b` | `native` | yes | yes | `native` / `native_json` | `toggle` | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `Hugging Face Inference Providers` | OpenAI-compatible chat completions through the HF router | `huggingface-qwen3-coder` | `native` | yes | yes | `native` / `delimited` | none | no | No | none | `medium` | `not_recorded` |
@@ -89,6 +90,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Inception` | OpenAI-compatible chat completions | `inception:mercury-2` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | No | none | `low` | `not_recorded` |
+| `Meta` | OpenAI-compatible chat completions | `meta:muse-spark-1.2-contributor` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | No | none | `medium` | `not_recorded` |
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
@@ -170,13 +172,13 @@ MCP notes:
 ### Gemini API
 
 - catalog provider: `gemini`
-- recommended route: `gemini:gemini-2.5-flash` (`gemini-2.5-flash`)
+- recommended route: `gemini:gemini-3.5-flash-lite` (`gemini-3.5-flash-lite`)
 - endpoint style: Gemini generateContent
 - recommended Harn options:
 
 ```toml
 provider = "gemini"
-model = "gemini-2.5-flash"
+model = "gemini-3.5-flash-lite"
 tool_format = "native"
 structured_output_mode = "native_json"
 ```

@@ -96,7 +96,7 @@ pub(crate) struct AmbientExecutionScope {
     /// Active agent-session breadcrumb. It starts empty for a spawned worker
     /// (never inherited from the parent), then the child's own
     /// `begin_agent_session` push is saved/restored across awaits.
-    session_stack: Vec<String>,
+    session_stack: Vec<crate::agent_sessions::CurrentSessionFrame>,
     /// The thread execution context (cwd/env/source-dir + capability path-scope
     /// root). Not a LIFO stack — a single `Option` the worker sets at startup and
     /// holds across the whole agent loop's awaits, so it cross-wires fan-out
@@ -595,8 +595,11 @@ pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
 /// thread-local guard across an `.await`.
 pub(crate) fn scope_agent_session<F: Future>(session_id: String, inner: F) -> Scoped<F> {
     let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
-    if scope.session_stack.last() != Some(&session_id) {
-        scope.session_stack.push(session_id);
+    if scope.session_stack.last().map(|frame| frame.session_id()) != Some(session_id.as_str()) {
+        scope.session_stack.push(
+            crate::agent_sessions::new_current_session_frame(session_id)
+                .expect("resolved tool-dispatch session id is non-empty"),
+        );
     }
     scope_ambient(scope, inner)
 }

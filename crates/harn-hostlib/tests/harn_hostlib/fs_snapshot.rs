@@ -76,7 +76,7 @@ impl Fixture {
     fn new(prefix: &str, enter_tool_call: bool) -> Self {
         let session = unique_session(prefix);
         let scope = unique_scope();
-        agent_sessions::open_or_create(Some(session.clone()));
+        agent_sessions::open_or_create(Some(session.clone())).expect("open fixture session");
         let session_guard = agent_sessions::enter_current_session(session.clone());
         let tool_guard = if enter_tool_call {
             Some(agent_sessions::enter_current_tool_call(scope.clone()))

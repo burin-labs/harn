@@ -236,7 +236,8 @@ fn trim_transcript_for_budget(
     VmValue::dict(next)
 }
 
-struct BudgetCompactionLiveEvent {
+pub(crate) struct BudgetCompactionLiveEvent {
+    session_id: String,
     receipt: crate::orchestration::CompactionReceipt,
 }
 
@@ -315,6 +316,7 @@ fn compact_transcript_for_budget(
             Some(outcome.event_metadata),
         ));
         live_event = Some(BudgetCompactionLiveEvent {
+            session_id: session_id.to_string(),
             receipt: outcome.receipt,
         });
     }
@@ -381,13 +383,24 @@ pub(crate) fn apply_transcript_with_budget(
     candidate: VmValue,
     source: &str,
 ) -> Result<(), String> {
+    let event = apply_transcript_with_budget_deferred_event(state, candidate, source)?;
+    publish_transcript_budget_event(event);
+    Ok(())
+}
+
+pub(crate) fn apply_transcript_with_budget_deferred_event(
+    state: &mut SessionState,
+    candidate: VmValue,
+    source: &str,
+) -> Result<Option<BudgetCompactionLiveEvent>, String> {
+    state.ensure_run_accepts_mutation(source)?;
     let policy = state.transcript_budget_policy.normalized();
     let include_bytes = policy.max_approx_bytes.is_some();
     let usage_before = transcript_usage(&state.transcript, include_bytes);
     let usage_attempted = transcript_usage(&candidate, include_bytes);
     let Some(reason) = transcript_budget_exceeded_reason(&usage_attempted, &policy) else {
-        state.replace_transcript(candidate);
-        return Ok(());
+        state.replace_transcript(candidate)?;
+        return Ok(None);
     };
 
     match policy.recovery.clone() {
@@ -440,8 +453,8 @@ pub(crate) fn apply_transcript_with_budget(
                 ));
             }
             state.last_transcript_budget_action = Some(audit);
-            state.replace_transcript(with_audit);
-            Ok(())
+            state.replace_transcript(with_audit)?;
+            Ok(None)
         }
         TranscriptBudgetRecovery::Compact { keep_last } => {
             let compacted =
@@ -475,14 +488,17 @@ pub(crate) fn apply_transcript_with_budget(
                 ));
             }
             state.last_transcript_budget_action = Some(audit);
-            state.replace_transcript(with_audit);
-            if let Some(event) = compacted.live_event {
-                crate::orchestration::emit_transcript_compacted_event_sync(
-                    &state.id,
-                    event.receipt,
-                );
-            }
-            Ok(())
+            state.replace_transcript(with_audit)?;
+            Ok(compacted.live_event)
         }
+    }
+}
+
+pub(crate) fn publish_transcript_budget_event(event: Option<BudgetCompactionLiveEvent>) {
+    if let Some(event) = event {
+        crate::orchestration::emit_transcript_compacted_event_sync(
+            &event.session_id,
+            event.receipt,
+        );
     }
 }

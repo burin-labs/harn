@@ -1,3 +1,5 @@
+import { AgentDeclaredArtifactAudit } from "std/agent/required_artifacts"
+
 /** Producer-owned classification of an agent-loop terminal. */
 pub type AgentTerminalKind = "natural" \
   | "user_cancelled" \
@@ -38,11 +40,13 @@ pub type AgentLlmSummary = {
   cache_write_tokens: int,
   accounting_status: "reported" | "partial" | "unknown",
   known_cost_usd: float,
+  projected_cost_usd?: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
   ...rest,
 }
 
+/* Worst case for the run; nil when some call has no bound at all. */
 pub type AgentToolSummary = {
   calls: list,
   successful: list<string>,
@@ -198,6 +202,37 @@ pub type AgentRecapAvailability = {state: "available", snapshot: AgentRecapSnaps
   | {state: "unavailable", reason: AgentRecapUnavailableReason}
 
 /**
+ * Why the loop judged that a run which reached its own end did not do the work
+ * (harn#7915).
+ *
+ * Present ONLY on a convicted run, so its absence is not a verdict of success;
+ * it means the rule did not fire. It rides beside `terminal` rather than inside
+ * it: `terminal.kind` is `completion_unverified` on a convicted run and stays
+ * the field a host branches on, while `stop_reason` keeps whatever the run
+ * itself said, verbatim.
+ *
+ * `attempted_tool_calls` and `succeeded_tool_calls` are CALL counts. They are
+ * deliberately not the lengths of `tools.successful` / `tools.rejected`, which
+ * deduplicate by tool name and answer a different question.
+ *
+ * The decision belongs to the agent loop's terminal region, which is the only
+ * place that holds the evidence. A result obtained from
+ * `HarnessAgent.session_finalize` directly therefore never carries this field,
+ * because no loop ran to decide it — not because the run was judged complete.
+ *
+ * `AgentResult.declared_artifacts` is the sibling field and is NOT a verdict:
+ * the declared-artifact audit is published on satisfied runs too, so a caller
+ * can tell a contract that passed from one that was never checked.
+ */
+pub type AgentAbandonment = {
+  cause: "no_tool_call_succeeded" | "required_tool_missing" | "declared_artifact_missing",
+  natural_stop_reason: string,
+  attempted_tool_calls: int,
+  succeeded_tool_calls: int,
+  last_rejection_category: string?,
+}
+
+/**
  * Canonical result returned by `agent_loop` and `HarnessAgent.session_finalize`.
  *
  * `terminal` is the stable decision surface. `final_status`, `stop_reason`,
@@ -212,6 +247,8 @@ pub type AgentResult = {
   acp_stop_reason: string,
   terminal_class: string?,
   terminal: AgentTerminalOutcome,
+  abandonment?: AgentAbandonment,
+  declared_artifacts?: AgentDeclaredArtifactAudit,
   error: any,
   text: string,
   visible_text: string,
@@ -227,6 +264,7 @@ pub type AgentResult = {
   known_cost_usd: float,
   unpriced_calls: int,
   usage_unknown_calls: int,
+  provider_call_count: int,
   session_id: string,
   run_id: string,
   started_at: string,
@@ -235,3 +273,25 @@ pub type AgentResult = {
   daemon_snapshot_path: any,
   ...rest,
 }
+
+/** Exact retained-run receipt for retrying a failed terminal persistence write. */
+pub type AgentFinalizationRetry = {
+  kind: "agent_session_finalize",
+  session_id: string,
+  run_id: string,
+}
+
+/** Additive error envelope for an agent loop that aborts by throwing. */
+pub type AgentLoopTerminalError = {
+  kind: string,
+  category: string,
+  reason: string,
+  message: string,
+  cause: unknown,
+  provider_call_count: int?,
+  retry: AgentFinalizationRetry?,
+  ...rest,
+}
+// Nil means the session ledger itself was unavailable. A measured zero is
+// always the integer 0, so consumers cannot confuse missing measurement
+// with a request that was refused before dispatch.

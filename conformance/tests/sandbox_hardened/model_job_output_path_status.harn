@@ -1,0 +1,77 @@
+import {
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobRequest,
+  ModelOutputSpec,
+  ModelTask,
+  model_job_fake_backend,
+  model_job_run_result,
+} from "std/model_job"
+
+/** A policy denial is not evidence that a model failed to produce its output. */
+pipeline default(harness: Harness) {
+  const base = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_model_job_output_status_" + to_string(harness.random.range(100000, 999999)),
+  )
+  const root = path_join(base, "workspace")
+  const readonly = path_join(base, "readonly")
+  const outside_path = path_join(base, "outside.bin")
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(readonly)
+  harness.fs.write_bytes(outside_path, bytes_from_base64("aGFybg=="))
+  const task: ModelTask = "image.generate"
+  const output_spec: ModelOutputSpec = {mime_type: "application/octet-stream"}
+  const request: ModelJobRequest = {
+    id: "output-policy",
+    task: task,
+    prompt: "Produce an output",
+    output: output_spec,
+  }
+  harness.runtime.with_execution_policy(
+    {sandbox_profile: "worktree", workspace_roots: [root], read_only_roots: [readonly]},
+    { ->
+      harness.stdio.println(harness.fs.status(outside_path).status)
+      const denied_output: ModelJobOutput = {
+        name: "outside.bin",
+        mime_type: "image/png",
+        path: outside_path,
+      }
+      const denied_observation: ModelJobObservation = {
+        job_id: "job-denied",
+        state: "succeeded",
+        outputs: [denied_output],
+      }
+      const denied = model_job_run_result(
+        harness,
+        model_job_fake_backend("fixture-denied", [denied_observation]),
+        request,
+        {asset_root: root},
+      )
+      const denied_error = unwrap_err(denied)
+      harness.stdio.println(denied_error.kind)
+      harness.stdio.println(denied_error.kind != "malformed_output")
+      const missing_path = path_join(root, "missing.bin")
+      const missing_output: ModelJobOutput = {
+        name: "missing.bin",
+        mime_type: "image/png",
+        path: missing_path,
+      }
+      const missing_observation: ModelJobObservation = {
+        job_id: "job-missing",
+        state: "succeeded",
+        outputs: [missing_output],
+      }
+      const missing = model_job_run_result(
+        harness,
+        model_job_fake_backend("fixture-missing", [missing_observation]),
+        request + {id: "output-missing"},
+        {asset_root: root},
+      )
+      const missing_error = unwrap_err(missing)
+      harness.stdio.println(missing_error.kind)
+      harness.stdio.println(contains(missing_error.message, "path is missing"))
+    },
+  )
+  harness.fs.delete(base)
+}

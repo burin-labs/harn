@@ -1,0 +1,193 @@
+// Run: harn test tests/agent/judge_model_refusal_test.harn
+//
+// harn#7937: the completion and step judges resolved their model as
+// `judge_cfg.model ?? opts.model`, and `opts` is the ACTOR's turn options. An
+// unconfigured judge therefore graded the run on the model that produced it,
+// which is not a check. It is the same model asked the same question twice,
+// and it is the mechanical cause of a cheap judge accepting a blocked run as
+// done (harn#7910).
+//
+// The resolution chain is now two rungs and a refusal: the judge's own
+// `model`, then the catalog's `[model_ladders.judge]` row for this provider
+// family, then a typed refusal naming both the setting and the provider. The
+// second rung is what keeps the throwaway harness -- `turn_end_condition:
+// true` and nothing else -- grading with a model at all.
+//
+// The instrument is the admission receipt, which records which model graded
+// the run and which rung chose it. Asserting that a verdict is absent would be
+// weaker: absence is also what a skipped judge, a capped judge, and a broken
+// fixture look like. Asserting the recorded model id says which model was
+// actually asked.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { assert_false, llm_text, with_llm_script } from "std/testing"
+
+const ACTOR_MODEL = "actor-model-7937"
+
+const JUDGE_MODEL = "judge-model-7937"
+
+// The `mock` row of the catalog's `judge` ladder. Named here, not derived, so
+// that deleting the ladder row fails this test instead of silently agreeing
+// with whatever the catalog happens to say.
+const CATALOG_MOCK_JUDGE_MODEL = "mock-judge-default"
+
+fn admissions(events: any) -> list {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_judge_admission.v1"
+    },
+  )
+    .to_list()
+}
+
+fn judge_models(events: any) -> list {
+  return admissions(events).map({ event -> event.checkpoint?.judge_model }).to_list()
+}
+
+/**
+ * The throwaway harness: `turn_end_condition: true` and nothing else.
+ *
+ * This is the shape the maturity gate cares about, so it must still grade. It
+ * must grade with the catalog's judge row for this provider family, and that
+ * model must not be the actor's.
+ */
+pipeline test_the_bare_shorthand_grades_on_the_catalog_judge_not_the_actor(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I finished the task. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+    ],
+    { ->
+      const session = "judge-bare-true-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: ACTOR_MODEL,
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        turn_end_condition: true,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Do the task and stop.", nil, opts) },
+      )
+      const models = judge_models(captured.events)
+      assert(
+        contains(models, CATALOG_MOCK_JUDGE_MODEL),
+        "the bare shorthand must grade on the catalog's judge row for this provider",
+      )
+      // The defect, stated directly.
+      assert_false(contains(models, ACTOR_MODEL), "and never on the actor's own model")
+      const admitted = admissions(captured.events).filter(
+        { event -> event.checkpoint?.judge_model == CATALOG_MOCK_JUDGE_MODEL },
+      )
+        .to_list()
+      assert_eq(admitted[0].checkpoint.judge_model_source, "catalog_role")
+    },
+  )
+}
+
+/**
+ * The refusal, which now fires only where it should: a provider family with no
+ * judge row and no configured model.
+ *
+ * The judge must refuse and must not be dispatched on ACTOR_MODEL. The
+ * assertion is on the model id the run recorded, so a refusal that quietly
+ * still called the actor's model would fail here even though no verdict came
+ * back.
+ */
+pipeline test_a_provider_without_a_judge_role_refuses_rather_than_using_the_actor(
+  harness: Harness,
+  task: unknown,
+) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("I finished the task. ##DONE##")],
+    { ->
+      const session = "judge-unconfigured-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: ACTOR_MODEL,
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        // A provider the catalog's judge ladder has no row for, and no model.
+        verify_completion_judge: {provider: "no-judge-role-provider", max_invocations: 1},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Do the task and stop.", nil, opts) },
+      )
+      const models = judge_models(captured.events)
+      // The whole point: the actor's model never appears as a judge model.
+      assert_false(
+        contains(models, ACTOR_MODEL),
+        "an unconfigured judge must not be dispatched on the actor's own model",
+      )
+      // And the refusal is recorded, so this is a measured absence and not an
+      // absence of measurement.
+      const refusals = admissions(captured.events).filter(
+        { event -> event.checkpoint?.outcome == "model_unconfigured" },
+      )
+        .to_list()
+      assert_eq(len(refusals), 1, "the refusal must be on the record")
+      assert_eq(refusals[0].checkpoint.judge_model_source, "unconfigured")
+      assert_eq(refusals[0].checkpoint.admitted, false)
+    },
+  )
+}
+
+/**
+ * The positive control, and the reason the arms above are not vacuous.
+ *
+ * Same run, same actor model, one setting added. A judge model IS recorded, it
+ * is the configured one, it beats the catalog row, and it is not the actor's.
+ * Without this arm, an assertion that the actor's model never appears would
+ * also pass on a build where the judge never runs at all.
+ */
+pipeline test_a_configured_judge_grades_on_its_own_model(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I finished the task. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}"),
+    ],
+    { ->
+      const session = "judge-configured-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: ACTOR_MODEL,
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 3,
+        verify_completion_judge: {provider: "mock", model: JUDGE_MODEL, max_invocations: 1},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Do the task and stop.", nil, opts) },
+      )
+      const models = judge_models(captured.events)
+      assert(
+        contains(models, JUDGE_MODEL),
+        "a configured judge must record the model it graded with",
+      )
+      assert_false(
+        contains(models, CATALOG_MOCK_JUDGE_MODEL),
+        "an explicit model beats the catalog role",
+      )
+      assert_false(contains(models, ACTOR_MODEL), "and it is never the actor's model")
+    },
+  )
+}

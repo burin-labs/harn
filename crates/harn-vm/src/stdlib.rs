@@ -93,6 +93,7 @@ mod portable;
 mod postgres;
 #[cfg(feature = "postgres")]
 pub use postgres::install_shared_pool_registry;
+pub(crate) mod canonical_store;
 pub mod process;
 pub(crate) mod process_spawn;
 mod project;

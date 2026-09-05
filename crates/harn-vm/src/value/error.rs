@@ -155,6 +155,11 @@ pub enum VmError {
     /// caught values, and transcript receipts never rebuild cause data from
     /// the human-readable message.
     SchemaStreamAbort(Box<SchemaStreamAbort>),
+    /// A spawn required a platform sandbox mechanism the host could not
+    /// supply. Carries the mechanism, the requested profile, and the
+    /// unsatisfied requirement structurally, so an embedder renders its own
+    /// remedy sentence instead of Harn guessing which control its operator has.
+    SandboxMechanismUnavailable(Box<crate::process_sandbox::SandboxMechanismUnavailable>),
     DaemonQueueFull {
         daemon_id: String,
         capacity: usize,
@@ -234,6 +239,7 @@ impl VmError {
             }
             VmError::ProviderStreamFailure(failure) => failure.thrown_value(),
             VmError::SchemaStreamAbort(abort) => abort.thrown_value(),
+            VmError::SandboxMechanismUnavailable(refusal) => refusal.thrown_value(),
             other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
         }
     }
@@ -248,6 +254,17 @@ impl VmError {
     pub fn schema_stream_abort(&self) -> Option<&SchemaStreamAbort> {
         match self {
             Self::SchemaStreamAbort(abort) => Some(abort),
+            _ => None,
+        }
+    }
+
+    /// The typed sandbox-mechanism refusal, when a spawn was refused because
+    /// the platform mechanism could not be attached.
+    pub fn sandbox_mechanism_unavailable(
+        &self,
+    ) -> Option<&crate::process_sandbox::SandboxMechanismUnavailable> {
+        match self {
+            Self::SandboxMechanismUnavailable(refusal) => Some(refusal),
             _ => None,
         }
     }
@@ -814,6 +831,9 @@ impl std::fmt::Display for VmError {
             }
             VmError::ProviderStreamFailure(failure) => failure.fmt(f),
             VmError::SchemaStreamAbort(abort) => abort.fmt(f),
+            VmError::SandboxMechanismUnavailable(refusal) => {
+                write!(f, "Error [{}]: {}", refusal.category().as_str(), refusal)
+            }
             VmError::DaemonQueueFull {
                 daemon_id,
                 capacity,

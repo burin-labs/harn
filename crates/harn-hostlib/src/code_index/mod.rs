@@ -98,7 +98,7 @@ pub use graph::DepGraph;
 pub use overlay::{BranchOverlay, OverlayState};
 pub use readonly::ReadonlyRoots;
 pub use snapshot::{CodeIndexSnapshot, SnapshotMeta};
-pub use state::{BuildOutcome, IndexState};
+pub use state::{BuildOutcome, IndexState, RefreshOutcome};
 pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
 pub use trigram::TrigramIndex;
 pub use versions::{ChangeRecord, EditOp, VersionEntry, VersionLog, HISTORY_LIMIT};
@@ -186,7 +186,20 @@ impl CodeIndexCapability {
                 // stored path string.
                 state.root = state::canonicalize(workspace_root);
                 state.reap_after_recovery(state::now_unix_ms());
-                state.relink_harn_references(self.harn_reference_resolver.as_ref());
+                // A snapshot is a starting point, not a claim of freshness.
+                // Matching `HEAD` says nothing about uncommitted edits, so
+                // reconcile against the files on disk before anyone can read
+                // the index. On an unchanged tree this is a stat walk.
+                let outcome = state.refresh_from_root(self.harn_reference_resolver.as_ref());
+                tracing::info!(
+                    target: "harn_hostlib::code_index",
+                    root = %state.root.display(),
+                    files_unchanged = outcome.files_unchanged,
+                    files_reindexed = outcome.files_reindexed,
+                    files_added = outcome.files_added,
+                    files_removed = outcome.files_removed,
+                    "code-index snapshot restored and reconciled",
+                );
                 let mut guard = self.index.lock().expect("code_index mutex poisoned");
                 *guard = Some(state);
                 Ok(true)

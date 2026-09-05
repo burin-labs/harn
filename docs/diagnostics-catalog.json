@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 73
+      "count": 74
     },
     {
       "id": "FMT",
@@ -2467,6 +2467,15 @@
           "summary": "Remove an explicitly unused test pipeline input"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-075",
+      "category": "LNT",
+      "summary": "tool handler returns a freeform dict, so its outcome must be inferred from key names instead of declared by its type",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

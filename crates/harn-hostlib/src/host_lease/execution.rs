@@ -220,6 +220,15 @@ pub enum HostLeaseRunState {
         /// that returned early, and every cause collapses into one label.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         worker_exit: Option<HostLeaseProcessExit>,
+        /// Whether the worker executable changed between spawn and reaping.
+        ///
+        /// `Some(true)` means the supervisor resolved one binary and a
+        /// different one now sits at that path, which is what a concurrent
+        /// rebuild of a shared `target/debug` does to a running invocation.
+        /// `None` means the comparison could not be made, and never that the
+        /// binary was verified unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worker_binary_replaced: Option<bool>,
     },
     /// The supervisor cancelled the worker before it acquired the resource.
     CancelledBeforeStart {

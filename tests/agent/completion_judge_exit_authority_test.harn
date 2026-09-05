@@ -32,9 +32,11 @@ fn judge_admissions(events: list) -> list {
     .to_list()
 }
 
-// bc#7798. A judge whose reply never parses is an exit authority that cannot
-// answer. Before the fix it was recorded `completion_judge_error` and read as
-// `continue`, so the run could only stop by exhausting an unrelated policy.
+/**
+ * bc#7798. A judge whose reply never parses is an exit authority that cannot
+ * answer. Before the fix it was recorded `completion_judge_error` and read as
+ * `continue`, so the run could only stop by exhausting an unrelated policy.
+ */
 pipeline test_malformed_judge_terminates_with_a_typed_reason(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
@@ -69,7 +71,7 @@ pipeline test_malformed_judge_terminates_with_a_typed_reason(harness: Harness, t
   )
 }
 
-// Negative control. A judge that answers well-formed is untouched by the bound.
+/** Negative control. A judge that answers well-formed is untouched by the bound. */
 pipeline test_well_formed_judge_run_is_unchanged(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,
@@ -89,8 +91,10 @@ pipeline test_well_formed_judge_run_is_unchanged(harness: Harness, task: unknown
   )
 }
 
-// The bound is a retry, not just a shorter path to failure: a transient bad
-// reply followed by a good one still completes.
+/**
+ * The bound is a retry, not just a shorter path to failure: a transient bad
+ * reply followed by a good one still completes.
+ */
 pipeline test_a_recovered_judge_reply_still_completes(harness: Harness, task: unknown) {
   with_llm_script(
     harness.llm,

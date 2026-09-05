@@ -91,6 +91,18 @@ sources = [
   "https://api-docs.deepseek.com/api/create-chat-completion",
 ]
 
+# Both fields verified against live responses, not against the docs alone: a
+# non-streaming call reported prompt_tokens_details.cached_tokens = 113 on a
+# repeated prefix, and a stream=true call with stream_options.include_usage
+# delivered a terminal chunk carrying the same usage shape.
+[[usage_accounting_audit.verified]]
+provider = "meta"
+checked_on = "2026-09-02"
+fields = ["cache", "stream"]
+sources = [
+  "https://dev.meta.ai/docs/overview/",
+]
+
 [[usage_accounting_audit.verified]]
 provider = "fireworks"
 checked_on = "2026-08-26"
@@ -495,6 +507,33 @@ source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of
 last_verified = "2026-07-09"
 
 [providers.dashscope.healthcheck]
+method = "GET"
+path = "/models"
+
+# Meta Model API — Meta's first-party hosted endpoint for the Muse family,
+# documented as drop-in compatible with the OpenAI SDK, so it reuses the
+# existing OpenAI chat-completions dialect rather than carrying an adapter of
+# its own. Bearer auth, /v1/models for the healthcheck.
+#
+# Note that this replaces the wound-down Llama API; Llama weights themselves
+# are served by the third-party providers already in this catalog.
+#
+# Meta publishes each Muse Spark generation under TWO model ids at two very
+# different prices. The cheaper `-contributor` id is a training grant, not a
+# volume discount, and each row declares that for itself in
+# `[models.<id>.data_controls]`.
+[providers.meta]
+display_name = "Meta"
+cache_usage_accounting = true
+stream_usage_accounting = true
+base_url = "https://api.meta.ai/v1"
+base_url_env = "META_BASE_URL"
+auth_style = "bearer"
+auth_env = "META_API_KEY"
+chat_endpoint = "/chat/completions"
+latency_p50_ms = 1900
+
+[providers.meta.healthcheck]
 method = "GET"
 path = "/models"
 
@@ -1305,6 +1344,28 @@ checked_on = "2026-08-30"
 sources = ["https://platform.openai.com/docs/api-reference/chat"]
 note = "Generic user-configured OpenAI-compatible endpoint. The wire contract it speaks documents no retention control beyond store, which a local server is not required to honor."
 
+# Meta sells the training posture per MODEL ID, not per request and not on the
+# account: `muse-spark-1.3` is priced at list and not trained on, while
+# `muse-spark-1.3-contributor` is ~12x cheaper on input and ~21x on output in
+# exchange for permission to train on the traffic.
+#
+# So the provider-level row records the posture that applies when a caller
+# names a standard route, and each `-contributor` row overrides it in
+# `[models.<id>.data_controls]`. `control_scope` is `none` because that is
+# literally true of a request: there is no header or body field to set. It is
+# NOT a claim that no control exists — the control is the model id, and the
+# model rows carry it.
+[providers.meta.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = [
+  "https://developer.meta.com/ai/products/meta-model-api/",
+  "https://developer.meta.com/ai/models/muse-spark/",
+]
+note = "Standard routes are documented as not used to improve Meta's products. The separately priced -contributor routes ARE, and each declares that on its own model row."
+
 # --- source: 12-local-runtime/lifecycle.toml ---
 # Local runtime lifecycle metadata for `harn local`.
 # These rows describe provider mechanics, not machine-specific model paths.
@@ -1633,6 +1694,17 @@ provider = "openai"
 # for stable catalog metadata, receipts, and cost projections.
 [aliases."gpt-5.6"]
 id = "gpt-5.6-sol"
+provider = "openai"
+
+# GPT-6 ships a single model, so the family alias and the marketing name both
+# resolve to the one id. Kept as aliases rather than extra catalog rows so
+# receipts and cost projections stay on the canonical `gpt-6-astra`.
+[aliases."gpt-6"]
+id = "gpt-6-astra"
+provider = "openai"
+
+[aliases.astra]
+id = "gpt-6-astra"
 provider = "openai"
 
 # The small tier default stays on an open-weight host by policy (see
@@ -3021,12 +3093,51 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
 # OpenAI section verified 2026-08-22 against the models and pricing docs
-# (platform.openai.com now redirects to developers.openai.com). Current
-# lineup: the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
+# (platform.openai.com now redirects to developers.openai.com), and the GPT-6
+# Astra row verified 2026-09-04 against the live API. Current
+# lineup: gpt-6-astra, the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
 # the gpt-5.4 tier family, and gpt-5.3-codex for agentic coding. The entire
 # GPT-4/o-series legacy exits by 2026-10-23 (announced 2026-04-22), and
 # the gpt-5 dated snapshots plus o3/o3-pro shut down 2026-12-11
 # (announced 2026-06-11).
+
+# GPT-6 Astra — OpenAI's frontier release of 2026-09-03, verified against the
+# live API on 2026-09-04. One id only (`gpt-6-astra`); OpenAI publishes no
+# dated snapshot for it, so there is nothing to pin a `current_snapshot` to.
+#
+# Two constraints make this row differ from the GPT-5.6 family in ways that
+# matter at request time, both probed rather than transcribed:
+#
+#  1. The effort ladder is low/medium/high/xhigh. `none` and `max` are both
+#     rejected, and OpenAI's own model page is wrong about `max`.
+#  2. Function tools are unusable on `/v1/chat/completions` for this model at
+#     ANY effort, including when the caller omits `reasoning_effort` entirely.
+#     The 400 advises falling back to `reasoning_effort: "none"`, which this
+#     model also rejects, so that suggestion is unsatisfiable. Tools must go
+#     through the Responses API. The capability row carries
+#     `reasoning_tools_require_responses` so Harn routes there automatically.
+#
+# Pricing carries the same >272k input band as GPT-5.6 (2x input, 1.5x output
+# applied to the whole request). Flex and Fast serving tiers are both accepted
+# by the live API; only Flex has a published rate (50% of standard), so Fast is
+# deliberately absent here rather than carrying an invented multiplier.
+[models."gpt-6-astra"]
+name = "GPT-6 Astra"
+blurb = "OpenAI's most capable model, for the hardest planning, coding, and review work at the highest cost."
+provider = "openai"
+context_window = 1050000
+logical_model = "gpt-6-astra"
+equivalence_group = "gpt-6-astra"
+released = "2026-09-03"
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+]
 
 # GPT-5.6 — current OpenAI family. The bare gpt-5.6 API alias routes to Sol;
 # Harn resolves it through the alias catalog so receipts keep the explicit
@@ -3337,9 +3448,11 @@ benchmarks = { swe_bench_verified = 49.3 }
 # Google Gemini ─ pricing: https://ai.google.dev/gemini-api/docs/pricing,
 # verified 2026-08-22. Gemini 1.0 / 1.5 already retired; Gemini 2.0
 # Flash + Flash-Lite shut down 2026-06-01 per the deprecations page.
-# The 2.5 family remains served alongside the current 3.x lineup
+# Gemini 2.5 Flash is no longer servable on the direct Gemini API: the
+# endpoint 404s the id for new users and points at the 3.x lineup
 # (Gemini 3.7 Flash, Gemini 3.6 Flash, and Gemini 3.5 Flash-Lite are
-# current GA routes). Thinking tokens bill as output; implicit
+# current GA routes). The row stays for pricing history and for the
+# OpenRouter mirror, which still serves it. Thinking tokens bill as output; implicit
 # caching is automatic (90% discount on cache hits), explicit caching
 # adds hourly storage.
 # NOTE: this row previously carried Flash-Lite's $0.10/$0.40 rates.
@@ -3351,6 +3464,9 @@ provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+deprecated = true
+deprecation_note = "generativelanguage.googleapis.com returns HTTP 404 model_unavailable for this id: \"no longer available to new users\", naming models/gemini-3.6-flash as the replacement. Observed 2026-09-03. The OpenRouter mirror google/gemini-2.5-flash still serves."
+superseded_by = "gemini-3.5-flash-lite"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]
@@ -3375,6 +3491,28 @@ strengths = ["speed", "cheap", "long_context", "summarization", "tool_use"]
 serving_tiers = [
   { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
+
+# Gemini 3.8 Flash — GA September 2, 2026. Google's live models endpoint
+# reports a 1,048,576-token input limit and a 65,536-token output ceiling for
+# `gemini-3.8-flash`; the id carries no preview suffix. Regular pricing is
+# $1.50/$7.50 per MTok with a $0.15 cache read, with an introductory period
+# through December 31, 2026. A "Gemini 3.8 Flash Cyber" sibling was announced
+# the same day but is gated behind an early-access program and is absent from
+# the models endpoint, so it gets no row until it is actually servable.
+[models."gemini-3.8-flash"]
+name = "Gemini 3.8 Flash"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 1.8, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
 # Gemini 3.7 Flash — GA August 2026. Google lists a 1M context window,
@@ -3504,6 +3642,19 @@ pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok =
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+# OpenRouter mirrors Gemini 3.8 Flash. Observed on openrouter.ai/api/v1/models
+# on 2026-09-03 at $0.75 in / $3.75 out per MTok, which tracks Google's own
+# introductory period rather than a separate OpenRouter discount.
+[models."google/gemini-3.8-flash"]
+name = "Gemini 3.8 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.8-intro", starts_on = "2026-09-02", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075, cache_write_per_mtok = 0.0416666666666667 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."google/gemini-3.7-flash"]
 name = "Gemini 3.7 Flash (via OpenRouter)"
@@ -3654,6 +3805,121 @@ architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe 
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
+
+# --- source: 60-models/12-meta.toml ---
+# Meta Muse Spark ─ Meta Model API (https://api.meta.ai/v1), OpenAI-compatible.
+#
+# Rate card, verified 2026-09-02 against dev.meta.ai/docs/pricing-rate-limits:
+#   standard    $1.25 in / $0.15 cached / $4.25 out per MTok, 3,000 rpm
+#   contributor $0.10 in / $0.002 cached / $0.20 out per MTok,   100 rpm
+# Every generation shares its tier's rate card, so 1.1, 1.2 and 1.3 carry the
+# same standard prices. Do not "correct" one row toward another generation.
+#
+# Context window is 1,048,576, as the docs spell it, not a rounded 1,000,000.
+#
+# THE CONTRIBUTOR ROWS ARE NOT A VOLUME DISCOUNT. Meta publishes the same
+# model twice; the cheaper id buys the discount with permission to train on
+# your prompts and completions. That is declared per row in
+# `[models.<id>.data_controls]`, which overrides the provider's declaration,
+# and `strictest_available` refuses to route to a row declaring `trains`.
+#
+# Wire facts below were verified with live calls on 2026-09-02, not inferred:
+#   - native OpenAI-shape tool calls (finish_reason "tool_calls", verified)
+#   - prompt caching real (usage reported cached_tokens > 0, verified)
+#   - reasoning is native and NOT optional; usage always reports
+#     reasoning_tokens
+#   - `reasoning_effort` is ACCEPTED but appears inert: "low" and "high" spent
+#     an identical 197 reasoning tokens on the same trivial prompt. No effort
+#     levels are declared here, because a lever that does not move is worse
+#     than an absent one. Re-probe before adding them.
+#
+# Sizing quirk worth knowing: the model spends heavily on reasoning before it
+# emits anything. "What is 2+2" returned "4" only after 274 reasoning tokens,
+# and a 16-token cap returned finish_reason "length" with null content. Any
+# caller or smoke fixture must budget max_tokens in the thousands.
+
+[models."muse-spark-1.3"]
+name = "Muse Spark 1.3"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.3".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
+
+[models."muse-spark-1.3-contributor"]
+name = "Muse Spark 1.3 (contributor tier)"
+provider = "meta"
+wire_model = "muse-spark-1.3-contributor"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+rate_limits = { rpm = 100 }
+
+[models."muse-spark-1.3-contributor".data_controls]
+training_default = "trains"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+
+[models."muse-spark-1.2"]
+name = "Muse Spark 1.2"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.2".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
+
+[models."muse-spark-1.2-contributor"]
+name = "Muse Spark 1.2 (contributor tier)"
+provider = "meta"
+wire_model = "muse-spark-1.2-contributor"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.20, cache_read_per_mtok = 0.002 }
+tier = "reasoning"
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+rate_limits = { rpm = 100 }
+
+[models."muse-spark-1.2-contributor".data_controls]
+training_default = "trains"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta prices this route ~12x below the standard tier in exchange for permission to train future Meta models on your prompts and completions. Meta's own wording is that the traffic is used to improve our products."
+
+# 1.1 has no contributor counterpart; Meta lists it only on the standard tier.
+[models."muse-spark-1.1"]
+name = "Muse Spark 1.1"
+provider = "meta"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching", "vision"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+strengths = ["reasoning", "tool_use", "long_context"]
+rate_limits = { rpm = 3000 }
+
+[models."muse-spark-1.1".data_controls]
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = ["https://developer.meta.com/ai/products/meta-model-api/"]
+note = "Meta documents the standard tier as not used to improve its products."
 
 # --- source: 60-models/20-open-weight-openrouter.toml ---
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
@@ -6533,7 +6799,7 @@ label = "sitrep summarizers, newest and strongest first"
 steps = [
   { provider = "anthropic", model = "claude-haiku-4-5-20251001" },
   { provider = "openai", model = "gpt-4o-mini" },
-  { provider = "gemini", model = "gemini-2.5-flash" },
+  { provider = "gemini", model = "gemini-3.5-flash-lite" },
   { provider = "openrouter", model = "google/gemini-2.5-flash" },
   { provider = "deepseek", model = "deepseek-v4-flash" },
   { provider = "groq", model = "qwen/qwen3.6-27b" },
@@ -6542,4 +6808,31 @@ steps = [
   { provider = "ollama", model = "llama3.2" },
   { provider = "local", model = "gemma-4-e4b-it" },
   { provider = "mock", model = "mock" },
+]
+
+# The default judge role. `std/agent/judge` resolves a judge's model here when
+# the judge's own configuration does not name one, so that the simplest
+# harness -- `turn_end_condition: true` and nothing else -- still grades with a
+# model, and never with the actor's own (harn#7937, harn#7910).
+#
+# This ladder is NOT a fallback chain. Each step is the judge model for ONE
+# provider family, and resolution picks the step matching the judge's (or the
+# run's) provider. There is deliberately no cross-provider fallthrough: a run
+# on a provider with no judge row gets a typed refusal naming the missing
+# setting, not a judge dispatched against a provider the caller never chose.
+#
+# Rows are cheap, capable, instruction-following models -- a judge reads a
+# short transcript and returns one small JSON verdict.
+[model_ladders.judge]
+label = "default judge model per provider family"
+steps = [
+  { provider = "anthropic", model = "claude-haiku-4-5-20251001", label = "anthropic" },
+  { provider = "openai", model = "gpt-4o-mini", label = "openai" },
+  { provider = "gemini", model = "gemini-3.5-flash-lite", label = "gemini" },
+  { provider = "openrouter", model = "google/gemini-2.5-flash", label = "openrouter" },
+  { provider = "deepseek", model = "deepseek-v4-flash", label = "deepseek" },
+  { provider = "groq", model = "qwen/qwen3.6-27b", label = "groq" },
+  { provider = "cerebras", model = "gpt-oss-120b", label = "cerebras" },
+  { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8", label = "together" },
+  { provider = "mock", model = "mock-judge-default", label = "mock" },
 ]

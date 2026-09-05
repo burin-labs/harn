@@ -211,6 +211,43 @@ impl RegexMatcher {
     }
 }
 
+/// The bytes a finished command left in its own receipt, for the requested
+/// source.
+///
+/// `combined` needs the fallback. The live output feed keeps an interleaved
+/// combined buffer, but the terminal receipt does not populate that field, so
+/// asking a completed handle for combined output reads as empty while `stdout`
+/// holds the bytes. Concatenating is not the original interleaving, and cannot
+/// be: the receipt does not record the order the two streams arrived in. It is
+/// still sound for matching, because each stream is searched as itself, so a
+/// match means those bytes really were printed on that stream and no match can
+/// straddle a seam that never existed.
+fn terminal_output(source: Source, result: &VmValue) -> Vec<u8> {
+    let Some(map) = result.as_dict() else {
+        return Vec::new();
+    };
+    let field = |key: &str| -> Vec<u8> {
+        match map.get(key) {
+            Some(VmValue::String(text)) => text.as_bytes().to_vec(),
+            _ => Vec::new(),
+        }
+    };
+    match source {
+        Source::Stdout => field("stdout"),
+        Source::Stderr => field("stderr"),
+        Source::Combined => {
+            let combined = field("combined");
+            if combined.is_empty() {
+                let mut merged = field("stdout");
+                merged.extend_from_slice(&field("stderr"));
+                merged
+            } else {
+                combined
+            }
+        }
+    }
+}
+
 fn backend(message: String) -> HostlibError {
     HostlibError::Backend {
         builtin: NAME,
@@ -302,8 +339,25 @@ pub(crate) async fn handle(args: Vec<VmValue>) -> Result<VmValue, HostlibError> 
     }
 
     if let Some(result) = super::wait_command::drain_matching_result(&session_id, &handle_id) {
+        // The command has already finished and its live output feed is gone, so
+        // the loop above never ran. Search what it left behind instead of
+        // answering without looking.
+        //
+        // Returning `exited` here unconditionally was the defect: a command that
+        // printed the pattern and then finished before the wait attached gave
+        // exactly the answer a command that never printed it gives. An agent
+        // that starts a build, thinks for a moment, and then waits on it lost
+        // that build's output, and no field in the result said so.
+        let searched = terminal_output(source, &result);
+        let found = matcher.find(&searched)?;
+        let status = if found.is_some() { "matched" } else { "exited" };
         return Ok(response(
-            "exited", &handle_id, source, &pattern, None, result,
+            status,
+            &handle_id,
+            source,
+            &pattern,
+            found.map(|(start, end)| (start, end, &searched[start..end])),
+            result,
         ));
     }
     Err(HostlibError::InvalidParameter {

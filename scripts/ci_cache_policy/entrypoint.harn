@@ -1,5 +1,6 @@
 import { read_json_result, read_yaml } from "std/fs"
 import { empty_scope_failure } from "../guard_scope.harn"
+import { scan_glob } from "../path_visibility.harn"
 import "./linux_checks.harn"
 import "./native_checks.harn"
 import "./policy_core.harn"
@@ -63,7 +64,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
   const sccache_action = read_yaml(harness.fs, SCCACHE_ACTION_PATH, nil)
   const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
   let workflows = {}
-  for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+  for path in scan_glob(harness.fs, "check-ci-cache-policy", WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
   }
   const empty = empty_scope_failure("CI cache policy", len(workflows.keys()), WORKFLOW_GLOB)
@@ -95,6 +96,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     nextest_version_errors(policy, workflows),
     actions_cache_capacity_errors(policy),
     macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),
+    macos_warm_errors(policy, workflows["macos-nightly.yml"], workflows["ci.yml"]),
   ]
   const errors = error_groups.flat_map({ group -> group }).to_list()
   if len(errors) > 0 {

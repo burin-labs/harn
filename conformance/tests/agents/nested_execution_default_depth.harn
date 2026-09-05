@@ -1,0 +1,104 @@
+// An agent descent that nobody bounded is still bounded, and the bound
+// arrives as a refusal rather than as a process abort.
+//
+// The sibling case `nested_execution_budget_depth.harn` manufactures
+// `recursion_limit: 0` and checks the denial one level down. That proves the
+// guard can refuse; it cannot prove the runtime refuses anything on its own,
+// because a limit of 0 is a limit the caller supplied. The default was
+// declared in `RuntimeLimits::max_nested_execution_depth` and installed only
+// on the workflow ceiling, so an agent that kept delegating descended with no
+// budget at all until the native stack ran out and the process aborted.
+//
+// An abort is the worst possible shape for this failure. It is not catchable,
+// so no transcript records it, no terminal reports it, and every later case in
+// the same process silently never runs.
+//
+// This case is also the tie between two constants that are otherwise only
+// related by arithmetic nobody checks: the declared descent depth, and the
+// native stack each level consumes. If the depth grows or the stack shrinks
+// far enough that the refusal can no longer be delivered, this case stops
+// printing and dies, which is exactly the signal that ordering deserves.
+import { agent_loop } from "std/agent/loop"
+import { sub_agent_run } from "std/agent/workers"
+import { with_llm_script } from "std/testing"
+
+/**
+ * A tool whose only job is to delegate to another agent that has the same
+ * tool, so the descent continues until something stops it.
+ *
+ * Each level records its own arrival before descending. The tally is what
+ * separates "the runtime refused" from "the descent never started": a bound
+ * that reads green because nothing ever ran is the failure this file exists
+ * to refuse.
+ */
+fn descending_tools(harness: Harness, counter: unknown) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "descend",
+    "Delegate to a nested child agent that can delegate again.",
+    {
+      handler: { _args ->
+        const seen = harness.runtime.shared_snapshot(counter)
+        harness.runtime.shared_cas(counter, seen, seen.value + 1)
+        const child = sub_agent_run(
+          harness,
+          "Descend again.",
+          {
+            provider: "mock",
+            max_iterations: 1,
+            tool_format: "native",
+            tools: descending_tools(harness, counter),
+            allowed_tools: ["descend"],
+          },
+        )
+        if child?.ok == false {
+          return "denied:" + to_string(child.error?.category ?? "")
+        }
+        return "descended"
+      },
+      parameters: {},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  const counter = harness.runtime.shared_cell(
+    {scope: "task_group", key: "nested-default-depth", initial: 0},
+  )
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "descend_1", name: "descend", arguments: {}}]}],
+    { ->
+      // Deliberately no `policy.recursion_limit`. The whole point is what the
+      // runtime does when the caller says nothing.
+      const parent = agent_loop(
+        harness,
+        "Descend.",
+        nil,
+        {
+          provider: "mock",
+          tools: descending_tools(harness, counter),
+          allowed_tools: ["descend"],
+          tool_format: "native",
+          max_iterations: 1,
+        },
+      )
+      const reached = harness.runtime.shared_snapshot(counter).value
+      // Reaching this line at all is the primary claim: an unbounded descent
+      // used to abort the process before any assertion could run.
+      harness.stdio.println("survived_an_unbounded_descent=true")
+      // The descent actually happened, so nothing below passes vacuously.
+      harness.stdio.println("descent_started=" + to_string(reached > 0))
+      // It stopped at the declared default rather than running until the
+      // stack died. The exact depth is the budget's, not this test's, so the
+      // clause is a bound rather than a golden number.
+      harness.stdio.println("descent_bounded=" + to_string(reached <= 8))
+      // The parent still terminates normally: a refused descent is a denial
+      // inside the run, not a failure of the run.
+      harness.stdio.println("parent_terminated=" + to_string(parent?.status != nil))
+    },
+  )
+}

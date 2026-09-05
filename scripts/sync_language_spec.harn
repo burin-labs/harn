@@ -27,6 +27,7 @@
 //   harn run scripts/sync_language_spec.harn               (rewrite all)
 //   harn run scripts/sync_language_spec.harn -- --check    (fail if stale)
 import "./compare_generated_text.harn"
+import { scan_glob } from "./path_visibility.harn"
 
 const CHAPTERS_GLOB = "spec/chapters/*.md"
 
@@ -62,7 +63,7 @@ const SUMMARY_PARENT = "- [Language specification](./language-spec.md)"
  * separators, so the assembler owns the blank line between top-level sections.
  */
 pub fn assemble_spec(fs: HarnessFs) -> string {
-  const chapters = fs.glob(CHAPTERS_GLOB).sorted()
+  const chapters = scan_glob(fs, "check-language-spec", CHAPTERS_GLOB).sorted()
   let out = ""
   let index = 0
   for path in chapters {
@@ -138,7 +139,7 @@ pub fn render_page_mirror(fs: HarnessFs, path: string) -> string {
 
 /** All chapter source paths in `NN-` order. */
 pub fn chapter_paths(fs: HarnessFs) -> list<string> {
-  return fs.glob(CHAPTERS_GLOB).sorted()
+  return scan_glob(fs, "check-language-spec", CHAPTERS_GLOB).sorted()
 }
 
 /** Chapter paths after the overview — each becomes its own docs page. */

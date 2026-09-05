@@ -546,30 +546,7 @@ fn blocks_from_text_and_thinking(text: &str, thinking: &str) -> Vec<serde_json::
 mod tests {
     use super::*;
     use crate::llm::api::{LlmErrorKind, LlmErrorReason, ThinkingConfig};
-
-    struct ScopedEnvVar {
-        key: &'static str,
-        previous: Option<String>,
-    }
-
-    impl ScopedEnvVar {
-        fn remove(key: &'static str) -> Self {
-            let previous = std::env::var(key).ok();
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for ScopedEnvVar {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => unsafe { std::env::set_var(self.key, value) },
-                None => unsafe { std::env::remove_var(self.key) },
-            }
-        }
-    }
+    use crate::llm::test_env::ScopedEnvVar;
 
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {

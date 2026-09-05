@@ -199,7 +199,14 @@ pipeline test(harness: Harness, task: unknown) {
           tool_caller: failed_caller,
         },
       )
-      assert(result.status == "done", "failed middleware loop completes")
+      // The middleware fails every call, so no tool call ever succeeds and the
+      // run seals completion_unverified (harn#7915). What this case is about is
+      // that the loop TERMINATES through the middleware path rather than
+      // hanging, which the status still shows.
+      assert(
+        result.status == "completion_unverified",
+        "failed middleware loop terminates without a successful call",
+      )
     },
   )
   assert(harness.runtime.atomic_get(failed_events.pending) == 1, "failed tool pending event")

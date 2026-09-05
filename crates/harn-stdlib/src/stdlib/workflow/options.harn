@@ -140,6 +140,10 @@ pub type WorkflowExecuteOptions = {
   audit?: bool | dict,
   mutation_scope?: string | dict,
   approval_policy?: any,
+  // Progressive tool disclosure for every stage's agent loop. Same shape the
+  // agent loop accepts (`"auto"`, a variant name, or a config dict); applied
+  // as a per-stage default so a stage that sets its own value still wins.
+  tool_search?: any,
 }
 
 /**

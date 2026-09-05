@@ -142,6 +142,8 @@ pub fn parse_llm_mock_value_versioned(
         .ok_or_else(|| "fixture line must be a JSON object".to_string())?;
     if schema_version > 0 {
         validate_v1_entry(object)?;
+    } else {
+        validate_v0_entry(object)?;
     }
 
     let match_pattern = optional_string_field(object, "match")?;
@@ -157,11 +159,20 @@ pub fn parse_llm_mock_value_versioned(
         consume_match,
     )?;
     let text = optional_string_field(object, "text")?.unwrap_or_default();
-    let input_tokens = optional_i64_field(object, "input_tokens")?;
-    let output_tokens = optional_i64_field(object, "output_tokens")?;
-    let cache_read_tokens = optional_i64_field(object, "cache_read_tokens")?;
+    // A `usage` object is the shape every provider reports and the shape
+    // fixture authors reach for. Read it as an alias for the flat fields
+    // rather than dropping it: a scripted zero-token completion that silently
+    // became the default thirty is indistinguishable from a fixture that was
+    // never applied, and it takes the response off the empty path the author
+    // meant to exercise. Flat fields win when both are present.
+    let usage = parse_llm_mock_usage(object.get("usage"))?;
+    let input_tokens = optional_i64_field(object, "input_tokens")?.or(usage.input_tokens);
+    let output_tokens = optional_i64_field(object, "output_tokens")?.or(usage.output_tokens);
+    let cache_read_tokens =
+        optional_i64_field(object, "cache_read_tokens")?.or(usage.cache_read_tokens);
     let cache_write_tokens = optional_i64_field(object, "cache_write_tokens")?
-        .or(optional_i64_field(object, "cache_creation_input_tokens")?);
+        .or(optional_i64_field(object, "cache_creation_input_tokens")?)
+        .or(usage.cache_write_tokens);
     let simulated_cost_usd = optional_nonnegative_f64_field(object, "simulated_cost_usd")?;
     let thinking = optional_string_field(object, "thinking")?;
     let thinking_summary = optional_string_field(object, "thinking_summary")?;
@@ -260,15 +271,31 @@ fn serialize_llm_mock_value(
             serde_json::Value::String(if mock.sticky { "sticky" } else { "once" }.to_string()),
         );
     } else {
-        // Preserve byte-compatible v0 serialization for direct legacy callers.
+        // A v0 document has no `scope`, `id` or `consume`: the parser returns
+        // before reading them and pins every entry to the default scope. Writing
+        // them anyway produced a document that could not be read back, which is
+        // the same silent drop this schema check exists to stop, in the writer
+        // rather than the reader. v0 spells reuse with `consume_match`, and only
+        // for a glob — a FIFO entry is always consumed.
         if mock.scope != DEFAULT_MOCK_SCOPE {
-            object.insert("scope".to_string(), serde_json::Value::String(mock.scope));
+            return Err(format!(
+                "v0 fixture serialization cannot express scope {:?}; \
+                 serialize a versioned fixture instead",
+                mock.scope
+            ));
         }
-        if mock.sticky {
-            object.insert(
-                "consume".to_string(),
-                serde_json::Value::String("sticky".to_string()),
-            );
+        match (object.contains_key("match"), mock.sticky) {
+            (true, false) => {
+                object.insert("consume_match".to_string(), serde_json::Value::Bool(true));
+            }
+            (false, true) => {
+                return Err(
+                    "v0 fixture serialization cannot express a reusable FIFO entry; \
+                     serialize a versioned fixture instead"
+                        .to_string(),
+                );
+            }
+            _ => {}
         }
     }
     if !mock.text.is_empty() {
@@ -520,12 +547,97 @@ fn required_v1_string_field(
     }
 }
 
+/// The fields the v0 parser above actually reads.
+///
+/// Deliberately not `V1_ENTRY_FIELDS`: `consume_match` and
+/// `cache_creation_input_tokens` are v0-only spellings the versioned contract
+/// dropped, and `id` / `scope` / `consume` are v1-only — `resolve_scope_consume`
+/// returns before reading them at v0, so authoring one here would be the very
+/// silent drop this check exists to stop.
+const V0_ENTRY_FIELDS: &[&str] = &[
+    "match",
+    "consume_match",
+    "text",
+    "usage",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_creation_input_tokens",
+    "simulated_cost_usd",
+    "thinking",
+    "thinking_summary",
+    "stop_reason",
+    "model",
+    "provider",
+    "blocks",
+    "logprobs",
+    "tool_calls",
+    "raw_tool_calls",
+    "error",
+    "stream_chunks",
+];
+
+/// Fields that only mean something once a fixture declares `schemaVersion`.
+/// Naming the header beats a nearest-spelling guess: the author did not
+/// misspell anything, they wrote a v1 entry into a v0 document.
+const V1_ONLY_ENTRY_FIELDS: &[&str] = &["id", "scope", "consume"];
+
+/// A leading underscore marks an author's annotation rather than a field the
+/// parser is expected to read, at every schema version and at every nesting
+/// depth.
+///
+/// The namespace exists because closing the schema would otherwise force human
+/// notes out of the fixture and into a second file that nothing keeps in sync.
+/// It is safe to leave open precisely because it cannot be reached by accident:
+/// a misspelling of a real field never grows a leading underscore, so an
+/// annotation is always a deliberate act. Bundled demo tapes already rely on
+/// this to explain why a near-empty tape exists at all.
+fn is_annotation_key(key: &str) -> bool {
+    key.starts_with('_')
+}
+
+/// Close the v0 authoring surface at the top level.
+///
+/// Nested shapes stay open at v0 on purpose: legacy tool calls accept `args`
+/// alongside `arguments`, and provider-native response blocks are opaque by
+/// contract. The defect this closes is a top-level key that is read by nobody
+/// and reported to nobody, which makes a fixture that was never applied
+/// indistinguishable from one that was.
+fn validate_v0_entry(object: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    for key in object.keys() {
+        if V0_ENTRY_FIELDS.contains(&key.as_str()) || is_annotation_key(key) {
+            continue;
+        }
+        if V1_ONLY_ENTRY_FIELDS.contains(&key.as_str()) {
+            return Err(format!(
+                "unknown fixture entry field `{key}`; it is a v1 field and this \
+                 document has no `schemaVersion` header, so it would be dropped"
+            ));
+        }
+        return Err(unknown_field_message("fixture entry", key, V0_ENTRY_FIELDS));
+    }
+    Ok(())
+}
+
+/// One message shape for both contract versions: name the key, and name the
+/// field the author probably meant when one is close enough to guess.
+fn unknown_field_message(label: &str, key: &str, allowed_fields: &[&str]) -> String {
+    match crate::value::closest_match(key, allowed_fields.iter().copied()) {
+        Some(suggestion) => {
+            format!("unknown {label} field `{key}`; did you mean `{suggestion}`?")
+        }
+        None => format!("unknown {label} field `{key}`"),
+    }
+}
+
 const V1_ENTRY_FIELDS: &[&str] = &[
     "id",
     "scope",
     "consume",
     "match",
     "text",
+    "usage",
     "input_tokens",
     "output_tokens",
     "cache_read_tokens",
@@ -610,11 +722,83 @@ fn validate_v1_object_fields(
     allowed_fields: &[&str],
 ) -> Result<(), String> {
     for key in object.keys() {
-        if !allowed_fields.contains(&key.as_str()) {
-            return Err(format!("unknown {label} field `{key}`"));
+        if !allowed_fields.contains(&key.as_str()) && !is_annotation_key(key) {
+            return Err(unknown_field_message(label, key, allowed_fields));
         }
     }
     Ok(())
+}
+
+/// Token counts read from a fixture entry's `usage` object.
+///
+/// Accepts both the OpenAI-compat spellings (`prompt_tokens` /
+/// `completion_tokens`) and the flat Harn names, because fixture authors copy
+/// whichever their provider prints. Every field stays optional so a `usage`
+/// carrying only one count leaves the others to their defaults.
+#[derive(Default)]
+struct LlmMockUsage {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
+}
+
+const USAGE_FIELDS: &[&str] = &[
+    "input_tokens",
+    "output_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_creation_input_tokens",
+    "total_tokens",
+];
+
+fn parse_llm_mock_usage(value: Option<&serde_json::Value>) -> Result<LlmMockUsage, String> {
+    let Some(value) = value else {
+        return Ok(LlmMockUsage::default());
+    };
+    if value.is_null() {
+        return Ok(LlmMockUsage::default());
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| "`usage` must be an object".to_string())?;
+    validate_v1_object_fields(object, "usage", USAGE_FIELDS)?;
+    let input_tokens = optional_i64_field(object, "input_tokens")?
+        .or(optional_i64_field(object, "prompt_tokens")?);
+    let output_tokens = optional_i64_field(object, "output_tokens")?
+        .or(optional_i64_field(object, "completion_tokens")?);
+    // `total_tokens` has no slot on the mock: the total is derived from the
+    // input and output counts downstream. Accepting it silently would drop a
+    // number the author wrote, so honour it as a constraint instead. A total
+    // that cannot be checked against a scripted split is rejected rather than
+    // ignored, which keeps the failure loud at the fixture that wrote it.
+    if let Some(total) = optional_i64_field(object, "total_tokens")? {
+        match (input_tokens, output_tokens) {
+            (Some(input), Some(output)) if input + output != total => {
+                return Err(format!(
+                    "`usage.total_tokens` is {total} but `input_tokens` + `output_tokens` is {}",
+                    input + output
+                ));
+            }
+            (Some(_), Some(_)) => {}
+            _ => {
+                return Err(
+                    "`usage.total_tokens` needs both `input_tokens` and `output_tokens`; \
+                     the mock derives the total and cannot split it"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    Ok(LlmMockUsage {
+        input_tokens,
+        output_tokens,
+        cache_read_tokens: optional_i64_field(object, "cache_read_tokens")?,
+        cache_write_tokens: optional_i64_field(object, "cache_write_tokens")?
+            .or(optional_i64_field(object, "cache_creation_input_tokens")?),
+    })
 }
 
 fn parse_llm_tool_calls(
@@ -788,527 +972,5 @@ fn optional_vec_field(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn roundtrip_preserves_text_and_tool_calls() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "text": "hello",
-            "model": "mock",
-            "simulated_cost_usd": 0.0025,
-            "tool_calls": [
-                { "name": "search", "args": { "q": "harn" } }
-            ]
-        }))
-        .expect("parse");
-        let line = serialize_llm_mock(mock).expect("serialize");
-        let value: serde_json::Value = serde_json::from_str(&line).expect("reparse");
-        let reparsed = parse_llm_mock_value(&value).expect("reparse mock");
-        assert_eq!(reparsed.text, "hello");
-        assert_eq!(reparsed.tool_calls.len(), 1);
-        assert_eq!(reparsed.tool_calls[0]["name"].as_str(), Some("search"));
-        assert_eq!(reparsed.simulated_cost_usd, Some(0.0025));
-    }
-
-    #[test]
-    fn simulated_cost_must_be_finite_and_nonnegative() {
-        for value in [serde_json::json!(-0.1), serde_json::json!("free")] {
-            let error = parse_llm_mock_value(&serde_json::json!({
-                "text": "hello",
-                "simulated_cost_usd": value,
-            }))
-            .expect_err("invalid simulated cost");
-            assert!(error.contains("finite non-negative number"), "{error}");
-        }
-    }
-
-    #[test]
-    fn roundtrip_preserves_raw_tool_calls() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "text": "hello",
-            "model": "mock",
-            "raw_tool_calls": [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {
-                        "name": "tool_call",
-                        "arguments": "{\"cmd\":\"test\"}"
-                    }
-                }
-            ]
-        }))
-        .expect("parse");
-        let line = serialize_llm_mock(mock).expect("serialize");
-        let value: serde_json::Value = serde_json::from_str(&line).expect("reparse json");
-        let reparsed = parse_llm_mock_value(&value).expect("reparse mock");
-        assert_eq!(
-            reparsed.raw_tool_calls[0]["function"]["name"].as_str(),
-            Some("tool_call")
-        );
-        assert_eq!(
-            reparsed.raw_tool_calls[0]["function"]["arguments"].as_str(),
-            Some("{\"cmd\":\"test\"}")
-        );
-    }
-
-    #[test]
-    fn parse_does_not_synthesize_raw_tool_calls_from_normalized_calls() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "text": "hello",
-            "model": "mock",
-            "tool_calls": [
-                {
-                    "name": "search",
-                    "arguments": {"query": "rust"}
-                }
-            ]
-        }))
-        .expect("parse");
-
-        assert!(
-            mock.raw_tool_calls.is_empty(),
-            "normalized tool_calls must not be promoted to provider-native raw_tool_calls"
-        );
-    }
-
-    #[test]
-    fn v0_tool_call_normalization_preserves_provider_metadata() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "tool_calls": [{
-                "id": "gemini_call_1",
-                "type": "function",
-                "name": "lookup",
-                "args": {"query": "harn"},
-                "thought_signature": "opaque-gemini-signature"
-            }]
-        }))
-        .expect("parse legacy provider metadata");
-
-        let call = &mock.tool_calls[0];
-        assert_eq!(call["id"], "gemini_call_1");
-        assert_eq!(call["type"], "function");
-        assert_eq!(call["name"], "lookup");
-        assert_eq!(call["arguments"], serde_json::json!({"query": "harn"}));
-        assert_eq!(call["thought_signature"], "opaque-gemini-signature");
-        assert!(call.get("args").is_none(), "legacy alias is canonicalized");
-    }
-
-    #[test]
-    fn parse_rejects_unknown_error_category() {
-        let result = parse_llm_mock_value(&serde_json::json!({
-            "error": { "category": "wibble", "message": "x" }
-        }));
-        match result {
-            Err(err) => assert!(err.contains("unknown error category"), "{err}"),
-            Ok(_) => panic!("expected parse failure for unknown error category"),
-        }
-    }
-
-    #[test]
-    fn parses_explicit_generic_error_category() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "error": { "category": "generic", "message": "x" }
-        }))
-        .expect("parse generic error");
-        let error = mock.error.expect("error");
-        assert_eq!(error.category.as_str(), "generic");
-        assert_eq!(error.message, "x");
-    }
-
-    #[test]
-    fn parses_provider_error_envelope() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "error": {
-                "status": 503,
-                "kind": "transient",
-                "reason": "upstream_unavailable",
-                "message": "upstream unavailable",
-                "retry_after_ms": 250
-            }
-        }))
-        .expect("parse provider envelope");
-        let error = mock.error.expect("error");
-        assert_eq!(error.category.as_str(), "overloaded");
-        assert_eq!(error.status, Some(503));
-        assert_eq!(error.kind.as_deref(), Some("transient"));
-        assert_eq!(error.reason.as_deref(), Some("upstream_unavailable"));
-        assert_eq!(error.retry_after_ms, Some(250));
-    }
-
-    #[test]
-    fn roundtrip_preserves_provider_error_envelope() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "match": "*retry*",
-            "error": {
-                "status": 503,
-                "kind": "transient",
-                "reason": "upstream_unavailable",
-                "retry_after_ms": 250
-            }
-        }))
-        .expect("parse provider envelope");
-        let line = serialize_llm_mock(mock).expect("serialize");
-        let value: serde_json::Value = serde_json::from_str(&line).expect("reparse json");
-        let reparsed = parse_llm_mock_value(&value).expect("reparse mock");
-        let error = reparsed.error.expect("error");
-        assert_eq!(reparsed.match_pattern.as_deref(), Some("*retry*"));
-        assert_eq!(error.category.as_str(), "overloaded");
-        assert_eq!(error.status, Some(503));
-        assert_eq!(error.kind.as_deref(), Some("transient"));
-        assert_eq!(error.reason.as_deref(), Some("upstream_unavailable"));
-        assert_eq!(error.retry_after_ms, Some(250));
-    }
-
-    #[test]
-    fn parse_rejects_unknown_error_kind() {
-        let result = parse_llm_mock_value(&serde_json::json!({
-            "error": { "status": 503, "kind": "maybe" }
-        }));
-        match result {
-            Err(err) => assert!(err.contains("unknown error kind"), "{err}"),
-            Ok(_) => panic!("expected parse failure for unknown error kind"),
-        }
-    }
-
-    // --- Versioned mock-fixture contract (bc#4969) ---
-
-    #[test]
-    fn header_detects_v0_when_no_schema_version() {
-        assert_eq!(
-            parse_fixture_header(&serde_json::json!({"text": "hi"})).expect("header"),
-            None,
-            "an ordinary entry is not a header"
-        );
-    }
-
-    #[test]
-    fn header_reads_version_and_strict_scopes() {
-        assert_eq!(
-            parse_fixture_header(&serde_json::json!({"schemaVersion": 1, "strictScopes": true}))
-                .expect("header"),
-            Some((1, true))
-        );
-    }
-
-    #[test]
-    fn v1_header_is_closed_and_requires_strict_scopes() {
-        let missing = parse_fixture_header(&serde_json::json!({"schemaVersion": 1}))
-            .expect_err("v1 header must declare strictScopes");
-        assert!(missing.contains("strictScopes"), "{missing}");
-
-        let unknown = parse_fixture_header(&serde_json::json!({
-            "schemaVersion": 1,
-            "strictScopes": false,
-            "strictScope": false,
-        }))
-        .expect_err("v1 header must reject misspelled fields");
-        assert!(unknown.contains("unknown field"), "{unknown}");
-    }
-
-    #[test]
-    fn header_rejects_unsupported_schema_version() {
-        let err =
-            parse_fixture_header(&serde_json::json!({"schemaVersion": 2, "strictScopes": false}))
-                .expect_err("unsupported version must fail");
-        assert!(err.contains("unsupported schemaVersion"), "{err}");
-    }
-
-    #[test]
-    fn v0_parse_pins_default_scope_and_legacy_consume() {
-        // FIFO entry: always consumed (not sticky).
-        let fifo = parse_llm_mock_value(&serde_json::json!({"text": "x"})).expect("fifo");
-        assert_eq!(fifo.scope, DEFAULT_MOCK_SCOPE);
-        assert!(!fifo.sticky);
-        // Glob entry: reusable (sticky) unless consume_match.
-        let glob = parse_llm_mock_value(&serde_json::json!({"match": "*"})).expect("glob");
-        assert!(glob.sticky, "v0 reusable glob is sticky");
-        let glob_once =
-            parse_llm_mock_value(&serde_json::json!({"match": "*", "consume_match": true}))
-                .expect("glob once");
-        assert!(!glob_once.sticky, "consume_match makes a glob one-shot");
-    }
-
-    #[test]
-    fn v1_parse_reads_scope_consume_and_id() {
-        let entry = parse_llm_mock_value_versioned(
-            &serde_json::json!({"scope": "completion.judge", "consume": "sticky", "id": "j1", "text": "Y"}),
-            1,
-            7,
-        )
-        .expect("v1 entry");
-        assert_eq!(entry.scope, "completion.judge");
-        assert!(entry.sticky);
-        assert_eq!(entry.entry_id, "j1");
-    }
-
-    #[test]
-    fn v1_rejects_missing_metadata_and_legacy_aliases() {
-        for (field, value) in [
-            ("id", serde_json::json!({"scope":"main","consume":"once"})),
-            ("scope", serde_json::json!({"id":"main-1","consume":"once"})),
-            ("consume", serde_json::json!({"id":"main-1","scope":"main"})),
-        ] {
-            let error = parse_llm_mock_value_versioned(&value, 1, 0)
-                .expect_err("v1 metadata must be explicit");
-            assert!(error.contains(field), "{error}");
-        }
-
-        let error = parse_llm_mock_value_versioned(
-            &serde_json::json!({
-                "id":"main-1",
-                "scope":"main",
-                "consume":"once",
-                "tool_calls":[{"name":"look","args":{}}]
-            }),
-            1,
-            0,
-        )
-        .expect_err("legacy args alias is v0-only");
-        assert!(
-            error.contains("unknown tool_calls[0] field `args`"),
-            "{error}"
-        );
-
-        let error = parse_llm_mock_value_versioned(
-            &serde_json::json!({
-                "id":"main-1",
-                "scope":"main",
-                "consume":"once",
-                "tool_calls":[{
-                    "name":"look",
-                    "arguments":{},
-                    "thought_signature":"opaque-gemini-signature"
-                }]
-            }),
-            1,
-            0,
-        )
-        .expect_err("provider-specific metadata is v0-only until the v1 contract owns it");
-        assert!(
-            error.contains("unknown tool_calls[0] field `thought_signature`"),
-            "{error}"
-        );
-
-        let entry = parse_llm_mock_value_versioned(
-            &serde_json::json!({
-                "id":"main-1",
-                "scope":"main",
-                "consume":"once",
-                "tool_calls":[{
-                    "id":"gemini_call_1",
-                    "type":"function",
-                    "name":"look",
-                    "arguments":{},
-                    "provider_metadata": {
-                        "gemini": {"thought_signature":"opaque-gemini-signature"}
-                    }
-                }]
-            }),
-            1,
-            0,
-        )
-        .expect("v1 accepts namespaced provider metadata");
-        assert_eq!(entry.tool_calls[0]["id"], "gemini_call_1");
-        assert_eq!(
-            entry.tool_calls[0]["provider_metadata"]["gemini"]["thought_signature"],
-            "opaque-gemini-signature"
-        );
-
-        let error = parse_llm_mock_value_versioned(
-            &serde_json::json!({
-                "id":"main-1",
-                "scope":"main",
-                "consume":"once",
-                "text":"ok",
-                "texte":"typo"
-            }),
-            1,
-            0,
-        )
-        .expect_err("v1 fixture entries are closed");
-        assert!(
-            error.contains("unknown fixture entry field `texte`"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn v1_parse_rejects_unknown_consume_mode() {
-        let err = parse_llm_mock_value_versioned(
-            &serde_json::json!({"id":"main-1", "scope":"main", "consume": "maybe"}),
-            1,
-            0,
-        )
-        .expect_err("unknown consume must fail");
-        assert!(err.contains("consume"), "{err}");
-    }
-
-    #[test]
-    fn v1_serializer_emits_a_closed_document_that_reparses() {
-        let mock = parse_llm_mock_value(&serde_json::json!({
-            "text": "hello",
-            "tool_calls": [{
-                "id": "gemini_call_1",
-                "type": "function",
-                "name": "look",
-                "args": {"file": "src/lib.harn"},
-                "thought_signature": "opaque-gemini-signature"
-            }],
-        }))
-        .expect("parse legacy source entry");
-
-        let document = serialize_llm_mock_fixture(vec![mock]).expect("serialize v1 document");
-        let serialized_entry: serde_json::Value = serde_json::from_str(
-            document
-                .lines()
-                .nth(1)
-                .expect("fixture contains one serialized entry"),
-        )
-        .expect("serialized entry is JSON");
-        assert_eq!(serialized_entry["tool_calls"][0]["id"], "gemini_call_1");
-        assert_eq!(serialized_entry["tool_calls"][0]["type"], "function");
-        assert_eq!(
-            serialized_entry["tool_calls"][0]["provider_metadata"]["gemini"]["thought_signature"],
-            "opaque-gemini-signature"
-        );
-        let fixture = parse_llm_mocks_jsonl(&document).expect("reparse v1 document");
-        assert_eq!(fixture.schema_version, 1);
-        assert!(!fixture.strict_scopes);
-        assert_eq!(fixture.mocks.len(), 1);
-        assert_eq!(fixture.mocks[0].entry_id, "record-0");
-        assert_eq!(fixture.mocks[0].scope, DEFAULT_MOCK_SCOPE);
-        assert!(!fixture.mocks[0].sticky);
-        assert_eq!(
-            fixture.mocks[0].tool_calls[0]["arguments"]["file"].as_str(),
-            Some("src/lib.harn")
-        );
-        assert_eq!(fixture.mocks[0].tool_calls[0]["id"], "gemini_call_1");
-        assert_eq!(
-            fixture.mocks[0].tool_calls[0]["provider_metadata"]["gemini"]["thought_signature"],
-            "opaque-gemini-signature"
-        );
-    }
-
-    #[test]
-    fn load_rejects_unsupported_schema_version() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("fixture.jsonl");
-        std::fs::write(
-            &path,
-            "{\"schemaVersion\": 2, \"strictScopes\": false}\n{\"scope\": \"main\", \"text\": \"MAIN\"}\n",
-        )
-        .expect("write fixture");
-        let err = load_llm_mocks_jsonl(&path).expect_err("unsupported version must fail at load");
-        assert!(err.contains("unsupported schemaVersion"), "{err}");
-    }
-
-    #[test]
-    fn load_parses_v1_header_and_scoped_entries() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("fixture.jsonl");
-        std::fs::write(
-            &path,
-            "{\"schemaVersion\": 1, \"strictScopes\": true}\n\
-             {\"id\": \"main-1\", \"scope\": \"agent.main\", \"consume\": \"once\", \"text\": \"MAIN\"}\n\
-             {\"id\": \"judge-1\", \"scope\": \"completion.judge\", \"consume\": \"sticky\", \"match\": \"*\", \"text\": \"JUDGE\"}\n",
-        )
-        .expect("write fixture");
-        let fixture = load_llm_mocks_jsonl(&path).expect("load v1");
-        assert_eq!(fixture.schema_version, 1);
-        assert!(fixture.strict_scopes);
-        assert_eq!(fixture.mocks.len(), 2);
-        assert_eq!(fixture.mocks[0].scope, "agent.main");
-        assert_eq!(fixture.mocks[0].entry_id, "main-1");
-        assert!(!fixture.mocks[0].sticky);
-        assert_eq!(fixture.mocks[1].scope, "completion.judge");
-        assert_eq!(fixture.mocks[1].entry_id, "judge-1");
-        assert!(fixture.mocks[1].sticky);
-        assert!(fixture.warnings.is_empty());
-    }
-
-    #[test]
-    fn v1_host_namespaced_scopes_are_open_without_advisory_noise() {
-        let fixture = parse_llm_mocks_jsonl(
-            "{\"schemaVersion\":1,\"strictScopes\":false}\n\
-             {\"id\":\"one\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"ONE\"}\n\
-             {\"id\":\"two\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"TWO\"}\n",
-        )
-        .expect("open scope strings remain valid");
-        assert!(fixture.warnings.is_empty());
-    }
-
-    #[test]
-    fn v1_unqualified_unknown_scopes_are_advisory_and_deduplicated() {
-        let fixture = parse_llm_mocks_jsonl(
-            "{\"schemaVersion\":1,\"strictScopes\":false}\n\
-             {\"id\":\"one\",\"scope\":\"custom_review\",\"consume\":\"once\",\"text\":\"ONE\"}\n\
-             {\"id\":\"two\",\"scope\":\"custom_review\",\"consume\":\"once\",\"text\":\"TWO\"}\n",
-        )
-        .expect("open scope strings remain valid");
-        assert_eq!(fixture.warnings.len(), 1);
-        assert!(fixture.warnings[0].contains("custom_review"));
-        assert!(fixture.warnings[0].contains("completion.judge"));
-    }
-
-    #[test]
-    fn load_v0_fixture_has_no_header_and_default_scope() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("fixture.jsonl");
-        std::fs::write(&path, "{\"text\": \"first\"}\n{\"text\": \"second\"}\n")
-            .expect("write fixture");
-        let fixture = load_llm_mocks_jsonl(&path).expect("load v0");
-        assert_eq!(fixture.schema_version, 0);
-        assert!(!fixture.strict_scopes);
-        assert_eq!(fixture.mocks.len(), 2);
-        assert!(fixture.mocks.iter().all(|m| m.scope == DEFAULT_MOCK_SCOPE));
-    }
-
-    #[test]
-    fn text_parser_is_the_file_parser_contract_owner() {
-        let text = "{\"schemaVersion\":1,\"strictScopes\":true}\n\
-                    {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n";
-        let from_text = parse_llm_mocks_jsonl(text).expect("parse text");
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("fixture.jsonl");
-        std::fs::write(&path, text).expect("write fixture");
-        let from_file = load_llm_mocks_jsonl(&path).expect("parse file");
-
-        assert_eq!(from_text.schema_version, from_file.schema_version);
-        assert_eq!(from_text.strict_scopes, from_file.strict_scopes);
-        assert_eq!(from_text.mocks[0].entry_id, from_file.mocks[0].entry_id);
-        assert_eq!(from_text.mocks[0].scope, from_file.mocks[0].scope);
-    }
-
-    #[test]
-    fn text_parser_rejects_duplicate_v1_entry_ids_before_installation() {
-        let err = parse_llm_mocks_jsonl(
-            "{\"schemaVersion\":1,\"strictScopes\":false}\n\
-             {\"id\":\"same\",\"scope\":\"main\",\"consume\":\"once\",\"text\":\"one\"}\n\
-             {\"id\":\"same\",\"scope\":\"main\",\"consume\":\"once\",\"text\":\"two\"}\n",
-        )
-        .expect_err("duplicate ids must fail");
-        assert!(err.contains("duplicate fixture entry id"), "{err}");
-    }
-
-    #[test]
-    fn text_parser_rejects_late_header_and_untrimmed_v1_identity() {
-        let late_header = parse_llm_mocks_jsonl(
-            "{\"text\":\"first\"}\n{\"schemaVersion\":1,\"strictScopes\":false}\n",
-        )
-        .expect_err("late header must fail");
-        assert!(
-            late_header.contains("first non-empty line"),
-            "{late_header}"
-        );
-
-        let untrimmed_id = parse_llm_mocks_jsonl("{\"schemaVersion\":1,\"strictScopes\":false}\n{\"id\":\" judge \",\"scope\":\"main\",\"consume\":\"once\"}\n")
-            .expect_err("untrimmed v1 id must fail");
-        assert!(
-            untrimmed_id.contains("non-empty trimmed string"),
-            "{untrimmed_id}"
-        );
-    }
-}
+#[path = "jsonl_tests.rs"]
+mod tests;

@@ -4,7 +4,7 @@ import { JsonParseFailure } from "std/json"
 
 fn __web_header(headers: dict?, name: any) {
   const wanted = lowercase(name)
-  for entry in headers ?? {} {
+  for entry in (headers ?? {}) {
     if lowercase(entry.key) == wanted {
       return entry.value
     }

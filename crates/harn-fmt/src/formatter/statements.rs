@@ -76,7 +76,7 @@ impl Formatter<'_> {
                     column + 4 + text_width(&format_pattern(pattern)) + 4,
                 );
                 self.format_block_expr(
-                    &format!("for {pat} in {iter_str} {{"),
+                    &super::for_header(&pat, &iter_str),
                     body,
                     indent_level,
                     node.span.line,

@@ -1,4 +1,4 @@
-name: Windows nightly
+name: Windows workspace tests
 
 # Runs the full workspace nextest surface on Windows once per night, plus
 # on-demand from the Actions tab. Complements the per-PR `windows` job in
@@ -28,10 +28,39 @@ on:
     # waiting when contributors start their day.
     - cron: "0 7 * * *"
   workflow_dispatch:
+  pull_request:
+    # Only the code these lanes actually exercise. A fragment- or docs-only
+    # pull request cannot change what a workspace test run proves, so it does
+    # not pay for one, and the release's evidence reader treats a lane it never
+    # needed as satisfied rather than missing.
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      # The nextest config decides what this lane runs and what budget it runs
+      # it under, so a change to it changes what the run proves. Without this
+      # the lane skips the very pull request that retimes it.
+      - ".config/nextest.toml"
+      - ".github/workflows/windows-nightly.yml"
+      - ".github/workflows/macos-nightly.yml"
 
 permissions:
   contents: read
   actions: write
+
+# Supersede an in-flight pull-request run when the same pull request pushes
+# again. Only the final head becomes a merge parent, so a superseded run's
+# result is never read by anything.
+#
+# Non-pull-request runs each get their own group via `github.run_id`, never a
+# shared ref key. A shared key would make two dispatches on one ref queue behind
+# each other, and release certification dispatches this workflow at an exact
+# commit: the release evidence reader requires a `workflow_dispatch` run at that
+# exact head, so serializing or cancelling those would turn a capacity setting
+# into a release-path dependency.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,11 +69,34 @@ env:
 
 jobs:
   nextest:
+    # NAME IS AN EVIDENCE KEY, NOT A RUNNER CLAIM. scripts/release_audit_contract.harn
+    # looks this lane up by exact job name, so renaming it to match the runner
+    # below would couple a CI capacity change to release certification, where a
+    # lane the reader cannot find is treated as satisfied rather than missing.
+    # The name stays pinned here and the rename is a separate change that moves
+    # the contract table and this string together.
     name: Workspace nextest (windows-latest)
-    runs-on: windows-latest
+    # Blacksmith capacity, one size above the pull-request `windows` job in
+    # ci.yml, because this lane compiles and runs the WHOLE workspace rather
+    # than an affected-crate closure — the one native Windows lane where core
+    # count buys real wall time. Both lanes fall back to GitHub-hosted capacity
+    # through the same explicit HARN_CI_ENABLE_BLACKSMITH_WINDOWS opt-in, so
+    # the public repository remains on free GitHub-hosted capacity by default.
+    #
+    # This job is the sole writer of the shared `workspace-windows` rust-cache.
+    # The producer and its PR consumer share the same selected tier, while the
+    # provider-neutral warm artifact below remains an ordinary GitHub Actions
+    # artifact that every consumer tries before rust-cache.
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith-16vcpu-windows-2025' || 'windows-latest' }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     env:
+      # Mirror the `runs-on` ladder exactly. Blacksmith runners register as
+      # ordinary self-hosted runners, so `runner.environment` reports
+      # `self-hosted` on them and any step branching on that context takes the
+      # wrong branch. One job-level tier variable is the single owner every step
+      # branches on instead.
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_WINDOWS == 'true' && 'blacksmith' || 'github-hosted' }}
       # Cache WRITER half of the rust-lld experiment — MUST stay byte-identical
       # to ci.yml's `windows` job (the restore-only consumer) or the shared-cache
       # policy's consumer/producer input comparison fails. Toggled together via
@@ -63,8 +115,11 @@ jobs:
       # old fixed 25 GB VHDX cap (harn#6027 / harn#6485). Growth remains bounded
       # by host free space on C:. Drive sizes are owned by cache-policy.json
       # windows_workspace_warm and locked by check_ci_cache_policy.harn.
+      # Tier-gated, not just variable-gated: the Blacksmith Windows image does
+      # not expose the Hyper-V New-VHD command this action needs, so the Dev
+      # Drive experiment is reachable only on the github-hosted fallback.
       - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: ${{ startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB' }}
@@ -91,7 +146,11 @@ jobs:
           target-dir: ${{ env.CARGO_TARGET_DIR }}
           cache-on-failure: true
           cache-bin: false
-          save: true
+          # This job is the sole writer for `workspace-windows`. A pull request
+          # run is a restore-only consumer: writing here would mint one
+          # immutable cache generation per pull request in a 10 GiB namespace
+          # that is already contended.
+          save: ${{ github.event_name != 'pull_request' }}
       - name: Restore Windows workspace warm artifact
         id: windows-warm-restore
         if: ${{ startsWith(github.ref_name, 'release-certify/') }}
@@ -100,7 +159,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+          ./scripts/ci/workspace_warm_artifact.sh windows download-and-restore \
             --repo "${{ github.repository }}" \
             --target-dir "${CARGO_TARGET_DIR:-target}"
       - name: Report Windows warm restore outcome
@@ -151,7 +210,7 @@ jobs:
         if: ${{ github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
-          ./scripts/ci/windows_workspace_warm_artifact.sh pack \
+          ./scripts/ci/workspace_warm_artifact.sh windows pack \
             "${RUNNER_TEMP}/workspace-windows-warm"
       - name: Upload Windows workspace warm artifact
         if: ${{ github.ref == 'refs/heads/main' }}

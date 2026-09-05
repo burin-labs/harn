@@ -406,9 +406,11 @@ audit log sees what the runtime actually attempted.
 4. **Schema decorators should be additive.** `tool_inject_param`
    leaves an existing parameter untouched if it's already declared so
    layered middleware (e.g. multiple injects of the same field) is
-   idempotent. It augments the entry's existing `parameters`,
-   `input_schema`, or MCP-style `inputSchema` field in place; it never
-   adds a competing `parameters` field that could shadow the original schema.
+   idempotent. It augments the entry's existing schema field in place —
+   MCP-style `inputSchema` for a complete JSON Schema, or legacy
+   `parameters` for a per-parameter map, the only two spellings a registry
+   entry has; it never adds a competing `parameters` field that could
+   shadow the original schema.
 5. **The `tool_call_audit` AgentEvent is fired only when middleware
    sets `result.audit`.** No middleware → no event. This keeps the
    wire stream clean for hosts that don't subscribe.

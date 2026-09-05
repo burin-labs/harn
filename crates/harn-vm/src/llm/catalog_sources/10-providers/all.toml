@@ -57,6 +57,18 @@ sources = [
   "https://api-docs.deepseek.com/api/create-chat-completion",
 ]
 
+# Both fields verified against live responses, not against the docs alone: a
+# non-streaming call reported prompt_tokens_details.cached_tokens = 113 on a
+# repeated prefix, and a stream=true call with stream_options.include_usage
+# delivered a terminal chunk carrying the same usage shape.
+[[usage_accounting_audit.verified]]
+provider = "meta"
+checked_on = "2026-09-02"
+fields = ["cache", "stream"]
+sources = [
+  "https://dev.meta.ai/docs/overview/",
+]
+
 [[usage_accounting_audit.verified]]
 provider = "fireworks"
 checked_on = "2026-08-26"
@@ -461,6 +473,33 @@ source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of
 last_verified = "2026-07-09"
 
 [providers.dashscope.healthcheck]
+method = "GET"
+path = "/models"
+
+# Meta Model API — Meta's first-party hosted endpoint for the Muse family,
+# documented as drop-in compatible with the OpenAI SDK, so it reuses the
+# existing OpenAI chat-completions dialect rather than carrying an adapter of
+# its own. Bearer auth, /v1/models for the healthcheck.
+#
+# Note that this replaces the wound-down Llama API; Llama weights themselves
+# are served by the third-party providers already in this catalog.
+#
+# Meta publishes each Muse Spark generation under TWO model ids at two very
+# different prices. The cheaper `-contributor` id is a training grant, not a
+# volume discount, and each row declares that for itself in
+# `[models.<id>.data_controls]`.
+[providers.meta]
+display_name = "Meta"
+cache_usage_accounting = true
+stream_usage_accounting = true
+base_url = "https://api.meta.ai/v1"
+base_url_env = "META_BASE_URL"
+auth_style = "bearer"
+auth_env = "META_API_KEY"
+chat_endpoint = "/chat/completions"
+latency_p50_ms = 1900
+
+[providers.meta.healthcheck]
 method = "GET"
 path = "/models"
 

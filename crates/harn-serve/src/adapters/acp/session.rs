@@ -24,7 +24,10 @@ impl AcpServer {
         };
 
         let session_id = self.next_session_id();
-        self.insert_session(session_id.clone(), cwd, SessionInfo::default());
+        if let Err(error) = self.insert_session(session_id.clone(), cwd, SessionInfo::default()) {
+            self.send_session_open_error(id, &error);
+            return;
+        }
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.environment_policy = environment_policy;
         }
@@ -412,7 +415,10 @@ impl AcpServer {
         };
 
         if !harn_vm::agent_sessions::exists(&src_id) {
-            harn_vm::agent_sessions::open_or_create(Some(src_id.clone()));
+            if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(src_id.clone())) {
+                self.send_session_open_error(id, &error);
+                return;
+            }
         }
 
         let keep_first =
@@ -483,9 +489,16 @@ impl AcpServer {
             Some(keep_first) => harn_vm::agent_sessions::fork_at(&src_id, keep_first, dst_id),
             None => harn_vm::agent_sessions::fork(&src_id, dst_id),
         };
-        let Some(new_session_id) = new_session_id else {
-            self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
-            return;
+        let new_session_id = match new_session_id {
+            Ok(Some(new_session_id)) => new_session_id,
+            Ok(None) => {
+                self.send_error(id, -32000, &format!("Failed to fork session: {src_id}"));
+                return;
+            }
+            Err(error) => {
+                self.send_session_open_error(id, &error);
+                return;
+            }
         };
 
         let snapshot = harn_vm::agent_sessions::snapshot(&new_session_id)
@@ -593,7 +606,10 @@ impl AcpServer {
 
         cancellation.cancel();
         if !harn_vm::agent_sessions::exists(&session_id) {
-            harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+            if let Err(error) = harn_vm::agent_sessions::open_or_create(Some(session_id.clone())) {
+                self.send_session_open_error(id, &error);
+                return;
+            }
         }
         let result = match harn_vm::agent_sessions::truncate(&session_id, keep_first) {
             Ok(Some(result)) => result,

@@ -124,10 +124,17 @@ pub(crate) fn parse_schema_stream_abort(err: &VmError) -> Option<SchemaStreamAbo
     err.schema_stream_abort().cloned()
 }
 
-/// Build the empty `LlmResult` stand-in used when the schema-retry loop
-/// surfaces an abort to the caller after retries are exhausted. The
-/// transcript event already records the abort metadata, but downstream
-/// callers (e.g. `llm_call_safe`) still expect a dict envelope.
+/// Build the `LlmResult` stand-in used when the schema-retry loop surfaces an
+/// abort to the caller after retries are exhausted. The transcript event
+/// already records the abort metadata, but downstream callers (e.g.
+/// `llm_call_safe`) still expect a dict envelope.
+///
+/// Accounting lives under `usage`, the same single owner every completed call
+/// projects, and reads unknown rather than zero. The provider generated and
+/// billed partial output before the connection was severed, and its
+/// end-of-stream usage frame never arrived, so a zero here would be a
+/// fabricated measurement rather than an absent one. `chunks_consumed` under
+/// `schema_stream_aborted` is the only partial evidence the abort actually has.
 pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     let mut meta = std::collections::BTreeMap::new();
     meta.put_str("reason_kind", abort.reason_kind.as_str());
@@ -143,8 +150,12 @@ pub(crate) fn aborted_result_value(abort: &SchemaStreamAbort) -> VmValue {
     dict.put_str("text", "");
     dict.put_str("model", abort.model.as_str());
     dict.put_str("provider", abort.provider.as_str());
-    dict.insert("input_tokens".to_string(), VmValue::Int(0));
-    dict.insert("output_tokens".to_string(), VmValue::Int(0));
+    dict.insert(
+        "usage".to_string(),
+        VmValue::dict(
+            crate::llm::usage::LlmUsage::stream_aborted_attempt().to_vm_dict(&Default::default()),
+        ),
+    );
     dict.insert("data".to_string(), VmValue::Nil);
     dict.insert("schema_stream_aborted".to_string(), VmValue::dict(meta));
     VmValue::dict(dict)

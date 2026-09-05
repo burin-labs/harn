@@ -29,7 +29,6 @@ const SEALED_DISPATCH_ALLOWED_RISK_LABELS: [&str; 3] = [
 
 thread_local! {
     static COMMAND_POLICY_STACK: RefCell<Vec<CommandPolicy>> = const { RefCell::new(Vec::new()) };
-    static COMMAND_POLICY_HOOK_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
 #[derive(Clone, Debug, Default)]
@@ -118,17 +117,6 @@ pub(crate) enum CommandDispatchOrigin {
     ReviewedGitPushWithLease,
 }
 
-struct HookDepthGuard;
-
-impl Drop for HookDepthGuard {
-    fn drop(&mut self) {
-        COMMAND_POLICY_HOOK_DEPTH.with(|depth| {
-            let mut depth = depth.borrow_mut();
-            *depth = depth.saturating_sub(1);
-        });
-    }
-}
-
 pub fn push_command_policy(policy: CommandPolicy) {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
 }
@@ -141,7 +129,7 @@ pub fn pop_command_policy() {
 
 pub fn clear_command_policies() {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+    hook_depth::reset_command_policy_hook_depth();
 }
 
 pub fn current_command_policy() -> Option<CommandPolicy> {
@@ -191,14 +179,6 @@ pub(crate) fn credential_read_path_candidates(args: &JsonValue) -> Vec<String> {
 /// cooperatively-scheduled siblings on the same thread.
 pub(crate) fn swap_command_policy_stack(next: Vec<CommandPolicy>) -> Vec<CommandPolicy> {
     COMMAND_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
-}
-
-pub(crate) fn swap_command_policy_hook_depth(next: usize) -> usize {
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| std::mem::replace(&mut *depth.borrow_mut(), next))
-}
-
-pub fn command_policy_hook_depth() -> usize {
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow())
 }
 
 pub fn parse_command_policy_value(
@@ -1128,8 +1108,7 @@ async fn invoke_command_hook(
             "command policy hook requires an async builtin VM context".to_string(),
         ));
     };
-    COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow_mut() += 1);
-    let _guard = HookDepthGuard;
+    let _guard = enter_command_policy_hook();
     let arg = crate::stdlib::json_to_vm_value(payload);
     vm.call_closure_pub(closure, &[arg]).await
 }
@@ -1475,6 +1454,11 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
 }
 
 mod catastrophic;
+mod hook_depth;
+// Re-exported so `command_policy::command_policy_hook_depth` keeps naming the
+// same thing it always did; only the file it lives in moved.
+pub use hook_depth::command_policy_hook_depth;
+pub(crate) use hook_depth::{enter_command_policy_hook, swap_command_policy_hook_depth};
 mod scan;
 mod workspace_effect;
 

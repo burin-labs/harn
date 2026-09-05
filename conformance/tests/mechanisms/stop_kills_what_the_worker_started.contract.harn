@@ -1,0 +1,314 @@
+// MECHANISM CONTRACT (onramp tier): what a stopped worker started dies with it.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — a background sub-agent starts a long-running background command
+//              through a handle the runtime owns, and the parent then stops
+//              that sub-agent;
+//   effect   — the command's process is gone after the stop;
+//   negative — a background command the PARENT owns is untouched by the child's
+//              stop, and the job is observed alive before the stop so a job
+//              that never started cannot pass.
+//
+// Why this contract exists. Stopping a worker aborted its task and wrote a
+// terminal that said `stopped`, and the processes that worker had started kept
+// running. The abort drops the loop's future mid-await, so the normal finalize
+// never runs, so the session-end hooks that reclaim a session's command handles
+// never fire. The run reported success at exactly the moment the guarantee
+// failed.
+//
+// The liveness clause is not ceremony. An earlier probe for this used a job
+// that never actually started, and its dead process looked exactly like a clean
+// kill: absence read as success. Nothing here may conclude anything about the
+// stop unless the job was observed running first.
+//
+// ESCALATION. Killing the children is necessary but not the whole guarantee:
+// the stop must ask before it shoots. Two more jobs pin the shape of the
+// signal sequence rather than only its outcome. One installs `trap '' TERM`,
+// so it can only die if the stop escalated to SIGKILL. The other traps SIGTERM
+// and writes a marker before exiting, so the marker exists only if SIGTERM was
+// actually sent first. A dead pid alone cannot distinguish TERM -> grace ->
+// KILL from an immediate KILL, because both leave the same corpse; the marker
+// is the non-null read that separates them.
+import { agent_lifecycle_tools, agent_stop, sub_agent_run } from "std/agent/workers"
+import { command_run } from "std/command"
+import { with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+/**
+ * Start a process that records its own pid and then does nothing but stay
+ * alive. `exec` replaces the shell, so the pid written is the pid that must
+ * die.
+ */
+fn spawn_recorded_job(tools: HarnessTools, pid_file: string) {
+  return command_run(
+    tools,
+    {mode: "shell", command: "echo $$ > " + pid_file + "; exec sleep 300"},
+    {background: true},
+  )
+}
+
+/**
+ * Start a process that IGNORES SIGTERM and records its own pid.
+ *
+ * `trap '' TERM` makes the shell immune to the first signal of the escalation,
+ * so this pid can only disappear if the stop escalated to SIGKILL. The inner
+ * `sleep` is a separate child that does die on the group's SIGTERM; the loop
+ * simply starts another one, which is exactly the shape of a process that
+ * swallows a polite request to leave.
+ */
+fn spawn_term_immune_job(tools: HarnessTools, pid_file: string) {
+  return command_run(
+    tools,
+    {
+      mode: "shell",
+      command: "trap '' TERM; echo $$ > " + pid_file
+        + "; while true; do sleep 0.1; done",
+    },
+    {background: true},
+  )
+}
+
+/**
+ * Start a process that HANDLES SIGTERM, recording that it was asked politely
+ * before it left.
+ *
+ * The marker is the whole point of this job. A stop that jumps straight to
+ * SIGKILL kills this process just as dead, and the pid probe cannot tell the
+ * two apart: only a file the process itself wrote while handling SIGTERM
+ * proves the first signal was ever sent. The loop ticks every 100ms so the
+ * trap runs well inside the escalation's grace period.
+ */
+fn spawn_term_polite_job(tools: HarnessTools, pid_file: string, marker_file: string) {
+  return command_run(
+    tools,
+    {
+      mode: "shell",
+      command: "trap 'echo TERM > " + marker_file + "; exit 0' TERM; echo $$ > " + pid_file
+        + "; while true; do sleep 0.1; done",
+    },
+    {background: true},
+  )
+}
+
+/** Ask the operating system, not a receipt, whether the pid is still there. */
+fn pid_is_alive(tools: HarnessTools, pid: string) -> bool {
+  if pid == "" {
+    return false
+  }
+  const probe = command_run(
+    tools,
+    {mode: "shell", command: "kill -0 " + pid + " 2>/dev/null && echo ALIVE || echo DEAD"},
+  )
+  return trim(probe.stdout) == "ALIVE"
+}
+
+/** Poll for the pid the job records, bounded so a job that never starts fails. */
+fn recorded_pid(harness: Harness, pid_file: string) -> string {
+  let waited = 0
+  while waited < 10000 {
+    if harness.fs.exists(pid_file) {
+      const raw = trim(harness.fs.read_text(pid_file))
+      if raw != "" {
+        return raw
+      }
+    }
+    harness.clock.sleep_ms(100)
+    waited = waited + 100
+  }
+  return ""
+}
+
+/** Poll for the pid to disappear, bounded, so a slow kill still passes. */
+fn pid_gone_within(harness: Harness, pid: string, budget_ms: int) -> bool {
+  let waited = 0
+  while waited < budget_ms {
+    if !pid_is_alive(harness.tools, pid) {
+      return true
+    }
+    harness.clock.sleep_ms(200)
+    waited = waited + 200
+  }
+  return false
+}
+
+fn job_tools(
+  harness: Harness,
+  pid_file: string,
+  immune_pid_file: string,
+  polite_pid_file: string,
+  term_marker_file: string,
+) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "start_long_job",
+    "Start the long background job.",
+    {
+      handler: { _args ->
+        spawn_recorded_job(harness.tools, pid_file)
+        spawn_term_immune_job(harness.tools, immune_pid_file)
+        spawn_term_polite_job(harness.tools, polite_pid_file, term_marker_file)
+        return "job started"
+      },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  // Keeps the worker RUNNING while the parent probes and stops it. A worker
+  // that parks instead is suspended, and a suspension checkpoints its session,
+  // which reclaims its handles for an entirely legitimate reason. The contract
+  // would then read green without a stop ever having been exercised.
+  tools = tool_define(
+    tools,
+    "keep_working",
+    "Do a little work and return.",
+    {
+      handler: { _args ->
+        harness.clock.sleep_ms(300)
+        return "still working"
+      },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+/** One scripted turn that calls `keep_working`, so the worker stays busy. */
+fn keep_working_turns(count: int) -> list {
+  let turns = []
+  let n = 0
+  while n < count {
+    turns = turns
+      + [
+        {
+          tool_calls: [{id: "work_" + to_string(n), name: "keep_working", arguments: {}}],
+          input_tokens: 2,
+          output_tokens: 2,
+        },
+      ]
+    n = n + 1
+  }
+  return turns
+}
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-stop-kills-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  const child_pid_file = path_join(root, "child.pid")
+  const bystander_pid_file = path_join(root, "bystander.pid")
+  const immune_pid_file = path_join(root, "term-immune.pid")
+  const polite_pid_file = path_join(root, "term-polite.pid")
+  const term_marker_file = path_join(root, "term-received.marker")
+  // The bystander belongs to the parent session, not the worker being stopped.
+  // It is what separates "the stop reclaimed what the worker owned" from "the
+  // stop killed whatever it could reach".
+  spawn_recorded_job(harness.tools, bystander_pid_file)
+  const bystander_pid = recorded_pid(harness, bystander_pid_file)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [{id: "start_1", name: "start_long_job", arguments: {}}],
+        input_tokens: 5,
+        output_tokens: 6,
+      },
+    ]
+      + keep_working_turns(60),
+    { ->
+      const worker = sub_agent_run(
+        harness,
+        "Start the long job, then park.",
+        {
+          provider: "mock",
+          background: true,
+          tool_format: "native",
+          max_iterations: 80,
+          token_budget: 5000,
+          tools: agent_lifecycle_tools(
+            harness.agent,
+            job_tools(harness, child_pid_file, immune_pid_file, polite_pid_file, term_marker_file),
+          ),
+          allowed_tools: ["start_long_job", "keep_working"],
+          session_id: "stop-kills-worker",
+        },
+      )
+      // Deliberately NOT `wait_agent`: the worker must still be running when
+      // it is stopped. Poll for the pid the job records instead.
+      const child_pid = recorded_pid(harness, child_pid_file)
+      const immune_pid = recorded_pid(harness, immune_pid_file)
+      const polite_pid = recorded_pid(harness, polite_pid_file)
+      // Liveness first. Every clause below is meaningless without it.
+      contract_effect(
+        harness.stdio,
+        "effect_job_observed_alive_before_stop",
+        child_pid != "" && pid_is_alive(harness.tools, child_pid),
+      )
+      // The escalation clauses get their own liveness read, and the marker
+      // must be ABSENT here. A marker written before the stop would prove
+      // nothing about the stop, and a pre-dead job is the failure this whole
+      // file exists to refuse.
+      contract_effect(
+        harness.stdio,
+        "effect_escalation_jobs_observed_alive_before_stop",
+        immune_pid != ""
+          && polite_pid != ""
+          && pid_is_alive(harness.tools, immune_pid)
+          && pid_is_alive(harness.tools, polite_pid)
+          && !harness.fs.exists(term_marker_file),
+      )
+      const stopped_summary = agent_stop(
+        harness.agent,
+        worker,
+        {graceful: true, reason: "operator pressed stop"},
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_stopped_worker_job_is_gone",
+        pid_gone_within(harness, child_pid, 10000),
+      )
+      // Escalation, both halves. A stop that only sends SIGTERM leaves the
+      // immune pid alive; a stop that jumps straight to SIGKILL never lets the
+      // polite job write its marker. Only TERM -> grace -> KILL satisfies both.
+      contract_effect(
+        harness.stdio,
+        "effect_term_ignoring_job_is_killed",
+        pid_gone_within(harness, immune_pid, 15000),
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_polite_job_was_asked_with_sigterm_first",
+        harness.fs.exists(term_marker_file)
+          && trim(harness.fs.read_text(term_marker_file)) == "TERM",
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_polite_job_exited_on_its_own_terms",
+        pid_gone_within(harness, polite_pid, 15000),
+      )
+      // The stop is still a stop: the worker left the running state.
+      contract_effect(
+        harness.stdio,
+        "effect_worker_reached_a_terminal_state",
+        stopped_summary?.worker?.status != "running",
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_parent_owned_job_survives_the_childs_stop",
+        bystander_pid == "" || !pid_is_alive(harness.tools, bystander_pid),
+      )
+      // Leave nothing running behind this test whatever the verdict above.
+      command_run(
+        harness.tools,
+        {
+          mode: "shell",
+          command: "kill -9 " + bystander_pid + " " + immune_pid + " " + polite_pid
+            + " 2>/dev/null; exit 0",
+        },
+      )
+    },
+  )
+}

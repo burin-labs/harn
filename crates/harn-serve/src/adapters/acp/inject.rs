@@ -149,7 +149,30 @@ impl AcpServer {
         };
 
         session.cancellation.cancel();
-        let flush_result = self.clear_active_prompt_transport(session_id).await;
+        if let Err(error) = self.clear_active_prompt_transport(session_id).await {
+            self.send_error(
+                id,
+                -32000,
+                &format!("Failed to persist session {session_id} before close: {error}"),
+            );
+            return;
+        }
+        if let Err(error) = harn_vm::agent_sessions::close_with_status(
+            session_id,
+            "client_request",
+            "closed",
+            serde_json::json!({
+                "protocol": "acp",
+                "method": method,
+            }),
+        ) {
+            self.send_error(
+                id,
+                -32000,
+                &format!("Failed to close session {session_id}: {error}"),
+            );
+            return;
+        }
         self.sessions
             .remove(session_id)
             .expect("validated session should still exist after sink flush");
@@ -170,24 +193,7 @@ impl AcpServer {
         {
             harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
         }
-        harn_vm::agent_sessions::close_with_status(
-            session_id,
-            "client_request",
-            "closed",
-            serde_json::json!({
-                "protocol": "acp",
-                "method": method,
-            }),
-        );
-
-        match flush_result {
-            Ok(()) => self.send_response(id, serde_json::json!({})),
-            Err(error) => self.send_error(
-                id,
-                -32000,
-                &format!("Failed to persist session {session_id} before close: {error}"),
-            ),
-        }
+        self.send_response(id, serde_json::json!({}));
     }
 
     pub(super) async fn handle_session_inject(

@@ -285,7 +285,7 @@ fn workflow_tracing_enable_resets_when_idle() {
 async fn verify_stage_reads_transcript_from_session_store() {
     crate::reset_thread_local_state();
     let session_id = "session-for-verify-stage".to_string();
-    crate::agent_sessions::open_or_create(Some(session_id.clone()));
+    crate::agent_sessions::open_or_create_for_test(Some(session_id.clone()));
     for msg in [
         serde_json::json!({"role": "user", "content": "implement the feature"}),
         serde_json::json!({"role": "assistant", "content": "I'll edit the file now."}),

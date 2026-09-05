@@ -403,9 +403,6 @@ fn __sv_tool_entry_parameters(entry: dict) {
   if type_of(entry?.parameters) == "dict" {
     return entry.parameters
   }
-  if type_of(entry?.input_schema) == "dict" {
-    return entry.input_schema
-  }
   if type_of(entry?.inputSchema) == "dict" {
     return entry.inputSchema
   }

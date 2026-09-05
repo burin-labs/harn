@@ -60,6 +60,7 @@ impl HarnLsp {
 /// binary shim and by the `harn` multi-call binary when invoked as `harn-lsp`.
 pub fn run() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(harn_vm::RUNTIME_STACK_SIZE)
         .enable_all()
         .build()
         .expect("failed to build Tokio runtime for harn-lsp");

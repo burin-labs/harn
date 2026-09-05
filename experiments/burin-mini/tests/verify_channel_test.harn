@@ -257,7 +257,7 @@ pipeline test_task_shape_verifier_reaches_a_terminal_state(harness: Harness, tas
     {
       id: "s1",
       name: "run",
-      arguments: {command: "MINI_VERIFY_SLEEP_SECONDS=1 ./scripts/verify-slow.sh"},
+      arguments: {command: "MINI_VERIFY_SLEEP_SECONDS=1 node scripts/verify-slow.js"},
     },
     registry,
   )

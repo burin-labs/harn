@@ -35,8 +35,9 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
             LlmErrorReason::InvalidResponse => 8,
             LlmErrorReason::ModelUnavailable => 9,
             LlmErrorReason::EmptyGeneration => 10,
-            LlmErrorReason::OutputBudgetExhausted => 11,
-            LlmErrorReason::Unknown => 12,
+            LlmErrorReason::BillingLimit => 11,
+            LlmErrorReason::OutputBudgetExhausted => 12,
+            LlmErrorReason::Unknown => 13,
         }
     }
 
@@ -46,7 +47,7 @@ fn exported_llm_outcome_vocabularies_are_complete_and_round_trip() {
         assert_eq!(LlmErrorKind::parse(kind.as_str()), Some(*kind));
     }
 
-    assert_eq!(LlmErrorReason::ALL.len(), 13);
+    assert_eq!(LlmErrorReason::ALL.len(), 14);
     for (index, reason) in LlmErrorReason::ALL.iter().enumerate() {
         assert_eq!(reason_ordinal(*reason), index);
         assert_eq!(LlmErrorReason::parse(reason.as_str()), Some(*reason));
@@ -394,6 +395,92 @@ fn classify_openai_quota_is_not_context_overflow() {
         reqwest::StatusCode::TOO_MANY_REQUESTS,
         r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}"#,
     );
+}
+
+/// harn#7939 falsifier. A hard billing stop arrives as a 429 whose body also
+/// says "quota", and the classifier read that as a rate limit and retried it.
+///
+/// A backoff never clears an account with no credit, so every retry, on every
+/// call, for the rest of the run, runs against a condition that will refuse
+/// identically. It also reaches the loop as an exhausted retry budget rather
+/// than as "the account cannot pay", so the terminal record names the wrong
+/// cause.
+#[test]
+fn a_billing_stop_on_a_429_is_terminal_not_a_rate_limit() {
+    let classified = classify_provider_http_error(
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        None,
+        r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}"#,
+    );
+
+    assert_eq!(classified.reason, LlmErrorReason::BillingLimit);
+    assert_eq!(classified.kind, LlmErrorKind::Terminal);
+}
+
+/// The same stop expressed as a message rather than a code, which is how
+/// Anthropic sends it.
+#[test]
+fn a_billing_stop_named_only_in_prose_is_terminal() {
+    let classified = classify_provider_http_error(
+        "anthropic",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        None,
+        r#"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#,
+    );
+
+    assert_eq!(classified.reason, LlmErrorReason::BillingLimit);
+    assert_eq!(classified.kind, LlmErrorKind::Terminal);
+}
+
+/// The negative control the issue names. An ordinary rate-limit 429 must still
+/// classify transient, so the change does not simply stop retrying 429s.
+#[test]
+fn an_ordinary_rate_limit_429_still_retries() {
+    let classified = classify_provider_http_error(
+        "openai",
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        Some("2"),
+        r#"{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-4o in organization org-x on tokens per min (TPM)."}}"#,
+    );
+
+    assert_eq!(classified.reason, LlmErrorReason::RateLimit);
+    assert_eq!(classified.kind, LlmErrorKind::Transient);
+}
+
+/// The second control. A provider shedding load is not an account that cannot
+/// pay, and it must keep retrying.
+#[test]
+fn an_overloaded_529_still_retries() {
+    let classified = classify_provider_http_error(
+        "anthropic",
+        reqwest::StatusCode::from_u16(529).expect("529"),
+        None,
+        r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+    );
+
+    assert_eq!(classified.reason, LlmErrorReason::ServerError);
+    assert_eq!(classified.kind, LlmErrorKind::Transient);
+}
+
+/// The same split has to hold on the message-taxonomy path, which is what a
+/// re-classified `CategorizedError` goes through. Without this, a billing stop
+/// that reached the loop as a categorized rate limit would be retried again.
+#[test]
+fn a_billing_stop_stays_terminal_through_the_message_taxonomy() {
+    let billing = classify_llm_error(
+        ErrorCategory::RateLimit,
+        "openai HTTP 429 [rate_limited]: {\"error\":{\"code\":\"insufficient_quota\"}}",
+    );
+    assert_eq!(billing.reason, LlmErrorReason::BillingLimit);
+    assert_eq!(billing.kind, LlmErrorKind::Terminal);
+
+    let throttle = classify_llm_error(
+        ErrorCategory::RateLimit,
+        "openai HTTP 429 [rate_limited]: rate limit reached, tokens per min",
+    );
+    assert_eq!(throttle.reason, LlmErrorReason::RateLimit);
+    assert_eq!(throttle.kind, LlmErrorKind::Transient);
 }
 
 #[test]

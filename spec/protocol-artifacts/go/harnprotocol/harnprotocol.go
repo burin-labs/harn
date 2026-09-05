@@ -14,7 +14,7 @@ import (
 )
 
 // ArtifactVersion pins the Harn release that generated this binding.
-const ArtifactVersion = "0.10.128-dev"
+const ArtifactVersion = "0.10.131-dev"
 
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
@@ -465,6 +465,7 @@ var LlmErrorReasons = []LlmErrorReason{
 	"invalid_response",
 	"model_unavailable",
 	"empty_generation",
+	"billing_limit",
 	"output_budget_exhausted",
 	"unknown",
 }

@@ -1,0 +1,139 @@
+// Run: harn test tests/agent/bare_json_final_message_test.harn
+//
+// Regression coverage for harn#7908: a final assistant message that is a bare
+// JSON scalar or array must return a terminal result, not throw.
+//
+// `__strip_internal_verdict_json` runs on the visible-text path of every
+// completing turn. It parses the assistant text and handed the parsed value
+// straight to `__internal_verdict_object`, which declared `value: dict`. The
+// runtime parameter check rejected a non-dict before the body ran, so the
+// function's own `if type_of(value) != "dict" { return false }` guard was
+// unreachable for exactly the inputs it was written to handle:
+//
+//   Type error: function '__internal_verdict_object' parameter 'value':
+//   expected dict or struct, got bool
+//
+// "Answer yes or no", "how many did you find", and "list the files you
+// changed" are ordinary turns, so a model that complies literally killed the
+// run on every agent surface.
+//
+// Deterministic: mock LLM script, no sleeps, no API calls.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { with_llm_script } from "std/testing"
+
+fn single_turn_options(session: string) -> AgentSpec {
+  return {
+    provider: "mock",
+    model: "mock-model",
+    tool_format: "native",
+    loop_until_done: false,
+    max_iterations: 1,
+    final_wrapup: false,
+    session_id: session,
+  }
+}
+
+/**
+ * Run one turn whose only assistant message is `final`.
+ *
+ * Returns `{ok: true, result}` or `{ok: false, error}`. The throw is reported
+ * rather than raised so a caller can measure every case in its table instead
+ * of stopping at the first one, which is what the before/after evidence for
+ * this defect needs.
+ */
+fn run_final_message(harness: Harness, final: string) -> dict {
+  return with_llm_script(
+    harness.llm,
+    [{text: final, usage: {completion_tokens: 4}}],
+    { ->
+      const session = "bare-json-final-" + harness.random.uuid()
+      const outcome = try {
+        agent_loop(harness, "Answer the question.", nil, single_turn_options(session))
+      }
+      if is_err(outcome) {
+        return {ok: false, error: to_string(unwrap_err(outcome) ?? "")}
+      }
+      return {ok: true, result: unwrap(outcome)}
+    },
+  )
+}
+
+/** One case's complaint, or "" when the run ended cleanly with `final` visible. */
+fn final_message_complaint(harness: Harness, final: string) -> string {
+  const outcome = run_final_message(harness, final)
+  if !outcome.ok {
+    return "`" + final + "` threw: " + to_string(outcome?.error ?? "")
+  }
+  const result = outcome.result
+  const status = to_string(result?.status ?? "")
+  if status != "done" {
+    return "`" + final + "` ended `" + status + "`, not `done`"
+  }
+  const text = trim(to_string(result?.text ?? ""))
+  if text != final {
+    return "`" + final + "` lost its visible text, got `" + text + "`"
+  }
+  return ""
+}
+
+/** Every complaint the table produced, so no case hides behind an earlier one. */
+fn complaints(harness: Harness, finals: list) -> list {
+  let found = []
+  for final in finals {
+    const complaint = final_message_complaint(harness, final)
+    if complaint != "" {
+      found = found + [complaint]
+    }
+  }
+  return found
+}
+
+/**
+ * The falsifier. Each of these final messages parses as valid non-object JSON,
+ * which is what reached the `dict` parameter. Before the fix every case here
+ * threw the type error above and produced no terminal record.
+ */
+pipeline test_bare_json_scalar_final_message_returns_a_result(harness: Harness, _task: unknown) {
+  const found = complaints(harness, ["true", "false", "42", "null", "[1, 2, 3]"])
+  assert(
+    len(found) == 0,
+    "a bare JSON scalar or array is not an internal verdict envelope: each must end the run `done` with its text intact: "
+      + json_stringify(found),
+  )
+}
+
+/**
+ * Negative controls from the issue. `ok` is not JSON at all and `True` is not
+ * valid JSON either, so neither ever reaches the parse. They pinned the
+ * working path before the fix and must keep passing after it: a change that
+ * made every final message bypass the verdict path would turn the cases above
+ * green without fixing anything, and these are what refuse that.
+ */
+pipeline test_non_json_final_messages_still_complete(harness: Harness, _task: unknown) {
+  const found = complaints(harness, ["ok", "True"])
+  assert(
+    len(found) == 0,
+    "a final message that is not valid JSON never reaches the parse and must end the run `done`: "
+      + json_stringify(found),
+  )
+}
+
+/**
+ * The verdict path itself still strips. A real internal verdict envelope as
+ * the whole final message must not leak into visible text, so the guard the
+ * fix makes reachable cannot be satisfied by accepting everything.
+ */
+pipeline test_internal_verdict_envelope_is_still_stripped(harness: Harness, _task: unknown) {
+  const outcome = run_final_message(
+    harness,
+    json_stringify({verdict: "done", reasoning: "the task is complete"}),
+  )
+  assert(outcome.ok, "a verdict envelope must not throw: " + to_string(outcome?.error ?? ""))
+  assert_eq(to_string(outcome.result?.status ?? ""), "done")
+  assert_eq(
+    trim(to_string(outcome.result?.text ?? "")),
+    "",
+    "an internal verdict envelope must still be stripped from visible text",
+  )
+}

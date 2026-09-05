@@ -600,7 +600,9 @@ mod tests {
         env.set("HARN_LLM_PROVIDER", "openai");
 
         crate::agent_sessions::reset_session_store();
-        let id = crate::agent_sessions::open_or_create(Some("pinned-resolver-session".to_string()));
+        let id = crate::agent_sessions::open_or_create_for_test(Some(
+            "pinned-resolver-session".to_string(),
+        ));
         crate::agent_sessions::set_pinned_model(&id, Some("claude-sonnet-4-6".to_string()))
             .expect("set pinned model");
         let _session_guard = crate::agent_sessions::enter_current_session(id);
@@ -624,8 +626,9 @@ mod tests {
         let _env = crate::test_env::test_env_guard();
 
         crate::agent_sessions::reset_session_store();
-        let id =
-            crate::agent_sessions::open_or_create(Some("explicit-override-session".to_string()));
+        let id = crate::agent_sessions::open_or_create_for_test(Some(
+            "explicit-override-session".to_string(),
+        ));
         crate::agent_sessions::set_pinned_model(&id, Some("claude-sonnet-4-6".to_string()))
             .expect("set pinned model");
         let _session_guard = crate::agent_sessions::enter_current_session(id);

@@ -213,6 +213,23 @@ for the `worktree` profile. `os_hardened` ignores the env var on
 purpose: a profile that means "the OS sandbox is required" cannot be
 silently downgraded by an environment variable.
 
+### Reading a mechanism refusal
+
+A spawn refused because the platform mechanism could not be attached carries
+the cause as typed fields rather than as advice prose. The caught value is a
+`tool_rejected` dict whose `source` is `sandbox_mechanism` and whose
+`sandbox_mechanism` member names the `mechanism` (`linux_landlock`,
+`macos_sandbox_exec`, `windows_app_container`), the `availability`
+(`absent_on_host` or `entry_point_cannot_attach`), the requested `profile`, the
+unsatisfied `requirement` (`profile` or `fallback`), and `selector_honored` —
+false when the requested profile requires the mechanism outright, so no
+`HARN_HANDLER_SANDBOX` value can weaken it.
+
+Harn's own message states the mechanism fact and nothing else. Which control an
+operator actually has depends on the embedding product: an embedder that hardens
+its default has made the fallback selector inert, and may use a Harn ladder name
+for a profile of its own. Read the fields and write the remedy sentence you own.
+
 ### Process sandbox policy
 
 `CapabilityPolicy` also carries a `process_sandbox` section. This policy is

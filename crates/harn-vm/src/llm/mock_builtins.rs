@@ -465,10 +465,29 @@ mod tests {
                 VmValue::String(arcstr::ArcStr::from("V0")),
             ),
         ]));
-        llm_mock_builtin(&[inline], &mut out).expect("inline v0 mock");
+        // harn#7864: v0 used to accept `scope` and drop it, which left the
+        // author believing an entry was bucketed when it was not. The inline
+        // builtin shares the canonical v0 decoder, so it now refuses the key
+        // and names the header that would have given it meaning.
+        let error = llm_mock_builtin(&[inline], &mut out)
+            .expect_err("a v1 field in a headerless entry must not be dropped");
+        let error = error.to_string();
+        assert!(error.contains("scope"), "{error}");
+        assert!(error.contains("schemaVersion"), "{error}");
 
-        // v0 ignores the newer scope annotation and retains its historical
-        // default-queue behavior.
+        // Without it, the historical default-queue behavior is unchanged: a
+        // v0 entry serves every scope from the one legacy bucket.
+        let inline = VmValue::dict(std::collections::BTreeMap::from([
+            (
+                "match".to_string(),
+                VmValue::String(arcstr::ArcStr::from("*")),
+            ),
+            (
+                "text".to_string(),
+                VmValue::String(arcstr::ArcStr::from("V0")),
+            ),
+        ]));
+        llm_mock_builtin(&[inline], &mut out).expect("inline v0 mock");
         assert_eq!(
             mock::mock_llm_response(&request(Some("completion.judge")))
                 .expect("v0 fallback")

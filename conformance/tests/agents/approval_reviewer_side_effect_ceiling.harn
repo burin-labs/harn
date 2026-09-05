@@ -1,0 +1,118 @@
+import { agent_command_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+// The reviewer seam against a SIDE-EFFECT CEILING refusal.
+//
+// `approval_reviewer_loop.harn` proves the seam when an approval POLICY asks.
+// That is not the shape a product loop sends. A product loop also installs a
+// capability policy, and a capability policy carries a side-effect ceiling.
+// The ceiling refusal is handled on its own branch of tool dispatch, and that
+// branch used to go straight to the host bridge. With no host bridge the call
+// was refused, and the reviewer sitting right there was never asked -- present
+// in the options, unreachable at runtime, and silent about it (harn#7982).
+//
+// The pair is the proof, and both arms carry the ceiling. Without it the
+// positive arm would pass on the approval-policy path that already worked and
+// would say nothing about the branch this test exists for.
+fn probe_tools(harness: Harness, root: string) {
+  return agent_command_tools(
+    harness,
+    nil,
+    {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]},
+  )
+}
+
+fn probe_script() -> list {
+  return [
+    {
+      text: "",
+      tool_calls: [
+        {
+          id: "run1",
+          name: "run_command",
+          // 42 is NOT in the argv on purpose. A marker that appears in the
+          // command text shows up in the echoed call whether or not the tool
+          // ever ran, which is a false positive rather than evidence.
+          arguments: {argv: ["sh", "-c", "expr 6 + 36"]},
+        },
+      ],
+    },
+    llm_text("Saw the command result."),
+  ]
+}
+
+/** A ceiling below the level `run_command` needs, so dispatch must refuse. */
+fn read_only_ceiling() -> dict {
+  return {side_effect_level: "read_only"}
+}
+
+pipeline main(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-ceiling-reviewer-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(root, true)
+  // CONTROL: the ceiling with no reviewer. The command must NOT run, or the
+  // arm below proves nothing about the reviewer.
+  with_llm_script(
+    harness.llm,
+    probe_script(),
+    { ->
+      const _ = agent_loop(
+        harness,
+        "Run the command and report back.",
+        nil,
+        {
+          provider: "mock",
+          tools: probe_tools(harness, root),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          policy: read_only_ceiling(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
+      harness.stdio.println("control_output_absent=" + to_string(!contains(second_turn, "42")))
+    },
+  )
+  // The same ceiling with a granting reviewer. It must be CONSULTED, and the
+  // command must run. Counting the consultation separately matters: a reviewer
+  // that is never asked and a reviewer that declined produce the same refusal,
+  // so the outcome alone cannot tell them apart.
+  let consulted = 0
+  with_llm_script(
+    harness.llm,
+    probe_script(),
+    { ->
+      const _ = agent_loop(
+        harness,
+        "Run the command and report back.",
+        nil,
+        {
+          provider: "mock",
+          tools: probe_tools(harness, root),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          policy: read_only_ceiling(),
+          approval_reviewer: { _ ->
+            consulted = consulted + 1
+            {
+              approved: true,
+              reviewer_answered: true,
+              rationale: "the stated task is to run this command",
+            }
+          },
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const second_turn = json_stringify(calls[1].messages)
+      harness.stdio.println("reviewer_consulted=" + to_string(consulted))
+      harness.stdio.println("reviewed_output_present=" + to_string(contains(second_turn, "42")))
+    },
+  )
+}

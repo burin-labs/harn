@@ -94,6 +94,22 @@ public struct HarnProviderDataControls: Codable, Sendable, Equatable {
     }
 }
 
+public struct HarnModelDataControls: Codable, Sendable, Equatable {
+    public let trainingDefault: String
+    public let retentionDefault: String?
+    public let checkedOn: String
+    public let sources: [String]
+    public let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case trainingDefault = "training_default"
+        case retentionDefault = "retention_default"
+        case checkedOn = "checked_on"
+        case sources
+        case note
+    }
+}
+
 public struct HarnProviderDataControl: Codable, Sendable, Equatable {
     public let location: String
     public let name: String
@@ -271,6 +287,7 @@ public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
 public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
+    public let dataControls: HarnModelDataControls?
     public let displayName: String
     public let blurb: String?
     public let provider: String
@@ -330,6 +347,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case dataControls = "data_controls"
         case displayName = "display_name"
         case blurb
         case provider
@@ -380,6 +398,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        dataControls = try container.decodeIfPresent(HarnModelDataControls.self, forKey: .dataControls)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name
         blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
         provider = try container.decode(String.self, forKey: .provider)

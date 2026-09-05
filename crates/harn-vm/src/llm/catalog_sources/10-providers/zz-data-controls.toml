@@ -297,3 +297,25 @@ training_default = "does_not_train"
 checked_on = "2026-08-30"
 sources = ["https://platform.openai.com/docs/api-reference/chat"]
 note = "Generic user-configured OpenAI-compatible endpoint. The wire contract it speaks documents no retention control beyond store, which a local server is not required to honor."
+
+# Meta sells the training posture per MODEL ID, not per request and not on the
+# account: `muse-spark-1.3` is priced at list and not trained on, while
+# `muse-spark-1.3-contributor` is ~12x cheaper on input and ~21x on output in
+# exchange for permission to train on the traffic.
+#
+# So the provider-level row records the posture that applies when a caller
+# names a standard route, and each `-contributor` row overrides it in
+# `[models.<id>.data_controls]`. `control_scope` is `none` because that is
+# literally true of a request: there is no header or body field to set. It is
+# NOT a claim that no control exists — the control is the model id, and the
+# model rows carry it.
+[providers.meta.data_controls]
+control_scope = "none"
+retention_default = "unspecified"
+training_default = "does_not_train"
+checked_on = "2026-09-02"
+sources = [
+  "https://developer.meta.com/ai/products/meta-model-api/",
+  "https://developer.meta.com/ai/models/muse-spark/",
+]
+note = "Standard routes are documented as not used to improve Meta's products. The separately priced -contributor routes ARE, and each declares that on its own model row."

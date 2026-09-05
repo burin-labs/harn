@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm_config::{
     DataControlDef, DataControlDialect, DataControlEffect, DataControlLocation, DataControlScope,
-    DataControlsDef, DataPosture,
+    DataControlsDef, DataPosture, TrainingDefault,
 };
 
 use super::dialect::StreamProtocol;
@@ -85,10 +85,25 @@ pub struct AppliedDataControl {
 /// trial, and a transcript all read the same fact.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DataControlsReceipt {
-    /// `"default"` or `"strictest_available"` — what the caller asked for.
+    /// The posture that actually applied to this request: the caller's own
+    /// `data_controls` when they named one, otherwise the catalog's resolved
+    /// `[data_controls_policy] default_posture`. It is the effective value,
+    /// never a hard-coded `"default"`, so a reader can tell a deployment that
+    /// ships the strict posture from one that never asked.
     pub requested_posture: String,
     pub outcome: DataControlsOutcome,
     pub provider: String,
+    /// The route this receipt describes. A provider can sell one training
+    /// posture on one model id and the opposite on another, so a receipt that
+    /// named only the provider could not be read as a claim about this
+    /// traffic.
+    pub model: String,
+    /// Whether this route trains on API traffic: the model row's own
+    /// declaration when it carries one, otherwise the provider's. `None`
+    /// means neither level has been researched, which is a weaker claim than
+    /// `Some(TrainingDefault::Unspecified)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_default: Option<TrainingDefault>,
     /// The registry's `control_scope` for this provider, absent when the
     /// provider is unresearched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,8 +112,10 @@ pub struct DataControlsReceipt {
     /// `applied`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applied: Vec<AppliedDataControl>,
-    /// The registry's one-line note for this provider, e.g. that the strict
-    /// posture exists but only by contract.
+    /// The registry's one-line note for this route: the model row's own note
+    /// when the row overrides its provider, otherwise the provider's. A
+    /// discounted training route under a provider that otherwise does not
+    /// train would read as safe if this reported the provider's line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -134,6 +151,56 @@ impl DataControlsPlan {
     }
 }
 
+/// Why a route is refused under the strict posture, as a sentence a host can
+/// show a person without rewording a privacy claim.
+///
+/// Applying "every declared per-request control" is not the same as achieving
+/// the strict posture. On a route the provider trains on by default and
+/// exposes no control for, there are zero controls to apply, so the request
+/// would go out unchanged, the receipt would read `no_control_available`, and
+/// the traffic would be trained on anyway. That is the absence-reads-as-
+/// success failure this whole module exists to prevent, so the strict posture
+/// refuses the call instead of quietly proceeding.
+///
+/// The refusal is deliberately narrow. It fires only when the effective
+/// declaration says `trains` outright. `unspecified` and an unresearched
+/// provider do not refuse, because "nobody has checked" must not silently
+/// acquire the force of "we checked and it trains"; those keep reporting
+/// themselves through the receipt.
+pub(crate) fn training_refusal(
+    provider: &str,
+    model: &str,
+    posture: DataPosture,
+) -> Option<String> {
+    if posture != DataPosture::StrictestAvailable {
+        return None;
+    }
+    if crate::llm_config::effective_training_default(provider, model)
+        != Some(crate::llm_config::TrainingDefault::Trains)
+    {
+        return None;
+    }
+    let sources = crate::llm_config::model_data_controls(model)
+        .map(|controls| controls.sources)
+        .or_else(|| {
+            crate::llm_config::provider_config(provider)
+                .and_then(|definition| definition.data_controls)
+                .map(|controls| controls.sources)
+        })
+        .unwrap_or_default();
+    let citation = sources
+        .first()
+        .map(|url| format!(" See {url}."))
+        .unwrap_or_default();
+    Some(format!(
+        "data_controls: refusing to call {model} on {provider}. The catalog records that this \
+         route trains on API traffic, and it publishes no per-request control that would stop \
+         it, so the strictest_available posture cannot be honored here. Choose a route that \
+         does not train, or ask for the default posture to proceed knowing the traffic is \
+         trained on.{citation}"
+    ))
+}
+
 /// Resolve the caller's posture against the registry into the writes this
 /// request owes and the receipt describing them.
 ///
@@ -141,6 +208,7 @@ impl DataControlsPlan {
 /// byte-for-byte what the provider adapter built.
 pub(crate) fn resolve(
     provider: &str,
+    model: &str,
     dialect: DataControlDialect,
     posture: DataPosture,
 ) -> DataControlsPlan {
@@ -152,6 +220,14 @@ pub(crate) fn resolve(
 
     let declaration = crate::llm_config::provider_config(provider)
         .and_then(|definition| definition.data_controls);
+    // The route's own declaration wins over its provider's, for both the
+    // reported posture and the note a host may surface verbatim.
+    let route_controls = crate::llm_config::model_data_controls(model);
+    let training_default = crate::llm_config::effective_training_default(provider, model);
+    let route_note = |provider_note: Option<String>| match &route_controls {
+        Some(controls) => controls.note.clone(),
+        None => provider_note,
+    };
 
     if posture == DataPosture::Default {
         return DataControlsPlan {
@@ -161,9 +237,11 @@ pub(crate) fn resolve(
                 requested_posture,
                 outcome: DataControlsOutcome::NotRequested,
                 provider: provider.to_string(),
+                model: model.to_string(),
+                training_default,
                 control_scope: declaration.as_ref().map(|entry| entry.control_scope),
                 applied: Vec::new(),
-                note: declaration.and_then(|entry| entry.note),
+                note: route_note(declaration.and_then(|entry| entry.note)),
             },
         };
     }
@@ -176,9 +254,11 @@ pub(crate) fn resolve(
                 requested_posture,
                 outcome: DataControlsOutcome::ProviderUnresearched,
                 provider: provider.to_string(),
+                model: model.to_string(),
+                training_default,
                 control_scope: None,
                 applied: Vec::new(),
-                note: None,
+                note: route_note(None),
             },
         };
     };
@@ -216,9 +296,11 @@ pub(crate) fn resolve(
             requested_posture,
             outcome,
             provider: provider.to_string(),
+            model: model.to_string(),
+            training_default,
             control_scope: Some(declaration.control_scope),
             applied,
-            note: declaration.note,
+            note: route_note(declaration.note),
         },
     }
 }
