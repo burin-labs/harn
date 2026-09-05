@@ -4,7 +4,7 @@ use super::*;
 impl SessionImporter for SqliteSessionStore {
     async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
         request.validate()?;
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         if let Some(existing) = read_import(&tx, &request.source_id)? {
             if existing.source_digest != request.source_digest {
@@ -64,7 +64,7 @@ impl SessionStore for SqliteSessionStore {
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
         let meta = crate::memory_helpers::meta_for_create(request);
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         insert_session(&tx, &meta, 1)?;
         tx.commit().map_err(map_sql)?;
@@ -78,7 +78,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn update(&self, session_id: &str, request: UpdateSession) -> StoreResult<SessionMeta> {
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let (updated_at_ms, updated_at) = now_ms_and_rfc3339();
         // `BEGIN IMMEDIATE` already owns the writer lock, so reading the
@@ -261,7 +261,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let stored = append_in_tx(&tx, &self.hooks, session_id, event)?;
         tx.commit().map_err(map_sql)?;
@@ -314,7 +314,7 @@ impl SessionStore for SqliteSessionStore {
         at_event_id: EventId,
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let (parent_meta, _) = read_session_meta(&tx, session_id)?;
         let parent_events = load_all_events(&tx, session_id)?;
@@ -379,7 +379,7 @@ impl SessionStore for SqliteSessionStore {
         session_id: &str,
         at_event_id: EventId,
     ) -> StoreResult<TruncateResult> {
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         let (mut meta, _) = read_session_meta(&tx, session_id)?;
         let exists: bool = tx
@@ -470,7 +470,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn snapshot(&self, session_id: &str) -> StoreResult<Snapshot> {
-        let conn = self.lock();
+        let conn = self.lock_for_mutation()?;
         let (meta, _) = read_session_meta(&conn, session_id)?;
         let mut events = load_all_events(&conn, session_id)?;
         redact_stored_events(&self.hooks, &mut events)?;
@@ -517,7 +517,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         // Read the pre-receipt chain root inside the transaction so the
         // root we sign is exactly the chain the receipt finalises, with
@@ -568,7 +568,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn soft_delete(&self, session_id: &str) -> StoreResult<SessionMeta> {
-        let conn = self.lock();
+        let conn = self.lock_for_mutation()?;
         let (mut meta, _) = read_session_meta(&conn, session_id)?;
         match meta.status {
             SessionStatus::HardDeleted => return Err(StoreError::NotFound(session_id.to_string())),
@@ -595,7 +595,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn hard_delete(&self, session_id: &str) -> StoreResult<()> {
-        let mut conn = self.lock();
+        let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
         tx.execute(
             "DELETE FROM session_events_fts WHERE session_id = ?1",
@@ -877,6 +877,15 @@ impl SessionStore for SqliteSessionStore {
                 .then(|| "semantic model unavailable; FTS-only fallback active".into()),
             hits,
         })
+    }
+
+    async fn sweep_retention(
+        &self,
+        policy: &RetentionPolicy,
+        now_ms: i64,
+    ) -> StoreResult<SweepReport> {
+        self.require_maintenance("sweeping retention")?;
+        crate::store::sweep_retention_unchecked(self, policy, now_ms).await
     }
 }
 

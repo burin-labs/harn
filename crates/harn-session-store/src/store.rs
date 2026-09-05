@@ -327,6 +327,10 @@ pub enum StoreContention {
     DatabaseBusy,
     /// A shared-cache SQLite table lock blocks the operation.
     DatabaseLocked,
+    /// Exclusive session-store maintenance currently excludes ordinary writes.
+    MaintenanceActive,
+    /// A live session writer prevents exclusive maintenance from starting.
+    ActiveWriter,
 }
 
 impl std::fmt::Display for StoreContention {
@@ -334,6 +338,8 @@ impl std::fmt::Display for StoreContention {
         match self {
             Self::DatabaseBusy => f.write_str("database_busy"),
             Self::DatabaseLocked => f.write_str("database_locked"),
+            Self::MaintenanceActive => f.write_str("maintenance_active"),
+            Self::ActiveWriter => f.write_str("active_writer"),
         }
     }
 }
@@ -352,6 +358,11 @@ pub enum StoreError {
         kind: StoreContention,
         /// Backend diagnostic retained for operators.
         message: String,
+    },
+    /// A file-backed operation requires an exclusively opened maintenance store.
+    MaintenanceRequired {
+        /// Stable operation name whose mutation scope requires exclusivity.
+        operation: &'static str,
     },
     /// The persistent store was written by a newer incompatible schema owner.
     SchemaIncompatible {
@@ -376,6 +387,10 @@ impl std::fmt::Display for StoreError {
             Self::Contention { kind, message } => {
                 write!(f, "retryable backend contention ({kind}): {message}")
             }
+            Self::MaintenanceRequired { operation } => write!(
+                f,
+                "maintenance ownership required: reopen the session store for maintenance before {operation}"
+            ),
             Self::SchemaIncompatible {
                 schema,
                 stored,
@@ -495,62 +510,70 @@ pub trait SessionStore: Send + Sync {
         policy: &RetentionPolicy,
         now_ms: i64,
     ) -> StoreResult<SweepReport> {
-        use tracing::Instrument as _;
-        let span = tracing::info_span!(
-            "harn.session.sweep_retention",
-            harn.session.sweep.archive_sink_configured = self.hooks().archive_sink.is_some(),
-            harn.session.sweep.archived = tracing::field::Empty,
-            harn.session.sweep.soft_deleted = tracing::field::Empty,
-            harn.session.sweep.hard_deleted = tracing::field::Empty,
-        );
-        let span_for_record = span.clone();
-        let sink = self.hooks().archive_sink.clone();
-        let result = async move {
-            let mut report = SweepReport::default();
-            let sessions = self.list(ListFilter::default()).await?;
-            for session in sessions {
-                if policy.should_hard_delete(&session, now_ms) {
-                    if let Some(sink) = sink.as_ref() {
-                        let tombstone = Tombstone {
-                            session_id: session.id.clone(),
-                            tenant_id: session.tenant_id.clone(),
-                            deleted_at_ms: now_ms,
-                            deleted_at: super::event::ms_to_rfc3339(now_ms),
-                            final_chain_root_hash: session.chain_root_hash.clone(),
-                            final_event_id: session.last_event_id,
-                        };
-                        sink.tombstone(&tombstone).await?;
-                        report.tombstoned += 1;
-                    }
-                    self.hard_delete(&session.id).await?;
-                    report.hard_deleted += 1;
-                } else if policy.should_soft_delete(&session, now_ms) {
-                    if policy.should_archive(&session, now_ms) {
-                        if let Some(sink) = sink.as_ref() {
-                            let events = read_all_events(self, &session.id).await?;
-                            sink.archive(&session, &events).await?;
-                            report.archived += 1;
-                        }
-                    }
-                    self.soft_delete(&session.id).await?;
-                    report.soft_deleted += 1;
-                }
-            }
-            Ok::<_, StoreError>(report)
-        }
-        .instrument(span)
-        .await?;
-        span_for_record.record("harn.session.sweep.archived", result.archived as i64);
-        span_for_record.record(
-            "harn.session.sweep.soft_deleted",
-            result.soft_deleted as i64,
-        );
-        span_for_record.record(
-            "harn.session.sweep.hard_deleted",
-            result.hard_deleted as i64,
-        );
-        Ok(result)
+        sweep_retention_unchecked(self, policy, now_ms).await
     }
+}
+
+pub(crate) async fn sweep_retention_unchecked<S: SessionStore + ?Sized>(
+    store: &S,
+    policy: &RetentionPolicy,
+    now_ms: i64,
+) -> StoreResult<SweepReport> {
+    use tracing::Instrument as _;
+    let span = tracing::info_span!(
+        "harn.session.sweep_retention",
+        harn.session.sweep.archive_sink_configured = store.hooks().archive_sink.is_some(),
+        harn.session.sweep.archived = tracing::field::Empty,
+        harn.session.sweep.soft_deleted = tracing::field::Empty,
+        harn.session.sweep.hard_deleted = tracing::field::Empty,
+    );
+    let span_for_record = span.clone();
+    let sink = store.hooks().archive_sink.clone();
+    let result = async move {
+        let mut report = SweepReport::default();
+        let sessions = store.list(ListFilter::default()).await?;
+        for session in sessions {
+            if policy.should_hard_delete(&session, now_ms) {
+                if let Some(sink) = sink.as_ref() {
+                    let tombstone = Tombstone {
+                        session_id: session.id.clone(),
+                        tenant_id: session.tenant_id.clone(),
+                        deleted_at_ms: now_ms,
+                        deleted_at: super::event::ms_to_rfc3339(now_ms),
+                        final_chain_root_hash: session.chain_root_hash.clone(),
+                        final_event_id: session.last_event_id,
+                    };
+                    sink.tombstone(&tombstone).await?;
+                    report.tombstoned += 1;
+                }
+                store.hard_delete(&session.id).await?;
+                report.hard_deleted += 1;
+            } else if policy.should_soft_delete(&session, now_ms) {
+                if policy.should_archive(&session, now_ms) {
+                    if let Some(sink) = sink.as_ref() {
+                        let events = read_all_events(store, &session.id).await?;
+                        sink.archive(&session, &events).await?;
+                        report.archived += 1;
+                    }
+                }
+                store.soft_delete(&session.id).await?;
+                report.soft_deleted += 1;
+            }
+        }
+        Ok::<_, StoreError>(report)
+    }
+    .instrument(span)
+    .await?;
+    span_for_record.record("harn.session.sweep.archived", result.archived as i64);
+    span_for_record.record(
+        "harn.session.sweep.soft_deleted",
+        result.soft_deleted as i64,
+    );
+    span_for_record.record(
+        "harn.session.sweep.hard_deleted",
+        result.hard_deleted as i64,
+    );
+    Ok(result)
 }
 
 /// Atomic, idempotent ingestion for stores that accept external session data.

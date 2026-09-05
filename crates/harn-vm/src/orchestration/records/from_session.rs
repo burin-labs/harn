@@ -489,7 +489,7 @@ impl RunWriterObservation {
         let Some(store_dir) = store_dir else {
             return Self::NotObserved;
         };
-        let path = crate::agent_session_journal::run_writer_lease_path(store_dir, session_id);
+        let path = harn_session_store::session_write_lease_path(store_dir, session_id);
         let Ok(file) = std::fs::File::open(path) else {
             return Self::NotObserved;
         };

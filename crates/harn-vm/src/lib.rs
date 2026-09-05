@@ -160,7 +160,7 @@ pub mod stdlib;
 pub use stdlib::session_change::{
     subscribe as subscribe_session_changes, SessionChangeSubscription,
 };
-pub use stdlib::session_store::open_canonical_store;
+pub use stdlib::session_store::{open_canonical_store, open_canonical_store_for_maintenance};
 pub mod stdlib_modules;
 pub mod step_runtime;
 pub mod store;

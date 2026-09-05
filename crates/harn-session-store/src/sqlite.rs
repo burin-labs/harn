@@ -8,8 +8,9 @@
 //! follows the same shape so consumers can swap by config.
 
 use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -25,9 +26,11 @@ use uuid::Uuid;
 use super::event::{
     now_ms_and_rfc3339, AppendEvent, EventId, EventSignature, SessionEventKind, StoredEvent,
 };
+use super::lease::{SessionLeaseError, SessionMaintenanceLease, SessionMutationLease};
 use super::redaction::{
     prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
 };
+use super::retention::RetentionPolicy;
 use super::search::{
     combined_score, fts_literal_query, ranks, redacted_search_document,
     redacted_search_document_parts, snippet, vector_blob, vector_from_blob, SearchHit, SearchMode,
@@ -41,7 +44,7 @@ use super::store::{
     CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ListOrder,
     ListSortKey, ReadRange, SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore,
     SessionType, Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult,
-    TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
+    SweepReport, TruncateResult, UpdateSession, VerifyReport, MAX_READ_BATCH,
 };
 
 // v5 adds `sessions.title_pinned`. Adding a column has to move this number:
@@ -58,7 +61,39 @@ pub struct SqliteSessionStore {
     conn: Arc<Mutex<Connection>>,
     hooks: Arc<StoreHooks>,
     path: PathBuf,
+    mutation_admission: MutationAdmission,
     _snapshot: Option<Arc<tempfile::TempDir>>,
+}
+
+#[derive(Clone, Debug)]
+enum MutationAdmission {
+    InMemory,
+    ReadOnly,
+    Shared {
+        store_dir: PathBuf,
+    },
+    Maintenance {
+        _lease: Arc<SessionMaintenanceLease>,
+    },
+}
+
+struct MutationConnection<'a> {
+    _lease: Option<SessionMutationLease>,
+    connection: MutexGuard<'a, Connection>,
+}
+
+impl Deref for MutationConnection<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+impl DerefMut for MutationConnection<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.connection
+    }
 }
 
 impl SqliteSessionStore {
@@ -74,7 +109,12 @@ impl SqliteSessionStore {
     pub fn open_in_memory_with_hooks(hooks: StoreHooks) -> StoreResult<Self> {
         let conn =
             Connection::open_in_memory().map_err(|error| StoreError::Backend(error.to_string()))?;
-        Self::initialize(conn, PathBuf::from(":memory:"), hooks)
+        Self::initialize(
+            conn,
+            PathBuf::from(":memory:"),
+            hooks,
+            MutationAdmission::InMemory,
+        )
     }
 
     /// Open an initialized file-backed store without creating or migrating it.
@@ -106,12 +146,16 @@ impl SqliteSessionStore {
             conn: Arc::new(Mutex::new(conn)),
             hooks: Arc::new(hooks),
             path,
+            mutation_admission: MutationAdmission::ReadOnly,
             _snapshot: Some(Arc::new(snapshot)),
         })
     }
 
     pub fn open_with_hooks(path: impl AsRef<Path>, hooks: StoreHooks) -> StoreResult<Self> {
         let path = path.as_ref().to_path_buf();
+        let store_dir = store_directory(&path);
+        let _initialization_lease = SessionMutationLease::try_acquire(&store_dir)
+            .map_err(|error| map_lease(error, StoreContention::MaintenanceActive))?;
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
@@ -120,10 +164,45 @@ impl SqliteSessionStore {
         }
         let conn =
             Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
-        Self::initialize(conn, path, hooks)
+        Self::initialize(conn, path, hooks, MutationAdmission::Shared { store_dir })
     }
 
-    fn initialize(mut conn: Connection, path: PathBuf, hooks: StoreHooks) -> StoreResult<Self> {
+    /// Open a file-backed store while excluding every participating writer.
+    ///
+    /// The returned store holds the exclusive lease for its full lifetime and
+    /// performs its own mutations directly under that ownership. Ordinary
+    /// stores fail with typed contention until every maintenance clone drops.
+    pub fn open_for_maintenance(path: impl AsRef<Path>) -> StoreResult<Self> {
+        Self::open_for_maintenance_with_hooks(path, StoreHooks::default())
+    }
+
+    /// Open a file-backed store for exclusive maintenance with custom hooks.
+    pub fn open_for_maintenance_with_hooks(
+        path: impl AsRef<Path>,
+        hooks: StoreHooks,
+    ) -> StoreResult<Self> {
+        let path = path.as_ref().to_path_buf();
+        let store_dir = store_directory(&path);
+        let lease = Arc::new(
+            SessionMaintenanceLease::try_acquire(&store_dir)
+                .map_err(|error| map_lease(error, StoreContention::ActiveWriter))?,
+        );
+        let conn =
+            Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
+        Self::initialize(
+            conn,
+            path,
+            hooks,
+            MutationAdmission::Maintenance { _lease: lease },
+        )
+    }
+
+    fn initialize(
+        mut conn: Connection,
+        path: PathBuf,
+        hooks: StoreHooks,
+        mutation_admission: MutationAdmission,
+    ) -> StoreResult<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let initialization = if path == Path::new(":memory:") {
@@ -147,6 +226,7 @@ impl SqliteSessionStore {
             conn: Arc::new(Mutex::new(conn)),
             hooks: Arc::new(hooks),
             path,
+            mutation_admission,
             _snapshot: None,
         })
     }
@@ -157,6 +237,51 @@ impl SqliteSessionStore {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The single admission boundary for every operation that can change a
+    /// file-backed store. The lease is taken before the connection mutex and
+    /// held until the returned guard drops.
+    fn lock_for_mutation(&self) -> StoreResult<MutationConnection<'_>> {
+        let lease = match &self.mutation_admission {
+            MutationAdmission::InMemory
+            | MutationAdmission::ReadOnly
+            | MutationAdmission::Maintenance { .. } => None,
+            MutationAdmission::Shared { store_dir } => Some(
+                SessionMutationLease::try_acquire(store_dir)
+                    .map_err(|error| map_lease(error, StoreContention::MaintenanceActive))?,
+            ),
+        };
+        Ok(MutationConnection {
+            _lease: lease,
+            connection: self.lock(),
+        })
+    }
+
+    fn require_maintenance(&self, operation: &'static str) -> StoreResult<()> {
+        match &self.mutation_admission {
+            MutationAdmission::InMemory | MutationAdmission::Maintenance { .. } => Ok(()),
+            MutationAdmission::ReadOnly | MutationAdmission::Shared { .. } => {
+                Err(StoreError::MaintenanceRequired { operation })
+            }
+        }
+    }
+}
+
+fn store_directory(path: &Path) -> PathBuf {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
+fn map_lease(error: SessionLeaseError, kind: StoreContention) -> StoreError {
+    match error {
+        error @ SessionLeaseError::Contended { .. } => StoreError::Contention {
+            kind,
+            message: error.to_string(),
+        },
+        error => StoreError::Backend(error.to_string()),
     }
 }
 

@@ -635,7 +635,7 @@ async fn soft_delete_marks_session_and_hard_delete_removes_it() {
 
 #[tokio::test]
 async fn sweep_retention_hard_deletes_after_grace_window() {
-    run_with_hooks(StoreHooks::default(), |store| async move {
+    run_retention_with_hooks(StoreHooks::default(), |store| async move {
         let meta = store
             .create(CreateSession::default())
             .await
