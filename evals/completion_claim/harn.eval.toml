@@ -1,0 +1,88 @@
+version = 1
+id = "completion-claim-exit-v1"
+name = "Explicit completion claim exit behavior"
+description = "Paired baseline and treatment cells for the typed task_complete exit affordance."
+trials = 5
+executor = { argv = ["harn", "run", "executor.harn"], timeout_seconds = 180 }
+
+[metadata]
+provider = "mock"
+model = "mock"
+max_tokens = 2048
+ledger_namespace = "completion-claim-exit-v1"
+
+[split]
+meter-tune = ["tune-config-baseline", "tune-config-treatment", "tune-release-baseline", "tune-release-treatment"]
+meter-holdout = ["holdout-alert-baseline", "holdout-alert-treatment", "holdout-policy-baseline", "holdout-policy-treatment"]
+
+[[cases]]
+id = "tune-config-baseline"
+kind = "live-verify"
+task = "Use inspect_status to read the configuration result. Report the exact evidence token and whether the configuration is ready."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-config-baseline"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/tune-config-baseline.json"]
+metadata = { pair = "tune-config", arm = "baseline", evidence = "config-ready-marker-41" }
+
+[[cases]]
+id = "tune-config-treatment"
+kind = "live-verify"
+task = "Use inspect_status to read the configuration result. Report the exact evidence token and whether the configuration is ready."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-config-treatment"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/tune-config-treatment.json"]
+metadata = { pair = "tune-config", arm = "treatment", evidence = "config-ready-marker-41" }
+
+[[cases]]
+id = "tune-release-baseline"
+kind = "live-verify"
+task = "Use inspect_status to read the release result. Report the exact evidence token and whether the release is ready."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-release-baseline"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/tune-release-baseline.json"]
+metadata = { pair = "tune-release", arm = "baseline", evidence = "release-ready-marker-73" }
+
+[[cases]]
+id = "tune-release-treatment"
+kind = "live-verify"
+task = "Use inspect_status to read the release result. Report the exact evidence token and whether the release is ready."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "tune-release-treatment"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/tune-release-treatment.json"]
+metadata = { pair = "tune-release", arm = "treatment", evidence = "release-ready-marker-73" }
+
+[[cases]]
+id = "holdout-alert-baseline"
+kind = "live-verify"
+task = "Use inspect_status to read the alert result. Report the exact evidence token and whether operator action is required."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-alert-baseline"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/holdout-alert-baseline.json"]
+metadata = { pair = "holdout-alert", arm = "baseline", evidence = "alert-clear-marker-29" }
+
+[[cases]]
+id = "holdout-alert-treatment"
+kind = "live-verify"
+task = "Use inspect_status to read the alert result. Report the exact evidence token and whether operator action is required."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-alert-treatment"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/holdout-alert-treatment.json"]
+metadata = { pair = "holdout-alert", arm = "treatment", evidence = "alert-clear-marker-29" }
+
+[[cases]]
+id = "holdout-policy-baseline"
+kind = "live-verify"
+task = "Use inspect_status to read the policy result. Report the exact evidence token and whether the policy check passed."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-policy-baseline"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/holdout-policy-baseline.json"]
+metadata = { pair = "holdout-policy", arm = "baseline", evidence = "policy-pass-marker-88" }
+
+[[cases]]
+id = "holdout-policy-treatment"
+kind = "live-verify"
+task = "Use inspect_status to read the policy result. Report the exact evidence token and whether the policy check passed."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "holdout-policy-treatment"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/holdout-policy-treatment.json"]
+metadata = { pair = "holdout-policy", arm = "treatment", evidence = "policy-pass-marker-88" }

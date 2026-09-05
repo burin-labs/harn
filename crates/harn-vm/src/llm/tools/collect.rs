@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use super::components::ComponentRegistry;
-use super::json_schema::json_schema_to_type_expr;
-use super::params::{extract_examples, extract_params_from_vm_dict, ToolParamSchema};
+use super::params::{
+    extract_params_from_json_schema, extract_params_from_vm_dict, ToolParamSchema,
+};
 use crate::value::VmValue;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -100,63 +101,6 @@ fn collect_vm_tool_schemas(
         .collect()
 }
 
-fn schema_description_from_json(value: &serde_json::Value) -> String {
-    value
-        .as_str()
-        .map(ToString::to_string)
-        .or_else(|| {
-            value
-                .get("description")
-                .and_then(|inner| inner.as_str())
-                .map(ToString::to_string)
-        })
-        .unwrap_or_default()
-}
-
-fn extract_params_from_provider_input_schema(
-    provider_input_schema: &serde_json::Value,
-    root: &serde_json::Value,
-    registry: &mut ComponentRegistry,
-) -> Vec<ToolParamSchema> {
-    let required_set: BTreeSet<String> = provider_input_schema
-        .get("required")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|value| value.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    provider_input_schema
-        .get("properties")
-        .and_then(|value| value.as_object())
-        .map(|properties| {
-            let mut params = properties
-                .iter()
-                .map(|(name, value)| {
-                    let examples = value.as_object().map(extract_examples).unwrap_or_default();
-                    ToolParamSchema {
-                        name: name.clone(),
-                        ty: json_schema_to_type_expr(value, root, registry),
-                        description: schema_description_from_json(value),
-                        required: required_set.contains(name),
-                        default: value.get("default").cloned(),
-                        examples,
-                    }
-                })
-                .collect::<Vec<_>>();
-            // Required first; alphabetical within groups for determinism.
-            params.sort_by(|a, b| {
-                (!a.required)
-                    .cmp(&!b.required)
-                    .then_with(|| a.name.cmp(&b.name))
-            });
-            params
-        })
-        .unwrap_or_default()
-}
-
 fn collect_provider_declared_tool_schemas(
     provider_tools: Option<&[serde_json::Value]>,
     registry: &mut ComponentRegistry,
@@ -187,11 +131,7 @@ fn collect_provider_declared_tool_schemas(
             Some(ToolSchema {
                 name: name.to_string(),
                 description,
-                params: extract_params_from_provider_input_schema(
-                    &provider_input_schema,
-                    &root,
-                    registry,
-                ),
+                params: extract_params_from_json_schema(&provider_input_schema, &root, registry),
                 summary_only: false,
             })
         })

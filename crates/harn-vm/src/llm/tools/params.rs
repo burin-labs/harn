@@ -2,6 +2,68 @@ use super::components::ComponentRegistry;
 use super::json_schema::json_schema_to_type_expr;
 use super::type_expr::TypeExpr;
 use crate::value::VmValue;
+use std::collections::BTreeSet;
+
+fn schema_description_from_json(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| {
+            value
+                .get("description")
+                .and_then(|inner| inner.as_str())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_default()
+}
+
+/// Project one complete object-root JSON Schema onto the parameter view used
+/// by validation, observability, prompt rendering, and replay.
+///
+/// Provider-declared schemas and VM registry `inputSchema` entries must share
+/// this owner. Projecting only the provider copy lets the wire carry required
+/// fields while Harn's validator and `tool_schemas` receipt report a nullary
+/// tool, so malformed calls pass the pre-dispatch boundary and the durable
+/// transcript cannot explain what the model was served.
+pub(super) fn extract_params_from_json_schema(
+    input_schema: &serde_json::Value,
+    root: &serde_json::Value,
+    registry: &mut ComponentRegistry,
+) -> Vec<ToolParamSchema> {
+    let required_set: BTreeSet<String> = input_schema
+        .get("required")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut params = input_schema
+        .get("properties")
+        .and_then(|value| value.as_object())
+        .map(|properties| {
+            properties
+                .iter()
+                .map(|(name, value)| ToolParamSchema {
+                    name: name.clone(),
+                    ty: json_schema_to_type_expr(value, root, registry),
+                    description: schema_description_from_json(value),
+                    required: required_set.contains(name),
+                    default: value.get("default").cloned(),
+                    examples: value.as_object().map(extract_examples).unwrap_or_default(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    params.sort_by(|a, b| {
+        (!a.required)
+            .cmp(&!b.required)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    params
+}
 
 /// Extract parameter info from a Harn VmValue dict (tool_registry entry).
 /// Harn tool definitions default to `required: true`; a param is optional only
@@ -15,6 +77,16 @@ pub(super) fn extract_params_from_vm_dict(
     root_json: &serde_json::Value,
     registry: &mut ComponentRegistry,
 ) -> Vec<ToolParamSchema> {
+    for key in ["inputSchema", "input_schema"] {
+        if let Some(schema) = td.get(key) {
+            return extract_params_from_json_schema(
+                &super::super::vm_value_to_json(schema),
+                root_json,
+                registry,
+            );
+        }
+    }
+
     let mut params = Vec::new();
     if let Some(VmValue::Dict(pd)) = td.get("parameters") {
         for (pname, pval) in pd.iter() {

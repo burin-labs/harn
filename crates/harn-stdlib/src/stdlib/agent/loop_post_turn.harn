@@ -7,6 +7,11 @@ import {
   command_ledger_should_hold,
 } from "std/agent/command_ledger"
 import {
+  agent_completion_claim_disposition,
+  completion_claim_evidence_refs,
+  completion_claim_implicit,
+} from "std/agent/completion_claim"
+import {
   AgentLoopBudget,
   AgentLoopBudgetDecision,
   agent_loop_apply_command,
@@ -49,7 +54,11 @@ import {
   agent_stall_repeated_verified_pass,
 } from "std/agent/stall_verification"
 import { agent_stance_post_turn } from "std/agent/stance"
-import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+import {
+  agent_emit_event,
+  agent_session_inject_feedback,
+  agent_session_messages,
+} from "std/agent/state"
 
 pub type AgentLoopPostTurnAction = "break" | "continue"
 
@@ -279,6 +288,11 @@ pub fn agent_loop_post_turn_transition(
     next.opts,
     context.successful_tools_seen,
   )
+  const completion_claim = agent_completion_claim_disposition(
+    agent_session_messages(harness.agent, session.session_id),
+    context.dispatch,
+    context.turn_opts,
+  )
   const cadence_loop_state = agent_loop_snapshot_state(
     {
       iteration: context.iteration,
@@ -307,7 +321,7 @@ pub fn agent_loop_post_turn_transition(
         context.consecutive_failure_count,
       ),
   )
-  const post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
+  let post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
     + {
       _session_successful_tools: context.successful_tools_seen,
       _session_rejected_tools: context.rejected_tools_seen,
@@ -317,7 +331,10 @@ pub fn agent_loop_post_turn_transition(
       _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
         || context.had_parse_errors,
     }
-  const outcome = __agent_loop_with_llm_render_context(
+  if completion_claim.kind == "valid" {
+    post_turn_opts = post_turn_opts + {_completion_claim: completion_claim.claim}
+  }
+  let outcome = __agent_loop_with_llm_render_context(
     harness,
     context.turn_llm_opts,
     { render_harness, _effective ->
@@ -332,6 +349,66 @@ pub fn agent_loop_post_turn_transition(
       )
     },
   )
+  let adjudication_opts = context.turn_opts
+  if completion_claim.kind == "valid" {
+    agent_emit_event(
+      harness.agent,
+      session.session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.completion_claim_observation.v1",
+        source: "tool",
+        disposition: "valid",
+        requirement_count: len(completion_claim.claim?.requirements ?? []),
+        evidence_ref_count: len(completion_claim_evidence_refs(completion_claim.claim)),
+      },
+    )
+    adjudication_opts = adjudication_opts + {_completion_claim: completion_claim.claim}
+    outcome = outcome
+      + {
+        kind: "break",
+        needs_verify: true,
+        stop_reason: "explicit_completion_claim",
+        turn_end_judge_due: true,
+      }
+  } else if completion_claim.kind == "absent"
+    && context.turn_opts?.completion_tool == true
+    && outcome.kind != "continue" {
+    const implicit_claim = completion_claim_implicit()
+    agent_emit_event(
+      harness.agent,
+      session.session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.completion_claim_observation.v1",
+        source: "implicit",
+        disposition: "valid",
+        requirement_count: 0,
+        evidence_ref_count: 0,
+      },
+    )
+    adjudication_opts = adjudication_opts + {_completion_claim: implicit_claim}
+  } else if completion_claim.kind == "invalid" {
+    agent_emit_event(
+      harness.agent,
+      session.session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.completion_claim_observation.v1",
+        source: "tool",
+        disposition: "invalid",
+        reason: completion_claim.reason ?? "completion_claim_invalid",
+      },
+    )
+    agent_session_inject_feedback(
+      harness.agent,
+      session.session_id,
+      completion_claim.reason ?? "completion_claim_invalid",
+      completion_claim.feedback ?? "The completion claim is invalid.",
+      1,
+    )
+    outcome = outcome + {kind: "continue", needs_verify: false}
+  }
   let updated_opts = __apply_post_turn_options(next.opts, outcome)
   updated_opts = agent_stance_post_turn(harness.agent, harness.runtime, session, updated_opts)
   next = next + {opts: updated_opts}
@@ -349,11 +426,14 @@ pub fn agent_loop_post_turn_transition(
   let should_continue = outcome.kind == "continue" || context.bridge_step_delivered > 0
   let verdict_record = nil
   let post_edit_reverify_confirmed = false
-  if should_continue && reverify_mandated && next.verify_attempts < max_verify_attempts {
+  if should_continue
+    && completion_claim.kind != "invalid"
+    && reverify_mandated
+    && next.verify_attempts < max_verify_attempts {
     const reverdict = agent_evaluate_completion(
       harness,
       session,
-      context.turn_opts
+      adjudication_opts
         + {
           _turn_end_judge_due: false,
           _turn_end_judge_invocations: next.turn_end_judge_invocations,
@@ -415,7 +495,7 @@ pub fn agent_loop_post_turn_transition(
       const verdict = agent_evaluate_completion(
         harness,
         session,
-        context.turn_opts
+        adjudication_opts
           + {
             _turn_end_judge_due: outcome?.turn_end_judge_due ?? true,
             _turn_end_judge_invocations: next.turn_end_judge_invocations,
@@ -509,7 +589,19 @@ pub fn agent_loop_post_turn_transition(
       should_continue = true
     }
     if !should_continue {
-      return {action: "break", state: next + {stop_reason: outcome.stop_reason}}
+      // An accepted explicit claim is a clean completion, not an unattributed
+      // empty status for session finalization to infer later. Seal it here,
+      // where the claim and its judge verdict are both still typed, so terminal
+      // projection and wrap-up eligibility read the same decision.
+      const settled_status = if completion_claim.kind == "valid" {
+        "done"
+      } else {
+        next.final_status
+      }
+      return {
+        action: "break",
+        state: next + {final_status: settled_status, stop_reason: outcome.stop_reason},
+      }
     }
   }
   if should_continue && post_edit_reverify_confirmed && context.iteration >= next.current_max {

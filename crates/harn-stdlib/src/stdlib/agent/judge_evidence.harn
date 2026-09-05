@@ -9,6 +9,7 @@
 // std/agent/judge and still calls into here, so every existing importer is
 // untouched by the move.
 import { canon_event_paths } from "std/agent/canon"
+import { completion_claim_evidence_refs } from "std/agent/completion_claim"
 import {
   COMPLETION_MUTATION_TARGET_LIMIT,
   CompletionEvidenceAction,
@@ -382,13 +383,23 @@ pub fn __judge_evidence_projection_from_lifecycle(
   opts: dict,
   raw_transcript_digest: any = nil,
 ) -> CompletionEvidenceProjection {
+  const claim_refs = completion_claim_evidence_refs(opts?._completion_claim)
+  const evidence_lifecycle = if len(claim_refs) == 0 {
+    lifecycle
+  } else {
+    lifecycle
+      + {
+        calls: lifecycle.calls.filter({ call -> claim_refs.contains(call.tool_call_id) }).to_list(),
+      }
+  }
   let relevant_call_count = 0
   let read_only_evidence: list<CompletionReadOnlyEvidence> = []
   let latest_verification = nil
   let latest_problem = nil
   let latest_observation = nil
+  let claimed_actions: list<CompletionEvidenceAction> = []
   let omitted_harness_authored_result_count = 0
-  for call in lifecycle.calls {
+  for call in evidence_lifecycle.calls {
     const action = __judge_lifecycle_action(call, opts)
     omitted_harness_authored_result_count = omitted_harness_authored_result_count
       + (action.omitted_harness_authored_result_count ?? 0)
@@ -404,6 +415,9 @@ pub fn __judge_evidence_projection_from_lifecycle(
       continue
     }
     relevant_call_count = relevant_call_count + 1
+    if len(claim_refs) > 0 {
+      claimed_actions = claimed_actions + [action]
+    }
     if __judge_descriptor_is_observation(action.semantics) {
       latest_observation = __judge_latest(latest_observation, action)
     }
@@ -425,10 +439,14 @@ pub fn __judge_evidence_projection_from_lifecycle(
   // Every touched path, then the verifier and the latest problem. State first,
   // narrative second: the judge is being asked what the workspace looks like
   // now, not which call happened last (#8090).
-  const selected = __judge_unique_slot_actions(
-    __judge_latest_mutation_per_target(lifecycle.calls, opts)
-      + [latest_verification, latest_problem],
-  )
+  const selected = if len(claim_refs) > 0 {
+    claimed_actions
+  } else {
+    __judge_unique_slot_actions(
+      __judge_latest_mutation_per_target(evidence_lifecycle.calls, opts)
+        + [latest_verification, latest_problem],
+    )
+  }
   const observation_fallback = if len(selected) == 0 && latest_observation != nil {
     [latest_observation]
   } else {
@@ -449,7 +467,10 @@ pub fn __judge_evidence_projection_from_lifecycle(
     actions: selected,
     research_summary: research_summary,
     fallback_observations: observation_fallback,
-    requirement_evidence: __judge_mutation_requirement_evidence(lifecycle, opts),
+    requirement_evidence: __judge_mutation_requirement_evidence(evidence_lifecycle, opts),
+  }
+  if opts?._completion_claim != nil {
+    packet = packet + {completion_claim: opts._completion_claim}
   }
   if omitted_harness_authored_result_count > 0 {
     packet = packet
