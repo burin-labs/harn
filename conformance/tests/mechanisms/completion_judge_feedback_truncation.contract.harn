@@ -111,7 +111,7 @@ fn run_case(harness: Harness, label: string, detail: string) {
       } else {
         ""
       }
-      return {delivered: first, count: len(delivered)}
+      return {delivered: first, count: len(delivered), delivered_len: len(first)}
     },
   )
 }
@@ -128,6 +128,22 @@ pipeline default(harness: Harness) {
   // back under the remedy fails here rather than passing quietly.
   harness.stdio.println("observed_exceeds_old_limit=" + to_string(len(observed.delivered) > 240))
   harness.stdio.println("observed_unmarked=" + to_string(!ends_with(observed.delivered, MARKER)))
+  // THE DELIVERY LEG, stated as a length equality rather than a suffix match.
+  // A suffix assertion alone would still pass if the MIDDLE of the instruction
+  // were dropped; this pins that the actor received exactly as many characters
+  // as the judge wrote, no more and no fewer.
+  harness.stdio.println(
+    "observed_delivered_len_equals_judge_detail_len="
+      + to_string(observed.delivered_len == len(OBSERVED_DETAIL)),
+  )
+  // The absolute number, so the golden moves visibly if the clamp ever drops
+  // back under the length of one real instruction.
+  harness.stdio.println("observed_delivered_len=" + to_string(observed.delivered_len))
+  // Feedback was actually DELIVERED, not merely composed. A judge that accepts
+  // first pass records `feedback_delivery: "none"` and exercises none of this,
+  // which is exactly how this leg went unproven on the live cells: every trial
+  // passed before any refusal was ever handed back. This case forces a refusal.
+  harness.stdio.println("observed_feedback_count=" + to_string(observed.count))
   // NEGATIVE (a): the bound is still a bound. Deleting the clamp would pass
   // every clause above and fail this one.
   const unbounded = run_case(harness, "unbounded", "gap. ".repeat(4000))

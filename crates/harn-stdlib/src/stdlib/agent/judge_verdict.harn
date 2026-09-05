@@ -72,8 +72,8 @@ pub fn __judge_clamp_completion_detail(detail: string) -> string {
   if len(detail) <= __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT {
     return detail
   }
-  const budget = __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT
-  -len(__JUDGE_DETAIL_TRUNCATION_MARKER)
+  const marker_cost = len(__JUDGE_DETAIL_TRUNCATION_MARKER)
+  const budget = __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT - marker_cost
   let kept = ""
   let stopped = false
   for word in detail.split(" ") {
