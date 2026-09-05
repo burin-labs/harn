@@ -13,6 +13,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use super::agents::AgentId;
+use super::builtin_args::{
+    optional_non_negative_u64, optional_positive_i64, optional_positive_u64,
+    optional_positive_usize, parse_hash, require_non_negative_u64, require_positive_file_id,
+    require_positive_u64,
+};
 use super::file_table::{fnv1a64, FileId};
 use super::imports;
 use super::state::{now_unix_ms, IndexState};
@@ -23,7 +28,6 @@ use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int_list, optional_string, optional_string_list,
     require_string, str_value, to_agent_path, to_agent_path_str,
 };
-use crate::value_args;
 
 /// Shared, mutable cell carrying the (at most one) live workspace index.
 /// `Mutex` rather than `RwLock` because rebuilds flip the slot wholesale
@@ -228,18 +232,27 @@ pub(super) fn run_imports_for(
         return Ok(empty_imports_response(&path));
     };
     let kind = imports::import_kind(&file.language).to_string();
-    let base_dir = imports::parent_dir(&file.relative_path);
     let resolved_ids: HashSet<FileId> = state.deps.imports_of(file_id).into_iter().collect();
     let mut entries: Vec<VmValue> = Vec::with_capacity(file.imports.len());
     for raw_import in &file.imports {
-        let resolved_path =
-            imports::resolve_module(raw_import, &file.language, &base_dir, &state.path_to_id)
-                .filter(|id| resolved_ids.contains(id))
-                .and_then(|id| state.files.get(&id).map(|f| f.relative_path.clone()));
+        // The importing file's own path, not its directory: Rust module
+        // resolution anchors on the crate root above it.
+        let resolved_path = imports::resolve_module(
+            raw_import,
+            &file.language,
+            &file.relative_path,
+            &state.path_to_id,
+        )
+        .filter(|id| resolved_ids.contains(id))
+        .and_then(|id| state.files.get(&id).map(|f| f.relative_path.clone()));
         entries.push(import_entry(raw_import, resolved_path.as_deref(), &kind));
     }
     Ok(build_dict([
         ("path", str_value(&file.relative_path)),
+        (
+            "resolution_strategy",
+            str_value(imports::strategy_for(&file.language).as_str()),
+        ),
         ("imports", VmValue::List(Arc::new(entries))),
     ]))
 }
@@ -1248,143 +1261,6 @@ fn ensure_state<'a>(
     Ok(guard.as_mut().unwrap())
 }
 
-fn parse_hash(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<u64, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(0),
-        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as u64),
-        Some(VmValue::Int(n)) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("must be >= 0, got {n}"),
-        }),
-        Some(VmValue::String(s)) => s
-            .parse::<u64>()
-            .map_err(|_| HostlibError::InvalidParameter {
-                builtin,
-                param: key,
-                message: format!("expected u64-parseable string, got {s:?}"),
-            }),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!(
-                "expected integer or numeric string, got {}",
-                other.type_name()
-            ),
-        }),
-    }
-}
-
-fn require_positive_u64(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<u64, HostlibError> {
-    let raw = require_non_negative_u64(builtin, dict, key)?;
-    if raw == 0 {
-        return Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: "must be >= 1".to_string(),
-        });
-    }
-    Ok(raw)
-}
-
-fn require_positive_file_id(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<FileId, HostlibError> {
-    let raw = require_positive_u64(builtin, dict, key)?;
-    FileId::try_from(raw).map_err(|_| HostlibError::InvalidParameter {
-        builtin,
-        param: key,
-        message: "does not fit in file id".to_string(),
-    })
-}
-
-fn require_non_negative_u64(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<u64, HostlibError> {
-    match value_args::optional_i64_no_default(builtin, dict, key)? {
-        Some(value) if value >= 0 => Ok(value as u64),
-        Some(value) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("must be >= 0, got {value}"),
-        }),
-        None => Err(HostlibError::MissingParameter {
-            builtin,
-            param: key,
-        }),
-    }
-}
-
-fn optional_positive_u64(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<Option<u64>, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(_) => require_positive_u64(builtin, dict, key).map(Some),
-    }
-}
-
-fn optional_non_negative_u64(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-    default: u64,
-) -> Result<u64, HostlibError> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(_) => require_non_negative_u64(builtin, dict, key),
-    }
-}
-
-fn optional_positive_i64(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<Option<i64>, HostlibError> {
-    match value_args::optional_i64_no_default(builtin, dict, key)? {
-        None => Ok(None),
-        Some(value) if value >= 1 => Ok(Some(value)),
-        Some(value) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("must be >= 1, got {value}"),
-        }),
-    }
-}
-
-fn optional_positive_usize(
-    builtin: &'static str,
-    dict: &harn_vm::value::DictMap,
-    key: &'static str,
-) -> Result<Option<usize>, HostlibError> {
-    match optional_positive_u64(builtin, dict, key)? {
-        Some(value) => {
-            usize::try_from(value)
-                .map(Some)
-                .map_err(|_| HostlibError::InvalidParameter {
-                    builtin,
-                    param: key,
-                    message: "does not fit in usize".to_string(),
-                })
-        }
-        None => Ok(None),
-    }
-}
-
 /// Re-export of [`normalize_relative_path`] for sibling modules
 /// (e.g. [`super::rename`]). Inputs may be a workspace-relative path,
 /// an absolute path inside the workspace, or an unknown path; the
@@ -1501,6 +1377,14 @@ fn empty_stats_response() -> VmValue {
 fn empty_imports_response(path: &str) -> VmValue {
     build_dict([
         ("path", str_value(path)),
+        // The file is unknown to the index, so no language and therefore
+        // no resolver applies. Saying "unresolved-by-design" keeps the
+        // required field honest rather than naming a strategy that was
+        // never selected.
+        (
+            "resolution_strategy",
+            str_value(super::imports::ResolutionStrategy::UnresolvedByDesign.as_str()),
+        ),
         ("imports", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
