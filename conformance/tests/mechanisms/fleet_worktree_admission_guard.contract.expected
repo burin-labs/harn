@@ -1,0 +1,4 @@
+trigger_raw_worktree_add=true
+effect_denial_names_admission_owner=true
+live_control_raw_cargo_is_also_denied=true
+negative_admission_and_inventory_not_denied=true
