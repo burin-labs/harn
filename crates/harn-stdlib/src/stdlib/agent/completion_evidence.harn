@@ -137,7 +137,13 @@ pub type CompletionEvidenceProjection = {
   stats: CompletionEvidenceProjectionStats,
 }
 
-/** Attach measurable authorship omissions to one projected action. */
+/**
+ * Attach measurable authorship omissions to one projected action.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
 pub fn completion_evidence_action_authorship(
   action: CompletionEvidenceAction,
   total_result_count: int,
@@ -245,7 +251,7 @@ const COMPLETION_READ_TARGET_KEYS = [
  */
 fn completion_read_target(args: dict) -> string {
   for key in COMPLETION_READ_TARGET_KEYS {
-    const value = args[key] ?? nil
+    const value = args[key]
     if value != nil {
       const rendered = trim(
         completion_evidence_clip_to(value, COMPLETION_EVIDENCE_LABEL_CHAR_LIMIT),
