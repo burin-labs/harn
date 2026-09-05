@@ -308,6 +308,11 @@ pub fn __judge_completion_verdict_read(
  * reply that sent something other than a list. Callers distinguish "itemized
  * nothing" from "itemized badly" by asking for the raw field themselves; this
  * reader only ever returns well-formed rows.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_completion_gaps_read({gaps: []})
  */
 pub fn __judge_completion_gaps_read(result: dict) -> list<CompletionJudgeGapItem> {
   const raw = result?.gaps
@@ -353,6 +358,11 @@ pub fn __judge_completion_gaps_read(result: dict) -> list<CompletionJudgeGapItem
  * observed failure. An empty quote is not a violation — the field is required
  * only for file-content gaps, and a judge that cites nothing is judged by the
  * other clauses.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_ungrounded_gap_quotes([], "")
  */
 pub fn __judge_ungrounded_gap_quotes(
   gaps: list<CompletionJudgeGapItem>,
