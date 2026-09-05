@@ -23,6 +23,8 @@
 // is only trustworthy when the same path has just returned a non-zero.
 //
 // Source-tier: reads committed files only.
+import { require_scanned } from "./path_visibility.harn"
+
 const PRODUCT_MODULE = "crates/harn-stdlib/src/stdlib/agent/turn_end.harn"
 
 /**
@@ -141,11 +143,15 @@ pipeline main(harness: Harness, task: unknown) {
   let findings = product_findings(product_source)
   let measurement_paths: list<string> = []
   for glob in MEASUREMENT_GLOBS {
+    // scan-refused: require_scanned on measurement_paths below.
     for path in harness.fs.glob(glob, root) {
       measurement_paths = measurement_paths.appending(to_string(path))
     }
   }
   measurement_paths = measurement_paths.unique().sorted()
+  // The globs above resolve to nothing when the root is denied or wrong, and
+  // every finding loop below would then report a clean boundary.
+  require_scanned("check-turn-end-boundary", "measurement source file(s)", len(measurement_paths))
   const scanned = measurement_paths.count
   for path in measurement_paths {
     // `glob` answers with absolute paths; the report reads better repo-relative.

@@ -1,7 +1,10 @@
 import {
   census_violations,
+  enumeration_violations,
   is_negated_exists_line,
+  is_raw_enumeration_line,
   negated_exists_count,
+  raw_enumeration_count,
 } from "../check_gate_path_visibility.harn"
 
 pipeline test_detector_finds_the_skip_shaped_guard(harness: Harness, task: unknown) {
@@ -59,4 +62,52 @@ pipeline test_a_stale_row_is_a_violation_too(harness: Harness, task: unknown) {
 pipeline test_a_file_at_its_baseline_is_clean(harness: Harness, task: unknown) {
   assert_eq(census_violations([{path: "scripts/a.harn", count: 1, allowed: 1}]), [])
   assert_eq(census_violations([]), [])
+}
+
+pipeline test_enumeration_detector_finds_the_unrefused_scan(harness: Harness, task: unknown) {
+  assert(is_raw_enumeration_line("  for path in fs.glob(pattern) {", ""))
+  assert(is_raw_enumeration_line("  for g in harness.fs.glob(\"crates/**/*.rs\") {", ""))
+  assert(is_raw_enumeration_line("  const entries = fs.walk(root)", ""))
+  assert(is_raw_enumeration_line("  for name in fs.list_dir(dir) {", ""))
+  assert(is_raw_enumeration_line("  for p in find_files(fs, root, \"**/*.rs\") {", ""))
+}
+
+pipeline test_enumeration_detector_credits_the_fix_and_ignores_prose(
+  harness: Harness,
+  task: unknown,
+) {
+  // The refusing wrappers are the fix, not the defect.
+  assert(!is_raw_enumeration_line("  for p in scan_glob(fs, \"gate\", pattern) {", ""))
+  assert(!is_raw_enumeration_line("  for p in scan_files(fs, \"gate\", root, pattern) {", ""))
+  // A marked site whose zero case is refused a few lines later.
+  assert(!is_raw_enumeration_line("  const entries = fs.walk(root)", "  // scan-refused: below."))
+  // Prose describing the shape is not a use of it.
+  assert(!is_raw_enumeration_line(" *     for p in fs.glob(x) { ... }", ""))
+  assert(!is_raw_enumeration_line("  const calls = [\"fs.glob(\", \"fs.walk(\"]", ""))
+}
+
+pipeline test_enumeration_count_honours_the_marker(harness: Harness, task: unknown) {
+  const text = join(
+    [
+      "fn probe(fs: HarnessFs) {",
+      "  for a in fs.glob(\"one\") {",
+      "  }",
+      "  // scan-refused: require_scanned below.",
+      "  for b in fs.glob(\"two\") {",
+      "  }",
+      "}",
+    ],
+    "\n",
+  )
+  assert_eq(raw_enumeration_count(text), 1)
+}
+
+pipeline test_enumeration_ratchet_refuses_growth_and_stale_headroom(
+  harness: Harness,
+  task: unknown,
+) {
+  assert_eq(enumeration_violations([{path: "a.harn", count: 1, allowed: 1}]), [])
+  assert_eq(len(enumeration_violations([{path: "a.harn", count: 2, allowed: 1}])), 1)
+  // A row that stopped being needed must be tightened rather than left open.
+  assert_eq(len(enumeration_violations([{path: "a.harn", count: 0, allowed: 1}])), 1)
 }

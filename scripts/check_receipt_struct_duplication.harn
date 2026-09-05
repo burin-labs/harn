@@ -9,6 +9,7 @@
 // version is behavior-identical: same skip set, same canonical-dir
 // exclusion, same field trio, same `path:line: pub struct Name` output.
 import { empty_scope_failure } from "./guard_scope.harn"
+import { scan_glob } from "./path_visibility.harn"
 
 const CANONICAL_DIR = "crates/harn-vm/src/receipts"
 
@@ -131,7 +132,7 @@ pub fn rel_path(path: string) -> string {
 pipeline main(harness: Harness, task: unknown) {
   let violations: list<string> = []
   let scanned = 0
-  for path in harness.fs.glob("**/*.rs") {
+  for path in scan_glob(harness.fs, "check-receipt-structs", "**/*.rs") {
     const rel = rel_path(path)
     if is_skipped(rel) {
       continue

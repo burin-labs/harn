@@ -138,6 +138,7 @@ GATES=(
   check-loud-boundaries
   check-ci-cache-policy
   check-rust-test-lane-policy
+  check-scheduled-workflows
   check-crate-sibling-versions
   check-dependabot-groups
   check-release-contract

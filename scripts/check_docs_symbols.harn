@@ -105,6 +105,7 @@ import {
   resolve_harn_bin,
 } from "./check_docs_snippets.harn"
 import { generated_artifact_inputs } from "./generated_artifacts_schema.harn"
+import { require_scanned } from "./path_visibility.harn"
 import { path_under } from "./warn_generated_artifact_drift.harn"
 
 const DOCS_GLOBS = [
@@ -636,6 +637,7 @@ pipeline main(harness: Harness, task: unknown) {
   }
   let md_files: list<string> = []
   for docs_glob in DOCS_GLOBS {
+    // scan-refused: require_scanned on md_files below.
     for g in harness.fs.glob(docs_glob) {
       const rel = rel_path(g)
       if !md_files.contains(rel) {
@@ -643,6 +645,8 @@ pipeline main(harness: Harness, task: unknown) {
       }
     }
   }
+  // Zero documentation files is the instrument failing, not a clean corpus.
+  require_scanned("check-docs-symbols", "documentation file(s)", len(md_files))
   md_files = md_files.sorted()
   if md_files.count() == 0 {
     harness.stdio.eprintln("error: no documentation pages matched")

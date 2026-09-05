@@ -1,4 +1,4 @@
-name: macOS nightly
+name: macOS workspace tests
 
 # Runs the full workspace nextest surface on macOS once per night, plus
 # on-demand from the Actions tab. This is the macOS analogue of
@@ -21,7 +21,7 @@ name: macOS nightly
 on:
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
-    # the Windows nightly so the two don't contend for the same cache lookups.
+    # the Windows workspace tests so the two don't contend for cache lookups.
     - cron: "30 7 * * *"
   workflow_dispatch:
   pull_request:
@@ -39,7 +39,7 @@ on:
 permissions:
   contents: read
   # Reading a main-produced warm artifact from a pull-request run needs the
-  # Actions scope, the same grant the Windows nightly already carries.
+  # Actions scope, the same grant the Windows workspace tests already carries.
   actions: write
 
 # Supersede an in-flight pull-request run when the same pull request pushes

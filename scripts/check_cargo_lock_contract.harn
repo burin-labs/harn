@@ -30,6 +30,7 @@
 import { read_yaml } from "std/fs"
 import { logical_commands } from "./check_rust_test_lane_policy.harn"
 import { empty_scope_failure } from "./guard_scope.harn"
+import { scan_glob } from "./path_visibility.harn"
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -233,7 +234,7 @@ fn workflow_name(path: string) -> string {
 pub fn main(harness: Harness) {
   let violations: list<LockViolation> = []
   let scanned = 0
-  for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+  for path in scan_glob(harness.fs, "check-cargo-lock-contract", WORKFLOW_GLOB).sorted() {
     const document = read_yaml(harness.fs, path, nil)
     if document == nil {
       continue

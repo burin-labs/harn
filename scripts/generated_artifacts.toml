@@ -57,6 +57,7 @@ exempt_checks = [
   "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
+  "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
   "check-docs-portable",            # the half of check-docs a published release can judge
@@ -645,6 +646,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
 "check-cargo-lock-contract" = "source"
+"check-scheduled-workflows" = "source"
 "lint-test-patterns" = "source"
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"
