@@ -117,6 +117,64 @@ fn openai_gpt_5_6_exposes_exact_reasoning_efforts() {
     }
 }
 
+/// GPT-6 Astra narrows the ladder again, and the generic `gpt-*`
+/// `version_min = [5, 4]` row would otherwise claim `none` is available and
+/// leave sampling unconstrained. Both facts were probed against the live API
+/// on 2026-09-04; a wrong row here costs a provider 400 per agent turn, and
+/// nothing else in the suite would catch it.
+#[test]
+fn openai_gpt_6_astra_narrows_effort_and_forbids_sampling() {
+    reset();
+    for model in ["gpt-6-astra", "gpt-6"] {
+        let caps = lookup("openai", model);
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["low", "medium", "high", "xhigh"],
+            "{model} reasoning effort contract"
+        );
+        assert!(
+            !caps.reasoning_none_supported,
+            "{model} rejects reasoning_effort=none"
+        );
+        assert!(
+            !caps.temperature_supported,
+            "{model} accepts only the default temperature"
+        );
+        assert!(!caps.top_p_supported, "{model} rejects top_p");
+        assert!(caps.responses_api);
+        assert!(caps.vision_supported);
+        assert!(
+            caps.reasoning_tools_require_responses,
+            "{model} cannot carry function tools on /v1/chat/completions"
+        );
+    }
+    // Gateway-prefixed ids resolve to the same contract.
+    let routed = lookup("openrouter", "openai/gpt-6-astra");
+    assert_eq!(
+        routed.reasoning_effort_levels,
+        vec!["low", "medium", "high", "xhigh"]
+    );
+    assert!(!routed.temperature_supported);
+}
+
+/// Direction control for the row above: the sibling family it sits next to
+/// must keep its own, wider ladder. A row that accidentally widened Astra's
+/// match glob would pass the assertions above by making every GPT model look
+/// like Astra, and this is what would fail.
+#[test]
+fn openai_gpt_6_row_does_not_capture_gpt_5_6() {
+    reset();
+    let five_six = lookup("openai", "gpt-5.6-sol");
+    assert!(
+        five_six.reasoning_none_supported,
+        "GPT-5.6 still accepts effort=none"
+    );
+    assert_eq!(
+        five_six.reasoning_effort_levels,
+        vec!["none", "low", "medium", "high", "xhigh", "max"]
+    );
+}
+
 #[test]
 fn openrouter_inherits_openai() {
     reset();

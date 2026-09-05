@@ -378,7 +378,21 @@ build_dir="${HARN_DEV_BUILD_DIR:-}"
 
 rustc_wrapper=""
 if command -v sccache >/dev/null 2>&1; then
+  # Not bare "sccache". sccache 0.17 folds every CARGO_* environment variable
+  # into its Rust cache key, and the target dir configured just below is an
+  # absolute per-worktree path that every Cargo entry point exports. Two
+  # worktrees compiling the byte-identical registry dependency therefore
+  # produced different keys, and a real cold build here measured 1 Rust cache
+  # hit against 638 misses. scripts/sccache_rustc_wrapper.sh drops that one
+  # variable for rustc only, which is what lets the dependency graph be shared.
+  #
+  # Windows keeps bare sccache: Cargo executes rustc-wrapper directly, so a
+  # `.sh` there is not runnable and the status quo is the safe answer.
   rustc_wrapper="sccache"
+  case "${OS:-$(uname -s)}" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*) ;;
+    *) rustc_wrapper="$(pwd -P)/scripts/sccache_rustc_wrapper.sh" ;;
+  esac
 fi
 
 force_target_dir=0

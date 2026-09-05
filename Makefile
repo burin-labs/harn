@@ -196,17 +196,27 @@ configure-merge-drivers:
 # the team cert is in the login keychain, ad-hoc otherwise) so Gatekeeper
 # skips the "Verifying harn..." dialog on first run. Single source of
 # truth: scripts/sign_local_macos.sh.
-build:
-	$(HARN_CARGO_CMD) build
-	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
-	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
-	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
+#
+# There is deliberately no plain `cargo build` step ahead of the binary probe.
+# `workspace.default-members` is exactly `crates/harn-cli`, so a bare build
+# compiles that one package, and the probe below already compiles the same
+# package with a superset of the work: both bins, the
+# `internal-freshness-checker` feature, and `HARN_BUILD_FRESHNESS_ID` in the
+# environment. Each of those two differences alone gives harn-cli a second
+# Cargo fingerprint. The feature changes the unit hash, and the environment
+# fires the `rerun-if-env-changed` in build_support/build_revision.rs. So the
+# preceding build recompiled the largest crate in the workspace in full and the
+# probe then deleted its unproven binary: a measured 2m37s of pure waste on an
+# already warm tree, plus a second rust-heavy lease acquisition.
+#
+# Keep the probe as the single compile. If `default-members` ever grows beyond
+# harn-cli, build the added members here with `--exclude harn-cli` rather than
+# restoring a bare build.
+build: build-harn
 
-# Focused canonical CLI build for product-path iteration. This retains the
-# worktree target isolation and signing contract without compiling unrelated
-# workspace binaries.
+# Canonical CLI build for product-path iteration. Retains the worktree target
+# isolation, freshness-receipt, and signing contract.
 build-harn:
-	$(HARN_CARGO_CMD) build -p harn-cli --bin harn
 	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
 	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
