@@ -194,9 +194,9 @@ mod tests {
             for entry in std::fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
-                    directories.push(path)
+                    directories.push(path);
                 } else if path.extension().is_some_and(|extension| extension == "rs") {
-                    paths.push(path)
+                    paths.push(path);
                 }
             }
         }
