@@ -40,9 +40,10 @@ fn recorded_roles(harness: Harness) -> list<string> {
   )
   const records = read_jsonl(harness.fs, path_join(dir, "llm_transcript.jsonl"), {strict: true})
   harness.fs.delete(dir)
-  return records
-    .filter({ record -> record.type == "message" })
-    .map({ record -> to_string(record?.role ?? "") })
+  return records.filter({ record -> record.type == "message" }).map(
+    { record -> to_string(record?.role ?? "") },
+  )
+    .to_list()
 }
 
 pipeline main(harness: Harness) {
@@ -53,10 +54,12 @@ pipeline main(harness: Harness) {
     "the run must have recorded at least the user turn and one assistant turn, saw "
     + to_string(roles)
   require roles[0] == "user",
-    "the transcript must open with the user turn that started the run, saw " + to_string(roles)
+    "the transcript must open with the user turn that started the run, saw "
+    + to_string(roles)
   // The sibling control. Without it a transcript that recorded only the user
   // turn would pass the assertion above while having lost the rest of the run.
   require len(roles.filter({ role -> role == "assistant" })) >= 1,
-    "the transcript must also carry the assistant turn, saw " + to_string(roles)
+    "the transcript must also carry the assistant turn, saw "
+    + to_string(roles)
   harness.stdio.log("agent transcript opening user turn test passed")
 }
