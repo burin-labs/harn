@@ -933,6 +933,96 @@ pub fn __completion_contradiction_arbitration_converts(
 }
 
 /**
+ * The gate reason that names a green run verifier observed AFTER a source write.
+ * `__completion_gate_ladder` rule 3 emits it, and it is the only ladder reason
+ * that carries both halves: the work changed source, and the task's own declared
+ * oracle then passed over that change. Plain `verified` (a green verifier with no
+ * source write) is deliberately not this, because a run that wrote nothing has
+ * not proven anything the completion judge would otherwise be asked about.
+ */
+pub const COMPLETION_VERIFIED_AFTER_WRITE_REASON = "verified_after_write"
+
+/**
+ * One completion boundary as the runtime already reads it, before any model is
+ * asked about it.
+ *
+ * A record rather than six positional arguments: four of the readings are
+ * strings, and a caller that transposed two of them would produce a predicate
+ * that is wrong in the permissive direction and looks right at the call site.
+ */
+pub type CompletionBoundaryReading = {
+  // Whether the deterministic completion gate ran at this boundary.
+  deterministic_invoked: bool,
+  // The gate's own ladder reason, held separately from the policy's running
+  // verdict because every stage after the gate overwrites that verdict.
+  deterministic_reason: string,
+  // The threaded verification reading: `passed`, `failed`, or `not_run`.
+  observed: string,
+  // How the turn ended: `sentinel`, `natural`, `stalled`, and so on.
+  stop_reason: string,
+  // The candidate turn's final response, as projected for display.
+  final_text: string,
+  // Deferred tool effects that outlive this turn.
+  pending_tool_batch_effect_count: int,
+}
+
+/**
+ * Whether the runtime already holds a typed green terminal, so a completion
+ * judge invoked at this boundary would be deciding a question the deterministic
+ * oracle has already answered.
+ *
+ * This is the skip side of the same authority the two arbitrations exercise
+ * after the fact. Both of those pay for a model call and then overrule its
+ * answer; when every clause below holds there is nothing left for that call to
+ * establish, so it is not made at all. A judge that never ran cannot overwrite
+ * proven success, and cannot spend the wall clock a headless run is bounded by.
+ *
+ * Every clause is required:
+ *
+ * 1. `deterministic_invoked` — the gate actually ran. Absent a gate this is an
+ *    unverified path and the judge is the only authority there is.
+ * 2. `deterministic_reason == verified_after_write` — the gate accepted BECAUSE
+ *    the declared verifier passed over a source write, not because there was
+ *    nothing to gate (`no_workspace_write`), not on a budget release, and not on
+ *    a green verifier with no write behind it (`verified`).
+ * 3. `observed == "passed"` — the verification state carried on the payload
+ *    agrees. The reason string is the gate's own summary of its ladder; this is
+ *    the reading it summarized, and requiring both means a gate whose reason and
+ *    reading disagree keeps the judge.
+ * 4. `stop_reason == "sentinel"` — the turn is the sealed final answer, not an
+ *    intermediate boundary the loop happens to evaluate.
+ * 5. a non-empty final response — there is an answer to hand back. Read from
+ *    the snapshot's display projection rather than its raw emission on purpose:
+ *    a turn that emitted nothing but the done sentinel projects to empty, and
+ *    that bare claim with no answer behind it is exactly the ambiguous case the
+ *    judge exists for.
+ * 6. `pending_tool_batch_effect_count == 0` — no deferred effect outlives the
+ *    turn. A pending effect means the verifier's reading is already stale.
+ *
+ * There is deliberately no clause for "the gate accepted". `verified_after_write`
+ * is emitted only on the ladder's allow branch, so the acceptance is carried by
+ * clause 2; a separate flag read off the policy's running verdict would be a
+ * clause no reachable input can falsify, which is worse than no clause at all.
+ *
+ * Preserved deliberately: unverified paths, red and unrun verifiers, ordinary
+ * prose completions with no source write, and every non-sentinel boundary. The
+ * judge keeps its full authority on all of them.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_typed_green_terminal(reading)
+ */
+pub fn __completion_typed_green_terminal(reading: CompletionBoundaryReading) -> bool {
+  return reading.deterministic_invoked
+    && reading.deterministic_reason == COMPLETION_VERIFIED_AFTER_WRITE_REASON
+    && reading.observed == "passed"
+    && reading.stop_reason == "sentinel"
+    && trim(reading.final_text) != ""
+    && reading.pending_tool_batch_effect_count == 0
+}
+
+/**
  * Default rendered feedback strings for each vetoing ladder rule. The MECHANISM
  * (evidence gate + post-write-verify gate) is generic; these strings are host
  * DOMAIN content (host-authored coding prose), so `completion_gate`'s
@@ -1096,7 +1186,7 @@ pub fn __completion_gate_ladder(derived: dict, feedback_templates: dict? = nil) 
     return {
       ok: true,
       reason: if saw_source {
-        "verified_after_write"
+        COMPLETION_VERIFIED_AFTER_WRITE_REASON
       } else {
         "verified"
       },
