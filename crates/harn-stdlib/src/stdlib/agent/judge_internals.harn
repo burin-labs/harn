@@ -51,7 +51,7 @@ pub type JudgeCheckpointRequest = {
   // judge adds a turn here rather than growing `user`: the route caches whole
   // messages, so a changed `user` costs a full re-read of the transcript it
   // carries. Empty for a first ask, which keeps that request unchanged.
-  follow_up_turns: list = [],
+  follow_up_turns: list?,
 }
 
 /**
