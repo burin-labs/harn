@@ -11,7 +11,7 @@
 //! adjacency lists are kept so the Cypher executor in [`super::cypher`]
 //! can traverse `<-[:EDGE]-` patterns without rescanning.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use tree_sitter::{Node as TsNode, Tree};
 
@@ -422,6 +422,10 @@ impl SymbolGraph {
         // the global by-name index, so cross-file calls become callable
         // once every file has been ingested at least once.
         if let Some(tree) = tree.as_ref() {
+            // A Swift target or Go package can put hundreds of files in
+            // scope, so the membership test is a set lookup rather than
+            // a scan of the import list per candidate per call site.
+            let visible: HashSet<FileId> = imported_files.iter().copied().collect();
             for (callee_name, line) in extract_call_sites_from_tree(tree, source) {
                 let call_id = self.add_node(Node {
                     id: 0,
@@ -436,7 +440,7 @@ impl SymbolGraph {
                     language: language.name().to_string(),
                 });
                 self.add_edge(module_id, call_id, EdgeKind::Contains);
-                let targets = self.resolve_call_targets(&callee_name, file_id, imported_files);
+                let targets = self.resolve_call_targets(&callee_name, file_id, &visible);
                 for t in targets {
                     self.add_edge(call_id, t, EdgeKind::Calls);
                 }
@@ -640,7 +644,7 @@ impl SymbolGraph {
         &self,
         callee_name: &str,
         file_id: FileId,
-        imported_files: &[FileId],
+        visible: &HashSet<FileId>,
     ) -> Vec<NodeId> {
         let named: Vec<NodeId> = self
             .nodes_named(callee_name)
@@ -671,7 +675,7 @@ impl SymbolGraph {
             .filter(|nid| {
                 self.nodes
                     .get(nid)
-                    .is_some_and(|n| imported_files.contains(&n.file_id))
+                    .is_some_and(|n| visible.contains(&n.file_id))
             })
             .collect();
         if !imported.is_empty() {

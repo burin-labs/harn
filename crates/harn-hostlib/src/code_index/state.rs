@@ -569,13 +569,18 @@ impl IndexState {
         else {
             return;
         };
-        // Call resolution is scoped by this file's resolved imports, so
-        // the dep graph for `id` must already be current. Every caller
-        // runs `rebuild_deps` for the same id immediately before this,
-        // and `refresh_from_root` re-resolves the whole table whenever
-        // the set of paths changed, which is when a dangling import can
-        // start resolving.
-        let imported_files = self.deps.imports_of(id);
+        // Call resolution is scoped by what this file can actually see,
+        // so the dep graph for `id` must already be current. Every
+        // caller runs `rebuild_deps` for the same id immediately before
+        // this, and `refresh_from_root` re-resolves the whole table
+        // whenever the set of paths changed, which is when a dangling
+        // import can start resolving.
+        //
+        // The full answer, not just the explicit import statements: a
+        // Swift or Go file calls into its own module's other files
+        // without importing them, and scoping the resolver to written
+        // imports alone would put those calls out of reach.
+        let imported_files = self.imports_of(id);
         let outcome = self.symbols.rebuild_file(
             id,
             &file.relative_path,
