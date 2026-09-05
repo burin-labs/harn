@@ -62,6 +62,7 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
     let exe = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current executable: {error}"))?;
     let mut command = Command::new(exe);
+    command.kill_on_drop(true);
     command.args(refresh_run_args(args));
     let mut child = command
         .spawn()
@@ -79,7 +80,12 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
                 // holding the network open is exactly what the caller was
                 // waiting on, and leaving it behind would make the next run
                 // contend with it.
-                let _ = child.kill().await;
+                child.kill().await.map_err(|error| {
+                    format!(
+                        "provider refresh workflow exceeded {}s and could not be stopped: {error}",
+                        limit.as_secs()
+                    )
+                })?;
                 return Err(refresh_timeout_message(args, limit));
             }
         },
@@ -131,8 +137,9 @@ pub(crate) fn refresh_timeout_message(
     };
     format!(
         "provider refresh workflow timed out after {}s waiting on {} via {}. \
-         This is a timeout, not an empty catalog: nothing was written and the \
-         committed catalog is unchanged. Raise --timeout-secs, pass \
+         This is a timeout, not an empty catalog: the refresh did not complete \
+         and its outputs must not be treated as authoritative. Raise \
+         --timeout-secs, pass \
          --timeout-secs 0 to wait indefinitely, or drop --live to refresh from \
          the committed fixtures without a network call.",
         limit.as_secs(),
@@ -142,12 +149,11 @@ pub(crate) fn refresh_timeout_message(
 }
 
 fn refresh_run_args(args: &ProvidersRefreshArgs) -> Vec<OsString> {
-    let mut command = vec![
-        OsString::from("run"),
-        OsString::from("--allow-process-network"),
-        args.script.as_os_str().to_owned(),
-        OsString::from("--"),
-    ];
+    let mut command = vec![OsString::from("run")];
+    if args.live {
+        command.push(OsString::from("--allow-process-network"));
+    }
+    command.extend([args.script.as_os_str().to_owned(), OsString::from("--")]);
     if args.live {
         command.push(OsString::from("--live"));
     }
@@ -266,7 +272,9 @@ fn load_filtered_recommend_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{refresh_timeout, refresh_timeout_message, DEFAULT_REFRESH_TIMEOUT_SECS};
+    use super::{
+        refresh_run_args, refresh_timeout, refresh_timeout_message, DEFAULT_REFRESH_TIMEOUT_SECS,
+    };
     use crate::cli::ProvidersRefreshArgs;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -321,7 +329,7 @@ mod tests {
         assert!(message.contains("not an empty catalog"), "{message}");
         assert!(!message.to_lowercase().contains("no models"), "{message}");
         assert!(
-            message.contains("committed catalog is unchanged"),
+            message.contains("outputs must not be treated as authoritative"),
             "{message}"
         );
     }
@@ -336,5 +344,25 @@ mod tests {
             !message.contains("live provider and model endpoints"),
             "{message}",
         );
+    }
+
+    #[test]
+    fn offline_refresh_cannot_inherit_process_network_access() {
+        let command = refresh_run_args(&args(false, 5));
+        assert!(
+            !command.iter().any(|arg| arg == "--allow-process-network"),
+            "offline refresh must be structurally disconnected from process network: {command:?}",
+        );
+        assert!(
+            !command.iter().any(|arg| arg == "--live"),
+            "offline refresh must not select live sources: {command:?}",
+        );
+    }
+
+    #[test]
+    fn live_refresh_explicitly_enables_network_and_live_sources() {
+        let command = refresh_run_args(&args(true, 5));
+        assert!(command.iter().any(|arg| arg == "--allow-process-network"));
+        assert!(command.iter().any(|arg| arg == "--live"));
     }
 }

@@ -29,7 +29,7 @@ HARN
 
 started=$(date +%s)
 set +e
-out="$("$harn_bin" provider catalog refresh --script "$script" --timeout-secs 3 2>&1)"
+out="$("$harn_bin" provider catalog refresh --live --script "$script" --timeout-secs 3 2>&1)"
 status=$?
 set -e
 elapsed=$(( $(date +%s) - started ))
@@ -51,6 +51,8 @@ grep -q "timed out after 3s" <<<"$out" \
   || fail "the terminal message must name the bound it exceeded"
 grep -q "not an empty catalog" <<<"$out" \
   || fail "a timeout must stay distinguishable from an export that found nothing"
+grep -q "live provider and model endpoints" <<<"$out" \
+  || fail "a live timeout must name the source class it was waiting on"
 
 # The negative control. Without it this passes for a command that always times
 # out, which would be a worse defect than the unbounded wait.
