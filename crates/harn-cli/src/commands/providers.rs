@@ -17,7 +17,7 @@ mod tool_probe_request;
 pub(crate) use artifacts::{run_export, run_validate};
 pub(crate) use build::run_generate;
 pub(crate) use overlay_audit::run_overlay_audit;
-pub(crate) use source_snapshot::load_source_snapshot;
+pub(crate) use source_snapshot::{load_source_snapshot, ProviderSourceSnapshot};
 pub(crate) use tool_probe_audit::run as run_audit;
 pub(crate) use tool_probe_request::{
     render as render_tool_probe_request, resolve_probe_wire_model,

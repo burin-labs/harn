@@ -80,9 +80,10 @@ pub use audit::{
     ProviderCapabilityMatrixRow, ToolCapabilityAuditGap, ToolCapabilityAuditReport,
 };
 pub use lookup::{
-    builtin_file, clear_user_overrides, lookup, lookup_with_base_file, lookup_with_user_overrides,
-    parse_capabilities_toml, provider_limit_providers, provider_limits_for, set_user_overrides,
-    set_user_overrides_from_manifest_toml, set_user_overrides_toml,
+    builtin_file, clear_user_overrides, lookup, lookup_with_base_file, lookup_with_source_config,
+    lookup_with_user_overrides, parse_capabilities_toml, provider_limit_providers,
+    provider_limits_for, set_user_overrides, set_user_overrides_from_manifest_toml,
+    set_user_overrides_toml,
 };
 pub use model::{
     CacheBreakpointStyle, Capabilities, CapabilitiesFile, CapabilityProbeReceipt,

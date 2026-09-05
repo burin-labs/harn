@@ -12,6 +12,7 @@ use harn_vm::provider_catalog::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use super::providers::ProviderSourceSnapshot;
 use crate::cli::ProvidersSupportArgs;
 use crate::format::escape_md;
 
@@ -225,8 +226,7 @@ pub(crate) fn build_report(
     let notes = load_notes(notes_path)?;
     let empirical = load_empirical(empirical_paths)?;
     Ok(build_report_from_parts(
-        snapshot.catalog,
-        &snapshot.capabilities,
+        snapshot,
         notes_source_label(notes_path),
         notes,
         empirical,
@@ -234,12 +234,12 @@ pub(crate) fn build_report(
 }
 
 fn build_report_from_parts(
-    catalog: ProviderCatalogArtifact,
-    capabilities: &capabilities::CapabilitiesFile,
+    snapshot: ProviderSourceSnapshot,
     notes_source: String,
     notes: SupportNotesFile,
     empirical: EmpiricalIndex,
 ) -> ProviderSupportReport {
+    let catalog = &snapshot.catalog;
     let providers_by_id = catalog
         .providers
         .iter()
@@ -259,7 +259,7 @@ fn build_report_from_parts(
     }
     let mut capability_rows_by_provider: BTreeMap<String, Vec<ProviderCapabilityMatrixRow>> =
         BTreeMap::new();
-    for row in capabilities::matrix_rows_for_base(capabilities) {
+    for row in capabilities::matrix_rows_for_base(&snapshot.capabilities) {
         capability_rows_by_provider
             .entry(row.provider.clone())
             .or_default()
@@ -296,7 +296,7 @@ fn build_report_from_parts(
                 &capability_rows_by_provider,
                 &catalog.qc_defaults,
                 &empirical,
-                capabilities,
+                &snapshot,
             )
         })
         .collect();
@@ -310,7 +310,7 @@ fn build_report_from_parts(
             notes: notes_source,
             empirical: empirical.sources.into_iter().collect(),
         },
-        credentials: build_credentials(&catalog),
+        credentials: build_credentials(catalog, &snapshot.config),
         providers,
     }
 }
@@ -319,8 +319,11 @@ fn build_report_from_parts(
 /// short list first, in catalog order, then everything else alphabetically.
 /// Providers that need no key stay in the table so the page can say so
 /// explicitly instead of leaving a reader to infer it from an absence.
-fn build_credentials(catalog: &ProviderCatalogArtifact) -> Vec<ProviderCredentialEntry> {
-    let featured = harn_vm::llm_config::featured_provider_names();
+fn build_credentials(
+    catalog: &ProviderCatalogArtifact,
+    config: &harn_vm::llm_config::ProvidersConfig,
+) -> Vec<ProviderCredentialEntry> {
+    let featured = harn_vm::llm_config::featured_provider_names_for_config(config);
     let is_featured = |id: &str| featured.iter().any(|name| name == id);
     let by_id: BTreeMap<&str, &CatalogProvider> = catalog
         .providers
@@ -360,7 +363,7 @@ fn build_entry(
     capability_rows_by_provider: &BTreeMap<String, Vec<ProviderCapabilityMatrixRow>>,
     qc_defaults: &BTreeMap<String, String>,
     empirical: &EmpiricalIndex,
-    capabilities: &capabilities::CapabilitiesFile,
+    snapshot: &ProviderSourceSnapshot,
 ) -> ProviderSupportEntry {
     let catalog_provider = note
         .and_then(|entry| entry.catalog_provider.as_deref())
@@ -384,7 +387,12 @@ fn build_entry(
     let caps = if model_id == "*" {
         Capabilities::default()
     } else {
-        capabilities::lookup_with_base_file(catalog_provider, &model_id, capabilities)
+        capabilities::lookup_with_source_config(
+            catalog_provider,
+            &model_id,
+            &snapshot.capabilities,
+            &snapshot.config,
+        )
     };
     let recommended_tool_format = note
         .and_then(|entry| entry.recommended_tool_format.as_deref())

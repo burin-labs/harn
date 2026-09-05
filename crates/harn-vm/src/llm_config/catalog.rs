@@ -495,6 +495,11 @@ pub fn provider_names() -> Vec<String> {
 /// that suppresses a provider cannot leave a dangling recommendation.
 pub fn featured_provider_names() -> Vec<String> {
     let config = effective_config();
+    featured_provider_names_for_config(&config)
+}
+
+/// Resolve presentation order from an explicit catalog snapshot.
+pub fn featured_provider_names_for_config(config: &ProvidersConfig) -> Vec<String> {
     config
         .presentation
         .featured_providers
@@ -628,10 +633,23 @@ pub fn wire_model_id(model_id: &str) -> String {
 /// into capability lookup). Collision-free catalog ids may differ from the
 /// upstream creator/model slug that provider-family rules match.
 pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
-    if !provider_has_feature(provider, "wire_model_capabilities") {
+    capability_model_id_for_config(provider, model_id, &effective_config())
+}
+
+pub(crate) fn capability_model_id_for_config(
+    provider: &str,
+    model_id: &str,
+    config: &ProvidersConfig,
+) -> String {
+    if !config.providers.get(provider).is_some_and(|provider| {
+        provider
+            .features
+            .iter()
+            .any(|feature| feature == "wire_model_capabilities")
+    }) {
         return model_id.to_string();
     }
-    effective_config()
+    config
         .models
         .get(model_id)
         .filter(|model| model.provider == provider)
