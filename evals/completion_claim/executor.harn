@@ -1,0 +1,319 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+
+fn __inspect_tools(evidence: string) {
+  return tool_define(
+    tool_registry(),
+    "inspect_status",
+    "Read the authoritative status evidence for this task.",
+    {
+      parameters: {},
+      handler: { _args ->
+        agent_tool_handler_result(
+          "Observed status evidence: " + evidence,
+          {evidence: evidence, status: "ready"},
+        )
+      },
+      annotations: {
+        kind: "read",
+        read_only: true,
+        side_effect_level: "none",
+        completion_evidence_role: "verification",
+      },
+    },
+  )
+}
+
+fn __status_evidence_verifier(evidence: string) {
+  return { payload ->
+    const matches = payload.judge_evidence_packet.research_summary.reads.filter(
+      { read -> read.name == "inspect_status" && !read.has_error_result },
+    )
+      .to_list()
+    const passed = len(matches) > 0 && contains(payload.judge_evidence, evidence)
+    return {
+      confirm: passed,
+      message: if passed {
+        "The authoritative status inspection contains the expected evidence."
+      } else {
+        "The authoritative status inspection does not contain the expected evidence."
+      },
+      reason: if passed {
+        "status_evidence_observed"
+      } else {
+        "status_evidence_missing"
+      },
+      verification: {
+        oracle_expected: true,
+        command: "inspect_status",
+        observed: if passed {
+          "passed"
+        } else {
+          "failed"
+        },
+        observed_at_evidence_index: if passed {
+          matches[0].evidence_index
+        } else {
+          nil
+        },
+      },
+    }
+  }
+}
+
+fn __checkpoint_events(events: list, schema: string) -> list {
+  return events.filter(
+    { event -> event.type == "typed_checkpoint" && event?.checkpoint?.schema == schema },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+fn __enqueue_mock_cell(llm: HarnessLlm, arm: string, evidence: string) {
+  llm.mock_clear()
+  llm.mock_enqueue(
+    {text: "", tool_calls: [{id: "inspect-1", name: "inspect_status", arguments: {}}]},
+  )
+  if arm == "treatment" {
+    llm.mock_enqueue(
+      {
+        text: "The status is ready. Evidence: " + evidence,
+        tool_calls: [
+          {
+            id: "complete-1",
+            name: "task_complete",
+            arguments: {requirements: [{requirement_id: "task", evidence_refs: ["inspect-1"]}]},
+          },
+        ],
+      },
+    )
+  } else {
+    llm.mock_enqueue({text: "The status is ready. Evidence: " + evidence})
+  }
+  llm.mock_enqueue(
+    {
+      text: json_stringify(
+        {verdict: "done", detail: "The inspected evidence supports the report."},
+      ),
+    },
+  )
+  if arm == "treatment" {
+    llm.mock_enqueue({text: "The status is ready. Evidence: " + evidence})
+  }
+}
+
+fn __request_failure(stdio: HarnessStdio, started_ms: int, clock: HarnessClock, message: string) {
+  stdio.println(
+    json_stringify(
+      {
+        verification: "FAIL",
+        wallTimeSeconds: to_float(clock.monotonic_ms() - started_ms) / 1000.0,
+        costUsd: 0.0,
+        failures: [message],
+        toolCallSummary: {failure_bucket: "invalid_request"},
+      },
+    ),
+  )
+  return 0
+}
+
+@complexity(allow)
+fn main(harness: Harness) -> int {
+  const started_ms = harness.clock.monotonic_ms()
+  const raw = harness.stdio.read_stdin()
+  if raw == nil || trim(raw) == "" {
+    return __request_failure(harness.stdio, started_ms, harness.clock, "empty eval request")
+  }
+  const request = try {
+    json_parse(raw)
+  } catch (e) {
+    return __request_failure(
+      harness.stdio,
+      started_ms,
+      harness.clock,
+      "invalid eval request: " + to_string(e),
+    )
+  }
+  const case_id = to_string(request?.case?.id ?? "")
+  const task = to_string(request?.case?.task ?? "")
+  const arm = to_string(request?.case?.metadata?.arm ?? "")
+  const pair = to_string(request?.case?.metadata?.pair ?? "")
+  const evidence = to_string(request?.case?.metadata?.evidence ?? "")
+  const trial = request?.trial ?? 0
+  const provider = to_string(request?.manifest?.metadata?.provider ?? "")
+  const model = to_string(request?.manifest?.metadata?.model ?? "")
+  const max_tokens = request?.manifest?.metadata?.max_tokens ?? 2048
+  if regex_match("^[A-Za-z0-9_-]+$", case_id) == nil
+    || !contains(["baseline", "treatment"], arm)
+    || pair == ""
+    || evidence == ""
+    || task == ""
+    || provider == ""
+    || model == ""
+    || trial < 1 {
+    return __request_failure(
+      harness.stdio,
+      started_ms,
+      harness.clock,
+      "eval request failed its closed boundary checks",
+    )
+  }
+  if provider == "mock" {
+    __enqueue_mock_cell(harness.llm, arm, evidence)
+  }
+  const session = "completion-claim-"
+    + case_id
+    + "-"
+    + to_string(trial)
+    + "-"
+    + harness.random.uuid()
+  const agent_options: AgentSpec = {
+    provider: provider,
+    model: model,
+    session_id: session,
+    tools: __inspect_tools(evidence),
+    required_tools: ["inspect_status"],
+    tool_format: "native",
+    completion_tool: arm == "treatment",
+    loop_until_done: true,
+    max_iterations: 6,
+    max_tokens: max_tokens,
+    verify_completion: __status_evidence_verifier(evidence),
+    verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(harness, task, nil, agent_options) },
+  )
+  const observations = __checkpoint_events(captured.events, "harn.completion_claim_observation.v1")
+  const completion_directives = __checkpoint_events(
+    captured.events,
+    "harn.completion_directive_receipt.v1",
+  )
+  const inspection_call_ids = captured.events.filter(
+    { event -> event.type == "tool_call" && event?.tool_name == "inspect_status" },
+  )
+    .map({ event -> event.tool_call_id })
+    .to_list()
+  const completion_attempts = captured.events.filter(
+    { event ->
+      event.type == "tool_call_update"
+        && event?.tool_name == "task_complete"
+        && event?.status == "completed"
+    },
+  )
+    .map({ event -> {tool_call_id: event.tool_call_id} })
+    .to_list()
+  const explicit = observations.any(
+    { item -> item?.source == "tool" && item?.disposition == "valid" },
+  )
+  const fallback = observations.any(
+    { item -> item?.source == "implicit" && item?.disposition == "valid" },
+  )
+  const inspected = captured.events.any(
+    { event ->
+      event.type == "tool_call_update"
+        && event?.tool_name == "inspect_status"
+        && event?.status == "completed"
+    },
+  )
+  const visible_text = to_string(captured.result?.visible_text ?? "")
+  const status_done = captured.result?.status == "done"
+  const evidence_reported = contains(visible_text, evidence)
+  const judge_cap_reached = captured.result?.completion_judge?.cap_reached ?? false
+  const exit_contract_met = if arm == "treatment" {
+    explicit && !fallback
+  } else {
+    !explicit
+  }
+  const pass = status_done
+    && inspected
+    && evidence_reported
+    && exit_contract_met
+    && !judge_cap_reached
+  const failure_bucket = if !status_done {
+    "terminal_not_done"
+  } else if !inspected {
+    "inspection_missing"
+  } else if !evidence_reported {
+    "evidence_not_reported"
+  } else if !exit_contract_met {
+    "exit_contract_not_met"
+  } else if judge_cap_reached {
+    "completion_judge_cap_reached"
+  } else {
+    "none"
+  }
+  if !harness.fs.exists("receipts") {
+    harness.fs.mkdir("receipts")
+  }
+  const artifact_path = path_join("receipts", case_id + ".json")
+  const artifact = {
+    schema: "harn.completion_claim_eval_receipt.v1",
+    case_id: case_id,
+    pair: pair,
+    arm: arm,
+    trial: trial,
+    session_id: session,
+    evidence: evidence,
+    pass: pass,
+    status: captured.result?.status,
+    stop_reason: captured.result?.stop_reason,
+    inspected: inspected,
+    evidence_reported: evidence_reported,
+    explicit_exit: explicit,
+    fallback_exit: fallback,
+    exit_contract_met: exit_contract_met,
+    completion_claim_observations: observations,
+    completion_directives: completion_directives,
+    inspection_call_ids: inspection_call_ids,
+    completion_attempts: completion_attempts,
+    completion_judge: captured.result?.completion_judge,
+    terminal_error: to_string(captured.result?.error ?? ""),
+    completion_judge_cap_reached: judge_cap_reached,
+    provider_call_count: captured.result?.provider_call_count ?? 0,
+    max_tokens: max_tokens,
+    known_cost_usd: captured.result?.known_cost_usd ?? 0.0,
+    unpriced_calls: captured.result?.unpriced_calls ?? 0,
+    usage_unknown_calls: captured.result?.usage_unknown_calls ?? 0,
+    failure_bucket: failure_bucket,
+  }
+  harness.fs.write_text(artifact_path, json_stringify_pretty(artifact))
+  harness.stdio.println(
+    json_stringify(
+      {
+        verification: if pass {
+          "PASS"
+        } else {
+          "FAIL"
+        },
+        wallTimeSeconds: to_float(harness.clock.monotonic_ms() - started_ms) / 1000.0,
+        costUsd: artifact.known_cost_usd,
+        producedPaths: [artifact_path],
+        failures: if pass {
+          []
+        } else {
+          [failure_bucket]
+        },
+        runId: "completion-claim:" + case_id + ":" + to_string(trial),
+        workflowId: "completion-claim-exit-v1",
+        sourcePath: artifact_path,
+        toolCallSummary: {
+          pair: pair,
+          arm: arm,
+          explicit_exit: explicit,
+          fallback_exit: fallback,
+          completion_judge_cap_reached: judge_cap_reached,
+          provider_calls: artifact.provider_call_count,
+          unpriced_calls: artifact.unpriced_calls,
+          usage_unknown_calls: artifact.usage_unknown_calls,
+          failure_bucket: failure_bucket,
+        },
+      },
+    ),
+  )
+  return 0
+}

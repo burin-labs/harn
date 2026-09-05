@@ -1,0 +1,5 @@
+trigger_standalone_claim_is_observed=true
+effect_claim_seals_explicit_done_terminal=true
+effect_final_report_survives_tool_only_exit=true
+negative_batched_claim_cannot_end_the_loop=true
+effect_batched_claim_is_rejected_by_the_typed_boundary=true

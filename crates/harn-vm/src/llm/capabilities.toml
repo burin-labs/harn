@@ -364,6 +364,15 @@ reasoning_round_trip = "echo_signed"
 [provider_defaults.openai]
 advanced_generation_options = ["logprobs", "logit_bias"]
 supports_parallel_tool_calls = true
+# OpenAI caches automatically on any prompt at or above 1024 tokens and accepts
+# no request-side marker: a top-level `cache_control` on
+# `/v1/chat/completions` is rejected with `Unknown parameter: 'cache_control'.`
+# (probed 2026-09-04). State that here rather than relying on the omission of
+# the field. The Rust enum default is also `None`, so this row changes no
+# behavior today; it exists so the invariant is a declaration a reader can find
+# and not the accident of `[provider_defaults.anthropic]` above declaring
+# `top_level` a few lines earlier in this same file.
+cache_breakpoint_style = "none"
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
 batch_discount_percent = 50
@@ -1650,10 +1659,30 @@ thinking_block_style = "inline"
 # in `[provider_family]` below (OpenRouter, Together, Groq, DeepSeek,
 # Fireworks, HuggingFace, local vLLM/SGLang). Siblings may still add their
 # own `[[provider.<name>]]` rules and those win over the openai fallback.
+#
+# `prompt_caching` is set per rule here, NOT by the `capabilities` list on a
+# model row. The catalog's `model.prompt_cache` field is projected from
+# `rule.prompt_caching.unwrap_or(false)`, so a model row listing
+# "prompt_caching" in `capabilities` still exports `prompt_cache: false` when
+# no rule sets the flag. Until 2026-09-04 no OpenAI rule set it, while every
+# other major provider family did, so the entire OpenAI lineup exported
+# `prompt_cache: false` despite caching automatically on any prompt at or above
+# 1024 tokens. Probed 2026-09-04 with an identical ~1578-token prefix sent
+# twice: call 1 reported cached_tokens 0, call 2 reported a cache hit on
+# gpt-5.6-luna (1575), gpt-6-astra (1575), gpt-4o-mini (1536), gpt-5.4-mini
+# (1280) and o4-mini (1408). Only gpt-5.6 and gpt-6 also report
+# cache_write_tokens; the older families report cached_tokens alone.
+#
+# The two catch-all rules with no `version_min` deliberately leave the flag
+# unset: they backstop pre-4o models that predate automatic caching. The
+# `extends = true` gpt-5.4 row also leaves it unset, because an extends rule
+# contributes only the fields it sets and resolution falls through to the
+# `version_min = [5, 4]` rule that carries the flag.
 
 # ChatGPT-era GPT models use Markdown prompt sections and native JSON output.
 [[provider.openai]]
 model_match = "gpt-4o*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "logit_bias", "prediction"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1671,6 +1700,7 @@ thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "gpt-4.1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 vision_supported = true
@@ -1691,6 +1721,7 @@ thinking_block_style = "none"
 # Placed before the generic `gpt-*` version rows so it wins the first-match.
 [[provider.openai]]
 model_match = "gpt-*codex*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1741,6 +1772,7 @@ thinking_block_style = "reasoning_summary"
 # into a provider 400 at request time, so keep this row ahead of the wildcard.
 [[provider.openai]]
 model_match = "gpt-6*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1779,6 +1811,7 @@ thinking_block_style = "reasoning_summary"
 # version rule so Harn rejects an invalid effort before spending an API call.
 [[provider.openai]]
 model_match = "gpt-5.6*"
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1828,6 +1861,7 @@ reasoning_excluded_portable_options = ["temperature"]
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 4]
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1860,6 +1894,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 1]
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1880,6 +1915,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 0]
+prompt_caching = true
 advanced_generation_options = ["logprobs", "verbosity"]
 native_tools = true
 preferred_tool_format = "native"
@@ -1913,6 +1949,7 @@ thinking_block_style = "none"
 # Reasoning family (o1, o3, o4, ...).
 [[provider.openai]]
 model_match = "o1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -1929,6 +1966,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "o3*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -1945,6 +1983,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "o4*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -1963,6 +2002,7 @@ thinking_block_style = "reasoning_summary"
 # OpenRouter-style provider-prefixed IDs.
 [[provider.openai]]
 model_match = "openai/gpt-4o*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 vision = true
@@ -1979,6 +2019,7 @@ thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/gpt-4.1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 vision_supported = true
@@ -1994,6 +2035,7 @@ thinking_block_style = "none"
 # OpenRouter-style provider-prefixed codex ids (responses-only, chat 404).
 [[provider.openai]]
 model_match = "openai/gpt-*codex*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 responses_api = true
@@ -2026,6 +2068,7 @@ thinking_block_style = "reasoning_summary"
 # rather than costing a round trip.
 [[provider.openai]]
 model_match = "openai/gpt-6*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -2051,6 +2094,7 @@ thinking_block_style = "reasoning_summary"
 # are rejected locally for both standard and provider-managed `-pro` routes.
 [[provider.openai]]
 model_match = "openai/gpt-5.6*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -2072,6 +2116,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 4]
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -2103,6 +2148,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 1]
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -2121,6 +2167,7 @@ thinking_block_style = "reasoning_summary"
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 0]
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 requires_completion_tokens = true
@@ -2150,6 +2197,7 @@ thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/o1*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -2166,6 +2214,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/o3*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -2182,6 +2231,7 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/o4*"
+prompt_caching = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
