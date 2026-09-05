@@ -398,6 +398,19 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_var(name))
     }
 
+    /// Resolve a lexical value only when it appears before any same-named
+    /// function in the scope chain. Nested function declarations are also
+    /// registered in `vars` for first-class references, so a plain `get_var`
+    /// cannot distinguish that projection from a true value shadow.
+    pub(super) fn get_var_before_fn(&self, name: &str) -> Option<&InferredType> {
+        if self.functions.contains_key(name) {
+            return None;
+        }
+        self.vars
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.get_var_before_fn(name))
+    }
+
     pub(super) fn define_flow_alias(&mut self, name: &str, expression: SNode) {
         let is_flow_expression = matches!(
             &expression.node,

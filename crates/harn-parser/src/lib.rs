@@ -53,6 +53,12 @@ pub const HARN_LEGACY_AMBIENT_CAPABILITIES_ENV: &str = "HARN_LEGACY_AMBIENT_CAPA
 static LEGACY_AMBIENT_CAPABILITIES: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(0);
 
+#[cfg(test)]
+pub(crate) fn legacy_ambient_capabilities_test_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
 pub fn legacy_ambient_capabilities_enabled() -> bool {
     match LEGACY_AMBIENT_CAPABILITIES.load(std::sync::atomic::Ordering::Relaxed) {
         1 => false,

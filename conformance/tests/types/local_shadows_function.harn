@@ -1,4 +1,10 @@
 pipeline default(harness: Harness) {
+  fn answer() -> string {
+    return "module"
+  }
+  fn invoke(answer: fn() -> int) -> int {
+    return answer()
+  }
   fn registry() {
     return {items: ["x"]}
   }
@@ -9,6 +15,8 @@ pipeline default(harness: Harness) {
     const registry = seed
     return registry
   }
+  assert(invoke(fn() -> int { return 7 }) == 7)
+  assert(answer() == "module")
   const r = build({items: ["a", "b"]})
   harness.stdio.println(to_string(len(r.items)))
 }
