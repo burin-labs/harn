@@ -58,23 +58,26 @@ const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new(SCHEMA_NAME, SCHEMA_VERS
 
 #[derive(Clone)]
 pub struct SqliteSessionStore {
-    conn: Arc<Mutex<Connection>>,
-    hooks: Arc<StoreHooks>,
-    path: PathBuf,
-    mutation_admission: MutationAdmission,
-    _snapshot: Option<Arc<tempfile::TempDir>>,
+    inner: Arc<StoreInner>,
 }
 
-#[derive(Clone, Debug)]
+// Clones are claims on one open store, not copies of its configuration.
+// Keep the connection, hooks, admission and snapshot lifetime together so
+// adding store policy does not enlarge every async caller's stack frame.
+struct StoreInner {
+    conn: Mutex<Connection>,
+    hooks: StoreHooks,
+    path: PathBuf,
+    mutation_admission: MutationAdmission,
+    _snapshot: Option<tempfile::TempDir>,
+}
+
+#[derive(Debug)]
 enum MutationAdmission {
     InMemory,
     ReadOnly,
-    Shared {
-        store_dir: PathBuf,
-    },
-    Maintenance {
-        _lease: Arc<SessionMaintenanceLease>,
-    },
+    Shared { store_dir: PathBuf },
+    Maintenance { _lease: SessionMaintenanceLease },
 }
 
 struct MutationConnection<'a> {
@@ -143,11 +146,13 @@ impl SqliteSessionStore {
         require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA)
             .map_err(map_initialization)?;
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            hooks: Arc::new(hooks),
-            path,
-            mutation_admission: MutationAdmission::ReadOnly,
-            _snapshot: Some(Arc::new(snapshot)),
+            inner: Arc::new(StoreInner {
+                conn: Mutex::new(conn),
+                hooks,
+                path,
+                mutation_admission: MutationAdmission::ReadOnly,
+                _snapshot: Some(snapshot),
+            }),
         })
     }
 
@@ -183,10 +188,8 @@ impl SqliteSessionStore {
     ) -> StoreResult<Self> {
         let path = path.as_ref().to_path_buf();
         let store_dir = store_directory(&path);
-        let lease = Arc::new(
-            SessionMaintenanceLease::try_acquire(&store_dir)
-                .map_err(|error| map_lease(error, StoreContention::ProjectLeaseHeld))?,
-        );
+        let lease = SessionMaintenanceLease::try_acquire(&store_dir)
+            .map_err(|error| map_lease(error, StoreContention::ProjectLeaseHeld))?;
         let conn =
             Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
         Self::initialize(
@@ -223,27 +226,29 @@ impl SqliteSessionStore {
         initialization.map_err(map_initialization)?;
         rebuild_search_index_if_needed(&mut conn, &hooks)?;
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            hooks: Arc::new(hooks),
-            path,
-            mutation_admission,
-            _snapshot: None,
+            inner: Arc::new(StoreInner {
+                conn: Mutex::new(conn),
+                hooks,
+                path,
+                mutation_admission,
+                _snapshot: None,
+            }),
         })
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.inner.path
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|e| e.into_inner())
+        self.inner.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The single admission boundary for every operation that can change a
     /// file-backed store. The lease is taken before the connection mutex and
     /// held until the returned guard drops.
     fn lock_for_mutation(&self) -> StoreResult<MutationConnection<'_>> {
-        let lease = match &self.mutation_admission {
+        let lease = match &self.inner.mutation_admission {
             MutationAdmission::InMemory
             | MutationAdmission::ReadOnly
             | MutationAdmission::Maintenance { .. } => None,
@@ -259,7 +264,7 @@ impl SqliteSessionStore {
     }
 
     fn require_maintenance(&self, operation: &'static str) -> StoreResult<()> {
-        match &self.mutation_admission {
+        match &self.inner.mutation_admission {
             MutationAdmission::InMemory | MutationAdmission::Maintenance { .. } => Ok(()),
             MutationAdmission::ReadOnly | MutationAdmission::Shared { .. } => {
                 Err(StoreError::MaintenanceRequired { operation })

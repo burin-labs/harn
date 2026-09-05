@@ -32,7 +32,7 @@ impl SessionImporter for SqliteSessionStore {
         insert_session(&tx, &meta, 1)?;
         let event_count = request.events.len();
         for event in request.events {
-            append_in_tx(&tx, &self.hooks, &meta.id, event)?;
+            append_in_tx(&tx, self.hooks(), &meta.id, event)?;
         }
         tx.execute(
             "INSERT INTO session_imports (source_id, source_digest, session_id, event_count)
@@ -59,7 +59,7 @@ impl SessionImporter for SqliteSessionStore {
 #[async_trait]
 impl SessionStore for SqliteSessionStore {
     fn hooks(&self) -> &StoreHooks {
-        &self.hooks
+        &self.inner.hooks
     }
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
@@ -130,7 +130,7 @@ impl SessionStore for SqliteSessionStore {
         }
         let (meta, _) = read_session_meta(&tx, session_id)?;
         let mut events = load_all_events(&tx, session_id)?;
-        redact_stored_events(&self.hooks, &mut events)?;
+        redact_stored_events(self.hooks(), &mut events)?;
         tx.execute(
             "DELETE FROM session_events_fts WHERE session_id = ?1",
             params![session_id],
@@ -142,14 +142,14 @@ impl SessionStore for SqliteSessionStore {
         )
         .map_err(map_sql)?;
         for event in &events {
-            insert_search_rows(&tx, &self.hooks, &meta, event)?;
+            insert_search_rows(&tx, self.hooks(), &meta, event)?;
         }
         tx.commit().map_err(map_sql)?;
         // Publish only after the commit lands and the writer lock is gone, so
         // an observer that reads the session back sees the row it was told
         // about instead of racing the transaction that produced it.
         drop(conn);
-        self.hooks.notify_session_changed(&meta);
+        self.hooks().notify_session_changed(&meta);
         Ok(meta)
     }
 
@@ -263,7 +263,7 @@ impl SessionStore for SqliteSessionStore {
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
         let mut conn = self.lock_for_mutation()?;
         let tx = write_transaction(&mut conn)?;
-        let stored = append_in_tx(&tx, &self.hooks, session_id, event)?;
+        let stored = append_in_tx(&tx, self.hooks(), session_id, event)?;
         tx.commit().map_err(map_sql)?;
         Ok(stored)
     }
@@ -296,7 +296,7 @@ impl SessionStore for SqliteSessionStore {
         for row in rows {
             events.push(row.map_err(map_sql)?);
         }
-        redact_stored_events(&self.hooks, &mut events)?;
+        redact_stored_events(self.hooks(), &mut events)?;
         let next_cursor = if events.len() as i64 == limit {
             events.last().map(|tail| tail.event_id + 1)
         } else {
@@ -355,7 +355,7 @@ impl SessionStore for SqliteSessionStore {
             .into_iter()
             .filter(|event| event.event_id <= at_event_id)
             .collect();
-        prepare_stored_events_for_persistence(&self.hooks, &mut inherited)?;
+        prepare_stored_events_for_persistence(self.hooks(), &mut inherited)?;
         let copied = re_anchor_events(&inherited, &new_id);
         child_meta.event_count = copied.len();
         child_meta.last_event_id = copied.last().map(|tail| tail.event_id);
@@ -364,7 +364,7 @@ impl SessionStore for SqliteSessionStore {
         insert_session(&tx, &child_meta, next_event_id)?;
         for event in &copied {
             insert_event(&tx, event)?;
-            insert_search_rows(&tx, &self.hooks, &child_meta, event)?;
+            insert_search_rows(&tx, self.hooks(), &child_meta, event)?;
         }
         tx.commit().map_err(map_sql)?;
         Ok(ForkResult {
@@ -473,7 +473,7 @@ impl SessionStore for SqliteSessionStore {
         let conn = self.lock_for_mutation()?;
         let (meta, _) = read_session_meta(&conn, session_id)?;
         let mut events = load_all_events(&conn, session_id)?;
-        redact_stored_events(&self.hooks, &mut events)?;
+        redact_stored_events(self.hooks(), &mut events)?;
         let (ms, text) = now_ms_and_rfc3339();
         let snapshot = Snapshot {
             id: SnapshotId(format!("snap-{}", Uuid::now_v7())),
@@ -512,7 +512,7 @@ impl SessionStore for SqliteSessionStore {
         let body = body.ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))?;
         let mut snapshot: Snapshot =
             serde_json::from_str(&body).map_err(|error| StoreError::Backend(error.to_string()))?;
-        redact_stored_events(&self.hooks, &mut snapshot.events)?;
+        redact_stored_events(self.hooks(), &mut snapshot.events)?;
         Ok(snapshot)
     }
 
@@ -533,17 +533,17 @@ impl SessionStore for SqliteSessionStore {
             crate::signing::canonical_receipt_payload(session_id, last_event_id, &record_root);
         let mut append = AppendEvent::new(SessionEventKind::Receipt, payload);
         append.actor = Some("session_store".into());
-        let mut stored = append_in_tx(&tx, &self.hooks, session_id, append)?;
+        let mut stored = append_in_tx(&tx, self.hooks(), session_id, append)?;
         // Intentionally replace the receipt's append-time per-event
         // signature with a receipt-root signature. The receipt's purpose
         // is to attest the chain root, so `verify()` special-cases it via
         // `verify_receipt_root` against the pre-receipt root rather than
         // the receipt event's own canonical bytes.
         if let Some(signer) = self
-            .hooks
+            .hooks()
             .receipt_signer
             .as_ref()
-            .or(self.hooks.event_signer.as_ref())
+            .or(self.hooks().event_signer.as_ref())
         {
             let signature = signer.sign_receipt(&record_root);
             let signature_json =
@@ -617,15 +617,15 @@ impl SessionStore for SqliteSessionStore {
         let (meta, _) = read_session_meta(&conn, session_id)?;
         let events = load_all_events(&conn, session_id)?;
         let event_verifier = self
-            .hooks
+            .hooks()
             .event_signer
             .as_ref()
             .map(|signer| signer.verifying_key());
         let receipt_verifier = self
-            .hooks
+            .hooks()
             .receipt_signer
             .as_ref()
-            .or(self.hooks.event_signer.as_ref())
+            .or(self.hooks().event_signer.as_ref())
             .map(|signer| signer.verifying_key());
         Ok(verify_session_chain(
             &meta,
@@ -638,7 +638,7 @@ impl SessionStore for SqliteSessionStore {
     async fn search(&self, query: SearchQuery) -> StoreResult<SearchResponse> {
         query.validate().map_err(StoreError::InvalidInput)?;
         let conn = self.lock();
-        let embedder = self.hooks.embedder.clone();
+        let embedder = self.hooks().embedder.clone();
         let semantic_available = embedder.is_semantic();
         let effective_mode = if semantic_available {
             query.mode
@@ -772,7 +772,7 @@ impl SessionStore for SqliteSessionStore {
             .iter()
             .map(|(event, ..)| event.clone())
             .collect::<Vec<_>>();
-        redact_stored_events(&self.hooks, &mut redacted)?;
+        redact_stored_events(self.hooks(), &mut redacted)?;
         for ((event, ..), redacted_event) in candidates.iter_mut().zip(redacted) {
             *event = redacted_event;
         }
@@ -780,7 +780,7 @@ impl SessionStore for SqliteSessionStore {
             .iter()
             .map(|(event, title, cwd, model, project_scope, ..)| {
                 redacted_search_document_parts(
-                    self.hooks.redaction.as_ref(),
+                    self.hooks().redaction.as_ref(),
                     title.as_deref(),
                     cwd.as_deref(),
                     model.as_deref(),
