@@ -121,7 +121,12 @@ fn main(harness: Harness) -> int {
   if provider == "mock" {
     __enqueue_mock_cell(harness.llm, arm, evidence)
   }
-  const session = "completion-claim-" + case_id + "-" + to_string(trial)
+  const session = "completion-claim-"
+    + case_id
+    + "-"
+    + to_string(trial)
+    + "-"
+    + harness.random.uuid()
   const captured = agent_capture_events(
     harness.agent,
     session,
@@ -141,11 +146,7 @@ fn main(harness: Harness) -> int {
         max_iterations: 6,
         max_tokens: max_tokens,
         final_wrapup: false,
-        verify_completion_judge: if provider == "mock" {
-          {provider: provider, max_invocations: 2}
-        } else {
-          {provider: provider, model: model, max_invocations: 2}
-        },
+        verify_completion_judge: {provider: provider, model: model, max_invocations: 2},
       },
     ) },
   )
@@ -189,6 +190,7 @@ fn main(harness: Harness) -> int {
     pair: pair,
     arm: arm,
     trial: trial,
+    session_id: session,
     evidence: evidence,
     pass: pass,
     status: captured.result?.status,
