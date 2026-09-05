@@ -193,15 +193,15 @@ pipeline test_the_run_reads_done_not_completion_unverified(harness: Harness, tas
   // The finalized result exposes this as `status`; the loop state calls it
   // `final_status`. Read both rather than guess, then assert an exact value so
   // the tolerance cannot make the case pass vacuously.
-  const status = to_string(run?.result?.status ?? run?.result?.final_status ?? "")
+  const status = to_string(run.result?.status ?? run.result?.final_status ?? "")
   assert(
     status != "completion_unverified",
     "the whole point of #8058: a green verifier must not seal completion_unverified",
   )
   assert(status == "done", "it seals done, got: " + status)
   assert(
-    to_string(run?.result?.stop_reason ?? "") == VERIFIED_CAP_REASON,
-    "and the stop reason says WHY it is done, got: " + to_string(run?.result?.stop_reason ?? ""),
+    to_string(run.result?.stop_reason ?? "") == VERIFIED_CAP_REASON,
+    "and the stop reason says WHY it is done, got: " + to_string(run.result?.stop_reason ?? ""),
   )
 }
 
@@ -212,7 +212,7 @@ pipeline test_the_cap_is_still_reported_as_reached(harness: Harness, task: unkno
   const run = __run_to_cap(harness, "passed", "passed")
   __assert_judge_ran(run, "cap-reported arm")
   assert(
-    run?.result?.completion_judge?.cap_reached ?? false,
+    run.result?.completion_judge?.cap_reached,
     "the cap was reached; sealing done must not erase that it was",
   )
 }
@@ -234,9 +234,9 @@ pipeline test_a_cap_over_a_failed_verifier_is_unchanged(harness: Harness, task: 
     "a red verifier keeps today's action, got: " + to_string(receipt?.action ?? "<none>"),
   )
   assert(
-    to_string(run?.result?.status ?? run?.result?.final_status ?? "") == "completion_unverified",
+    to_string(run.result?.status ?? run.result?.final_status ?? "") == "completion_unverified",
     "and today's terminal, got: "
-      + to_string(run?.result?.status ?? run?.result?.final_status ?? ""),
+      + to_string(run.result?.status ?? run.result?.final_status ?? ""),
   )
 }
 
@@ -252,8 +252,8 @@ pipeline test_a_cap_over_an_unrun_verifier_is_unchanged(harness: Harness, task: 
     "an unrun verifier is not a passing one, got: " + to_string(receipt?.action ?? "<none>"),
   )
   assert(
-    to_string(run?.result?.status ?? run?.result?.final_status ?? "") == "completion_unverified",
+    to_string(run.result?.status ?? run.result?.final_status ?? "") == "completion_unverified",
     "and today's terminal, got: "
-      + to_string(run?.result?.status ?? run?.result?.final_status ?? ""),
+      + to_string(run.result?.status ?? run.result?.final_status ?? ""),
   )
 }
