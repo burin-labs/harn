@@ -49,7 +49,10 @@ const SCHEDULER_VIEW = join(
 // The conditions, at the owning interface.
 // -------------------------------------------------------------------------------------------------
 
-pipeline test_the_prompt_makes_the_current_view_outrank_earlier_rounds(harness: Harness, task: unknown) {
+pipeline test_the_prompt_makes_the_current_view_outrank_earlier_rounds(
+  harness: Harness,
+  task: unknown,
+) {
   // #8091 read the refusals as a judge restating its previous position rather
   // than re-reading the view it was handed. Nothing in the prompt said the
   // labelled view outranks what was said last round. Assert the WORDS, because
@@ -77,7 +80,7 @@ pipeline test_the_schema_offers_room_for_every_gap(harness: Harness, task: unkno
   const item = gaps?.items
   for field in ["criterion", "gap_class", "detail"] {
     assert(
-      item?.properties?[field] != nil,
+      item?.properties?.[field] != nil,
       "every gap must carry `" + field + "`, or the actor cannot tell the gaps apart",
     )
   }
@@ -94,11 +97,31 @@ pipeline test_a_refusal_can_name_five_gaps_at_once(harness: Harness, task: unkno
     verdict: "continue",
     detail: "Five test-quality gaps remain.",
     gaps: [
-      {criterion: "status filter excludes a top-scoring non-matching run", gap_class: "unmet_manner_clause", detail: "make the non-matching run highest-scoring"},
-      {criterion: "last-step ranking is distinguished from peak", gap_class: "unmet_manner_clause", detail: "adjust fixtures so peak ranking picks a different run"},
-      {criterion: "experiment scoping is exercised", gap_class: "unmet_manner_clause", detail: "add a cross-experiment run"},
-      {criterion: "the other experiment's score exceeds the selected run", gap_class: "unmet_manner_clause", detail: "raise it above the selection"},
-      {criterion: "the missing-metric run carries a higher different-key value", gap_class: "unmet_manner_clause", detail: "set that value above the target"},
+      {
+        criterion: "status filter excludes a top-scoring non-matching run",
+        gap_class: "unmet_manner_clause",
+        detail: "make the non-matching run highest-scoring",
+      },
+      {
+        criterion: "last-step ranking is distinguished from peak",
+        gap_class: "unmet_manner_clause",
+        detail: "adjust fixtures so peak ranking picks a different run",
+      },
+      {
+        criterion: "experiment scoping is exercised",
+        gap_class: "unmet_manner_clause",
+        detail: "add a cross-experiment run",
+      },
+      {
+        criterion: "the other experiment's score exceeds the selected run",
+        gap_class: "unmet_manner_clause",
+        detail: "raise it above the selection",
+      },
+      {
+        criterion: "the missing-metric run carries a higher different-key value",
+        gap_class: "unmet_manner_clause",
+        detail: "set that value above the target",
+      },
     ],
   }
   const gaps = __judge_completion_gaps_read(reply)
@@ -180,7 +203,10 @@ pipeline test_a_quote_present_in_the_view_passes(harness: Harness, task: unknown
       ],
     },
   )
-  assert(len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0, "a real line is not a violation")
+  assert(
+    len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0,
+    "a real line is not a violation",
+  )
 }
 
 pipeline test_reflowed_whitespace_still_matches(harness: Harness, task: unknown) {

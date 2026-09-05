@@ -32,10 +32,7 @@ pub import {
   __completion_arbitrate_contradiction,
   __completion_arbitrate_verification,
 } from "std/agent/judge_arbitration"
-import {
-  __judge_resolve_contradiction,
-  __judge_resolve_ungrounded_quotes,
-} from "std/agent/judge_contradiction"
+import { __judge_settle_reply } from "std/agent/judge_contradiction"
 import { __judge_evidence_projection_from_lifecycle } from "std/agent/judge_evidence"
 import {
   COMPLETION_JUDGE_GAP_CLASSES,
@@ -512,53 +509,21 @@ fn __judge_invoke_structured(
     contract,
     payload.judge_evidence_packet,
   )
-  // A judge that answered `done` while naming a gap has contradicted itself.
-  // Same treatment, same reason: re-ask the JUDGE once with the contradiction
-  // named, rather than sending the actor a refusal built out of the judge's own
-  // claim that the work is finished. Without this the identical reply comes back
-  // on every invocation and the run dies at the cap. See harn#8060.
-  const contradiction = __judge_resolve_contradiction(
+  // Both re-ask reasons, in order, owned by the module that owns re-asks: a
+  // `done` that also names a gap (harn#8060), then a refusal quoting evidence
+  // it was never shown (#8100). The sequencing lives there so this function
+  // does not grow a second copy of "re-ask, then re-decode, then remember which
+  // reply is now of record".
+  const settled = __judge_settle_reply(
     harness,
     reask_request,
+    contract,
+    payload,
     resolved.data,
-    __judge_completion_verdict_contradicts_itself(itemized_decoded),
+    itemized_decoded,
   )
-  // `contradiction.data` is the reply of record: the re-ask when one happened,
-  // and the itemization pass's reply unchanged when none did. Every read below
-  // goes through it so no clause is left describing a superseded reply.
-  const contradiction_decoded = if contradiction.reasked {
-    __judge_completion_verdict_read(contradiction.data, contract, payload.judge_evidence_packet)
-  } else {
-    itemized_decoded
-  }
-  // A refusal that sources itself to the evidence gets checked against the
-  // evidence. Same treatment as the self-contradiction above and for the same
-  // reason: the reply is not usable, and re-asking the JUDGE once beats handing
-  // the actor a complaint whose stated basis is not in the file view it was
-  // shown. See #8100. `payload.judge_evidence` is the rendered packet the judge
-  // was actually handed, so this compares against what it saw and not against
-  // what the workspace happens to hold now.
-  const ungrounded = __judge_ungrounded_gap_quotes(
-    contradiction_decoded.gaps,
-    payload.judge_evidence,
-  )
-  const grounding = if contradiction_decoded.verdict == "continue" {
-    __judge_resolve_ungrounded_quotes(harness, reask_request, contradiction.data, ungrounded)
-  } else {
-    {data: contradiction.data, reasked: false}
-  }
-  const decoded = if grounding.reasked {
-    __judge_completion_verdict_read(grounding.data, contract, payload.judge_evidence_packet)
-  } else {
-    contradiction_decoded
-  }
-  // The last reply either re-ask produced. Every read below goes through it so
-  // no clause is left describing a superseded reply.
-  const reply_of_record = if grounding.reasked {
-    grounding.data
-  } else {
-    contradiction.data
-  }
+  const decoded = settled.decoded
+  const reply_of_record = settled.reply_of_record
   const requirement_report = decoded.requirement_report
   const unassessed = resolved.omitted && requirement_report != nil
   // A judge that REFUSED and itemized nothing has assessed nothing either, but
