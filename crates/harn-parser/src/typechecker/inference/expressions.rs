@@ -10,7 +10,7 @@
 //! also runs from contexts that should stay silent (e.g. probing a
 //! `Ternary`'s arm types for `infer_type`'s union merge).
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::ControlFlow};
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -430,8 +430,7 @@ impl TypeChecker {
             }
 
             Node::Identifier(name) => {
-                // A local owns the name even when its type is unknown; do not
-                // flatten that binding into a same-named function reference.
+                // An untyped local still owns its name over a module function.
                 if let Some(var_ty) = scope.get_var(name) {
                     return var_ty.clone();
                 }
@@ -460,7 +459,8 @@ impl TypeChecker {
                 type_args,
                 args,
             } => {
-                if let Some(return_type) = self.infer_lexical_call_return(name, scope) {
+                if let ControlFlow::Break(return_type) = self.infer_lexical_call_return(name, scope)
+                {
                     return return_type;
                 }
                 let source_defined = scope

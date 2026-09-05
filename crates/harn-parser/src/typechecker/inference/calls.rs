@@ -15,6 +15,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
+    ops::ControlFlow,
 };
 
 use crate::ast::*;
@@ -1386,9 +1387,11 @@ impl TypeChecker {
         &self,
         name: &str,
         scope: &TypeScope,
-    ) -> Option<Option<TypeExpr>> {
-        let bound_type = scope.get_var_before_fn(name)?;
-        Some(
+    ) -> ControlFlow<Option<TypeExpr>> {
+        let Some(bound_type) = scope.get_var_before_fn(name) else {
+            return ControlFlow::Continue(());
+        };
+        ControlFlow::Break(
             bound_type
                 .as_ref()
                 .and_then(|ty| match self.resolve_alias(ty, scope) {
