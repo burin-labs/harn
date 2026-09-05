@@ -398,6 +398,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        dataControls = try container.decodeIfPresent(HarnModelDataControls.self, forKey: .dataControls)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name
         blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
         provider = try container.decode(String.self, forKey: .provider)

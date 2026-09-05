@@ -29,6 +29,7 @@ pub struct PreparedCliArgument {
     completions: Vec<String>,
     display_order: Option<u32>,
     help_group: Option<String>,
+    schema: JsonValue,
 }
 
 impl PreparedCliArgument {
@@ -86,6 +87,15 @@ impl PreparedCliArgument {
 
     pub fn help_group(&self) -> Option<&str> {
         self.help_group.as_deref()
+    }
+
+    /// The property's schema with every shared component reference resolved.
+    ///
+    /// The generated CLI reads token types from this rather than from the
+    /// catalog entry, so a component-backed registry projects the same way a
+    /// literal one does instead of meeting an unresolved reference.
+    pub fn schema(&self) -> &JsonValue {
+        &self.schema
     }
 }
 
@@ -165,9 +175,13 @@ impl PreparedCliTree {
             return Err(error("duplicate registry-level CLI command metadata path"));
         }
 
+        let components = catalog
+            .components
+            .as_ref()
+            .map(|components| &components.schemas);
         let mut root = MutableCommand::default();
         for tool in &catalog.tools {
-            let arguments = prepare_arguments(tool)?;
+            let arguments = prepare_arguments(tool, components)?;
             if !tool.governance.allows(ToolAudience::Cli) {
                 continue;
             }
@@ -349,6 +363,7 @@ impl PreparedCliCommand {
 
 fn prepare_arguments(
     tool: &crate::tool_registry::ToolCatalogEntry,
+    components: Option<&BTreeMap<String, JsonValue>>,
 ) -> Result<Vec<PreparedCliArgument>, PreparedToolCatalogError> {
     let properties = tool
         .input_schema
@@ -385,6 +400,7 @@ fn prepare_arguments(
             .get(&property)
             .cloned()
             .unwrap_or_default();
+        let schema = resolve_component_schema(&tool.name, &property, &schema, components)?;
         let argument = prepare_argument(&tool.name, property, &schema, projection)?;
         if let Some(position) = argument.position {
             if let Some(owner) = positions.insert(position, argument.property.clone()) {
@@ -587,7 +603,58 @@ fn prepare_argument(
         completions: projection.completions,
         display_order: projection.display_order,
         help_group: projection.help_group,
+        schema: schema.clone(),
     })
+}
+
+/// Follow a shared component reference until the property's own schema is
+/// concrete, so the CLI projection reads a real type rather than a pointer.
+///
+/// Only the registry's own `#/components/schemas/*` vocabulary is followed;
+/// any other reference is left alone for the schema owner to reject. Keywords
+/// written beside the reference win over the component they resolve to, which
+/// is how a caller narrows a shared type at one use site.
+fn resolve_component_schema(
+    tool: &str,
+    property: &str,
+    schema: &JsonValue,
+    components: Option<&BTreeMap<String, JsonValue>>,
+) -> Result<JsonValue, PreparedToolCatalogError> {
+    let mut resolved = schema.clone();
+    let mut seen = BTreeSet::new();
+    loop {
+        let Some(name) = resolved
+            .get("$ref")
+            .and_then(JsonValue::as_str)
+            .and_then(|reference| reference.strip_prefix("#/components/schemas/"))
+            .and_then(super::decode_json_pointer_segment)
+        else {
+            return Ok(resolved);
+        };
+        if !seen.insert(name.clone()) {
+            return Err(error(format!(
+                "tool {tool:?} property {property:?} resolves through a cyclic component reference"
+            )));
+        }
+        let component = components
+            .and_then(|components| components.get(&name))
+            .ok_or_else(|| {
+                error(format!(
+                    "tool {tool:?} property {property:?} references unknown component {name:?}"
+                ))
+            })?;
+        let mut merged = component.clone();
+        let (Some(merged_object), Some(overrides)) = (merged.as_object_mut(), resolved.as_object())
+        else {
+            return Ok(component.clone());
+        };
+        for (key, value) in overrides {
+            if key != "$ref" {
+                merged_object.insert(key.clone(), value.clone());
+            }
+        }
+        resolved = merged;
+    }
 }
 
 fn valid_long_name(value: &str) -> bool {

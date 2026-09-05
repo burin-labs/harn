@@ -157,3 +157,37 @@ pub fn collect(prefix: string, ...values: int) -> dict {
         serde_json::json!({"prefix": "positional", "values": [3, 4]})
     );
 }
+
+#[tokio::test]
+async fn dispatch_rejects_an_unknown_named_argument_instead_of_dropping_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn inspect(count: int) -> int {
+  return count
+}
+",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    assert_eq!(
+        core.tool_catalog().tools[0].input_schema["additionalProperties"],
+        serde_json::json!(false),
+        "the advertised export schema must close the caller-owned object"
+    );
+
+    let mut unknown = replay_test_request(None);
+    unknown.function = "inspect".to_string();
+    unknown.arguments = CallArguments::Named(BTreeMap::from([
+        ("count".to_string(), serde_json::json!(1)),
+        ("mispelled".to_string(), serde_json::json!(2)),
+    ]));
+    let error = core
+        .dispatch(unknown)
+        .await
+        .expect_err("an unknown named argument must not reach the handler");
+    assert!(matches!(error, DispatchError::Validation(_)));
+    assert!(error.message().contains("additionalProperties"));
+}

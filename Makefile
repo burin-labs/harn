@@ -1,7 +1,8 @@
-.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
-.PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
+.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-downstream-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-symbols check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths check-stack-frames check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-generated-registry gen-release-contract check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
+.PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache gh-check-state
 .PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: check-typescript-protocol-binding check-swift-protocol-binding
+.PHONY: check-scheduled-workflows
 .PHONY: sync-docs-diagnostics
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
@@ -9,6 +10,13 @@ HARN_BIN ?=
 PROTOCOL_ARTIFACT_VERSION ?=
 HARN_CONFORMANCE_TIMEOUT_MS ?= 60000
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
+define HARN_REQUIRE_NEXTEST
+	@if ! command -v cargo-nextest >/dev/null 2>&1; then \
+		echo "cargo-nextest is required; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
+		exit 1; \
+	fi
+	@$(HARN_CARGO_CMD) nextest --version >/dev/null
+endef
 # Rust tests start from a known security-policy environment. Focused tests may
 # still seed these variables explicitly after process startup. Harn script
 # tests use harn_test_env.sh so they also get a fresh durable session store.
@@ -56,7 +64,7 @@ all: fmt
 	stable_root="$$(mktemp -d "$${TMPDIR:-/tmp}/harn-all-bin.XXXXXX")" || exit 1; \
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
-	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-vm-exposures portal-check || exit 1; \
+	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-portable-demo-package check-prompt-grammar check-protocol-artifacts check-connector-schemas check-harness-migrations check-bindings check-session-bundle-schema check-run-view-fixtures check-docs lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-public-product-names check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-test-target-coverage check-gate-path-visibility check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-turn-end-boundary check-release-contract check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract check-scheduled-workflows check-vm-exposures portal-check || exit 1; \
 	if [ -z "$(strip $(HARN_BIN))" ]; then HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --record-receipt; fi
 
 check: all
@@ -281,10 +289,7 @@ check-dependabot-groups:
 # `ARGS` replaces the default `--workspace` selector so `-p <crate>` also
 # narrows compilation instead of forming Cargo's additive workspace union.
 test:
-	@$(HARN_CARGO_CMD) nextest --version >/dev/null 2>&1 || { \
-		echo "make test requires cargo-nextest; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
-		echo "for intentional plain cargo test (different isolation; includes e2e binaries): make test-cargo" >&2; \
-		exit 1; }
+	$(HARN_REQUIRE_NEXTEST)
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(if $(strip $(ARGS)),$(ARGS),--workspace)
 
 # Run a native nextest expression without passing it through Make or a shell
@@ -324,8 +329,7 @@ test-one:
 # compiling the Harn CLI.
 AFFECTED_BASE ?= origin/main
 test-affected:
-	@$(HARN_CARGO_CMD) nextest --version >/dev/null 2>&1 || { \
-		echo "test-affected requires cargo-nextest; run 'make setup'"; exit 1; }
+	$(HARN_REQUIRE_NEXTEST)
 	@args="$$(./scripts/ci/affected_crate_args.sh --base "$(AFFECTED_BASE)")"; \
 	if [ -z "$$args" ]; then \
 		echo "make test-affected: no affected crates; skipping Rust tests."; \
@@ -339,7 +343,8 @@ test-affected:
 # Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace --profile e2e --run-ignored all
+	$(HARN_REQUIRE_NEXTEST)
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(if $(strip $(ARGS)),$(ARGS),--workspace) --profile e2e --run-ignored all
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:
@@ -612,6 +617,14 @@ test-harn-scripts:
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/burin-mini/tests/ --parallel
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/diagnostics-timing/tests/ --parallel
 	@echo "    Harn script tests OK."
+
+# Read one head commit's CI check state as a typed census: latest verdict per
+# check name, queued counted as pending, and an expected-name list derived from
+# the changed paths so a check that never reported is reported MISSING instead
+# of passing. Not a gate; it is the shared reader for agents and scripts.
+# usage: make gh-check-state REPO=owner/name SHA=<40-hex> [ARGS='--json']
+gh-check-state:
+	@./scripts/gh_check_state.sh --repo "$(REPO)" --sha "$(SHA)" $(ARGS)
 
 check-binary-size-policy:
 	@echo "=== Checking release binary-size policy ==="
@@ -1332,6 +1345,13 @@ check-generated-registry:
 	@echo "=== Checking generated-artifact registry is in sync ==="
 	@$(HARN_CMD) run scripts/check_generated_registry.harn
 
+gen-release-contract:
+	@$(HARN_CMD) run scripts/release_contract.harn
+
+check-release-contract:
+	@echo "=== Checking Harn-owned release contract ==="
+	@$(HARN_CMD) run scripts/release_contract.harn -- --check
+
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="
 	@$(HARN_CMD) run scripts/release_audit_contract.harn -- --contract scripts/release_audit_contract.json --check-ci .github/workflows/ci.yml
@@ -1357,6 +1377,10 @@ check-rust-test-lane-policy:
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="
 	@$(HARN_CMD) run scripts/check_cargo_lock_contract.harn
+
+check-scheduled-workflows:
+	@echo "=== Checking scheduled workflow claims and cadences ==="
+	@$(HARN_CMD) run scripts/check_scheduled_workflows.harn
 
 check-agent-guidance:
 	@echo "=== Checking canonical agent guidance ==="

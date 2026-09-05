@@ -8,6 +8,8 @@
 //
 // Usage:
 //   harn run scripts/check_docs_model_refs.harn   # exit 1 on stale refs
+import { scan_glob } from "./path_visibility.harn"
+
 const PROVIDERS_TOML = "crates/harn-vm/src/llm/providers.toml"
 
 const SONNET_REF_RE = r"claude-sonnet-4(-[0-9][0-9A-Za-z]*)+"
@@ -112,10 +114,10 @@ pipeline main(harness: Harness, task: unknown) {
     return 1
   }
   let files: list<string> = []
-  for g in harness.fs.glob("docs/src/**/*.md") {
+  for g in scan_glob(harness.fs, "check-docs-model-refs", "docs/src/**/*.md") {
     files = files + [rel_path(g)]
   }
-  for g in harness.fs.glob("docs/llm/**/*.md") {
+  for g in scan_glob(harness.fs, "check-docs-model-refs", "docs/llm/**/*.md") {
     files = files + [rel_path(g)]
   }
   let failures = 0

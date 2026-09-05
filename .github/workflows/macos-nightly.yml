@@ -1,4 +1,4 @@
-name: macOS nightly
+name: macOS workspace tests
 
 # Runs the full workspace nextest surface on macOS once per night, plus
 # on-demand from the Actions tab. This is the macOS analogue of
@@ -21,7 +21,7 @@ name: macOS nightly
 on:
   schedule:
     # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
-    # the Windows nightly so the two don't contend for the same cache lookups.
+    # the Windows workspace tests so the two don't contend for cache lookups.
     - cron: "30 7 * * *"
   workflow_dispatch:
   pull_request:
@@ -39,7 +39,7 @@ on:
 permissions:
   contents: read
   # Reading a main-produced warm artifact from a pull-request run needs the
-  # Actions scope, the same grant the Windows nightly already carries.
+  # Actions scope, the same grant the Windows workspace tests already carries.
   actions: write
 
 # Supersede an in-flight pull-request run when the same pull request pushes
@@ -66,12 +66,11 @@ jobs:
     name: Workspace nextest (macos-latest)
     # A pull-request run is cache-warming class, not exact-source proof, so it
     # takes the same hosted runner and the same generous budget as the nightly.
-    # The paid M4 class stays reserved for release certification, and the 30
-    # minute budget would have timed out this lane's p90 of 47 minutes, which
-    # the evidence reader would then have read as a red lane rather than a slow
-    # one.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 30 || 75 }}
+    # The paid M4 class requires an explicit release-incident opt-in. The 30
+    # minute budget would have timed out the hosted lane's p90 of 47 minutes,
+    # which the evidence reader would then have read as red rather than slow.
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 'blacksmith-12vcpu-macos-15' || 'macos-latest' }}
+    timeout-minutes: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_MACOS == 'true' && github.event_name == 'workflow_dispatch' && 30 || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:

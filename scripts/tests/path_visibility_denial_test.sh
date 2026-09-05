@@ -22,7 +22,7 @@ cleanup() { rm -f "$probe"; }
 trap cleanup EXIT
 
 cat > "$probe" <<'HARN'
-import { path_visibility } from "scripts/path_visibility.harn"
+import { path_visibility, scan_glob } from "scripts/path_visibility.harn"
 
 fn main(harness: Harness) {
   // Outside the worktree, so the sandbox refuses it.
@@ -34,6 +34,23 @@ fn main(harness: Harness) {
   harness.stdio.println("denied_line=" + denied.denial)
   harness.stdio.println("missing_status=" + missing.status)
   harness.stdio.println("missing_line=" + missing.denial)
+  // An enumeration rooted outside the worktree resolves to nothing, which is
+  // the shape a mis-rooted or denied scan produces. It must refuse rather than
+  // hand back an empty list a caller would loop over zero times.
+  const denied_scan = try {
+    scan_glob(harness.fs, "probe gate", "/etc/**/*.conf")
+    "returned"
+  } catch (err) {
+    "refused: " + to_string(err)
+  }
+  harness.stdio.println("denied_scan=" + denied_scan)
+  // Negative control: an in-scope enumeration with real matches must not throw.
+  const allowed_scan = try {
+    to_string(len(scan_glob(harness.fs, "probe gate", "scripts/*.harn")) > 0)
+  } catch (err) {
+    "threw: " + to_string(err)
+  }
+  harness.stdio.println("allowed_scan=" + allowed_scan)
 }
 HARN
 
@@ -57,5 +74,14 @@ grep -Eq '^denied_line=.*denied.*/etc/hosts' <<<"$out" \
 # calls everything denied, which would turn every gate red for no reason.
 grep -Fxq 'missing_status=missing' <<<"$out" || fail "an absent in-scope file was not reported missing"
 grep -Fxq 'missing_line=' <<<"$out" || fail "an absent in-scope file must not produce a denial line"
+
+# An enumeration that resolved to nothing must refuse, and must say why in
+# words an operator can grep for.
+grep -Eq '^denied_scan=refused: .*inspected 0' <<<"$out" \
+  || fail "an enumeration that resolved to nothing returned instead of refusing"
+
+# The negative control for that arm: a real in-scope enumeration must still
+# return, or the refusal would simply break every gate.
+grep -Fxq 'allowed_scan=true' <<<"$out" || fail "an in-scope enumeration with matches did not return"
 
 echo "path_visibility_denial_test: ok"

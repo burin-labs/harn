@@ -1,4 +1,4 @@
-name: Release size watch
+name: Release size baseline freshness
 
 # The hard binary size budget only runs inside build-release-binaries.yml, so
 # before this workflow existed it was evaluated on tag pushes and on the subset

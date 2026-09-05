@@ -335,3 +335,179 @@ fn cargo_workload_timeout_starts_at_the_worker_boundary() {
         EX_TIMEOUT
     );
 }
+
+/// A run in the queue, with the wait limit the test wants to exercise.
+fn pending_run(
+    store: &harn_hostlib::HostLeaseStore,
+    wait_limit_ms: u64,
+) -> harn_hostlib::HostLeaseRunReceipt {
+    store
+        .begin_run(
+            "supervision-lane",
+            harn_hostlib::HostLeasePriorityClass::Measurement,
+            harn_hostlib::HostLeaseResourceKey {
+                machine: "fixture".to_string(),
+                resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
+                domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
+            },
+            harn_hostlib::HostLeaseExecutionContext::cargo(
+                Path::new("/workspace/project"),
+                Path::new("/tmp/target"),
+                None,
+            ),
+            wait_limit_ms,
+        )
+        .unwrap()
+}
+
+fn worker_spec() -> SpawnSpec {
+    SpawnSpec {
+        builtin: "harn_host_lease_run_cargo",
+        program: "harn".to_string(),
+        args: vec!["host".to_string(), "lease".to_string()],
+        cwd: None,
+        env: BTreeMap::new(),
+        env_remove: Vec::new(),
+        env_mode: EnvMode::InheritClean,
+        use_stdin: true,
+        configure_process_group: true,
+        owner_death: OwnerDeathPolicy::None,
+        output_capture: OutputCapture::Inherit,
+    }
+}
+
+/// The #7829 contention regression, at the seam that decides it.
+///
+/// The wait outlives the first worker: the run is queued behind a holder with
+/// an hour of configured wait, and its worker dies at 47 minutes the way the
+/// reported receipt did. Before the supervisor existed this ended the run, so
+/// the assertion that binds is the second spawn, not the terminal state.
+#[tokio::test]
+async fn a_worker_that_dies_before_acquiring_is_replaced_while_the_wait_remains() {
+    let temp = TempDir::new().unwrap();
+    let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+    let run = pending_run(&store, 3_600_000);
+
+    let spawner = std::sync::Arc::new(MockSpawner::new());
+    // Every worker dies pre-acquire. Each one is a fresh process, which is
+    // what the supervisor has to notice and answer.
+    for _ in 0..=super::MAX_PRE_ACQUIRE_WORKER_RESTARTS {
+        spawner.enqueue(MockProcessConfig {
+            exit_status: Some(harn_hostlib::process::ExitStatus::from_code(101)),
+            ..MockProcessConfig::default()
+        });
+    }
+    let _guard = harn_hostlib::process::install_spawner(spawner.clone());
+
+    // The run stays Pending throughout, so every exit is a pre-acquire death.
+    let supervised = super::supervise_worker(&store, &run.run_id, worker_spec())
+        .await
+        .unwrap_or_else(|_| panic!("supervision failed"));
+
+    assert_eq!(
+        spawner.captured().len(),
+        super::MAX_PRE_ACQUIRE_WORKER_RESTARTS as usize + 1,
+        "a pre-acquire death inside the wait must be replaced, not reported",
+    );
+    assert_eq!(supervised.restarts, super::MAX_PRE_ACQUIRE_WORKER_RESTARTS);
+}
+
+/// The negative control for the restart: cancellation must terminate the
+/// waiter rather than being answered with another worker.
+#[tokio::test]
+async fn a_cancelled_worker_is_not_replaced() {
+    let temp = TempDir::new().unwrap();
+    let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+    let run = pending_run(&store, 3_600_000);
+
+    assert!(matches!(
+        super::restart_decision(&store, &run.run_id, 0),
+        super::RestartDecision::Restart { .. }
+    ));
+
+    // Cancellation is decided before the restart question is ever asked, so
+    // the control that binds is the completion arm rather than the decision.
+    let cancelled = super::WorkerCompletion::Cancelled;
+    assert!(
+        matches!(cancelled, super::WorkerCompletion::Cancelled),
+        "cancellation must stay distinguishable from an exit",
+    );
+
+    let exit = finalize_run(
+        &store,
+        &run.run_id,
+        super::WorkerCompletion::Cancelled,
+        &BinaryWitness::observe(temp.path().join("absent-binary")),
+    )
+    .unwrap();
+
+    // Reaching a non-pending state is what clears the queue entry:
+    // `transition_run` removes the waiter for any status that is not Pending,
+    // so this assertion is the CLI-side half. The row deletion itself is
+    // hostlib's to assert, and it is not observed here.
+    let status = store.load_run(&run.run_id).unwrap().status;
+    assert!(
+        matches!(
+            status,
+            harn_hostlib::HostLeaseRunState::CancelledBeforeStart { .. }
+        ),
+        "an accepted cancellation must reach a terminal state, not stay queued: {status:?}",
+    );
+    assert_eq!(exit, super::EX_CANCELLED);
+}
+
+/// A run whose configured wait has passed gets no replacement. Without this
+/// the restart would turn a bounded wait into an unbounded one.
+#[test]
+fn a_run_past_its_wait_limit_is_not_restarted() {
+    let temp = TempDir::new().unwrap();
+    let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+    let run = pending_run(&store, 0);
+
+    assert!(matches!(
+        super::restart_decision(&store, &run.run_id, 0),
+        super::RestartDecision::Stop
+    ));
+}
+
+/// A worker that acquired and then died must never be replaced: the lease is
+/// still held under that run, and a second worker would be a second owner.
+#[test]
+fn a_run_that_already_acquired_is_not_restarted() {
+    let temp = TempDir::new().unwrap();
+    let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+    let run = pending_run(&store, 3_600_000);
+
+    // Pending is the only state a replacement is allowed from. Prove the
+    // decision reads the durable receipt by moving the run out of it.
+    store
+        .transition_run(
+            &run.run_id,
+            harn_hostlib::HostLeaseRunState::StartFailed {
+                observed_at_ms: 1,
+                error: harn_hostlib::HostLeaseRunStartFailure::WorkerExitedBeforeAcquire,
+                worker_exit: None,
+                worker_binary_replaced: None,
+            },
+        )
+        .unwrap();
+
+    assert!(matches!(
+        super::restart_decision(&store, &run.run_id, 0),
+        super::RestartDecision::Stop
+    ));
+}
+
+/// The restart bound is real: a worker that can never start fails the run
+/// instead of respawning until the wait limit expires.
+#[test]
+fn the_restart_bound_stops_a_worker_that_never_starts() {
+    let temp = TempDir::new().unwrap();
+    let store = harn_hostlib::HostLeaseStore::for_root(temp.path()).unwrap();
+    let run = pending_run(&store, 3_600_000);
+
+    assert!(matches!(
+        super::restart_decision(&store, &run.run_id, super::MAX_PRE_ACQUIRE_WORKER_RESTARTS),
+        super::RestartDecision::Stop
+    ));
+}

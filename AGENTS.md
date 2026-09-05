@@ -195,6 +195,10 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `npm run portal:build`.
 - VS Code changes need `(cd editors/vscode && npm run compile)`.
 - Tree-sitter changes need `(cd tree-sitter-harn && npm test)`.
+- Read one head's CI check state with
+  `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
+  latest verdict per check name, counts queued work as pending, and exits 3 when
+  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.

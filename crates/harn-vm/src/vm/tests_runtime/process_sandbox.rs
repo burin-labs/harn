@@ -164,10 +164,6 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
 
 #[cfg(target_os = "windows")]
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
     let allowed = tempfile::tempdir().unwrap();
     let allowed_file = allowed.path().join("allowed.txt");
@@ -196,10 +192,6 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
 
 #[cfg(target_os = "windows")]
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn test_windows_process_sandbox_allows_exec_argv0() {
     let allowed = tempfile::tempdir().unwrap();
     let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
@@ -224,10 +216,6 @@ fn test_windows_process_sandbox_allows_exec_argv0() {
 
 #[cfg(target_os = "windows")]
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Windows sandboxed child hangs until the AppContainer read-root fix lands; see the Windows sandbox candidate PR"
-)]
 fn test_windows_process_sandbox_denies_write_outside_workspace() {
     let allowed = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

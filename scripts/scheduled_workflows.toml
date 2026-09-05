@@ -1,0 +1,131 @@
+# One inventory for every scheduled GitHub Actions claim. The checker requires
+# a bijection with workflow files, unique claims and cadences, and stable job
+# identifiers. Cadence reasons are operational decisions, not historical notes.
+
+[[workflow]]
+path = ".github/workflows/actions-vulnerability-audit.yml"
+name = "Actions vulnerability audit"
+claim = "Pinned GitHub Actions remain free of newly disclosed vulnerabilities"
+crons = ["17 11 * * *"]
+cadence_reason = "Daily catches advisory database updates without adding work to every pull request."
+job_ids = ["zizmor-online"]
+
+[[workflow]]
+path = ".github/workflows/build-release-binaries.yml"
+name = "Build release binaries"
+claim = "The main branch can still produce every supported release artifact and warm cache"
+crons = ["17 5 * * *"]
+cadence_reason = "Daily keeps release-platform compiler caches usable between infrequent releases."
+job_ids = ["setup", "prepare_release", "prepare_cli_aot", "build", "collect_candidate_manifest", "cache_budget", "container", "release"]
+
+[[workflow]]
+path = ".github/workflows/cli-cold-start-budget.yml"
+name = "CLI cold-start budget"
+claim = "Optimized CLI startup remains within its published latency budgets"
+crons = ["47 11 * * *"]
+cadence_reason = "Daily detects gradual startup regressions; minute 47 avoids contending with the vulnerability audit."
+job_ids = ["cold-start-budget"]
+
+[[workflow]]
+path = ".github/workflows/e2e.yml"
+name = "CLI end-to-end behavior"
+claim = "Slow subprocess CLI behavior remains functional outside the pull-request fast path"
+crons = ["0 3 * * *"]
+cadence_reason = "Daily covers expensive subprocess paths without putting their known noise on every pull request."
+job_ids = ["e2e", "notify"]
+
+[[workflow]]
+path = ".github/workflows/flake-detection.yml"
+name = "Touched-test repeatability"
+claim = "Recently changed tests remain repeatable across bounded reruns"
+crons = ["30 8 * * *"]
+cadence_reason = "Daily gives touched tests repeated trials while bounding runner time."
+job_ids = ["flake-rerun"]
+
+[[workflow]]
+path = ".github/workflows/install-smoke.yml"
+name = "Install channels smoke"
+claim = "Public installation channels still install a runnable Harn CLI"
+crons = ["23 11 * * 1"]
+cadence_reason = "Weekly is sufficient for external installers that change independently of source merges."
+job_ids = ["cargo-install", "install-sh"]
+
+[[workflow]]
+path = ".github/workflows/macos-nightly.yml"
+name = "macOS workspace tests"
+claim = "The full workspace test surface passes on macOS"
+crons = ["30 7 * * *"]
+cadence_reason = "Daily covers platform-only behavior; the half-hour offset avoids the Windows cache window."
+job_ids = ["nextest"]
+
+[[workflow]]
+path = ".github/workflows/main-health.yml"
+name = "Scheduled suite health"
+claim = "Persistent failures in advisory scheduled suites are visible on main"
+crons = ["23 13 * * *"]
+cadence_reason = "Daily runs after the overnight suites and requires three consecutive failures before alarming."
+job_ids = ["report"]
+
+[[workflow]]
+path = ".github/workflows/provider-contract-probe.yml"
+name = "Provider contract probe"
+claim = "Live provider adapters still satisfy their public contracts"
+crons = ["17 11 * * 1"]
+cadence_reason = "Weekly limits paid provider calls while detecting upstream API drift."
+job_ids = ["probe", "notify-live-failure"]
+
+[[workflow]]
+path = ".github/workflows/release-size-watch.yml"
+name = "Release size baseline freshness"
+claim = "The release-size baseline tracks the latest successful main build"
+crons = ["41 */4 * * *"]
+cadence_reason = "Every four hours bounds stale-baseline recovery without rebuilding binaries in this controller."
+job_ids = ["dispatch"]
+
+[[workflow]]
+path = ".github/workflows/release-smoke.yml"
+name = "Release smoke"
+claim = "Published artifacts and source-health release builds remain installable across platforms"
+crons = ["17 9 * * *"]
+cadence_reason = "Daily tests source health; publication events separately trigger exact artifact smoke."
+job_ids = ["resolve", "smoke"]
+
+[[workflow]]
+path = ".github/workflows/repository-state-reconciliation.yml"
+name = "Repository state reconciliation"
+claim = "Superseded speculative runs are cancelled and post-release development state is restored promptly"
+crons = ["*/5 * * * *"]
+cadence_reason = "Five minutes is the recovery objective for scarce runner capacity and a stable-version main branch."
+job_ids = ["cancel-obsolete-runs", "check"]
+
+[[workflow]]
+path = ".github/workflows/secret-scan.yml"
+name = "Secret exposure report"
+claim = "The shipped tree is rescanned for newly recognized secret exposure patterns"
+crons = ["37 9 * * 1"]
+cadence_reason = "Weekly catches scanner rule updates while pull requests and main pushes cover source changes."
+job_ids = ["gitleaks"]
+
+[[workflow]]
+path = ".github/workflows/stack-frame-banking.yml"
+name = "Stack-frame budget freshness"
+claim = "The compiler stack-frame budget is banked from a current full measurement"
+crons = ["17 4 * * 1"]
+cadence_reason = "Weekly refreshes the expensive full measurement without charging every pull request."
+job_ids = ["bank"]
+
+[[workflow]]
+path = ".github/workflows/thread-parity.yml"
+name = "Test scheduler thread-count parity"
+claim = "The full test suite has the same outcome across supported scheduler thread counts"
+crons = ["0 9 * * *"]
+cadence_reason = "Daily exercises the expensive three-way scheduler matrix outside required pull-request checks."
+job_ids = ["thread-parity"]
+
+[[workflow]]
+path = ".github/workflows/windows-nightly.yml"
+name = "Windows workspace tests"
+claim = "The full portable workspace test surface passes on Windows"
+crons = ["0 7 * * *"]
+cadence_reason = "Daily covers Windows-only behavior outside US business hours."
+job_ids = ["nextest"]

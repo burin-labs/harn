@@ -1,4 +1,4 @@
-name: Thread-count parity
+name: Test scheduler thread-count parity
 
 on:
   schedule:

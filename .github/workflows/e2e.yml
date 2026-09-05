@@ -1,4 +1,4 @@
-name: E2E
+name: CLI end-to-end behavior
 
 # Slow E2E / smoke suite — subprocess-spawning binary surface tests.
 # Runs:
@@ -91,7 +91,7 @@ jobs:
         with:
           # Unchanged: this string is the deduplication key, so any tracking
           # issue open right now must keep matching.
-          title: Nightly E2E suite is failing
+          title: Scheduled CLI end-to-end behavior is failing
           result: ${{ needs.e2e.result }}
           details: The scheduled nightly E2E suite did not pass.
           owner-file: .github/workflows/e2e.yml
