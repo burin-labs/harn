@@ -10,6 +10,7 @@ import {
   agent_transcript_tool_lifecycle_report,
 } from "std/agent/transcript"
 import { ToolRegistry } from "std/tools"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 
 const __COMPLETION_CLAIM_TOOL_NAME = "task_complete"
 
@@ -31,7 +32,7 @@ pub type CompletionClaimDisposition = {
   feedback?: string,
 }
 
-fn __completion_claim_handler(args: dict) -> CompletionClaim {
+fn __completion_claim_handler(args: dict) {
   const blocked_on = trim(to_string(args?.blocked_on ?? ""))
   const base: CompletionClaim = {
     schema: "harn.completion_claim.v1",
@@ -39,9 +40,12 @@ fn __completion_claim_handler(args: dict) -> CompletionClaim {
     source: "tool",
   }
   if blocked_on == "" {
-    return base
+    return agent_tool_handler_result("Completion claim recorded.", base)
   }
-  return base + {blocked_on: blocked_on}
+  return agent_tool_handler_result(
+    "Completion claim recorded with an unresolved dependency.",
+    base + {blocked_on: blocked_on},
+  )
 }
 
 fn __completion_claim_registry_has_name(registry: any, name: string) -> bool {
@@ -140,6 +144,14 @@ fn __completion_claim_results(dispatch: AgentToolDispatch) -> list {
     }
   }
   return matches
+}
+
+fn __completion_claim_payload(result: dict) {
+  const payload = result?.result
+  if payload?.schema == "harn.agent_tool_handler_result.v1" {
+    return payload?.data
+  }
+  return payload
 }
 
 fn __completion_claim_requirement_ids(opts: dict) -> list<string> {
@@ -286,15 +298,16 @@ pub fn agent_completion_claim_disposition(
     )
   }
   const result = matches[0]
-  if type_of(result?.result) != "dict"
-    || result.result?.schema != "harn.completion_claim.v1"
-    || result.result?.source != "tool" {
+  const payload = __completion_claim_payload(result)
+  if type_of(payload) != "dict"
+    || payload?.schema != "harn.completion_claim.v1"
+    || payload?.source != "tool" {
     return __completion_claim_invalid(
       "completion_claim_result_invalid",
       "The task_complete result did not preserve Harn's completion-claim schema.",
     )
   }
-  const claim: CompletionClaim = result.result
+  const claim: CompletionClaim = payload
   if trim(to_string(claim.blocked_on ?? "")) != "" {
     return __completion_claim_invalid(
       "completion_claim_blocked",
