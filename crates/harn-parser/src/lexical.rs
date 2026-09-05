@@ -847,7 +847,7 @@ impl<'source> LexicalAnalysis<'source> {
         inside_nested_callable: bool,
     ) {
         let resolved = resolve(scopes, name);
-        if resolved.is_some() {
+        if self.source.is_some() && resolved.is_some() {
             self.lexically_resolved.insert((span.start, span.end));
         }
         match resolved {
