@@ -1,0 +1,24 @@
+fn main(harness: Harness) -> int {
+  const case_id = argv[0] ?? ""
+  if regex_match("^[A-Za-z0-9_-]+$", case_id) == nil {
+    return 2
+  }
+  const path = path_join("receipts", case_id + ".json")
+  if !harness.fs.exists(path) {
+    return 1
+  }
+  const receipt = try {
+    json_parse(harness.fs.read_text(path))
+  } catch (e) {
+    return 1
+  }
+  const valid = receipt?.schema == "harn.completion_claim_eval_receipt.v1"
+    && receipt?.case_id == case_id
+    && receipt?.pass == true
+    && receipt?.status == "done"
+    && receipt?.inspected == true
+    && receipt?.evidence_reported == true
+    && receipt?.completion_judge_cap_reached == false
+    && contains(["baseline", "treatment"], receipt?.arm)
+  return if valid { 0 } else { 1 }
+}

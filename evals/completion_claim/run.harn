@@ -1,0 +1,74 @@
+import { is_absolute } from "std/path"
+
+fn __selected_cases(manifest: dict, split: string) -> list {
+  const ids = manifest.split?.[split] ?? []
+  return manifest.cases.filter({ eval_case -> contains(ids, eval_case.id) }).to_list()
+}
+
+fn main(harness: Harness) -> int {
+  const split = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_SPLIT", "meter-tune")
+  const trials = to_int(harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_TRIALS", "5")) ?? 5
+  const provider = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_PROVIDER", "mock")
+  const model = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_MODEL", "mock")
+  const ledger_path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
+  if !contains(["meter-tune", "meter-holdout"], split) || trials < 5 || trials > 20 {
+    harness.stdio.eprintln("select a frozen split and 5-20 trials")
+    return 2
+  }
+  const path = path_join(harness.fs.source_dir(), "harn.eval.toml")
+  const raw = eval_pack_manifest(
+    toml_parse(harness.fs.read_text(path)) + {base_dir: harness.fs.source_dir()},
+  )
+  const cases = __selected_cases(raw, split)
+  const planned_cells = len(cases) * trials
+  const shared_ledger = harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
+    && is_absolute(ledger_path)
+  if provider != "mock" {
+    const confirmed = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_CONFIRM_SPEND", "0") == "1"
+    const ceiling = to_int(
+      harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_MAX_CELLS", "0"),
+    )
+      ?? 0
+    if !confirmed || ceiling < planned_cells || !shared_ledger {
+      harness.stdio.eprintln(
+        "live completion-claim eval requires spend confirmation, an adequate cell ceiling, and an absolute shared SQLite event ledger",
+      )
+      return 2
+    }
+  }
+  const manifest = eval_pack_manifest(
+    raw
+      + {
+        trials: trials,
+        cases: cases,
+        split: {[split]: raw.split[split]},
+        metadata: raw.metadata + {provider: provider, model: model},
+        executor: if shared_ledger {
+          raw.executor
+            + {
+              argv: [
+                ...raw.executor.argv.slice(0, 2),
+                "--write-root",
+                dirname(ledger_path),
+                ...raw.executor.argv.slice(2, len(raw.executor.argv)),
+              ],
+            }
+        } else {
+          raw.executor
+        },
+      },
+  )
+  let options = {
+    namespace: raw.metadata.ledger_namespace,
+    suite: raw.id,
+    model: model,
+    split: split,
+  }
+  const commit = harness.env.get_or("HARN_COMPLETION_CLAIM_EVAL_COMMIT", "")
+  if commit != "" {
+    options = options + {commit: commit}
+  }
+  const report = harness.runtime.eval_pack_run(manifest, options)
+  harness.stdio.println(json_stringify_pretty(report))
+  return if report.pass { 0 } else { 1 }
+}
