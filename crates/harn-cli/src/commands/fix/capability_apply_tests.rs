@@ -1031,6 +1031,62 @@ fn capability_apply_ignores_ambient_builtin_names_shadowed_by_local_callables() 
 }
 
 #[test]
+fn capability_apply_ignores_ambient_builtin_names_shadowed_by_callable_parameters() {
+    let (result, updated) = apply_single(
+        "fn callback_call(call: fn() -> int) -> int { return call() }\nfn callback_git(git: fn() -> int) -> int { return git() }\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("HarnessLlm") && !updated.contains("HarnessTools"),
+        "lexical callbacks must not acquire ambient capability authority:\n{updated}"
+    );
+}
+
+#[test]
+fn capability_apply_resolves_shadowing_at_each_call_site() {
+    let (result, updated) = apply_single(
+        "fn mixed() {\n  const nested = fn(call: fn() -> int) -> int { return call() }\n  return call(\"mock\", \"outside\")\n}\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "mixed"),
+        vec![param("llm", "HarnessLlm")]
+    );
+    assert_eq!(call_arities(&updated, "call"), vec![0]);
+    assert_eq!(method_receiver_paths(&updated, "call"), vec!["llm"]);
+}
+
+#[test]
+fn capability_apply_respects_source_order_for_block_bindings() {
+    let (result, updated) = apply_single(
+        "fn ordered(call: fn() -> int) -> int {\n  if true {\n    const first = call()\n    const call = fn() -> int { return 4 }\n    return first * 10 + call()\n  }\n  return 0\n}\n\nfn ambient_before_binding() {\n  const first = call(\"mock\", \"before binding\")\n  const call = fn() -> int { return 4 }\n  return call()\n}\n",
+    );
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        updated.contains("fn ordered(call: fn() -> int) -> int"),
+        "the outer lexical callback must not acquire ambient authority:\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "ambient_before_binding"),
+        vec![param("llm", "HarnessLlm")]
+    );
+    assert_eq!(call_arities(&updated, "call"), vec![0, 0, 0]);
+    assert_eq!(method_receiver_paths(&updated, "call"), vec!["llm"]);
+}
+
+#[test]
 fn capability_apply_still_migrates_unshadowed_ambient_builtins() {
     let (result, updated) = apply_single("fn main() {\n  scan(\".\")\n}\n");
 
