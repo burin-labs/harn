@@ -10,10 +10,10 @@
         "warn_percent_hundredths": 200
       },
       "baseline": {
-        "version": "0.10.127",
-        "source_sha": "cd682579d07b1fbd3eacd8decb83c6ef8c04c76b",
-        "bytes": 248725912,
-        "observed_at": "2026-09-02T16:12:17Z",
+        "version": "0.10.130",
+        "source_sha": "a13ede819023dd37f4b07566a6e50db77688bdc1",
+        "bytes": 251631968,
+        "observed_at": "2026-09-05T09:15:49Z",
         "build_identity": {
           "profile": "release",
           "codegen_units": 8,
