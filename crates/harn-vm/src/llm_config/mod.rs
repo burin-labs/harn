@@ -2,7 +2,7 @@
 //! layers, and the resolution/query surface Harn uses to turn a selector into
 //! a concrete provider/model identity.
 //!
-//! Split into bounded contexts: [`model_def`]/[`provider_def`] DTOs, the
+//! Split into bounded contexts: shared model records and [`provider_def`] DTOs, the
 //! [`config`] aggregate + merge, [`loading`] of ambient overlays, model
 //! [`taxonomy`] + provider inference, the [`catalog`] query surface, selector
 //! [`resolution`], and complementary-[`reviewer`] selection.
@@ -11,9 +11,7 @@ mod catalog;
 mod config;
 mod data_controls;
 mod loading;
-mod model_def;
 mod overlay_audit;
-mod presentation;
 mod provider_def;
 mod resolution;
 mod reviewer;
@@ -42,10 +40,10 @@ mod tool_format_fitness_tests;
 pub use catalog::*;
 pub use config::*;
 pub use data_controls::*;
+pub use harn_provider_catalog::model_def::*;
+pub use harn_provider_catalog::presentation::*;
 pub use loading::*;
-pub use model_def::*;
 pub use overlay_audit::*;
-pub use presentation::*;
 pub use provider_def::*;
 pub use resolution::*;
 pub use reviewer::*;

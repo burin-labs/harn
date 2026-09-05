@@ -3840,6 +3840,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-provider-catalog"
+version = "0.10.131-dev"
+dependencies = [
+ "chrono",
+ "harn-clock",
+ "serde",
+ "serde_json",
+ "time",
+ "toml",
+]
+
+[[package]]
 name = "harn-rules"
 version = "0.10.131-dev"
 dependencies = [
@@ -4027,6 +4039,7 @@ dependencies = [
  "harn-modules",
  "harn-opcode-macros",
  "harn-parser",
+ "harn-provider-catalog",
  "harn-session-store",
  "harn-sqlite",
  "harn-stdlib",
