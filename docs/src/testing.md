@@ -63,6 +63,13 @@ harn test conformance --filter my_test -v
 harn test conformance --timing --filter my_test
 ```
 
+Name the suite root, not a path inside it. Conformance cases are driven by their
+sibling `.expected` file, and `harn test <path>` discovers test pipelines, so a
+path form walks the tree, runs the two dozen files that happen to declare a
+pipeline, and prints a confident total over one percent of the suite. A target
+holding conformance fixtures is now refused, and every path run reports the case
+count beside the number of `.harn` files it walked.
+
 Use a narrow `--filter` while developing. Run the full suite with `--parallel`
 before shipping. Each conformance worker is a separate process with its own
 runtime state, and the parent combines results in stable path order. The
