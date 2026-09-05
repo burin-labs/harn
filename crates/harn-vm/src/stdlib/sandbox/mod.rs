@@ -336,8 +336,9 @@ pub fn active_backend_name() -> &'static str {
 }
 
 /// Stable identifier for the active backend's filesystem-confinement
-/// mechanism. Paired with [`active_backend_available`]: the name says what the
-/// backend needs, while the boolean says whether this host can enforce it.
+/// mechanism. Paired with [`active_backend_filesystem_available`]: the name
+/// says what the backend needs, while the boolean says whether this host can
+/// enforce it.
 pub fn active_backend_filesystem_mechanism() -> &'static str {
     ActiveBackend::filesystem_mechanism()
 }
