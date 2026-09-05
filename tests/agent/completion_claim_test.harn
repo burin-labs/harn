@@ -75,7 +75,7 @@ pipeline test_fabricated_ref_is_rejected_before_judging(harness: Harness, task: 
   const disposition = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(claim("implementation", ["invented-404"])),
-    {},
+    {completion_tool: true},
   )
   assert_eq(disposition.kind, "invalid")
   assert_eq(disposition.reason, "completion_claim_evidence_ref_unresolved")
@@ -85,7 +85,7 @@ pipeline test_completion_tool_cannot_cite_itself(harness: Harness, task: unknown
   const disposition = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(claim("implementation", ["complete-1"])),
-    {},
+    {completion_tool: true},
   )
   assert_eq(disposition.kind, "invalid")
   assert_eq(disposition.reason, "completion_claim_evidence_ref_invalid")
@@ -99,7 +99,7 @@ pipeline test_claim_cannot_cite_harness_authored_feedback(harness: Harness, task
   const disposition = agent_completion_claim_disposition(
     messages,
     completion_dispatch(claim("implementation", ["edit-1"])),
-    {},
+    {completion_tool: true},
   )
   assert_eq(disposition.kind, "invalid")
   assert_eq(disposition.reason, "completion_claim_evidence_ref_unsupported")
@@ -112,7 +112,7 @@ pipeline test_claim_cannot_cite_a_failed_dispatch(harness: Harness, task: unknow
       dispatched_result("edit", "edit-1", "permission denied", "error"),
     ],
     completion_dispatch(claim("implementation", ["edit-1"])),
-    {},
+    {completion_tool: true},
   )
   assert_eq(disposition.kind, "invalid")
   assert_eq(disposition.reason, "completion_claim_evidence_ref_unsupported")
@@ -120,6 +120,7 @@ pipeline test_claim_cannot_cite_a_failed_dispatch(harness: Harness, task: unknow
 
 pipeline test_claim_must_cover_the_declared_requirement_contract(harness: Harness, task: unknown) {
   const opts = {
+    completion_tool: true,
     turn_end_condition: {
       requirement_contract: {
         requirements: [
@@ -142,14 +143,14 @@ pipeline test_claim_must_use_the_default_task_requirement(harness: Harness, task
   const invented = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(claim("implementation", ["edit-1"])),
-    {},
+    {completion_tool: true},
   )
   assert_eq(invented.kind, "invalid")
   assert_eq(invented.reason, "completion_claim_requirement_missing")
   const canonical = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(claim("task", ["edit-1"])),
-    {},
+    {completion_tool: true},
   )
   assert_eq(canonical.kind, "valid")
 }
@@ -159,7 +160,7 @@ pipeline test_judge_packet_contains_only_explicitly_cited_calls(harness: Harness
   const disposition = agent_completion_claim_disposition(
     evidence_messages(),
     completion_dispatch(value),
-    {},
+    {completion_tool: true},
   )
   assert_eq(disposition.kind, "valid")
   const projected = __judge_evidence_projection(
