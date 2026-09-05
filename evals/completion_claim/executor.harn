@@ -19,7 +19,7 @@ fn __inspect_tools(evidence: string) {
         kind: "read",
         read_only: true,
         side_effect_level: "none",
-        evidence_role: "verification",
+        completion_evidence_role: "verification",
       },
     },
   )
@@ -60,7 +60,6 @@ fn __enqueue_mock_cell(llm: HarnessLlm, arm: string, evidence: string) {
         {
           verdict: "done",
           detail: "The inspected evidence supports the report.",
-          requirement_report: [{requirement_id: "task", met: true, evidence_refs: [2]}],
         },
       ),
     },
@@ -145,14 +144,11 @@ fn main(harness: Harness) -> int {
         max_iterations: 6,
         max_tokens: max_tokens,
         final_wrapup: false,
-        verify_completion_judge: {
-          provider: provider,
-          model: model,
-          max_invocations: 2,
-          requirement_contract: {
-            requirements: [{requirement_id: "task", name: "Report the inspected status."}],
+          verify_completion_judge: {
+            provider: provider,
+            model: model,
+            max_invocations: 2,
           },
-        },
       },
     ) },
   )
