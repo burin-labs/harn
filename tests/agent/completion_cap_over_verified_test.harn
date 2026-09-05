@@ -19,7 +19,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
-import { with_llm_script } from "std/testing"
+import { llm_done, with_llm_script } from "std/testing"
 
 const VERIFIED_CAP_REASON = "judge_cap_reached_over_verified_pass"
 
@@ -80,14 +80,26 @@ fn __gate_observing(observed: string) {
   }
 }
 
-/** One capped run over a given verifier reading. */
+/**
+ * One capped run over a given verifier reading.
+ *
+ * The script ALTERNATES actor turn and judge reply. Getting this wrong is not a
+ * quiet mistake: if the script runs short the actor consumes the judge's
+ * scripted reply as its own turn, the judge is never invoked at all, and the
+ * run ends `parse_dropped` — which looks like a failing assertion rather than a
+ * mis-scripted fixture. Every case here asserts the judge actually ran.
+ */
 fn __run_to_cap(harness: Harness, label: string, observed: string) {
   return with_llm_script(
     harness.llm,
     [
-      {text: "Working on it. ##DONE##"},
+      llm_done(),
       __always_refuses(),
+      llm_done(),
       __always_refuses(),
+      llm_done(),
+      __always_refuses(),
+      llm_done(),
     ],
     { ->
       const session = label + "-" + harness.random.uuid()
@@ -96,9 +108,9 @@ fn __run_to_cap(harness: Harness, label: string, observed: string) {
         session_id: session,
         loop_until_done: true,
         done_sentinel: "##DONE##",
-        max_iterations: 3,
+        max_iterations: 6,
         verify_completion: __gate_observing(observed),
-        verify_completion_judge: {provider: "mock", max_invocations: 1},
+        verify_completion_judge: {provider: "mock", max_invocations: 2},
       }
       assert(
         agent_completion_adjudicator_declared(opts, "sentinel"),
@@ -116,8 +128,30 @@ fn __run_to_cap(harness: Harness, label: string, observed: string) {
 
 // -------------------------------------------------------------------------------------------------
 
+/**
+ * The judge was actually invoked.
+ *
+ * Asserted in every case below. A short script makes the actor eat the judge's
+ * reply, the judge never runs, and the run dies `parse_dropped`; without this
+ * the cases would fail for a reason that has nothing to do with what they test.
+ */
+fn __assert_judge_ran(run: dict, label: string) {
+  const invoked = run?.result?.completion_judge?.invocations ?? 0
+  assert(
+    invoked > 0,
+    label
+      + ": the completion judge was never invoked ("
+      + to_string(invoked)
+      + "), so this case is measuring a mis-scripted fixture. status="
+      + to_string(run?.result?.status ?? "")
+      + " stop_reason="
+      + to_string(run?.result?.stop_reason ?? ""),
+  )
+}
+
 pipeline test_a_cap_over_a_passed_verifier_stops_verified(harness: Harness, task: unknown) {
   const run = __run_to_cap(harness, "passed", "passed")
+  __assert_judge_ran(run, "passed arm")
   const receipt = __stop_receipt(run.events)
   assert(receipt != nil, "the cap must have produced a stopping completion directive")
   assert(
@@ -145,7 +179,11 @@ pipeline test_a_cap_over_a_passed_verifier_stops_verified(harness: Harness, task
 
 pipeline test_the_run_reads_done_not_completion_unverified(harness: Harness, task: unknown) {
   const run = __run_to_cap(harness, "passed", "passed")
-  const status = to_string(run?.result?.final_status ?? "")
+  __assert_judge_ran(run, "done arm")
+  // The finalized result exposes this as `status`; the loop state calls it
+  // `final_status`. Read both rather than guess, then assert an exact value so
+  // the tolerance cannot make the case pass vacuously.
+  const status = to_string(run?.result?.status ?? run?.result?.final_status ?? "")
   assert(
     status != "completion_unverified",
     "the whole point of #8058: a green verifier must not seal completion_unverified",
@@ -162,6 +200,7 @@ pipeline test_the_cap_is_still_reported_as_reached(harness: Harness, task: unkno
   // `completion_unverified` alone, the runs that hit a cap would be exactly the
   // ones reporting no cap.
   const run = __run_to_cap(harness, "passed", "passed")
+  __assert_judge_ran(run, "cap-reported arm")
   assert(
     (run?.result?.completion_judge?.cap_reached ?? false),
     "the cap was reached; sealing done must not erase that it was",
@@ -175,6 +214,7 @@ pipeline test_the_cap_is_still_reported_as_reached(harness: Harness, task: unkno
 
 pipeline test_a_cap_over_a_failed_verifier_is_unchanged(harness: Harness, task: unknown) {
   const run = __run_to_cap(harness, "failed", "failed")
+  __assert_judge_ran(run, "failed arm")
   const receipt = __stop_receipt(run.events)
   assert(receipt != nil, "the cap must still stop the run")
   assert(
@@ -182,8 +222,9 @@ pipeline test_a_cap_over_a_failed_verifier_is_unchanged(harness: Harness, task: 
     "a red verifier keeps today's action, got: " + to_string(receipt?.action ?? "<none>"),
   )
   assert(
-    to_string(run?.result?.final_status ?? "") == "completion_unverified",
-    "and today's terminal, got: " + to_string(run?.result?.final_status ?? ""),
+    to_string(run?.result?.status ?? run?.result?.final_status ?? "") == "completion_unverified",
+    "and today's terminal, got: "
+      + to_string(run?.result?.status ?? run?.result?.final_status ?? ""),
   )
 }
 
@@ -191,6 +232,7 @@ pipeline test_a_cap_over_an_unrun_verifier_is_unchanged(harness: Harness, task: 
   // `not_run` also covers "the gate could not read facts". Reading it as
   // verified is the blanket weakening this test exists to refuse.
   const run = __run_to_cap(harness, "not_run", "not_run")
+  __assert_judge_ran(run, "not_run arm")
   const receipt = __stop_receipt(run.events)
   assert(receipt != nil, "the cap must still stop the run")
   assert(
@@ -198,7 +240,8 @@ pipeline test_a_cap_over_an_unrun_verifier_is_unchanged(harness: Harness, task: 
     "an unrun verifier is not a passing one, got: " + to_string(receipt?.action ?? "<none>"),
   )
   assert(
-    to_string(run?.result?.final_status ?? "") == "completion_unverified",
-    "and today's terminal, got: " + to_string(run?.result?.final_status ?? ""),
+    to_string(run?.result?.status ?? run?.result?.final_status ?? "") == "completion_unverified",
+    "and today's terminal, got: "
+      + to_string(run?.result?.status ?? run?.result?.final_status ?? ""),
   )
 }
