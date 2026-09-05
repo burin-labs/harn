@@ -202,7 +202,7 @@ pub fn render_value(args: dict) {
 pipeline default(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "render_fixture", "Render one fixture value", {
-    parameters: {
+    input_schema: {
       type: "object",
       properties: {value: {type: "string"}},
       required: ["value"],

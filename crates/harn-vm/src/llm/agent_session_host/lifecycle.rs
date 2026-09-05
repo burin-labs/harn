@@ -2,6 +2,33 @@
 
 use super::*;
 
+/// Holds the pushed transcript-directory frame until the session takes it.
+///
+/// The frame is pushed before the opening turns are injected, so every failure
+/// path between the push and host registration has to unwind it. Ownership
+/// transfers to the session through [`Self::into_frame`]; anything else drops
+/// the guard and the frame comes back off the stack.
+struct TranscriptDirScope(Option<crate::llm::agent_observe::TranscriptDirFrame>);
+
+impl TranscriptDirScope {
+    fn push(dir: Option<&str>) -> Self {
+        Self(dir.and_then(crate::llm::agent_observe::push_llm_transcript_dir))
+    }
+
+    /// Hand the frame to the session that owns it for the rest of the run.
+    fn into_frame(mut self) -> Option<crate::llm::agent_observe::TranscriptDirFrame> {
+        self.0.take()
+    }
+}
+
+impl Drop for TranscriptDirScope {
+    fn drop(&mut self) {
+        if let Some(frame) = self.0.take() {
+            crate::llm::agent_observe::remove_llm_transcript_dir(frame);
+        }
+    }
+}
+
 /// Initialize a Harn-driven agent session: open transcript, seed user message.
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -129,6 +156,14 @@ async fn host_agent_session_init(
 
         let llm_transcript_dir = opt_str(&opts_map, "llm_transcript_dir").unwrap_or_default();
         let transcript_dir = (!llm_transcript_dir.is_empty()).then_some(llm_transcript_dir);
+        // The transcript has to be current before the first message is
+        // injected. `inject_message` writes its sidecar `message` event into
+        // whatever transcript is active at that moment, so a directory pushed
+        // afterwards sends the opening user turn to no transcript at all. The
+        // run then reads as one that never had a user turn, which is exactly
+        // what a projected training example cannot tell apart from a run that
+        // genuinely opened with the assistant.
+        let transcript_scope = TranscriptDirScope::push(transcript_dir.as_deref());
         let seeded_history = if has_canonical_history {
             Vec::new()
         } else {
@@ -173,9 +208,7 @@ async fn host_agent_session_init(
 
         let current_session_frame = crate::agent_sessions::push_current_session(resolved.clone())
             .expect("initialized agent session id is non-empty");
-        let transcript_dir_frame = transcript_dir
-            .as_deref()
-            .and_then(crate::llm::agent_observe::push_llm_transcript_dir);
+        let transcript_dir_frame = transcript_scope.into_frame();
         let session = AgentHostSession {
             session_id: resolved.clone(),
             run_id: run_id.clone(),
