@@ -143,6 +143,8 @@ pipeline main(harness: Harness) {
   )
   const waited_data = json_parse(waited.rendered_result)
   harness.stdio.println(waited_data.status)
+  harness.stdio.println(waited.result?.schema == "harn.agent_tool_handler_result.v1")
+  harness.stdio.println(waited.result?.data?.status == "completed")
   harness.stdio.println(
     contains(
       waited_data?.combined ?? waited_data?.stdout ?? waited_data?.inline_output ?? "",
