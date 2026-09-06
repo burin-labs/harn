@@ -16,10 +16,15 @@ import { llm_text, with_llm_script } from "std/testing"
  *  3. Real call (bare `edit({...})` and braceless `edit(path=...)`) does NOT
  *     false-fire either content nudge — the call dispatches and the loop
  *     proceeds normally.
- *  4. No-progress streak: 3 consecutive toolless prose turns in the DEFAULT
- *     loop escalate to the `no_progress_streak` nudge; a successful tool call
- *     decays the streak so a later toolless turn does not re-escalate at the
- *     same depth.
+ *  4. No-progress streak: RECEIPTS ONLY. Consecutive toolless prose turns in
+ *     the DEFAULT loop reach the streak, and it puts nothing in the packet.
+ *     This case used to assert the opposite, that the streak escalated into an
+ *     injected corrective, and that is the contract the demotion removed. It is
+ *     kept and inverted rather than deleted, because the interesting claim is
+ *     that the mechanism is still REACHED while staying silent; a deleted case
+ *     would leave "reached and silent" and "never reached" indistinguishable.
+ *     The receipt itself is pinned in the agent unit fixture, which can read
+ *     the event stream this harness cannot.
  *
  *  5. A completion judge owns terminal intent and bypasses this classifier.
  *  6. A repair claim is published as a typed fact on the next turn, so a
@@ -263,10 +268,18 @@ pipeline default(harness: Harness) {
     },
   )
   // 4. No-progress streak in the DEFAULT loop (loop_until_done so the toolless
-  //    turns continue): a successful tool call decays the streak, then three
-  //    consecutive toolless prose turns escalate to the no_progress_streak
-  //    nudge. The prose avoids intent verbs / fences / bound-tool names so the
-  //    content nudges do NOT match and the fallback streak nudge is exercised.
+  //    turns continue). The prose avoids intent verbs, fences and bound-tool
+  //    names so the content nudges do NOT match and the streak is the only
+  //    mechanism left that could speak. It no longer speaks: the streak was
+  //    demoted to receipts-only, so the packet stays clean on every one of
+  //    these turns.
+  //
+  //    Both assertions below now read false, and they are not the same false.
+  //    The first says a turn that made progress never injected, which held
+  //    before the demotion too. The second says the stalled turns do not inject
+  //    either, which is the demotion itself. Keeping the pair means a change
+  //    that silenced the whole file, rather than just this mechanism, still
+  //    shows up as the first line flipping.
   with_llm_script(
     harness.llm,
     [
@@ -301,7 +314,7 @@ pipeline default(harness: Harness) {
           streak_fired = true
         }
       }
-      harness.stdio.println("streak.escalates=" + to_string(streak_fired))
+      harness.stdio.println("streak.injects_a_corrective=" + to_string(streak_fired))
     },
   )
   // 5. A completion judge is the single model-based owner of terminal intent.

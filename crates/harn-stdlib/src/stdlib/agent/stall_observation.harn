@@ -64,10 +64,9 @@ pub fn __agent_stall_reset_action(state: AgentStallState) -> AgentStallState {
  * @errors: []
  */
 pub fn __agent_stall_result_snippet(result: dict) -> string {
-  if __agent_stall_result_ok(result) {
-    return ""
-  }
-  const text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  const text = to_string(
+    result?.error ?? result?.message ?? result?.rendered_result ?? result?.result ?? "",
+  )
   const normalized = trim(text)
   return __agent_clip_head_tail(normalized, 4000)
 }
@@ -154,8 +153,7 @@ pub fn __agent_stall_fold_diagnostic(
   } else {
     nil
   }
-  const result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
-  const gate = if result_is_non_ok {
+  const gate = if result != nil {
     __agent_stall_gate_input(agent, __agent_stall_delta_previous(state), result)
   } else {
     nil
@@ -169,7 +167,7 @@ pub fn __agent_stall_fold_diagnostic(
     // current-failure model so the next re-fail of the SAME diagnostic is
     // recognized across the edit. A genuine passing result on a NON-edit turn
     // is real verification evidence and clears the model.
-    if result_is_non_ok && (delta == nil || delta.status != "cleared") {
+    if result == nil || gate?.status != "cleared" {
       if turn_made_edit && state.last_diagnostic_class == "fail" {
         return state
           + {
@@ -182,30 +180,8 @@ pub fn __agent_stall_fold_diagnostic(
       return state
         + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
-    if turn_made_edit && result == nil {
-      if state.last_diagnostic_class == "fail" {
-        return state
-          + {
-            write_epoch: new_write_epoch,
-            edit_since_failure: true,
-            reverify_owed: true,
-            turns_since_clean_verify: new_turns_since_clean_verify,
-          }
-      }
-      return state
-        + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
-    }
-    if result == nil {
-      // No verification evidence and no edit-on-failure: leave the model alone.
-      return state
-        + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
-    }
     // A passing verification clears the current-failure model.
-    const pass_signature = if delta != nil {
-      "ok:" + sha256(json_stringify(delta.current))
-    } else {
-      __agent_stall_result_outcome(agent, result).signature
-    }
+    const pass_signature = "ok:" + sha256(json_stringify(delta.current))
     const verified_epoch = if new_write_epoch > state.verified_write_epoch {
       new_write_epoch
     } else {
@@ -920,6 +896,7 @@ pub fn agent_stall_observe_completed_dispatch(
     next_state = next_state + {observation_recurrence_counts: recurrence.counts}
     all_repeated = all_repeated && recurrence.count > 1
     if !config.enabled
+      || !config.observation_recurrence_advisory
       || recurrence.count
         != config.repeat_same_observation
       || next_state.same_observation_streak

@@ -70,6 +70,13 @@ pub type CompletionPolicyEvaluation = {
   // The deterministic gate's own reason, held separately because
   // `evaluation.verdict` is overwritten by every stage that follows it.
   deterministic_reason: string,
+  // This boundary's acceptance ledger, read with no model assessment in hand,
+  // so every declared row is pending. Computed once for the boundary rather
+  // than per stage: both decisions that can end a run without asking the judge
+  // — the typed-green skip and the judge cap — are boundary-level, and a ledger
+  // each of them read separately could disagree. Empty when no ledger is
+  // declared, never absent. See harn#8110.
+  ledger: CompletionRequirementReport,
 }
 
 const __COMPLETION_VERIFICATION_CONVERSION: string = "failed_verification_contradicted_by_gate"

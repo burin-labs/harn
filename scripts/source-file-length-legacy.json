@@ -35,7 +35,6 @@
     "crates/harn-vm/src/orchestration/compaction.rs",
     "crates/harn-vm/src/orchestration/hooks.rs",
     "crates/harn-vm/src/orchestration/merge_captain_audit.rs",
-    "crates/harn-vm/src/orchestration/workflow.rs",
     "crates/harn-vm/src/orchestration/workflow_bundle/mod.rs",
     "crates/harn-vm/src/security/mod.rs",
     "crates/harn-vm/src/session_bundle.rs",

@@ -1190,12 +1190,14 @@ mod tests {
             Language::Rust,
             "fn start() {}\nfn driver() { start(); }\n",
             &[],
+            &[],
         );
         g.rebuild_file(
             2,
             "src/b.rs",
             Language::Rust,
             "fn entry() { driver(); }\n",
+            &[],
             &[],
         );
         g
@@ -1303,7 +1305,7 @@ mod tests {
         for i in 0..25 {
             source.push_str(&format!("fn f{i}() {{}}\n"));
         }
-        g.rebuild_file(1, "src/big.rs", Language::Rust, &source, &[]);
+        g.rebuild_file(1, "src/big.rs", Language::Rust, &source, &[], &[]);
 
         let err = execute(
             "MATCH (a:Function),(b:Function),(c:Function) RETURN a.name AS n",
