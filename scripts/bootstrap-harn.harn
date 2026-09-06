@@ -1,0 +1,5 @@
+import { run_bootstrap } from "../crates/harn-stdlib/src/stdlib/runtime/bootstrap.harn"
+
+fn main(harness: Harness) {
+  run_bootstrap(harness, argv)
+}

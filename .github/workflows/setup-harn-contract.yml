@@ -1,0 +1,44 @@
+name: Setup Harn contract
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  install:
+    name: Install and verify
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run deterministic setup-action tests
+        run: sh scripts/bootstrap-harn.sh --seed-command test --test-path scripts/tests/runtime_install_test.harn
+      - name: Install a published Harn release
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: 0.10.28
+          max-attempts: "3"
+          retry-delay-seconds: "1"
+      - name: Verify installed release and receipt outputs
+        shell: bash
+        env:
+          HARN_PATH: ${{ steps.harn.outputs.path }}
+          HARN_VERSION: ${{ steps.harn.outputs.version }}
+          HARN_CHECKSUM: ${{ steps.harn.outputs.checksum }}
+          HARN_RECEIPT: ${{ steps.harn.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          test "$HARN_VERSION" = "0.10.28"
+          [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
+          test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
+          "$HARN_PATH" run --standalone -e 'const r = json_parse(harness.env.get("HARN_RECEIPT")); require r.schema_version == "harn-bootstrap-v1" && r.binary_path == harness.env.get("HARN_PATH"), "invalid setup receipt"'
+          harn --version
+          harn-lsp --version
+          harn-dap --version

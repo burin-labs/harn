@@ -101,6 +101,15 @@ pub(super) fn resolve_local_import(current_file: &Path, import_path: &str) -> Lo
         };
     }
 
+    if import_path.starts_with("./") || import_path.starts_with("../") {
+        if let Some(module) = super::stdlib::relative_stdlib_module(current_file, import_path) {
+            return LocalResolution::Resolved(super::stdlib::stdlib_virtual_path(&module));
+        }
+        if super::stdlib::is_stdlib_virtual_path(current_file) {
+            return LocalResolution::Rejected;
+        }
+    }
+
     let base = current_file.parent().unwrap_or(Path::new("."));
     let mut file_path = base.join(import_path);
     if !file_path.exists() && file_path.extension().is_none() {
