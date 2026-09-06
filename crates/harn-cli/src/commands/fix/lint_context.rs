@@ -26,6 +26,7 @@ impl FixLintContext {
             require_docstrings: self.lint.require_docstrings,
             complexity_threshold: self.lint.complexity_threshold,
             persona_step_allowlist: &self.lint.persona_step_allowlist,
+            test_root_components: &self.lint.test_root_components,
             require_stdlib_metadata: check::path_is_stdlib_source(path),
             engine_rules: &self.engine_rules,
             native_rule_paths: &self.native_rule_paths,

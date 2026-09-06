@@ -106,3 +106,70 @@ fn a_test_suffixed_file_is_a_test_root_on_its_own() {
         "a `_test.harn` file is test source wherever it lives: {diags:?}"
     );
 }
+
+// The three layouts a test suite is actually written in. Before the typed
+// predicate the rule knew only the first two, so a consumer repository whose
+// suites sit in `pipeline-tests/` and end in `-test.harn` had every assert in
+// every suite reported as production control flow.
+#[test]
+fn every_test_layout_is_recognised_as_test_source() {
+    for path in [
+        "tests/agent/math_test.harn",
+        "bench/vm/dispatch_test.harn",
+        "pipeline-tests/modes/review-test.harn",
+    ] {
+        let diags = lint_source_at(TEST_HELPER_SOURCE, path);
+        assert!(
+            !has_rule(&diags, "assert-outside-test"),
+            "{path} is a test layout and must not warn: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn a_non_test_layout_still_warns_under_every_neighbour() {
+    // The control for the case above. Without it that test passes on a build
+    // whose predicate returns true for everything, which would disable the
+    // rule outright rather than widen it.
+    for path in [
+        "src/runtime/math.harn",
+        "pipelines/modes/review.harn",
+        "bench/vm/dispatch.harn",
+    ] {
+        let diags = lint_source_at(TEST_HELPER_SOURCE, path);
+        assert!(
+            has_rule(&diags, "assert-outside-test"),
+            "{path} is production source and must warn: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn a_declared_test_root_is_recognised_and_an_undeclared_one_is_not() {
+    // The second half of the fix: a project whose suites live under a
+    // directory that is not named `tests` declares it once in `[lint]`.
+    let declared = vec!["pipeline-tests".to_string()];
+    let path = "pipeline-tests/modes/review.harn";
+
+    let with_config = lint_source_at_with_test_roots(TEST_HELPER_SOURCE, path, &declared);
+    assert!(
+        !has_rule(&with_config, "assert-outside-test"),
+        "a declared test root must be test source: {with_config:?}"
+    );
+
+    // Control one: the same path with nothing declared still warns, so the
+    // config is what changed the answer and not a widened default.
+    let without_config = lint_source_at(TEST_HELPER_SOURCE, path);
+    assert!(
+        has_rule(&without_config, "assert-outside-test"),
+        "an undeclared directory must stay production source: {without_config:?}"
+    );
+
+    // Control two: declaring one root does not turn the rule off everywhere.
+    let elsewhere =
+        lint_source_at_with_test_roots(TEST_HELPER_SOURCE, "src/runtime/math.harn", &declared);
+    assert!(
+        has_rule(&elsewhere, "assert-outside-test"),
+        "declaring a root must not disable the rule elsewhere: {elsewhere:?}"
+    );
+}

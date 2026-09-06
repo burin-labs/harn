@@ -75,6 +75,12 @@ pub struct LintConfig {
     /// bodies without being declared as `@step`.
     #[serde(default, alias = "persona-step-allowlist")]
     pub persona_step_allowlist: Vec<String>,
+    /// Directory names this project treats as test roots, in addition to the
+    /// built-in `tests`. Declaring a root here is a structural fact visible in
+    /// review, not a per-file escape hatch, which is the property the
+    /// path-driven test predicate exists to preserve.
+    #[serde(default, alias = "test-root-components")]
+    pub test_root_components: Vec<String>,
     /// Threshold for the `template-variant-explosion` rule. Defaults
     /// to [`harn_lint::DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`].
     #[serde(default, alias = "template-variant-branch-threshold")]
