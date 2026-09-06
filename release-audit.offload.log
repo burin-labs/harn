@@ -1,0 +1,2 @@
+=== Parallel release audit ===
+>>> warm-prebuild (cargo build -p harn-cli --bin harn)
