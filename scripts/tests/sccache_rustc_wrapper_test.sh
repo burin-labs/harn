@@ -90,11 +90,20 @@ fn cargo_binary_environment_reached_rustc() {
 RS
 
 output="$tmp_root/cargo-output.txt"
+set +e
 CARGO_TARGET_DIR="$tmp_root/target" \
   RUSTC_WRAPPER="$wrapper_binary" \
   HARN_SCCACHE_WRAPPER_TRACE=1 \
+  HARN_ALLOW_RAW_CARGO=1 \
   cargo test --manifest-path "$fixture/Cargo.toml" --no-run -vv \
   > "$output" 2>&1
+cargo_status=$?
+set -e
+if (( cargo_status != 0 )); then
+  echo "real Cargo probe failed before the wrapper routes could be verified" >&2
+  cat "$output" >&2
+  exit "$cargo_status"
+fi
 
 if ! grep -Fq 'harn-sccache-wrapper: route=direct cargo-binary environment' "$output"; then
   echo "real Cargo probe did not route its compiler-provided binary environment directly" >&2
