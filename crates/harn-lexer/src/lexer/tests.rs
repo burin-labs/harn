@@ -354,47 +354,46 @@ fn test_line_comment() {
 #[test]
 fn test_doc_line_comment_detection() {
     let cases = [
-        ("// regular", false),
-        ("/// doc", true),
-        ("//// separator bar", false),
-        ("///// also a bar", false),
-        ("///", true), // empty doc comment
+        ("// regular", " regular", false),
+        ("/// doc", " doc", true),
+        ("//// separator bar", "// separator bar", false),
+        ("///// also a bar", "/// also a bar", false),
+        ("///", "", true), // empty doc comment
     ];
-    for (src, expect_doc) in cases {
+    for (src, text, is_doc) in cases {
         let mut lex = Lexer::new(src);
         let tokens = lex.tokenize_with_comments().unwrap();
-        match &tokens[0].kind {
-            TokenKind::LineComment { is_doc, .. } => {
-                assert_eq!(
-                    *is_doc, expect_doc,
-                    "expected is_doc={expect_doc} for input {src:?}",
-                );
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::LineComment {
+                text: text.into(),
+                is_doc
             }
-            other => panic!("expected LineComment for {src:?}, got {other:?}"),
-        }
+        );
+        assert_eq!(Lexer::new(src).tokenize().unwrap(), tokens[1..]);
     }
 }
 
 #[test]
 fn test_doc_block_comment_detection() {
     let cases = [
-        ("/* regular */", false),
-        ("/** doc */", true),
-        ("/*** not a doc */", false),
-        ("/**/", false), // empty block comment, not a doc
+        ("/* regular */", " regular ", false),
+        ("/** doc */", " doc ", true),
+        ("/*** not a doc */", "** not a doc ", false),
+        ("/**/", "", false), // empty block comment, not a doc
+        ("/* é\n/* nested */ */", " é\n/* nested */ ", false),
     ];
-    for (src, expect_doc) in cases {
+    for (src, text, is_doc) in cases {
         let mut lex = Lexer::new(src);
         let tokens = lex.tokenize_with_comments().unwrap();
-        match &tokens[0].kind {
-            TokenKind::BlockComment { is_doc, .. } => {
-                assert_eq!(
-                    *is_doc, expect_doc,
-                    "expected is_doc={expect_doc} for input {src:?}",
-                );
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::BlockComment {
+                text: text.into(),
+                is_doc
             }
-            other => panic!("expected BlockComment for {src:?}, got {other:?}"),
-        }
+        );
+        assert_eq!(Lexer::new(src).tokenize().unwrap(), tokens[1..]);
     }
 }
 
