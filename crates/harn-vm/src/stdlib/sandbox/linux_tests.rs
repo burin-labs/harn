@@ -3,6 +3,7 @@
 //! (`super::*` still resolves to `linux.rs`), so nothing about scope moved.
 
 use super::*;
+use crate::stdlib::sandbox::{effective_fallback, handler_sandbox_test_guard};
 
 const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_REMOVE_DIR
@@ -16,6 +17,145 @@ const WRITE_BITS: u64 = LANDLOCK_ACCESS_FS_WRITE_FILE
     | LANDLOCK_ACCESS_FS_MAKE_SYM
     | LANDLOCK_ACCESS_FS_REFER
     | LANDLOCK_ACCESS_FS_TRUNCATE;
+
+/// Declares that this host is expected to enforce Landlock, so a live-boundary
+/// test that cannot exercise the boundary must fail rather than skip.
+///
+/// CI sets this on the runner class that has Landlock. Everywhere else the
+/// tests skip and say why, because a missing kernel feature is not a product
+/// defect and reporting it as one wastes the reader's time on a Landlock hunt
+/// in a kernel that has none.
+const REQUIRE_LIVE_LANDLOCK_ENV: &str = "HARN_REQUIRE_LANDLOCK_TESTS";
+
+/// Whether a live Landlock boundary will actually be applied on this host.
+///
+/// Two different absences, kept apart because they are acted on differently:
+/// the kernel has no Landlock at all, or it has it and the fallback selector
+/// turned enforcement off for this thread. Both mean the same thing to a
+/// negative control -- nothing was confined -- and neither is a product defect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveLandlock {
+    Enforcing,
+    AbsentOnHost,
+    DisabledBySelector,
+}
+
+impl LiveLandlock {
+    fn probe() -> Self {
+        if landlock_abi_version() == 0 {
+            return Self::AbsentOnHost;
+        }
+        // A worktree-profile run consults the selector, and `off` produces no
+        // ruleset even where the kernel supports one.
+        if matches!(
+            effective_fallback(SandboxProfile::Worktree),
+            SandboxFallback::Off
+        ) {
+            return Self::DisabledBySelector;
+        }
+        Self::Enforcing
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Enforcing => "Landlock is enforcing",
+            Self::AbsentOnHost => {
+                "Landlock unavailable on this host, sandbox boundary not exercised"
+            }
+            Self::DisabledBySelector => {
+                "Landlock disabled by the fallback selector, sandbox boundary not exercised"
+            }
+        }
+    }
+}
+
+/// The active security-module list, for a skip message that names the class.
+///
+/// A skip that only says "no Landlock" leaves the reader unable to tell which
+/// runner class they are looking at. The kernel publishes the answer.
+fn active_lsm_list() -> String {
+    std::fs::read_to_string("/sys/kernel/security/lsm")
+        .map(|text| text.trim().to_string())
+        .unwrap_or_else(|error| format!("<unreadable: {error}>"))
+}
+
+/// What a live-Landlock test must do, given what the host can actually enforce.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LandlockGate {
+    Proceed,
+    Skip(String),
+    Fail(String),
+}
+
+/// Whether the environment declares that this host must enforce Landlock.
+///
+/// Read from the real process environment on purpose. The shared test env seam
+/// is per-thread and structurally hides the process environment under
+/// `cfg(test)`, which is right for selectors a test injects and wrong for a
+/// declaration the CI job makes about its own runner.
+fn live_landlock_required() -> bool {
+    std::env::var(REQUIRE_LIVE_LANDLOCK_ENV)
+        .map(|value| {
+            let value = value.trim().to_ascii_lowercase();
+            !matches!(value.as_str(), "" | "0" | "false" | "off" | "no")
+        })
+        .unwrap_or(false)
+}
+
+/// The gate's whole decision, as a pure function of what was measured.
+///
+/// Separated from the probe so the two directions can be asserted without
+/// touching a kernel or a process environment.
+fn landlock_gate(state: LiveLandlock, required: bool, test: &str, lsm: &str) -> LandlockGate {
+    if state == LiveLandlock::Enforcing {
+        return LandlockGate::Proceed;
+    }
+    if required {
+        return LandlockGate::Fail(format!(
+            "[{test}] {}; {REQUIRE_LIVE_LANDLOCK_ENV} declares this host must enforce it. active security modules: {lsm}",
+            state.reason()
+        ));
+    }
+    LandlockGate::Skip(format!(
+        "[{test}] SKIPPED: {}. active security modules: {lsm}",
+        state.reason()
+    ))
+}
+
+/// The one gate every live-Landlock test opens with.
+///
+/// Returns false when the caller must return early. Panics with the named
+/// reason when the environment declares enforcement required, so a runner class
+/// that is supposed to confine cannot quietly stop confining -- which is the
+/// vacuous pass this replaces: the positive half of a boundary test succeeds
+/// identically whether the boundary permits the write or was never applied, so
+/// only the negative half notices, and it reported the absence as a product
+/// defect (harn#8215).
+#[must_use]
+fn live_landlock_available(test: &str) -> bool {
+    let lsm = active_lsm_list();
+    match landlock_gate(LiveLandlock::probe(), live_landlock_required(), test, &lsm) {
+        LandlockGate::Proceed => {
+            // Printed on the PROCEEDING path too, not only on a skip. The
+            // kernel can answer the ABI query and still not apply an effective
+            // ruleset -- a container that permits the version probe and blocks
+            // the rest reads as enforcing here, the boundary assertion fails,
+            // and the report looks like a product defect again. One line per
+            // run makes that host state visible in the log whether the test
+            // passes, skips, or reds.
+            eprintln!(
+                "[{test}] Landlock ABI {} reported enforcing. active security modules: {lsm}",
+                landlock_abi_version()
+            );
+            true
+        }
+        LandlockGate::Skip(reason) => {
+            eprintln!("{reason}");
+            false
+        }
+        LandlockGate::Fail(reason) => panic!("{reason}"),
+    }
+}
 
 fn linux_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
     CapabilityPolicy {
@@ -146,6 +286,12 @@ fn filesystem_metadata_syscalls_include_fchmodat2() {
 
 #[test]
 fn sandboxed_tar_extracts_symlinks_without_widening_the_write_root() {
+    // The negative half below is the only assertion that can tell an enforced
+    // boundary from no boundary at all, so it must not run where nothing will
+    // be confined (harn#8215).
+    if !live_landlock_available("sandboxed-tar") {
+        return;
+    }
     let workspace = tempfile::tempdir().expect("workspace");
     let source = workspace.path().join("archive-source");
     let extract = workspace.path().join("extract");
@@ -791,8 +937,7 @@ fn an_unreadable_ancestor_grants_nothing_beneath_it_and_never_itself() {
 ///   which is what proves the refusal was the denylist.
 #[test]
 fn a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling() {
-    if landlock_abi_version() == 0 {
-        eprintln!("[landlock-live] SKIPPED: no Landlock on this kernel");
+    if !live_landlock_available("landlock-live") {
         return;
     }
     let home = tempfile::TempDir::new().expect("temp home");
@@ -963,8 +1108,7 @@ fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
 #[test]
 fn a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read() {
     use std::os::unix::fs::PermissionsExt;
-    if landlock_abi_version() == 0 {
-        eprintln!("[unreadable-root] SKIPPED: no Landlock on this kernel");
+    if !live_landlock_available("unreadable-root") {
         return;
     }
     let _env_lock = crate::runtime_paths::test_env_lock()
@@ -1014,4 +1158,90 @@ fn a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read() 
         "the child must actually have executed, not merely exited zero"
     );
     eprintln!("[unreadable-root] confined child ran with an unreadable preset root present");
+}
+
+/// FALSIFIER 1. With nothing enforcing and no declaration, the gate stands down
+/// and says why. It must never report a missing kernel feature as a boundary
+/// failure, which is what harn#8215 recorded.
+#[test]
+fn an_unenforced_host_skips_with_the_named_reason_when_nothing_requires_it() {
+    for state in [LiveLandlock::AbsentOnHost, LiveLandlock::DisabledBySelector] {
+        let decision = landlock_gate(state, false, "probe", "capability,yama");
+        let LandlockGate::Skip(reason) = decision else {
+            panic!("an unenforced host must skip, not {decision:?}");
+        };
+        assert!(
+            reason.contains("sandbox boundary not exercised"),
+            "the skip names what did not happen: {reason}"
+        );
+        assert!(
+            reason.contains("capability,yama"),
+            "the skip names the host's security modules so the class is identifiable: {reason}"
+        );
+    }
+}
+
+/// FALSIFIER 2. Same host, but the environment declares it must enforce. The
+/// gate reds, and the message says which declaration was broken. This is what
+/// stops a runner class silently ceasing to confine.
+#[test]
+fn a_host_declared_to_enforce_reds_when_it_does_not() {
+    let decision = landlock_gate(LiveLandlock::AbsentOnHost, true, "probe", "capability,yama");
+    let LandlockGate::Fail(reason) = decision else {
+        panic!("a declared-enforcing host must fail, not {decision:?}");
+    };
+    assert!(
+        reason.contains("Landlock unavailable on this host, sandbox boundary not exercised"),
+        "the failure names the absence verbatim: {reason}"
+    );
+    assert!(
+        reason.contains(REQUIRE_LIVE_LANDLOCK_ENV),
+        "the failure names the declaration it answers to: {reason}"
+    );
+}
+
+/// DIRECTION CONTROL for both. An enforcing host proceeds whatever the
+/// declaration says, so the gate can never turn a real boundary test off.
+#[test]
+fn an_enforcing_host_always_proceeds() {
+    for required in [true, false] {
+        assert_eq!(
+            landlock_gate(LiveLandlock::Enforcing, required, "probe", "landlock"),
+            LandlockGate::Proceed,
+            "an enforcing host runs the boundary test, required={required}"
+        );
+    }
+}
+
+/// The probe reads the real mechanism, not just the kernel.
+///
+/// Landlock can be present and still not applied, because the worktree profile
+/// consults the fallback selector and `off` produces no ruleset. A gate keyed
+/// on the kernel alone would call that host enforcing and hand the negative
+/// control an unconfined child, which is the same vacuous pass by another route.
+#[test]
+fn the_selector_can_disable_enforcement_on_a_landlock_capable_kernel() {
+    if landlock_abi_version() == 0 {
+        eprintln!(
+            "[selector-probe] SKIPPED: no Landlock on this kernel, so the selector cannot be \
+             the deciding factor. active security modules: {}",
+            active_lsm_list()
+        );
+        return;
+    }
+    let guard = handler_sandbox_test_guard();
+    guard.set("off");
+    assert_eq!(
+        LiveLandlock::probe(),
+        LiveLandlock::DisabledBySelector,
+        "a disabled selector must not read as an enforcing host"
+    );
+    // Direction control: the default selector leaves the same kernel enforcing.
+    drop(guard);
+    let _restored = handler_sandbox_test_guard();
+    assert_eq!(
+        LiveLandlock::probe(),
+        LiveLandlock::Enforcing,
+        "the default selector enforces on a Landlock-capable kernel"
+    );
 }
