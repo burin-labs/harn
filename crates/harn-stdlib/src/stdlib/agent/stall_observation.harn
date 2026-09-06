@@ -1,10 +1,6 @@
 import { agent_feedback_emit } from "std/agent/feedback"
-import { AgentToolDispatch, __dispatch_results_list } from "std/agent/loop_result_status"
-import {
-  agent_monologue_actuation_config,
-  agent_monologue_actuation_initial_state,
-  agent_monologue_actuation_observe,
-} from "std/agent/monologue_actuation"
+import { AgentToolDispatch } from "std/agent/loop_result_status"
+import { agent_monologue_actuation_observe } from "std/agent/monologue_actuation"
 import {
   __agent_stall_completed_result,
   __agent_stall_delta_signature,
@@ -27,7 +23,7 @@ import {
   AgentStallWarning,
 } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
-import { agent_emit_event, agent_session_totals } from "std/agent/state"
+import { agent_emit_event } from "std/agent/state"
 import { agent_tool_calls_are_read_only } from "std/agent/tool_annotations"
 
 /**
