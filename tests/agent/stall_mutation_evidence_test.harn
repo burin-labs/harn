@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_tool_call, with_llm_script } from "std/testing"
@@ -43,31 +44,27 @@ fn mutation_sequence(harness: Harness, mutations: list<string>, failed_transport
       harness.llm,
       mutations.map({ mutation -> llm_tool_call("edit", {mutation: mutation}) }).to_list(),
       { ->
-        agent_loop(
-          harness,
-          "Edit source",
-          nil,
-          {
-            provider: "mock",
-            session_id: sid,
-            tools: tools,
-            tool_format: "native",
-            max_iterations: len(mutations),
-            stall_diagnostics: {enabled: true},
-            post_turn_callback: { info ->
-              const state = agent_stall_checkpoint_state(harness.agent, info.stall_checkpoint)
-              observations = observations
-                + [
-                  {
-                    status: info.stall_checkpoint.dispatch[0].status,
-                    mutation: info.stall_checkpoint.dispatch[0].data?.mutation_status,
-                    write_epoch: state.write_epoch,
-                  },
-                ]
-              return nil
-            },
+        const opts: AgentSpec = {
+          provider: "mock",
+          session_id: sid,
+          tools: tools,
+          tool_format: "native",
+          max_iterations: len(mutations),
+          stall_diagnostics: {enabled: true},
+          post_turn_callback: { info ->
+            const state = agent_stall_checkpoint_state(harness.agent, info.stall_checkpoint)
+            observations = observations
+              + [
+                {
+                  status: info.stall_checkpoint.dispatch[0].status,
+                  mutation: info.stall_checkpoint.dispatch[0].data?.mutation_status,
+                  write_epoch: state.write_epoch,
+                },
+              ]
+            return nil
           },
-        )
+        }
+        agent_loop(harness, "Edit source", nil, opts)
       },
     )
     require executions == len(mutations) && len(observations) == len(mutations),
@@ -83,19 +80,31 @@ fn mutation_sequence(harness: Harness, mutations: list<string>, failed_transport
 
 pipeline test_successful_transport_uses_mutation_evidence_before_edit_annotation(harness: Harness) {
   const rows = mutation_sequence(harness, ["applied", "not_applied", "unchanged", "legacy"], false)
-  require rows.all({ row -> row.status == "ok" }),
-    "all producer results must complete successfully at the transport boundary"
-  require rows.map({ row -> row.mutation }).to_list()
-    == ["applied", "not_applied", "unchanged", nil],
-    "native dispatch must retain explicit mutation facts and distinguish missing evidence"
-  require rows.map({ row -> row.write_epoch }).to_list() == [1, 1, 1, 2],
-    "rejected and nonmutating results must not advance writes; untyped edit success remains compatible"
+  assert(
+    rows.all({ row -> row.status == "ok" }),
+    "all producer results must complete successfully at the transport boundary",
+  )
+  assert_eq(
+    rows.map({ row -> row.mutation }).to_list(),
+    ["applied", "not_applied", "unchanged", nil],
+    "native dispatch must retain explicit mutation facts and distinguish missing evidence",
+  )
+  assert_eq(
+    rows.map({ row -> row.write_epoch }).to_list(),
+    [1, 1, 1, 2],
+    "rejected and nonmutating results must not advance writes; untyped edit success remains compatible",
+  )
 }
 
 pipeline test_failed_transport_retains_explicit_applied_mutation(harness: Harness) {
   const rows = mutation_sequence(harness, ["applied"], true)
-  require rows[0].status == "error" && rows[0].mutation == "applied",
-    "the executed dispatch must preserve failure disposition alongside applied evidence"
-  require rows[0].write_epoch == 1,
-    "an authenticated applied mutation remains a write despite its transport failure"
+  assert(
+    rows[0].status == "error" && rows[0].mutation == "applied",
+    "the executed dispatch must preserve failure disposition alongside applied evidence",
+  )
+  assert_eq(
+    rows[0].write_epoch,
+    1,
+    "an authenticated applied mutation remains a write despite its transport failure",
+  )
 }

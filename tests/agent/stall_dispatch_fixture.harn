@@ -5,7 +5,7 @@ import {
 } from "std/agent/stall"
 
 pub type StallObservationInput = {
-  config: dict | bool | nil,
+  config: dict | bool?,
   session_id?: string?,
   calls?: list?,
   iteration?: int?,
@@ -76,5 +76,5 @@ pub fn _fail_dispatch(error_text: any) -> list {
  * @errors: []
  */
 pub fn _verification_of(prev_dispatch: any) -> list {
-  return (prev_dispatch ?? []).filter({ result -> result.tool_name == "run" })
+  return (prev_dispatch ?? []).filter({ result -> result.tool_name == "run" }).to_list()
 }
