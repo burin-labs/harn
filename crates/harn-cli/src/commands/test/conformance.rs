@@ -263,6 +263,15 @@ async fn execute_conformance_source(
     let state_dir = state_dir.to_string_lossy().into_owned();
     let _state_dir_guard =
         ScopedEnvVar::set(harn_vm::runtime_paths::HARN_STATE_DIR_ENV, &state_dir);
+    // Memory is not covered by `HARN_STATE_DIR`. It resolves source-relative and
+    // defaults to `.harn/memory` beside the running script, so a case that calls
+    // a memory builtin wrote its event log into the fixture's own directory and
+    // left it there after passing. The stray artifact then changed the source
+    // input inventory and failed the exact-binary freshness gate that runs next.
+    let memory_root = case_root.join(".harn").join("memory");
+    let memory_root = memory_root.to_string_lossy().into_owned();
+    let _memory_root_guard =
+        ScopedEnvVar::set(harn_vm::runtime_paths::HARN_MEMORY_ROOT_ENV, &memory_root);
     let harn_bin = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
     let harn_bin = harn_bin.to_string_lossy().into_owned();

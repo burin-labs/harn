@@ -5,6 +5,12 @@ use sha2::{Digest, Sha256};
 pub const HARN_STATE_DIR_ENV: &str = "HARN_STATE_DIR";
 pub const HARN_RUN_DIR_ENV: &str = "HARN_RUN_DIR";
 pub const HARN_WORKTREE_DIR_ENV: &str = "HARN_WORKTREE_DIR";
+/// Overrides where the memory builtins keep their event log and vector cache.
+///
+/// Memory does not live under `HARN_STATE_DIR`: it resolves source-relative and
+/// defaults to `.harn/memory` beside the running script. A caller that isolates
+/// state therefore has to isolate memory as a second, separate act.
+pub const HARN_MEMORY_ROOT_ENV: &str = "HARN_MEMORY_ROOT";
 const NEXTEST_ENV: &str = "NEXTEST";
 const NEXTEST_RUN_ID_ENV: &str = "NEXTEST_RUN_ID";
 const NEXTEST_BINARY_ID_ENV: &str = "NEXTEST_BINARY_ID";
