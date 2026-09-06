@@ -382,6 +382,49 @@ fn deterministic_scan_detects_outside_workspace_paths() {
     assert!(labels(&scan).contains(&"outside_workspace".to_string()));
 }
 
+#[test]
+fn deterministic_scan_distinguishes_executable_paths_from_path_operands() {
+    for context in [
+        ctx(&["/bin/echo", "hi"]),
+        shell_ctx("/bin/echo hi"),
+        ctx(&["env", "/bin/echo", "hi"]),
+        shell_ctx("sudo /bin/echo hi"),
+        shell_ctx("sh -c '/bin/echo hi'"),
+        shell_ctx("/bin/echo hi | /usr/bin/wc -c"),
+        shell_ctx("find /tmp/work -exec /bin/echo {} \\;"),
+        ctx(&["xargs", "--", "/bin/echo", "hi"]),
+        ctx(&["xargs", "--", "sh", "-c", "/bin/echo hi"]),
+        shell_ctx("find /tmp/work -exec sh -c '/bin/echo hi' \\;"),
+    ] {
+        let scan = command_risk_scan_json(&context, None);
+        assert!(
+            !labels(&scan).contains(&"outside_workspace".to_string()),
+            "an executable's location is not a workspace path operand: {context}"
+        );
+    }
+
+    for context in [
+        ctx(&["/bin/echo", "/bin/echo"]),
+        ctx(&["env", "/bin/echo", "/bin/echo"]),
+        ctx(&["xargs", "--", "/bin/echo", "/bin/echo"]),
+        shell_ctx("/bin/echo /bin/echo"),
+        shell_ctx("sh -c '/bin/echo /bin/echo'"),
+        shell_ctx("/bin/echo hi > /etc/harn-output"),
+        shell_ctx("find /tmp/work -exec /bin/echo /bin/echo \\;"),
+        ctx(&["xargs", "--", "sh", "-c", "/bin/echo /bin/echo"]),
+        shell_ctx("find /tmp/work -exec sh -c '/bin/echo /bin/echo' \\;"),
+        ctx(&["env", "-C", "/etc", "/bin/echo", "hi"]),
+        ctx(&["sudo", "-D", "/etc", "/bin/echo", "hi"]),
+        ctx(&["time", "-o", "/etc/harn-time", "/bin/echo", "hi"]),
+    ] {
+        let scan = command_risk_scan_json(&context, None);
+        assert!(
+            labels(&scan).contains(&"outside_workspace".to_string()),
+            "the same path in an operand role must still be classified: {context}"
+        );
+    }
+}
+
 fn is_outside_workspace(command: &str) -> bool {
     labels(&command_risk_scan_json(&shell_ctx(command), None))
         .contains(&"outside_workspace".to_string())
