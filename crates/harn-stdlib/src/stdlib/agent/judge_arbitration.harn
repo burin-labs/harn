@@ -10,8 +10,24 @@
 // `__completion_contradiction_arbitration_converts` in `std/agent/judge_internals`
 // own the CONDITIONS and the reasoning for each clause. This module owns what a
 // conversion does to the verdict: it flips the acceptance, clears the feedback
-// that no turn could answer, and stamps `converted_from` so a reader can count
+// that no turn could answer, names the party whose answer the verdict now IS,
+// and stamps both the typed override and `converted_from` so a reader can count
 // overrules without inferring them.
+//
+// Both conversions overrule a judge, so both write the attribution pair harn#8229
+// defined: `source` names the author of the verdict of record, `judge_source`
+// stays with the party that produced the judge's own answer, and `override`
+// carries the overruling party and the rule in a typed object rather than in
+// prose a consumer has to pattern-match.
+//
+// They did not, and the gap was one-directional in a way that hid it. harn#8229
+// instrumented the gate forcing a `continue` over a judge's `done`, which is the
+// direction the completion seam takes. These two take the other direction, a
+// `done` of record over a judge's `continue`, and stamped only `converted_from`
+// while leaving `source` at `llm`. Measured across an eval archive: every one of
+// the eight conversions published the gate's answer under the model's name,
+// which is the exact reading harn#8229 exists to prevent, surviving on the half
+// of the ladder it did not reach.
 import { CompletionEvidenceSnapshot } from "std/agent/completion_evidence"
 import { CompletionRequirementReport } from "std/agent/completion_requirements"
 import {
@@ -94,6 +110,33 @@ const __COMPLETION_CONTRADICTION_CONVERSION: string =
   "gap_contradicts_done_survived_reask_over_passing_verifier"
 
 /**
+ * The typed override both conversions stamp, in the shape harn#8229 defined.
+ *
+ * Shared so the two arbitrations cannot describe the same kind of event
+ * differently, which is how the prose field they used to write alone drifted
+ * from the decision it was describing.
+ *
+ * `judge_verdict` prefers the field harn#8229 sets upstream and falls back to
+ * the verdict being converted. The fallback is not decoration: a replayed or
+ * older-pin verdict reaches here without the pair, and recording the overruled
+ * answer as absent would leave exactly the hole this closes. The verdict on
+ * this path is a refusal by construction, so the fallback is the judge's own
+ * word either way.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __completion_conversion_override(verdict, "failed_verification_contradicted_by_gate")
+ */
+fn __completion_conversion_override(verdict: CompletionStageVerdict, rule: string) -> dict {
+  return {
+    party: "gate",
+    rule: rule,
+    judge_verdict: to_string(verdict?.judge_verdict ?? verdict.verdict ?? ""),
+  }
+}
+
+/**
  * Refuse a model `continue` that names a failed verification the deterministic
  * gate observed passing, and convert it to `done` with a receipt saying so.
  *
@@ -143,6 +186,18 @@ pub fn __completion_arbitrate_verification(
       verdict: "done",
       feedback: nil,
       next_step: "",
+      // `source` is the author of the verdict of record, and after this line
+      // that author is the gate. `judge_source` is deliberately untouched: it
+      // names who produced the judge's own answer, stays `llm` across an
+      // override, and is what the guard above reads so a later arbitration can
+      // still recognise a model refusal.
+      // `source` is the author of the verdict of record, and after this line
+      // that author is the gate. `judge_source` is deliberately untouched: it
+      // names who produced the judge's own answer, stays `llm` across an
+      // override, and is what the guard above reads so a later arbitration can
+      // still recognise a model refusal.
+      source: "gate",
+      override: __completion_conversion_override(verdict, __COMPLETION_VERIFICATION_CONVERSION),
       converted_from: __COMPLETION_VERIFICATION_CONVERSION,
       reason: __COMPLETION_VERIFICATION_CONVERSION,
     }
@@ -200,6 +255,8 @@ pub fn __completion_arbitrate_contradiction(
       verdict: "done",
       feedback: nil,
       next_step: "",
+      source: "gate",
+      override: __completion_conversion_override(verdict, __COMPLETION_CONTRADICTION_CONVERSION),
       converted_from: __COMPLETION_CONTRADICTION_CONVERSION,
       reason: __COMPLETION_CONTRADICTION_CONVERSION,
     }
