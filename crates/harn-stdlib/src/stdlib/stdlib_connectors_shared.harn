@@ -7,7 +7,12 @@ pub import {
 } from "std/connectors/http"
 import { JsonParseFailure, merge } from "std/json"
 
-/** Bind connector lifecycle state to one provider and its owned reset keys. */
+/**
+ * Bind connector lifecycle state to one provider and its owned reset keys.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn connector_lifecycle(
   provider: string,
   state_key: string,

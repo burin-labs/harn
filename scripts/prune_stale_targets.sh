@@ -61,6 +61,8 @@
 #                               most-recent set is retired (default 259200)
 #   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
 #                               both the legacy $TMPDIR and durable cache roots
+#   HARN_TARGET_GC_PROTECT      the caller's own entry (path or name), kept
+#                               whatever its age or rank
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -186,6 +188,21 @@ cutoff=$(( $(date +%s) - min_age ))
 keep_recent="${HARN_TARGET_GC_KEEP_RECENT:-10}"
 max_idle="${HARN_TARGET_GC_MAX_IDLE_SECS:-259200}"
 idle_cutoff=$(( $(date +%s) - max_idle ))
+
+# The entry belonging to whoever launched this sweep, which must survive it
+# whatever the ranking says. Setup restores a Cargo target seed and then sweeps,
+# and a restored seed carries the seed's timestamps at every depth, so the tree
+# setup just installed can read as idle for weeks the moment it is created. The
+# ranking would then retire the one entry the caller is about to build into.
+#
+# Comparison is by basename, so a caller that knows only its target-dir path
+# still protects the right entry, and a name shared across the two managed roots
+# protects both. Over-protecting keeps a tree that a later sweep will collect;
+# under-protecting deletes a tree that is in use.
+protect_name=""
+if [ -n "${HARN_TARGET_GC_PROTECT:-}" ]; then
+  protect_name="$(basename "${HARN_TARGET_GC_PROTECT}")"
+fi
 
 # The pids this GC must never mistake for a build: its own process and every
 # ancestor. An agent session or wrapper that names a cache entry on its command
@@ -352,6 +369,15 @@ prune_root() {
     scanned=$((scanned + 1))
     name="$(basename "$d")"
     warm_entry=0
+
+    # The caller's own entry outranks every other rule, including the process
+    # probe: a setup run that has restored a seed but not yet started Cargo owns
+    # its tree without holding a lock or naming it on any command line.
+    if [ -n "$protect_name" ] && [ "$name" = "$protect_name" ]; then
+      echo "keep (caller's own entry): $name"
+      kept=$((kept + 1)); kept_paths+=("$d"); continue
+    fi
+
     if grep -qxF "$name" "$keep"; then
       # A live worktree points at this tree, so it is warm rather than an
       # orphan. It is not decided here: the retention cap below ranks every

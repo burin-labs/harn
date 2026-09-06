@@ -608,7 +608,13 @@ pub fn __verification_delta_explicit_failure(value: any) -> bool {
   return __verification_delta_outcome(value) == "fail"
 }
 
-/** Command facts outrank the surrounding tool's successful dispatch receipt. */
+/**
+ * Command facts outrank the surrounding tool's successful dispatch receipt.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn __verification_command_fact(value: dict) -> dict {
   const data = value?.data ?? value?.result?.data ?? value
   const command = data?.run_outcome ?? value?.run_outcome ?? data
