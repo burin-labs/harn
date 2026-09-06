@@ -120,6 +120,7 @@ fn __green_reading() {
     stop_reason: "sentinel",
     final_text: "Implemented the selector and the verifier passed.",
     pending_tool_batch_effect_count: 0,
+    ledger_pending_count: 0,
   }
 }
 
@@ -173,6 +174,13 @@ pipeline test_typed_green_terminal_requires_every_clause(harness: Harness, task:
   assert(
     !__completion_typed_green_terminal(__green_reading() + {pending_tool_batch_effect_count: 1}),
     "a deferred effect outliving the turn makes the verifier's reading stale",
+  )
+  // A green verifier answers "did the declared command pass". It is not an
+  // answer to "was each thing the task asked for delivered", and the judge is
+  // where a declared acceptance row is assessed.
+  assert(
+    !__completion_typed_green_terminal(__green_reading() + {ledger_pending_count: 1}),
+    "an outstanding acceptance row is not something the verifier established",
   )
 }
 
@@ -330,4 +338,194 @@ pipeline test_the_verification_judge_keeps_every_other_boundary(harness: Harness
     __completion_receipts(no_gate.events)[0].invoked.verify_completion_judge,
     "with no gate the judge is the only authority",
   )
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The acceptance ledger. The skip does not only skip the judge, it skips
+// everything behind the judge, and the pending-requirements check that turns a
+// done into a continue lives inside the structured invocation. Found against
+// harn#8126, and the case below is the reproduction as reported. See harn#8110.
+
+// -------------------------------------------------------------------------------------------------
+
+/** A completion judge declaring one acceptance row nothing has measured. */
+fn __completion_judge_with_open_ledger() -> dict {
+  return {
+    turn_end_condition: {
+      provider: "mock",
+      max_invocations: 1,
+      requirement_contract: {
+        requirements: [
+          {
+            requirement_id: "unmet-row",
+            name: "The acceptance row nobody measured.",
+            evidence_roles: ["deterministic_verification"],
+          },
+        ],
+      },
+    },
+  }
+}
+
+pipeline test_an_open_ledger_row_still_blocks_the_terminal(harness: Harness, task: unknown) {
+  const captured = __run(
+    harness,
+    "typed-green-open-ledger",
+    [llm_done(), __judge_refuses("not there yet"), llm_done()],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")}
+      + __completion_judge_with_open_ledger(),
+  )
+  const receipts = __completion_receipts(captured.events)
+  // Non-vacuity first. A `requirement_contract` under an unrecognized key
+  // configures no ledger at all, and every assertion below would then be
+  // measuring a run with nothing declared. The count is read off the receipt,
+  // which is the runtime's own reading of the contract rather than the fixture
+  // restated.
+  assert_eq(receipts[0].requirements.required_count, 1)
+  assert(
+    __judge_calls(captured.events) >= 1,
+    "an outstanding acceptance row is the judge's question, so it must be asked",
+  )
+  assert(receipts[0].requirements != nil, "a sealed done must never carry a null ledger")
+  assert_eq(receipts[0].action, "continue")
+  assert(captured.result.status != "done", "an open acceptance row outranks the terminal reading")
+}
+
+pipeline test_a_run_with_no_ledger_records_an_empty_one_not_a_null(
+  harness: Harness,
+  task: unknown,
+) {
+  // The direction control, and the receipt half of the fix. This run skips the
+  // judge exactly as before. What must not happen is the skip recording `nil`,
+  // which is the same value a run with an unassessed ledger would carry and is
+  // therefore unreadable as evidence of anything.
+  const captured = __run(
+    harness,
+    "typed-green-no-ledger",
+    [llm_done(), __judge_refuses("the fixture does not satisfy the required case")],
+    {verify_completion: __gate_reporting(true, "verified_after_write", "passed")},
+  )
+  assert_eq(__judge_calls(captured.events), 0)
+  const receipts = __completion_receipts(captured.events)
+  assert_eq(captured.result.status, "done")
+  assert(
+    receipts[0].requirements != nil,
+    "a done sealed without a judge still says what the ledger held",
+  )
+  assert_eq(receipts[0].requirements.required_count, 0)
+  assert_eq(receipts[0].requirements.pending_count, 0)
+  assert(receipts[0].requirements.complete, "an undeclared ledger is complete, not unknown")
+}
+
+/**
+ * Run a longer boundary sequence, so the judge can exhaust its budget rather
+ * than the fixture running out of scripted turns. `__run`'s two iterations end
+ * the run before a cap is ever reached.
+ */
+fn __run_to_cap(harness: Harness, label: string, script: list, opts_extra: dict) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        // `verified`, not `verified_after_write`, so the typed-green skip does
+        // not fire and the boundary actually reaches the cap. `observed` is
+        // still `passed`, which is the reading the cap conversion depends on,
+        // so the two cases below differ only in whether a ledger is declared.
+        verify_completion: __gate_reporting(true, "verified", "passed"),
+      }
+        + opts_extra
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+fn __refusing_run_to_cap(harness: Harness, label: string, judge_cfg: dict) {
+  return __run_to_cap(
+    harness,
+    label,
+    [
+      llm_done(),
+      __judge_refuses("not there yet"),
+      llm_done(),
+      __judge_refuses("still not"),
+      llm_done(),
+      llm_done(),
+      llm_done(),
+    ],
+    {turn_end_condition: judge_cfg},
+  )
+}
+
+pipeline test_a_judge_cap_over_an_open_ledger_does_not_seal_a_verified_stop(
+  harness: Harness,
+  task: unknown,
+) {
+  // The other way a boundary ends without asking the judge. A cap reached over
+  // a passing verifier converts to `stop_verified`, which seals `done`. Read
+  // without the ledger, that conversion fires on a run whose judge spent its
+  // whole budget saying the acceptance row was not met. Measured before the
+  // fix: two recorded refusals naming the row, then `stop_verified` with
+  // reason `judge_cap_reached_over_verified_pass`, `requirements` null, and a
+  // run status of `done`.
+  const capped = __refusing_run_to_cap(
+    harness,
+    "cap-open-ledger",
+    {
+      provider: "mock",
+      max_invocations: 2,
+      requirement_contract: {
+        requirements: [
+          {
+            requirement_id: "unmet-row",
+            name: "The acceptance row nobody measured.",
+            evidence_roles: ["deterministic_verification"],
+          },
+        ],
+      },
+    },
+  )
+  const receipts = __completion_receipts(capped.events)
+  const sealing = receipts[len(receipts) - 1]
+  // Non-vacuity: the judge really was handed a one-row ledger. Read off the
+  // receipt it assessed, which is the runtime's reading of the contract.
+  assert_eq(receipts[0].requirements.required_count, 1)
+  assert(receipts[0].requirements.pending_count > 0, "the row was never established")
+  assert_eq(__judge_calls(capped.events), 2)
+  assert_eq(sealing.action, "stop_unverified")
+  assert(capped.result.status != "done", "a cap is a budget, not an assessment")
+}
+
+pipeline test_a_judge_cap_with_no_ledger_still_stops_verified(harness: Harness, task: unknown) {
+  // The direction control. The cap-over-a-passing-oracle conversion is a
+  // deliberate mechanism and this change must not retire it: with no acceptance
+  // rows outstanding there is nothing the judge was going to add, and the run
+  // still stops verified on the oracle's answer.
+  const capped = __refusing_run_to_cap(
+    harness,
+    "cap-no-ledger",
+    {provider: "mock", max_invocations: 2},
+  )
+  const receipts = __completion_receipts(capped.events)
+  const sealing = receipts[len(receipts) - 1]
+  assert_eq(__judge_calls(capped.events), 2)
+  assert_eq(sealing.action, "stop_verified")
+  assert_eq(sealing.reason, "judge_cap_reached_over_verified_pass")
+  assert_eq(capped.result.status, "done")
+  // The receipt half of the fix, on the action class the rule is about: a
+  // sealed done says what the ledger held rather than staying silent.
+  assert(sealing.requirements != nil, "a sealed done always says what the ledger held")
+  assert_eq(sealing.requirements.required_count, 0)
 }
