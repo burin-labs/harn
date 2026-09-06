@@ -549,7 +549,6 @@ crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn::unified_detectors_post
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_clip_head_tail
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_delta_previous
 crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_maybe_emit
-crates/harn-stdlib/src/stdlib/agent/stall_observation.harn::__agent_stall_turn_result
 crates/harn-stdlib/src/stdlib/agent/stall_verification.harn::agent_stall_current_failure
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_apply
 crates/harn-stdlib/src/stdlib/agent/stance.harn::agent_stance_default_consent_check

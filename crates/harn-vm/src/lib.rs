@@ -353,7 +353,7 @@ pub use mcp_registry::{
     get_registration as mcp_get_registration, install_active as mcp_install_active,
     is_registered as mcp_is_registered, register_servers as mcp_register_servers,
     release as mcp_release, reset as mcp_reset_registry, snapshot_status as mcp_snapshot_status,
-    sweep_expired as mcp_sweep_expired, RegisteredMcpServer, RegistryStatus,
+    sweep_expired as mcp_sweep_expired, McpServerPreparation, RegisteredMcpServer, RegistryStatus,
 };
 pub use mcp_server::{
     take_mcp_serve_metadata, take_mcp_serve_prompts, take_mcp_serve_registry,

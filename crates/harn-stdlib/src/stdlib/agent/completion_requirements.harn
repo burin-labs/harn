@@ -675,3 +675,57 @@ pub fn completion_requirement_unassessed_feedback(report: CompletionRequirementR
     + " acceptance item(s), so they could not be verified. Unassessed: "
     + join(parts, " ")
 }
+
+/**
+ * The acceptance ledger of a run that declared no rows.
+ *
+ * Explicit rather than `nil`. `nil` on a receipt is ambiguous in the one
+ * direction that matters: it reads the same for "there were no rows" and for
+ * "there were rows and nobody looked", and only the second is a false
+ * completion. A sealed done therefore carries this value when no ledger exists,
+ * so a reader can tell the two apart. See harn#8110.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_ledger_empty()
+ */
+pub fn completion_requirement_ledger_empty() -> CompletionRequirementReport {
+  return {
+    schema: "harn.completion_requirement_report.v1",
+    complete: true,
+    required_count: 0,
+    reported_count: 0,
+    pending_count: 0,
+    pending_names: [],
+    rows: [],
+  }
+}
+
+/**
+ * The acceptance ledger read with no model assessment in hand.
+ *
+ * This is the reading available to a caller deciding whether to ask the judge
+ * at all, and it is deliberately pessimistic: with no assessment, every
+ * declared row is `missing`, so `pending_count` equals `required_count`. A
+ * declared row can only be established as met by an assessment, so "no pending
+ * rows" and "no ledger declared" are today the same condition. It is expressed
+ * as a pending count anyway, because that is the question being asked, and
+ * because a deterministic assessor added later is then read correctly here
+ * without a second copy of the rule.
+ *
+ * The evidence packet is empty on purpose: with no rows to match, no clause of
+ * the report builder consults it. Row shaping stays owned by
+ * `completion_requirement_report` rather than restated here.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: completion_requirement_ledger_unassessed(contract)
+ */
+pub fn completion_requirement_ledger_unassessed(
+  contract: CompletionRequirementContract?,
+) -> CompletionRequirementReport {
+  return completion_requirement_report(contract, nil, {})
+    ?? completion_requirement_ledger_empty()
+}

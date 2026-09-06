@@ -1444,16 +1444,10 @@ fn every_terminal_kind_agrees_with_its_typed_projection() {
     }
 }
 
-/// The terminal says WHEN it was sealed, not only what it was.
-///
-/// The record already dates the run's end from this stamp, but only as
-/// `finished_at`, whose provenance a reader has to look up in `run_clock` before
-/// knowing it came from the terminal rather than from the last observed event.
-/// Carrying it on the terminal removes that join.
-///
-/// The assertion is against `finished_at` rather than a literal, because a
-/// literal would pass just as happily if both fields were wrong together. Tying
-/// them proves it is the terminal's own clock and not a second reading of it.
+/// The terminal carries its own seal time, so a reader no longer joins
+/// `finished_at` through `run_clock` to learn it came from the terminal.
+/// Asserting against `finished_at` rather than a literal ties the two clocks,
+/// so both being wrong together cannot pass.
 #[tokio::test]
 async fn the_terminal_carries_the_moment_it_was_sealed() {
     let store = MemorySessionStore::default();
@@ -1501,4 +1495,80 @@ async fn the_terminal_carries_the_moment_it_was_sealed() {
         !bare_run.metadata.contains_key("terminal"),
         "a run with no terminal must not report when one was sealed"
     );
+}
+/// THE FALSIFIER. A closed session that recorded no terminal and no final
+/// status says nothing about how its run ended, and must not be projected as a
+/// finished one.
+///
+/// Measured shape: an agent run ended on a `policy_no_progress` terminal, the
+/// terminal was recorded against the session the loop ran in, and the record was
+/// projected from a different session id that had the transcript but not the
+/// terminal. Every mapping on the way was correct — a policy kind projects to
+/// `stopped` — and the record still read `status: "completed", terminal: null`,
+/// because the last branch answers from the session being shut rather than from
+/// any evidence about the run.
+#[tokio::test]
+async fn a_closed_session_with_no_terminal_is_unclassified_never_completed() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, user_message("do the work"))
+        .await
+        .expect("append message");
+    store.close(&meta.id).await.expect("close session");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project closed session");
+
+    assert_eq!(
+        run.status, "unknown",
+        "a closed session with no terminal claimed a finish it has no evidence for"
+    );
+    assert!(
+        !run.metadata.contains_key("terminal"),
+        "no terminal was recorded, so none may be reported"
+    );
+}
+
+/// THE DIRECTION CONTROLS. The change above must not be reachable by making the
+/// projection uniformly pessimistic: a run that left a verdict still reports it,
+/// in both directions.
+///
+/// `natural` is the half that matters most. If it drifted to `unknown` the
+/// projection would be honest and useless, and every reader that asks "did this
+/// finish" would get no for everything.
+#[tokio::test]
+async fn a_session_that_left_a_verdict_still_reports_it_in_both_directions() {
+    for (final_status, stop_reason, expected) in [
+        // `sentinel` is in the natural stop-reason set; a `done` with a stop
+        // reason outside that set is a policy stop, which is the #4642 rule.
+        ("done", "sentinel", "completed"),
+        ("stuck", "no_progress", "stopped"),
+    ] {
+        let store = MemorySessionStore::default();
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create session");
+        store
+            .append(&meta.id, terminal(final_status, stop_reason))
+            .await
+            .expect("append terminal");
+        // Closed, exactly like the falsifier above. The terminal is the only
+        // difference between the two cases, so it is the only thing that can be
+        // deciding the answer.
+        store.close(&meta.id).await.expect("close session");
+
+        let run = project_run_record_from_session(&store, &meta.id)
+            .await
+            .expect("project");
+        assert_eq!(
+            run.status, expected,
+            "a {final_status} terminal must still project {expected}"
+        );
+    }
 }

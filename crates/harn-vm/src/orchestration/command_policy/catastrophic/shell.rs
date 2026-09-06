@@ -12,27 +12,39 @@ pub(super) struct EnvInvocation<'a> {
     pub(super) resolved: bool,
 }
 
+pub(super) struct UnwrappedCommand {
+    pub(super) command_index: usize,
+    pub(super) path_operands: Vec<String>,
+}
+
 pub(super) fn unwrapped_command_index(tokens: &[String], start: usize, end: usize) -> usize {
-    unwrapped_command_index_inner(tokens, start, end, false)
+    unwrapped_command_inner(tokens, start, end, false, false).command_index
+}
+
+pub(super) fn unwrapped_command(tokens: &[String], start: usize, end: usize) -> UnwrappedCommand {
+    unwrapped_command_inner(tokens, start, end, false, true)
 }
 
 pub(super) fn unwrapped_shell_command_index(tokens: &[String], start: usize, end: usize) -> usize {
-    unwrapped_command_index_inner(tokens, start, end, true)
+    unwrapped_command_inner(tokens, start, end, true, false).command_index
 }
 
-fn unwrapped_command_index_inner(
+fn unwrapped_command_inner(
     tokens: &[String],
     start: usize,
     end: usize,
     shell_assignments: bool,
-) -> usize {
+    project_path_operands: bool,
+) -> UnwrappedCommand {
     let mut index = start;
+    let mut path_operands = Vec::new();
     while index < end {
         if shell_assignments && is_shell_assignment(&tokens[index]) {
             index += 1;
             continue;
         }
-        let next = match command_basename(&tokens[index]) {
+        let wrapper = command_basename(&tokens[index]);
+        let next = match wrapper {
             "command" => skip_command_wrapper(tokens, index + 1, end),
             "builtin" | "nohup" => index + 1,
             "exec" => skip_exec_wrapper(tokens, index + 1, end),
@@ -41,14 +53,81 @@ fn unwrapped_command_index_inner(
             "nice" => skip_nice_wrapper(tokens, index + 1, end),
             "time" => skip_time_wrapper(tokens, index + 1, end),
             "timeout" => skip_timeout_wrapper(tokens, index + 1, end),
-            _ => return index,
+            _ => break,
         };
         if next <= index {
-            return index;
+            break;
+        }
+        if project_path_operands {
+            collect_wrapper_path_operands(wrapper, tokens, index + 1, next, &mut path_operands);
         }
         index = next;
     }
-    index
+    UnwrappedCommand {
+        command_index: index,
+        path_operands,
+    }
+}
+
+fn collect_wrapper_path_operands(
+    wrapper: &str,
+    tokens: &[String],
+    start: usize,
+    end: usize,
+    operands: &mut Vec<String>,
+) {
+    let mut index = start;
+    while index < end {
+        let option = tokens[index].as_str();
+        let takes_path = matches!(
+            (wrapper, option),
+            ("env", "-C")
+                | ("sudo", "-D")
+                | ("sudo", "-R")
+                | ("sudo", "--chdir")
+                | ("sudo", "--chroot")
+                | ("time", "-o")
+                | ("time", "--output")
+        );
+        if takes_path && index + 1 < end {
+            operands.push(tokens[index + 1].clone());
+            index += 2;
+            continue;
+        }
+        if let Some(path) = option
+            .strip_prefix("--chdir=")
+            .filter(|_| wrapper == "sudo")
+        {
+            operands.push(path.to_string());
+        } else if let Some(path) = option
+            .strip_prefix("--chroot=")
+            .filter(|_| wrapper == "sudo")
+        {
+            operands.push(path.to_string());
+        } else if let Some(path) = option
+            .strip_prefix("--output=")
+            .filter(|_| wrapper == "time")
+        {
+            operands.push(path.to_string());
+        } else if wrapper == "env" {
+            if let Some((_, path)) = option
+                .strip_prefix('-')
+                .and_then(|flags| flags.split_once('C'))
+            {
+                if !path.is_empty() {
+                    operands.push(path.to_string());
+                }
+            }
+        } else if wrapper == "sudo" {
+            for prefix in ["-D", "-R"] {
+                if let Some(path) = option.strip_prefix(prefix).filter(|path| !path.is_empty()) {
+                    operands.push(path.to_string());
+                    break;
+                }
+            }
+        }
+        index += 1;
+    }
 }
 
 pub(super) fn skip_exec_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
@@ -297,6 +376,7 @@ pub(super) fn sudo_option_consumes_argument(option: &str) -> bool {
     matches!(
         option,
         "-C" | "-D"
+            | "-R"
             | "-g"
             | "-h"
             | "-p"
@@ -304,6 +384,8 @@ pub(super) fn sudo_option_consumes_argument(option: &str) -> bool {
             | "-T"
             | "-u"
             | "--close-from"
+            | "--chdir"
+            | "--chroot"
             | "--group"
             | "--host"
             | "--prompt"

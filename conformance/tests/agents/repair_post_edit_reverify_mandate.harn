@@ -1,6 +1,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
 
 /**
  * Current-failure loop: the post-edit re-verify mandate. A turn that makes a
@@ -15,8 +16,6 @@ import { llm_text, with_llm_script } from "std/testing"
  * Negative control: post_edit_reverify:false => no forced verify, the marker
  * feedback never appears.
  */
-import { repair_test_tools } from "../../fixtures/agents/repair_tools"
-
 fn repair_tools() {
   return repair_test_tools("test failed: assertion X", true, "read")
 }

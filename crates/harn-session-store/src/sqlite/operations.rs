@@ -92,6 +92,13 @@ impl SessionStore for SqliteSessionStore {
             request.title,
             request.title_pinned,
         );
+        // Merge, never replace: an absent key is not a request to clear one.
+        // The read above is already inside `BEGIN IMMEDIATE`, so the merge
+        // cannot race another writer's attributes.
+        let mut attributes = current.attributes;
+        attributes.extend(request.attributes);
+        let attributes_json =
+            serde_json::to_string(&attributes).unwrap_or_else(|_| "{}".to_string());
         let changed = tx
             .execute(
                 "UPDATE sessions SET
@@ -105,6 +112,7 @@ impl SessionStore for SqliteSessionStore {
                     usage_input = COALESCE(?7, usage_input),
                     usage_output = COALESCE(?8, usage_output),
                     usage_cost_usd_micros = COALESCE(?9, usage_cost_usd_micros),
+                    attributes_json = ?14,
                     updated_at_ms = ?10,
                     updated_at = ?11
                  WHERE id = ?12",
@@ -122,6 +130,7 @@ impl SessionStore for SqliteSessionStore {
                     updated_at,
                     session_id,
                     title_pinned,
+                    attributes_json,
                 ],
             )
             .map_err(map_sql)?;
