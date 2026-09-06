@@ -36,6 +36,12 @@ pub type MissingToolCallRecoveryOptions = {
   max_tokens?: int,
   temperature?: float,
   classifier?: MissingToolCallCustomClassifier,
+  /**
+   * Whether a claimed tool call may reach the provider as a decode grammar.
+   * Off with the claim still on is a fallback turn. Read at
+   * `std/agent/loop_support`.
+   */
+  output_contract?: bool,
   top_p?: float,
   seed?: int,
   effort?: string,
@@ -169,6 +175,22 @@ pub type StallDiagnostics = {
   repeat_success?: int,
   /** Treat a shrinking failure set as progress and restore the nudge budget. */
   shrinking_failure_set_resets_budget?: bool,
+  /**
+   * Report a repeated observation as advice rather than counting it toward a
+   * stall. Read at `std/agent/stall_config`.
+   */
+  observation_recurrence_advisory?: bool,
+  /**
+   * Callback the stall decision keys on to learn whether the verifier moved.
+   * The whole verifier-progress arm is inert without it. Read at
+   * `std/agent/stall_verification`.
+   */
+  progress_signal?: any,
+  /**
+   * Turns the verifier may fail to advance before that counts as no progress.
+   * Read at `std/agent/stall_verification`.
+   */
+  no_verifier_progress_limit?: int,
 }
 
 /**
@@ -314,7 +336,6 @@ pub type AgentModelSpec = {
     max_cost_usd?: float,
     max_input_tokens?: int,
     max_output_tokens?: int,
-    /** Combined input and output ceiling, read at `std/llm/handlers`. */
     max_total_tokens?: int,
     total_budget_usd?: float,
   },
@@ -329,6 +350,29 @@ pub type AgentModelSpec = {
   history?: list,
   prefill?: string,
   session_id?: string,
+  /**
+   * The child run's identifier, injected by the host alongside `session_id`
+   * when `sub_agent_run` calls the loop. Declared because it arrives in the
+   * option dict like any caller key.
+   */
+  run_id?: string,
+  /**
+   * How the session journal should classify this run, set by the host to
+   * `subagent` when the loop is entered through `sub_agent_run`. Read at the
+   * journal boundary, not by the loop itself.
+   */
+  session_type?: string,
+  /**
+   * Workspace anchor for a child run, injected by `sub_agent_run` and read by
+   * the host's path-scope resolution.
+   */
+  anchor?: any,
+  /** Identifier of the run that spawned this one, injected by the host. */
+  parent_run_id?: string,
+  /** Identifier of the session that spawned this one, injected by the host. */
+  parent_session_id?: string,
+  /** Token ceiling for a child run, read by the host's sub-agent budgeting. */
+  token_budget?: int,
   call_role?: string,
   rate_limit_consumer_id?: string,
   mock_scope?: string,
@@ -339,7 +383,10 @@ pub type AgentModelSpec = {
   metadata?: dict,
 }
 
-/** Loop bounds, completion policy, callbacks, and dispatch controls. */
+/**
+ * Combined input and output ceiling, read at `std/llm/handlers`.
+ * Loop bounds, completion policy, callbacks, and dispatch controls.
+ */
 pub type AgentExecutionSpec = {
   profile?: string,
   loop_until_done?: bool,
@@ -396,6 +443,11 @@ pub type AgentExecutionSpec = {
   final_wrapup?: bool,
   /** Cap on verification retries before the run seals. Default 20. */
   max_verify_attempts?: int,
+  /**
+   * Announce the reserved call-budget boundary to the model before the run
+   * reaches it. Read at `std/agent/loop_call_budget`.
+   */
+  call_budget_reserve_signal?: bool,
   /**
    * Cap on how many failing tool calls one turn fans out to before the loop
    * stops dispatching the rest of the batch.
@@ -523,49 +575,60 @@ pub type AgentPresetOptions = AgentSpec \
   llm_options?: dict,
   persona?: any,
   judge?: bool | JudgeConfig,
-  /**
-   * A preset's default compaction-pin policy. `agent_preset` copies it into
-   * the options it returns, so it arrives at `agent_loop_options` as an
-   * ordinary caller key.
-   */
   pin_policy?: any,
-  /**
-   * Discovery mirror of the repair knobs inside `stall_diagnostics`, written
-   * by `agent_preset` so a consumer can find them without reading that nested
-   * dict. Read by whoever inspects a preset's options, not by the loop, which
-   * takes its values from `stall_diagnostics.repair_diagnostics`.
-   */
   repair_diagnostics?: RepairDiagnostics,
-  /**
-   * Consumed by `sub_agent_run` in the host before the loop sees it, and
-   * forwarded in the same dict. Declared here because the option dict at this
-   * boundary carries keys owned by the surfaces that funnel through it; the
-   * cleaner end state is for each of those to remove what it owns.
-   */
   allowed_tools?: list<string>,
-  /**
-   * Response schema for the underlying model call, consumed by the host's LLM
-   * option validation and forwarded in the same dict. Same shape of debt as
-   * `allowed_tools`.
-   */
-  output_schema?: any,
-  /**
-   * Preset-pack lane rows, lowered by `std/agent/lanes`. `agent_preset`
-   * copies it into the options it returns.
-   */
+  request?: any,
+  research_questions?: list,
+  questions?: list,
+  action_items?: list,
+  actions?: list,
+  workflow_stages?: list,
+  stages?: list,
+  verification_steps?: list,
+  verification?: list,
   lane_policy?: any,
-  /**
-   * Preset-pack overlay rows, lowered by `std/agent/overlays`. `agent_preset`
-   * copies it into the options it returns.
-   */
   overlay_policy?: any,
-  /**
-   * Whether this run's transcript may feed workflow learning. Read by the host
-   * when it opens the session journal.
-   */
   workflow_learning_eligibility?: string,
 }
 
+/**
+ * A preset's default compaction-pin policy. `agent_preset` copies it into
+ * the options it returns, so it arrives at `agent_loop_options` as an
+ * ordinary caller key.
+ */
+/**
+ * Discovery mirror of the repair knobs inside `stall_diagnostics`, written
+ * by `agent_preset` so a consumer can find them without reading that nested
+ * dict. Read by whoever inspects a preset's options, not by the loop, which
+ * takes its values from `stall_diagnostics.repair_diagnostics`.
+ */
+/**
+ * Consumed by `sub_agent_run` in the host before the loop sees it, and
+ * forwarded in the same dict. Declared here because the option dict at this
+ * boundary carries keys owned by the surfaces that funnel through it; the
+ * cleaner end state is for each of those to remove what it owns.
+ */
+/**
+ * Worker provenance. `sub_agent_run` forwards its own option dict as the
+ * child's loop options, and the worker request record is then derived from
+ * that same dict on the host side, so these arrive at the loop boundary
+ * even though the loop never reads them. Same shape of debt as
+ * `allowed_tools`: the cleaner end state is for the worker request to carry
+ * them on its own channel.
+ */
+/**
+ * Preset-pack lane rows, lowered by `std/agent/lanes`. `agent_preset`
+ * copies it into the options it returns.
+ */
+/**
+ * Preset-pack overlay rows, lowered by `std/agent/overlays`. `agent_preset`
+ * copies it into the options it returns.
+ */
+/**
+ * Whether this run's transcript may feed workflow learning. Read by the host
+ * when it opens the session journal.
+ */
 import { LlmCallerTransport } from "std/agent/caller_transport"
 
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"

@@ -17,4 +17,6 @@ declaration the way the per-validator field reads already had.
 Turning the check on found options the loop reads that the type never declared,
 now declared, and a handful of keys nothing reads at all, now removed: a
 workflow stage set three loop-detection values that no code anywhere consumes,
-and two conformance tests disabled a judge that does not exist.
+and two conformance tests disabled a judge under a name that was renamed away.
+`done_judge` now refuses with its replacement named, `turn_end_condition`,
+rather than falling through to the generic "no option reads this".

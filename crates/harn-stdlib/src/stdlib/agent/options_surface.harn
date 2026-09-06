@@ -16,7 +16,6 @@ import { AgentPresetOptions } from "std/agent/options_types"
  * the declaration and drifts from it exactly the way the per-validator field
  * reads already have.
  */
-
 /**
  * Flatten a schema node into the branches that could describe a dict.
  *
@@ -35,7 +34,7 @@ fn __option_schema_branches(node: any) -> list<any> {
   }
   let branches = [node]
   for group in ["all_of", "any_of", "one_of", "union"] {
-    const value = node?[group]
+    const value = node?.[group]
     if type_of(value) == "list" {
       for item in value {
         branches = branches + __option_schema_branches(item)
@@ -143,25 +142,25 @@ fn __option_key_accepted_elsewhere(key: string, at_path: string) -> string {
 }
 
 /**
- * Refuse an option key nothing on the surface declares.
+ * Collect every option key nothing on the surface declares.
  *
- * A rejection rather than a report, unlike the host event payload census:
- * there the emitters are inside the runtime and a refusal would kill a live
- * path, while a misplaced option is a caller's own configuration and the
- * caller is the one who can fix it. The whole failure here is a signal that
- * was present and read as ordinary, so it has to stop the run.
+ * Walks one option dict against its schema node and returns the dotted path of
+ * every key no branch declares. A node that declares no properties is a
+ * free-form `dict` option: nothing is known about its keys, so the walk stops
+ * rather than refusing them.
  *
  * @effects: []
- * @errors: [ValueError]
+ * @errors: []
  */
-fn __check_option_keys(value: any, node: any, path: string) {
+fn __collect_unread_keys(value: any, node: any, path: string) -> list<string> {
   if type_of(value) != "dict" {
-    return
+    return []
   }
   const allowed = __option_declared_keys(node)
   if len(allowed) == 0 {
-    return
+    return []
   }
+  let unread = []
   for key in keys(value) {
     // Runtime-internal plumbing. The stdlib writes these into an option dict
     // itself — `std/agent/lanes` adds `_lane_verdict`, `std/workflow/stage`
@@ -178,24 +177,26 @@ fn __check_option_keys(value: any, node: any, path: string) {
       path + "." + key
     }
     if !contains(allowed, key) {
-      const at = if path == "" {
-        "the top level"
-      } else {
-        "`" + path + "`"
-      }
-      throw "agent_loop: `"
-        + key
-        + "` is not an option at "
-        + at
-        + __option_key_accepted_elsewhere(key, here)
-        + ". A key nothing reads is accepted in silence otherwise, and the run then reports what a run without that option would report."
+      unread = unread + [here]
+    } else {
+      unread = unread + __collect_unread_keys(value[key], __option_child_schema(node, key), here)
     }
-    __check_option_keys(value[key], __option_child_schema(node, key), here)
   }
+  return unread
 }
 
 /**
- * Validate supplied `agent_loop` options against the declared surface.
+ * Refuse every option key nothing on the surface declares, in one message.
+ *
+ * A rejection rather than a report, unlike the host event payload census:
+ * there the emitters are inside the runtime and a refusal would kill a live
+ * path, while a misplaced option is a caller's own configuration and the
+ * caller is the one who can fix it. The whole failure here is a signal that
+ * was present and read as ordinary, so it has to stop the run.
+ *
+ * All of them at once, not the first: a caller with three misplaced keys
+ * should learn three, and finding them one rebuild at a time is how this
+ * check's own bring-up went.
  *
  * @effects: []
  * @errors: [ValueError]
@@ -204,5 +205,80 @@ pub fn __validate_agent_loop_option_keys(opts: any) {
   if type_of(opts) != "dict" {
     return
   }
-  __check_option_keys(opts, schema_of(AgentPresetOptions), "")
+  const unread = __collect_unread_keys(opts, schema_of(AgentPresetOptions), "")
+  if len(unread) == 0 {
+    return
+  }
+  __reject_removed_option_keys(unread)
+  let parts = []
+  for full in unread {
+    const key = __option_path_leaf(to_string(full))
+    const at = if to_string(full) == key {
+      "the top level"
+    } else {
+      "`" + __option_path_parent(to_string(full)) + "`"
+    }
+    parts = parts
+      + [
+        "`"
+          + key
+          + "` at "
+          + at
+          + __option_key_accepted_elsewhere(key, to_string(full)),
+      ]
+  }
+  throw "agent_loop: no option reads "
+    + join(parts, ", ")
+    + ". A key nothing reads is accepted in silence otherwise, and the run then reports what a run without that option would report."
+}
+
+/**
+ * The last segment of a dotted option path.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_path_leaf(full: string) -> string {
+  const parts = split(full, ".")
+  return to_string(parts[len(parts) - 1])
+}
+
+/**
+ * Everything before the last segment of a dotted option path.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_path_parent(full: string) -> string {
+  const parts = split(full, ".")
+  let head = []
+  for (index, part) in iter(parts).enumerate() {
+    if index < len(parts) - 1 {
+      head = head + [to_string(part)]
+    }
+  }
+  return join(head, ".")
+}
+
+/**
+ * Refuse a key the model-call registry already records as removed, using the
+ * registry's own wording.
+ *
+ * The removed vocabulary has one owner, the registry the dispatch layer reads.
+ * That layer only sees a key once a run is under way, which is well past the
+ * point a caller can act on it, and the surface check would otherwise reach
+ * the key first and report it as unread. A removed key is not unread: it was
+ * read until it was taken away, and the registry knows what replaced it.
+ *
+ * @effects: []
+ * @errors: [ValueError]
+ */
+fn __reject_removed_option_keys(unread: list<string>) {
+  const removed = __llm_call_option_registry().removed
+  for full in unread {
+    const key = __option_path_leaf(to_string(full))
+    if removed[key] != nil {
+      throw "agent_loop: option `" + key + "` was removed — " + removed[key]
+    }
+  }
 }
