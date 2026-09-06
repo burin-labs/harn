@@ -301,10 +301,17 @@ fn __completion_gate_evaluate(
   }
   const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
   const task = to_string(payload?.task ?? "")
+  // The judge payload is the canonical completion-evidence snapshot. Reuse
+  // its obligation reading so deterministic and model authorities cannot
+  // disagree when a projected transcript is stale or incomplete. Direct and
+  // legacy callers do not carry the field, so derive it here only as a
+  // compatibility fallback.
+  const obligations = payload?.obligations
+    ?? completion_obligations_from_messages(messages, task)
   const ctx = {
     session_id: session_id,
     task: task,
-    obligations: completion_obligations_from_messages(messages, task),
+    obligations: obligations,
     stop_reason: to_string(payload?.stop_reason ?? ""),
     text: to_string(payload?.text ?? ""),
     messages: messages,
