@@ -478,6 +478,32 @@ fn runtime_stdlib_import_surface_resolves_to_embedded_sources() {
 }
 
 #[test]
+fn embedded_stdlib_relative_imports_resolve_without_filesystem_mirrors() {
+    let tmp = tempfile::tempdir().unwrap();
+    let entry = write_file(
+        tmp.path(),
+        "entry.harn",
+        "import { run_bootstrap } from \"std/runtime/bootstrap\"\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let bootstrap = stdlib::stdlib_virtual_path("runtime/bootstrap");
+    let installer = stdlib::stdlib_virtual_path("runtime/install");
+    assert!(graph.contains_module(&bootstrap));
+    assert!(graph.contains_module(&installer));
+    assert_eq!(graph.selective_import_issues(&entry), Vec::new());
+    assert!(graph
+        .imported_names_for_file(&bootstrap)
+        .expect("embedded bootstrap imports should resolve")
+        .contains("install_runtime"));
+
+    assert!(matches!(
+        crate::package_imports::resolve_local_import(&bootstrap, "../../../outside.harn"),
+        crate::package_imports::LocalResolution::Rejected
+    ));
+}
+
+#[test]
 fn stdlib_imports_expose_type_declarations() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

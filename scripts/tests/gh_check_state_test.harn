@@ -148,7 +148,7 @@ pipeline test_matrix_check_names_satisfy_their_prefix(task: unknown) {
     check_runs: [
       run(1, "CI status", "completed", "success"),
       run(2, "Setup Harn action (ubuntu-latest)", "completed", "success"),
-      run(3, "Setup Harn action (windows-latest)", "completed", "success"),
+      run(3, "Setup Harn action (windows-latest) / Install and verify", "completed", "success"),
     ],
   }
   const census = build_census(

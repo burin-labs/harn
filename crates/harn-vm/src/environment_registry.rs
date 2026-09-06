@@ -639,12 +639,18 @@ mod tests {
             {
                 let source = std::fs::read_to_string(entry.path()).expect("read Harn source");
                 for token in harn_name_tokens(&source) {
+                    // Bare prefixes, not names. Each is a literal that a script
+                    // concatenates a suffix onto, so the scanner sees the
+                    // prefix alone and cannot resolve the name that is actually
+                    // read. The names those expressions produce are registered
+                    // individually; only the unresolvable fragment is excused.
                     if variable_spec(token).is_none()
                         && !protocol_symbols.contains(token)
                         && !matches!(
                             token,
                             "HARN_AGENT"
                                 | "HARN_AGENT_"
+                                | "HARN_BOOTSTRAP_"
                                 | "HARN_LLM"
                                 | "HARN_LLM_"
                                 | "HARN_PLANNER"
