@@ -1,7 +1,99 @@
 import { agent_loop } from "std/agent/loop"
 import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { llm_tool_call, with_llm_script } from "std/testing"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+pipeline test_completed_text_turns_preserve_the_write_axis_stop(harness: Harness) {
+  const sid = harness.agent.open()
+  let writes = 0
+  let observations = 0
+  let empty_turns = 0
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify source",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { _args ->
+        agent_tool_handler_result(
+          "Opaque failure",
+          {run_outcome: {command_status: "failed", exit_code: 1}},
+        )
+      },
+    },
+  )
+  const registry = tool_define(
+    tools,
+    "edit",
+    "Apply source change",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { _args ->
+        writes = writes + 1
+        return "Applied source change"
+      },
+    },
+  )
+  const result = with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("verify", {path: "a.txt"}),
+      llm_tool_call("edit", {path: "a.txt"}),
+      llm_text("I am considering the failure."),
+      llm_text("I am still considering the failure."),
+      llm_tool_call("edit", {path: "must-not-execute.txt"}),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Repair source",
+        nil,
+        {
+          provider: "mock",
+          session_id: sid,
+          tools: registry,
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "TASK_DONE",
+          max_nudges: 99,
+          iteration_budget: {mode: "adaptive", initial: 4, max: 8, extend_by: 4},
+          stall_diagnostics: {
+            enabled: true,
+            no_verifier_progress_limit: 3,
+            repeat_same_error: 99,
+            repeat_same_observation: 99,
+            repeat_success: 99,
+            no_progress_messages: 99,
+            ping_pong_cycles: 99,
+            hard_stop_after_trips: 99,
+            progress_signal: { payload ->
+              observations = observations + 1
+              if len(payload.dispatch ?? []) == 0 {
+                empty_turns = empty_turns + 1
+              }
+              return if len(payload.verification_dispatch) > 0 {
+                0
+              } else {
+                nil
+              }
+            },
+          },
+        },
+      )
+    },
+  )
+  require writes == 1, "the real first edit must execute and the post-cap edit must not"
+  require observations == 4 && empty_turns == 2,
+    "both completed text turns must fold once without a fabricated initial turn"
+  require result.stall_checkpoint.state.verify_turns_since_advance == 3
+    && result.stall_checkpoint.state.verify_wrote_since_advance,
+    "text-only turns must retain the real write and consume the flat-progress window"
+  require result.status == "budget_exhausted",
+    "the real loop must refuse adaptive extension when verification stayed flat after a write"
+  harness.agent.close(sid)
+}
 
 pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: Harness) {
   const sid = harness.agent.open()
