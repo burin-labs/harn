@@ -177,14 +177,7 @@ pub(crate) fn summarize_artifacts(
     artifacts
 }
 
-pub(crate) fn resolve_output_path(
-    command_id: Option<&str>,
-    handle_id: Option<&str>,
-    path: Option<&str>,
-) -> Option<PathBuf> {
-    if let Some(path) = path {
-        return Some(PathBuf::from(path));
-    }
+fn resolve_output_path(command_id: Option<&str>, handle_id: Option<&str>) -> Option<PathBuf> {
     let artifacts = ARTIFACTS.lock().expect("command artifact store poisoned");
     command_id
         .and_then(|id| artifacts.by_id.get(id))
