@@ -7,7 +7,6 @@
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
 HARN_BIN ?=
-PROTOCOL_ARTIFACT_VERSION ?=
 HARN_CONFORMANCE_TIMEOUT_MS ?= 60000
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 define HARN_REQUIRE_NEXTEST
@@ -30,7 +29,6 @@ HARN_NO_BUILD_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_
 HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
 HARN_BIN_ASSIGN = harn_bin="$$($(HARN_BIN_PRINT_CMD))"
-PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(PROTOCOL_ARTIFACT_VERSION)),--artifact-version "$(PROTOCOL_ARTIFACT_VERSION)" --check,--check)
 HARN_WASM_PACK_VERSION ?= 0.15.0
 HARN_WASM_PACK_DIR ?= $(or $(TMPDIR),/tmp)/harn-tools/wasm-pack-$(HARN_WASM_PACK_VERSION)
 HARN_WASM_PACK = $(HARN_WASM_PACK_DIR)/bin/wasm-pack
@@ -872,7 +870,7 @@ gen-protocol-artifacts:
 
 check-protocol-artifacts:
 	@echo "=== Checking Harn protocol artifacts are up to date ==="
-	@$(HARN_CLI_CMD) dump-protocol-artifacts $(PROTOCOL_ARTIFACT_CHECK_ARGS)
+	@$(HARN_CLI_CMD) dump-protocol-artifacts --check
 	@echo "    Harn protocol artifacts OK."
 
 gen-connector-schemas:
