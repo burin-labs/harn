@@ -9,6 +9,327 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.132
+
+### Breaking
+
+- The generated protocol bindings no longer export a build-version constant.
+  `HARN_PROTOCOL_ARTIFACT_VERSION` is removed from the TypeScript, Rust and
+  Python bindings, along with its Swift spelling `HarnProtocolConstants.artifactVersion`
+  and its Go spelling `ArtifactVersion`; the `artifactVersion` key is removed
+  from `manifest.json` and the round-trip fixture. Code that reads any of these
+  must move to the manifest's `schemaVersion`, which is the field that describes
+  the protocol the artifacts speak. The `dump-protocol-artifacts --artifact-version`
+  flag is removed with the stamp it wrote. Generated artifacts are now identical
+  across releases unless the protocol itself changes, so a version bump no longer
+  rewrites all seven of them.
+
+### Added
+
+- `stall_diagnostics.observation_recurrence_advisory` independently selects cumulative read-recurrence warnings
+  while preserving recurrence evidence and iteration-budget decisions.
+- The shared development cache sweep can now retire an entry by name. Its
+  automatic rules bound the cache by how many entries a root keeps and how long
+  one may sit idle, and neither answers whether the work behind an entry is
+  finished: a branch that landed yesterday leaves a warm tree that is both recent
+  and young, so every rule protects it.
+
+  `--remove-entry NAME`, repeatable, retires named entries regardless of rank or
+  age. A live process still wins. The check sits after the liveness probe and
+  before the rank and age rules, because a caller can be wrong about work being
+  finished but not about a compiler holding the tree open, while rank and age are
+  exactly what the caller is overriding. Names containing a path separator are
+  refused, and a name that matches nothing is reported rather than passing
+  silently.
+- Connector HTTP requests support provider quota admission using epoch or relative reset headers,
+  including successful-response waits, bounded delays, and the existing safe retry policy.
+- Shared connector lifecycle operations preserve explicit binding IDs and provider state isolation,
+  rejecting duplicate binding paths before activation.
+- **PostToolUse hooks can return typed denials.** A hook may return
+  `{result, denial: {kind, message}}`; the denial survives later result
+  rewrites and reaches the agent tool envelope without relying on message text.
+- Session attributes can now be recorded after the session exists. They were
+  reachable only through the create call, which made every attribute a
+  create-time fact: a writer that learned one later had no way to store it, and
+  no way to notice, because the value simply never appeared and the read came
+  back null. An update now merges the attributes it names into the ones already
+  stored, leaving every key it does not name alone, so a caller that knows one
+  fact does not have to read the others back to avoid erasing them. Clearing an
+  attribute stays outside the update contract, exactly as it already does for the
+  typed fields.
+- The session store now exposes crash-safe writer and maintenance leases, so
+  project-wide retention can exclude live transcript writers without heartbeats.
+  Persisted open status remains independent of writer liveness, so dormant
+  resumable history remains eligible for automatic retention.
+
+### Changed
+
+- Shared source analysis drops unused token streams while preserving cached syntax trees and diagnostics.
+- Package API documentation releases parser tokens after parsing instead of retaining a duplicate stream.
+- The no-progress streak now observes without steering. It used to add a paragraph
+  of advice to the model's packet on every unproductive turn, and it could not end
+  a run: a turn with no successful tool raises its counter and a turn with a
+  successful tool lowers it rather than zeroing it, so an agent alternating
+  narration with a succeeding poll parks between the counter's floor and the nudge
+  budget and satisfies the guard indefinitely. One measured run spent 22 of its 30
+  feedback injections this way and still ended unverified. The nudge is gone and
+  its receipt stays, so the loop still records that it saw the stall while the
+  packet keeps the room for evidence the completion judge is asked to read. The
+  separate text-only nudge budget, which shares the `max_nudges` setting and does
+  end a run, is unchanged.
+- The completion judge's re-ask for an ungrounded quote now names the failure as
+  paraphrase and says what a quote must be. It requires `evidence_quote` to be a
+  span copied character for character from the transcript or tool output, sends
+  the judge's reading of that span to `detail` instead, and refuses an empty
+  quote as an answer, asking for either a span or a `continue` whose gap is named
+  without claiming evidence. The previous wording asked the judge to quote only
+  lines that were really there, which does not reach a judge that believes it is
+  describing what it saw.
+
+### Fixed
+
+- Bound completed command-artifact registrations per live process during high-rate
+  command runs while keeping registered results readable. N live processes can retain
+  up to N times the configured cap; shared cleanup removes only unleased directories.
+- Compact text tool catalogs now use the native description summarizer, including sentence boundaries ending in `!` or `?`.
+- **A call site no longer links to every same-named function in the workspace
+  (#8107).**
+  Call resolution matched on name alone, so a call to a common helper drew an
+  edge to every declaration sharing that identifier anywhere in the workspace,
+  and six of seven edges were wrong. Resolution is now scoped to what the
+  calling file can actually see: a declaration in the same file wins; failing
+  that, one in a file the caller imports or shares a module with; failing that,
+  a single unambiguous declaration in the workspace; failing that, nothing.
+  On a 7,038-file workspace, `CALLS` edges fall from 1,101,334 to 240,757 and
+  the worst call site goes from 275 targets to 72. The point is precision
+  rather than size: call sites resolving to exactly one target rise from
+  117,756 to 143,173, and those landing on six or more fall from 58,643 to
+  5,206. The middle tier is doing real work, not passing through: disabling it
+  and re-measuring drops resolved call sites from 157,226 to 142,716.
+- `make test-e2e` compiles only the CLI integration targets selected by its test
+  profile. CI derives worker counts from the host's available CPU share and a
+  separate compiler memory cap, reducing resource-pressure failures before tests.
+- A completion judge's refusal is no longer overruled by a verifier reading that
+  no declared verifier produced. Both arbitration conversions, and the typed green
+  terminal that skips the judge outright, now require that a verifier command was
+  actually declared before a `passed` reading counts as a positive answer.
+
+  The condition lives in one predicate that all three call, because they had each
+  carried their own copy and had drifted: the clause was missing from all three,
+  and adding it to one would have left the others open.
+- Lazy manifest MCP servers now remain silent and defer credential preparation
+  until their first activation. Help and version scripts that do not use MCP no
+  longer print deferred-server banners or access connector credentials.
+- A run record no longer reports a run as completed on the strength of its session
+  being closed. When the projection found no terminal and no final status, nothing
+  in the session said how the run ended, and `closed` only said somebody shut it;
+  the record claimed a clean finish anyway. An agent run that ended on a policy cut
+  was published as `completed` for exactly this reason, with its terminal recorded
+  against a different session than the record was projected from. That case now
+  reads `unknown`, which is what the session actually supports. A run that left a
+  terminal or a final status still reports it, in both directions.
+- Command results now carry typed process-sandbox denials and explicitly state when the active backend can only infer refusals.
+- Generated connector packages pass strict verification without an unused pipeline input.
+- Verification gates and agent stall checkpoints now preserve typed command failures and pending outcomes
+  even when the surrounding tool dispatch succeeds.
+- A feedback receipt can now say that the feedback was not delivered. The event a
+  post-turn mechanism writes is named for injection and had no field for whether
+  anything reached the model, so every row it produced read as delivered feedback.
+  That became wrong once the no-progress streak was demoted to observing a stalled
+  turn without injecting anything: the only remaining signal was that a sibling
+  injection row was missing, which left readers inferring silence from an absent
+  row. The receipt now carries the answer, and stays absent rather than guessing
+  for mechanisms that have not been taught the question. The same event also keeps
+  the iteration it was already given, so a receipt can be tied to the turn that
+  caused it without parsing prose.
+- Main CI is green again after the truthful-verification stall change: the conformance suite,
+  the sources and generated files check, and the repository policy check pass on the same commit.
+- An overridden completion verdict no longer wears the judge's name, and a veto
+  now says what it found unmet.
+
+  When the completion gate converted a judge's `done` into a `continue`, the
+  decision was still published with `source: "llm"` and carried no field holding
+  what the judge had actually said, so a record could report `done` for a run
+  whose every judge decision was `continue`. The judge's own answer now travels
+  beside the verdict of record, `source` names the party that authored the
+  answer, and a conversion is a typed record of the overriding party and the
+  rule it applied.
+
+  The same override injected the judge's own rationale for finishing as the
+  reason the run could not finish, so the veto read as an approval, the actor had
+  nothing to act on, and the loop ran to the judge cap without advancing. It now
+  names the gap that was declared alongside the `done` and what would resolve it.
+- Fail-fast parallel cancellation conformance checks now synchronize the sibling
+  start, removing a scheduler-dependent false failure while still proving
+  in-flight work is cancelled.
+- Cargo integration tests that embed package binary paths now keep Cargo's
+  compiler-provided environment when the development build cache is enabled.
+- The source file-length ratchet now refuses only over files the change under review
+  touched. A file already over the cap on main is reported by name and line count
+  instead of failing every later pull request that never opened it, and the ratchet
+  reports as its own check so a red names the file rather than a job.
+- Live-Landlock sandbox tests now report whether the host applied a boundary at
+  all. On a host that enforces nothing they skip with a named reason and the
+  active security-module list, instead of failing as though the sandbox let a
+  write through.
+- Release folds now leave the generated projections consistent with the
+  workspace they ship from. The protocol artifacts, the A2A and MCP conformance
+  fixtures, and the grammar-fitness receipt all carry the post-fold development
+  version instead of the one the release was cut at.
+- The never-approvable write floor now names why a target is protected instead of
+  always reporting it as a tracked project file. Outside a Git repository the
+  floor treats every existing file as protected, and the refusal said the file was
+  tracked in workspaces with no tracking at all. Refusals are unchanged; the three
+  findings (tracked by Git, already exists with no Git to consult, or no execution
+  root to resolve against) are now distinguishable to whoever reads the message.
+- Raw `git worktree add` is now refused only in a repository that actually owns a
+  Fleet admission command, and allowed where none exists. The wrapper measures its
+  own tree and reports the answer, because the hook host permits no filesystem
+  access; a missing measurement still refuses, so the check cannot be switched off
+  by failing to run.
+- The release-metadata gate accepts the fold commit as a release's lineage record.
+  History on the default branch is linear, so a release cut off it can never
+  become an ancestor and the fold is the only record the branch can hold.
+- The Windows workspace test lane no longer runs out of disk partway through
+  linking. Its scratch volume was sized for a run the job never performs, taking
+  the full-workspace ceiling only on release-certification refs while the job
+  itself compiles every crate on every ref. A restored warm target left under a
+  gibibyte free and the run died before a single test executed. The volume now
+  takes the full-workspace ceiling unconditionally, and the conditional
+  expression that had been a second owner of that number is gone.
+
+  The lane also measured its own free space immediately before the build and
+  then entered the build regardless. That reading is now the decision: below the
+  declared build headroom the step refuses and reports both the measurement and
+  the floor, so an undersized volume is named at the measurement rather than
+  discovered thousands of lines into compiler output.
+- A completion judge's approval is no longer refused by its own reply schema.
+  The gap array carried a one-item minimum that could not see the verdict, so
+  every approval was sent back and the repair turn could satisfy it only by
+  inventing a gap. Both verdict-dependent rules now live in the typed read, and
+  the gap class gained a member an approval can send.
+- A completion is no longer sealed over an acceptance row nothing established.
+  The pending-requirements check lived inside the structured judge invocation, so
+  both ways a boundary can end without asking the judge took the ledger with it: a
+  typed green terminal skipped it, and a judge cap reached over a passing verifier
+  converted to a verified stop while the judge's own refusals named the unmet row.
+  One ledger reading is now computed per boundary and read by the skip, the
+  catalog light-scrutiny skip, and the cap conversion. A cap with no rows
+  outstanding still stops verified, unchanged. The directive receipt always
+  carries a report, explicitly empty when no ledger was declared, so `null` can no
+  longer mean either "no rows" or "nobody looked".
+- **Go imports are extracted at all, and resolve to the package directory they
+  name (#8114).**
+  Go writes almost every import inside a parenthesised block, and the
+  line-oriented extractor only ever matched the `import (` opener. Every Go
+  file in a workspace therefore carried exactly one import string, the literal
+  text `import (`, and no path was ever seen. The extractor now reads the block
+  form along with the single-line, alias, blank and dot spellings.
+  Resolution follows: an import names a package, a package is a directory, and
+  the mapping from import path to directory comes from the `module` line of the
+  `go.mod` that declares it, with a nested module winning over the one
+  containing it. Files in one package also see each other with no import
+  statement, stored per package rather than per pair of files.
+  Measured on a 69-file Go workspace: files whose import statements resolve go
+  from 0 to 27, and 65 files gain package peers. The remaining 42 import only
+  the standard library and external dependencies, which resolve to nothing
+  because they are not in the workspace, not because nothing was attempted.
+  Every language in the rules file now declares a real resolver.
+- Bound doctor subprocess probes and captured output so an unresponsive tool
+  reports a diagnostic instead of hanging the command indefinitely.
+- The linked-program graph binding is now covered by tests for the case that
+  matters when a compiled artifact is suspected of being stale: a source edited
+  in place, keeping its byte length and its exact modification time, is refused
+  against the digest recorded when the program was linked, and so is a source
+  that no longer parses. The binding hashes source content, so neither can pass,
+  and the refusal names the mismatch.
+- The CLI reference now documents `harn precompile`, which had no section of its
+  own. It names the command that regenerates the `.harnbc` and `.harnmod`
+  artifacts beside a source tree, and states that both are found by a key derived
+  from source content rather than a timestamp, so an artifact that no longer
+  matches its source is rejected and the source is compiled instead. Someone who
+  suspects a run is executing an old compiled artifact now has a documented
+  answer rather than having to infer one from modification times.
+- A run record's terminal now says when it was sealed. The record already dated the
+  run's end from that same stamp, but only as `finished_at`, whose provenance a
+  reader had to look up in `run_clock` before knowing it came from the terminal at
+  all. `metadata.terminal.sealed_at` carries it directly, so a reader asking when a
+  run stopped no longer has to join two fields to find out whether the stop was the
+  end of the run.
+- A host event payload key that no field of the resulting event reads is now
+  reported instead of discarded in silence. `AgentEvent` is an internally-tagged
+  enum with no `deny_unknown_fields`, so an emitter could write a key, the emit
+  could succeed, the run could succeed, and the field would simply not be there
+  for whoever read the timeline afterwards to work out what happened. The loss is
+  now a typed `dropped` record on the boundary funnel, carrying the event type and
+  the key name, reported once per session rather than once per turn.
+
+  It is a report and not a refusal on purpose. Live emitters are known to pass
+  keys nothing consumes, some deliberately, so refusing the event would turn an
+  invisible loss into a dead run. The registry that already owns this boundary now
+  also records how much of a payload each arm reads, which is what separates a key
+  nobody reads from one read under another name.
+- The Go protocol binding's round-trip test no longer compares the fixture
+  against the removed `ArtifactVersion` constant, and the release gate no longer
+  passes a version to the protocol-artifact check. Both were left behind when the
+  version stamp was dropped from the generated artifacts.
+- A completion verdict converted by the deterministic gate now names the gate as
+  its author. Two arbitrations can overrule a model refusal and publish a `done`
+  of record; both recorded which rule converted it but left the source field at
+  the model, so the gate's answer went out under the model's name and a consumer
+  reading provenance from that field counted those as model decisions. Both now
+  set the source to the gate and stamp a typed override object naming the
+  overruling party and the rule it applied. The field that names the party which
+  produced the judge's own answer is unchanged, so a model refusal is still
+  recognisable after a conversion, and the judge's own reasoning still stands in
+  the record as a refusal that was overruled rather than one that never happened.
+- Release recovery can publish the certified candidate's existing signed archives
+  from current release tooling without rebuilding them or selecting a newer source
+  commit. Explicit publication inputs bind the immutable tag, source, producer,
+  manifest digest, and policy revision before release assets or crates are published.
+  Main-push release checks now recognize the certified-tag wait state without
+  failing, and advance to the next development version only after the GitHub
+  Release is observably published.
+  Promotion authenticates the signed durable candidate-to-run binding before it
+  downloads any archive, and publication no longer mints a contents-write token
+  for its read-only trusted-tag path.
+- Release publication accepts a trusted signed, certified candidate before its
+  release pull request merges, while rejecting unrelated off-main tags.
+- Every push to the main branch now gets its own CI run, and keeps it. Main
+  pushes previously shared one concurrency key and cancelled on push, so a merge
+  could evict a pending run before any job started and kill one already
+  executing. Merges land closer together than a run takes, so most main commits
+  never finished being proved, and a commit whose run was discarded carries no
+  executed result at all, which reads the same as a passing one. Main runs are
+  now keyed per commit and are never superseded, so they execute in parallel.
+  Pull-request runs still supersede when a new commit arrives.
+- Command policy no longer treats an executable's own absolute path as a path outside the workspace.
+  Absolute paths passed as arguments or redirects remain classified.
+- Resolve post-release development cutover state from the complete stable tag list,
+  including certified release tags that do not belong to main's ancestry.
+- The shared development cache for per-worktree Cargo target directories is now
+  actually collected. Its garbage collector ran only from setup profiles that a
+  worktree never uses, and stamped its interval per worktree, so on a machine
+  carrying 80 worktrees no sweep had run and entries survived for weeks. Every
+  profile now runs it, the interval is stamped beside the cache so one worktree
+  per day pays the sweep rather than each one, and the entry belonging to the
+  worktree being set up is never collected by its own setup run.
+- Agent loops can carry an explicit session-bound stall checkpoint across workflow stages without losing final verification
+  or counting dispatch twice. Verification uses the completion evidence role: successful reads and deferred calls cannot
+  clear failures, and the last executed verification wins.
+- Agent progress callbacks now observe completed dispatch once, before post-turn
+  callbacks. Final progress survives checkpoint projection and stage handoffs.
+- `assert-outside-test` no longer fires on test suites whose layout is not `tests/` or `_test`.
+  A file whose stem ends in `-test` is test source wherever it lives.
+  A project declares its own test directories with `[lint] test_root_components`.
+  One typed predicate owns the layout vocabulary, so every rule gets the same answer.
+- The explicit unused-input repair now covers private unattributed operational pipelines.
+  Usage resolves to each parameter declaration, so another pipeline's same-named parameter cannot hide a removable input.
+  Runner, attribute, public, extended, caller, default, and rest contracts remain protected.
+- Workflow graph normalization now preserves live model policies, including session identity and stall settings.
+  Agent stages retain stall and verification evidence across shared sessions; explicit `stall_checkpoints`
+  carry those lifetimes into a subsequent workflow while fresh sessions remain independent.
+
 ## v0.10.131
 
 ### Added
