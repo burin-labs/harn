@@ -119,10 +119,10 @@ async fn post_tool_hook_preserves_denial_across_later_rewrites() {
     assert_eq!(result.text, "second wording");
     assert_eq!(
         result.denial,
-        Some(PostToolDenial {
+        Some(Box::new(PostToolDenial {
             kind: "policy_blocked".to_string(),
             message: "stable reason".to_string(),
-        })
+        }))
     );
 }
 
