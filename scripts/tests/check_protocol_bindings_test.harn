@@ -32,7 +32,7 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   return nil
 }
 
-fn write_fixture_artifacts(fs: HarnessFs, root: string, binding_method: string) -> nil {
+fn write_fixture_artifacts(fs: HarnessFs, root: string, binding_method: string? = nil) -> nil {
   const artifacts = path_join(fs.source_dir(), "../../spec/protocol-artifacts")
   // Validated, not merely parsed: the agent-event method is read below and the
   // round-trip document is written back with every other key intact, so the
@@ -51,7 +51,11 @@ fn write_fixture_artifacts(fs: HarnessFs, root: string, binding_method: string) 
     fs,
     root,
     "spec/protocol-artifacts/python/harn_protocol.py",
-    binding.replace(fixture.harnAgentEventMethod, binding_method),
+    if binding_method == nil {
+      binding
+    } else {
+      binding.replace(fixture.harnAgentEventMethod, binding_method ?? "")
+    },
   )
   write_text(
     fs,
@@ -78,7 +82,7 @@ pipeline test_supplied_artifact_root_round_trip_passes(harness: Harness, task: u
   with_temp_dir(
     harness.fs,
     { root ->
-      write_fixture_artifacts(harness.fs, root, "harn/agent_event")
+      write_fixture_artifacts(harness.fs, root)
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, true)
       assert_eq(report.stage, "ok")
@@ -92,7 +96,7 @@ pipeline test_method_drift_is_reported_as_round_trip_failure(harness: Harness, t
   with_temp_dir(
     harness.fs,
     { root ->
-      write_fixture_artifacts(harness.fs, root, "harn/agent_event_drifted")
+      write_fixture_artifacts(harness.fs, root, "_harn/agentEventDrifted")
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, false)
       assert_eq(report.stage, "round_trip")
