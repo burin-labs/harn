@@ -1658,6 +1658,7 @@ jobs:
       - run: make check-portable-demo-package
       - run: make check-docs-links
       - run: make check-agent-guidance
+      - run: make check-agent-gates
       - run: make check-tree-sitter-keywords
       - run: make check-grammar-fitness
       - run: make check-vm-exposures

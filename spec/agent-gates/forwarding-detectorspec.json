@@ -1,0 +1,9 @@
+[
+  {
+    "scope": "DetectorSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+    "expression": "detector_spec_token_runaway(spec)",
+    "owner": "detector_spec_token_runaway",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

@@ -8,6 +8,7 @@
 enum TokenType {
   BLOCK_SEP,
   LINE_SEP,
+  HASHED_RAW_STRING,
 };
 
 typedef struct {
@@ -26,6 +27,7 @@ static bool is_ignored_separator_target(int32_t lookahead) {
     case '&':
     case '+':
     case '*':
+    case '%':
     case '?':
       return true;
     default:
@@ -39,7 +41,8 @@ static void skip_horizontal_space(TSLexer *lexer) {
   }
 }
 
-static bool consume_comment(TSLexer *lexer) {
+static bool consume_comment(TSLexer *lexer, bool *division) {
+  *division = false;
   if (lexer->lookahead != '/') {
     return false;
   }
@@ -54,6 +57,7 @@ static bool consume_comment(TSLexer *lexer) {
   }
 
   if (lexer->lookahead != '*') {
+    *division = true;
     return false;
   }
 
@@ -112,8 +116,9 @@ static bool consume_newline_run(TSLexer *lexer, uint16_t *indent) {
 }
 
 static bool comment_line_continues_expression(TSLexer *lexer) {
-  if (!consume_comment(lexer)) {
-    return false;
+  bool division = false;
+  if (!consume_comment(lexer, &division)) {
+    return division;
   }
 
   skip_horizontal_space(lexer);
@@ -123,7 +128,7 @@ static bool comment_line_continues_expression(TSLexer *lexer) {
   }
 
   skip_horizontal_space(lexer);
-  while (consume_comment(lexer)) {
+  while (consume_comment(lexer, &division)) {
     skip_horizontal_space(lexer);
     if (!consume_newline_run(lexer, &indent)) {
       return false;
@@ -131,7 +136,39 @@ static bool comment_line_continues_expression(TSLexer *lexer) {
     skip_horizontal_space(lexer);
   }
 
-  return is_ignored_separator_target(lexer->lookahead);
+  return division || is_ignored_separator_target(lexer->lookahead);
+}
+
+// Match the native lexer's arbitrary hash count without interpreting escapes
+// or interpolation. A quote with too few hashes remains literal content.
+static bool scan_hashed_raw_string(TSLexer *lexer) {
+  lexer->advance(lexer, false); // r
+  uint32_t hashes = 0;
+  while (lexer->lookahead == '#') {
+    if (hashes == UINT32_MAX) return false;
+    hashes++;
+    lexer->advance(lexer, false);
+  }
+  if (hashes == 0 || lexer->lookahead != '"') return false;
+  lexer->advance(lexer, false);
+  while (lexer->lookahead != 0 && lexer->lookahead != '\n') {
+    if (lexer->lookahead != '"') {
+      lexer->advance(lexer, false);
+      continue;
+    }
+    lexer->advance(lexer, false);
+    uint32_t closing = 0;
+    while (closing < hashes && lexer->lookahead == '#') {
+      closing++;
+      lexer->advance(lexer, false);
+    }
+    if (closing == hashes) {
+      lexer->mark_end(lexer);
+      lexer->result_symbol = HASHED_RAW_STRING;
+      return true;
+    }
+  }
+  return false;
 }
 
 void *tree_sitter_harn_external_scanner_create(void) {
@@ -177,6 +214,11 @@ void tree_sitter_harn_external_scanner_deserialize(void *payload, const char *bu
 
 bool tree_sitter_harn_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   ScannerState *state = (ScannerState *)payload;
+
+  if (valid_symbols[HASHED_RAW_STRING]) {
+    skip_horizontal_space(lexer);
+    if (lexer->lookahead == 'r') return scan_hashed_raw_string(lexer);
+  }
 
   if (!valid_symbols[BLOCK_SEP] && !valid_symbols[LINE_SEP]) {
     return false;

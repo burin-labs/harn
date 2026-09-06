@@ -1,0 +1,183 @@
+import {
+  AgentGateBindingScope,
+  agent_gate_binding_reads,
+  agent_gate_binding_scopes_reads,
+} from "std/dev/agent_gate_bindings"
+
+fn scope() -> AgentGateBindingScope {
+  return {
+    id: "fixture",
+    prefix: "TestOptions.",
+    types: ["TestOptions"],
+    parameters: [{function: "explicit_root", name: "raw"}],
+    normalizers: [
+      "normalizer",
+      {
+        function: "wrapped_normalizer",
+        path: ["payload", "options"],
+        additional_paths: [["payload", "turn_options"]],
+      },
+    ],
+  }
+}
+
+@test
+pipeline test_config_aliases_preserve_reads_and_expose_forwarding(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-bindings")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "fixture.harn")
+  harness.fs.write_text(
+    path,
+    [
+      "// Unicode before byte spans: é.",
+      "type TestOptions = {enabled?: bool, threshold?: int}",
+      "fn normalizer(value: dict) { return value }",
+      "fn wrapped_normalizer() { return {payload: {options: {}}} }",
+      "fn consume(value: dict) { return value }",
+      "fn typed(options: TestOptions, key: string) {",
+      "  const alias = options",
+      "  let second = alias",
+      "  second = second + {}",
+      "  const a = second?.enabled",
+      "  const b = second[\"threshold\"]",
+      "  const c = second[key]",
+      "  second.enabled = false",
+      "  second.threshold += 1",
+      "  const d = alias.get(\"other\")",
+      "  const e = __has_key(alias, \"guard\")",
+      "  const combined = alias.enabled && alias.threshold > 0",
+      "  consume(alias.enabled)",
+      "  consume(alias)",
+      "  if true { const alias = {}; const ignored = alias.unrelated }",
+      "  return [a, b, c, d, e]",
+      "}",
+      "fn normalizer_origin(raw: dict) { const renamed = normalizer(raw); return renamed.fresh_key }",
+      "fn explicit_root(raw: dict) { const renamed = raw; return renamed.explicit_key }",
+      "fn unrelated(raw: dict) { return raw.not_config }",
+      "fn collection(values: list<TestOptions>) { return values[0]?.not_a_root }",
+      "fn nullable(options: TestOptions?) { return options?.nullable_key }",
+      "fn defaulted(options: TestOptions?) { const local = options ?? {}; return local.defaulted_key }",
+      "fn conditional(options: TestOptions) { const local = if true { options } else { {} }; return local.conditional_key }",
+      "fn embedded(options: TestOptions) { consume({wrapped: options}); return options == nil }",
+      "fn wrapped() { const value = wrapped_normalizer(); return value.payload.options.wrapped_key }",
+      "fn wrapped_turn() { const value = wrapped_normalizer(); const payload = value.payload; return payload.turn_options.turn_key }",
+      "fn wrapped_lookup() { const value = wrapped_normalizer(); return value.get(\"payload\").get_or(\"options\", {}).lookup_key }",
+    ]
+      .join("\n"),
+  )
+  const result = agent_gate_binding_reads({ast: harness.ast, fs: harness.fs}, path, scope())
+  const names = result.reads.map(fn(read) { return read.name })
+  assert_eq(len(result.reads), 16)
+  for name in [
+    "enabled",
+    "threshold",
+    "other",
+    "guard",
+    "fresh_key",
+    "explicit_key",
+    "nullable_key",
+    "defaulted_key",
+    "conditional_key",
+    "wrapped_key",
+    "turn_key",
+    "lookup_key",
+  ] {
+    assert(contains(names, "TestOptions." + name))
+  }
+  for excluded in ["get", "unrelated", "not_config", "not_a_root"] {
+    assert(!contains(names, "TestOptions." + excluded))
+  }
+  assert_eq(len(result.unresolved), 3)
+  assert_eq(result.unresolved[0]?.reason, "dynamic configuration index")
+  assert_eq(result.unresolved[1]?.reason, "configuration forwarded to an opaque call")
+  assert_eq(result.unresolved[2]?.reason, "configuration embedded in a container")
+  const batched = agent_gate_binding_scopes_reads(
+    {ast: harness.ast, fs: harness.fs},
+    path,
+    [
+      scope(),
+      {id: "absent", prefix: "Absent.", types: ["Absent"], parameters: [], normalizers: []},
+    ],
+  )
+  assert_eq(batched, result)
+  let ambiguous = scope()
+  ambiguous.normalizers = [
+    {function: "wrapped_normalizer", path: ["payload"], additional_paths: [["payload", "options"]]},
+  ]
+  const rejected = try {
+    agent_gate_binding_reads({ast: harness.ast, fs: harness.fs}, path, ambiguous)
+  }
+  assert(is_err(rejected))
+  assert(contains(to_string(unwrap_err(rejected)), "overlapping normalization paths"))
+}
+
+@test
+pipeline test_nested_parameter_origin_excludes_siblings_and_preserves_forwarding(
+  harness: Harness,
+  task: unknown,
+) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-bindings-nested")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "nested.harn")
+  harness.fs.write_text(
+    path,
+    [
+      "fn consume(value: dict) { return value }",
+      "fn runner(state: dict, key: string) {",
+      "  const context = state.context",
+      "  const options = context.options",
+      "  const enabled = options.enabled",
+      "  const threshold = state.context.options[\"threshold\"]",
+      "  const ignored = state.context.facts.unrelated",
+      "  const also_ignored = state.other",
+      "  consume(state)",
+      "  consume(context)",
+      "  consume(options)",
+      "  const dynamic = state[key]",
+      "}",
+    ]
+      .join("\n"),
+  )
+  const result = agent_gate_binding_reads(
+    {ast: harness.ast, fs: harness.fs},
+    path,
+    {
+      id: "nested",
+      prefix: "TestOptions.",
+      types: [],
+      parameters: [{function: "runner", name: "state", path: ["context", "options"]}],
+      normalizers: [],
+    },
+  )
+  assert_eq(
+    result.reads.map(fn(read) { return read.name }),
+    ["TestOptions.enabled", "TestOptions.threshold"],
+  )
+  assert_eq(len(result.unresolved), 4)
+  assert_eq(result.unresolved[0].target.pending, ["context", "options"])
+  assert_eq(result.unresolved[1].target.pending, ["options"])
+  assert_eq(result.unresolved[2].target.pending, [])
+  assert_eq(result.unresolved[3].reason, "dynamic configuration index")
+}
+
+@test
+pipeline test_invalid_configuration_source_cannot_become_an_empty_pass(
+  harness: Harness,
+  task: unknown,
+) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-bindings-invalid")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "invalid.harn")
+  harness.fs.write_text(path, "fn broken( {")
+  const result = try {
+    agent_gate_binding_reads({ast: harness.ast, fs: harness.fs}, path, scope())
+  }
+  assert(is_err(result))
+  assert(contains(to_string(unwrap_err(result)), "incomplete parse"))
+}

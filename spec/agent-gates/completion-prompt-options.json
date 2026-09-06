@@ -1,0 +1,5 @@
+[
+  {"name":"TurnPolicy.tool_examples","kind":"option","layer":"runner","default":"AgentSpec.tool_examples, then empty string","readers":[],"reachability":"unknown","evidence":"The text tool contract reads turn_policy.tool_examples before the runner fallback.","verdict":"KEEP-with-expiry","reason":"Caller-provided tool examples are prompt policy content.","expiry":"2026-09-13"},
+  {"name":"agent_done_contract.done_sentinel","kind":"option","layer":"stop decision","default":"the configured done sentinel","readers":[],"reachability":"unknown","evidence":"Read by __done_contract_primary_prompt when constructing the actor completion instructions.","verdict":"DELETE","reason":"Replace the prose sentinel completion contract with a typed actor completion packet."},
+  {"name":"AgentSpec.persistent","kind":"option","layer":"runner","default":"absent; a supplied key is rejected","readers":[],"reachability":"unknown","evidence":"__validate_removed_agent_loop_options rejects this removed option.","verdict":"DELETE","reason":"Move removed-option rejection to the owning closed input contract and remove the one-off guard."}
+]

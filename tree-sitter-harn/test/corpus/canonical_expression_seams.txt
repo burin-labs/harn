@@ -1,0 +1,211 @@
+==================
+Canonical division and remainder continuations
+==================
+
+fn divide(value: int) {
+  const direct = value
+    / 2
+  const commented = value
+    // keep the division on the following line
+    / 2
+  const nested_comment = value
+    /* note /* nested */ end */
+    / 2
+  const modulo = value
+    % 2
+  // this begins a separate statement
+  const separate = 3
+  return [direct, commented, nested_comment, modulo, separate]
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)
+        (type_annotation
+          (identifier))))
+    (block
+      (const_binding
+        (identifier)
+        (binary_expression
+          (identifier)
+          (integer_literal)))
+      (const_binding
+        (identifier)
+        (binary_expression
+          (identifier)
+          (comment)
+          (integer_literal)))
+      (const_binding
+        (identifier)
+        (binary_expression
+          (identifier)
+          (comment)
+          (integer_literal)))
+      (const_binding
+        (identifier)
+        (binary_expression
+          (identifier)
+          (integer_literal)))
+      (comment)
+      (const_binding
+        (identifier)
+        (integer_literal))
+      (return_statement
+        (list_literal
+          (identifier)
+          (identifier)
+          (identifier)
+          (identifier)
+          (identifier))))))
+
+==================
+Contextual block names remain values
+==================
+
+fn contextual(scope: int, block: int) {
+  scope += 1
+  block = block + scope
+  scope(scope)
+  block(block)
+  const data = {scope: scope, block: block}
+  return data.scope + data.block
+}
+fn scopes() {
+  scope { const local = 1 }
+  block { const local = 2 }
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)
+        (type_annotation
+          (identifier)))
+      (typed_parameter
+        (identifier)
+        (type_annotation
+          (identifier))))
+    (block
+      (compound_assignment
+        (identifier)
+        (integer_literal))
+      (assignment
+        (identifier)
+        (binary_expression
+          (identifier)
+          (identifier)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier))))
+      (const_binding
+        (identifier)
+        (dict_literal
+          (dict_entry
+            (identifier)
+            (identifier))
+          (dict_entry
+            (identifier)
+            (identifier))))
+      (return_statement
+        (binary_expression
+          (property_access
+            (identifier)
+            (identifier))
+          (property_access
+            (identifier)
+            (identifier))))))
+  (fn_declaration
+    (identifier)
+    (block
+      (scope_block
+        (block
+          (const_binding
+            (identifier)
+            (integer_literal))))
+      (block_statement
+        (block
+          (const_binding
+            (identifier)
+            (integer_literal)))))))
+
+==================
+Hashed raw strings preserve literal bodies
+==================
+
+fn strings() {
+  const single = r#"quoted "body" ${literal} \\ path"#
+  const nested = r###"contains "# and "##, then ends"###
+  const empty = r#""#
+  return [single, nested, empty]
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (block
+      (const_binding
+        (identifier)
+        (raw_string_literal))
+      (const_binding
+        (identifier)
+        (raw_string_literal))
+      (const_binding
+        (identifier)
+        (raw_string_literal))
+      (return_statement
+        (list_literal
+          (identifier)
+          (identifier)
+          (identifier))))))
+
+==================
+Hashed raw string rejects unmatched closing delimiter
+:error
+==================
+
+fn broken() { return r##"not closed"# }
+
+---
+
+(ERROR)
+
+==================
+Hashed raw string rejects newline
+:error
+==================
+
+fn broken() { return r#"first
+second"# }
+
+---
+
+(ERROR)
+
+==================
+Hashed raw string rejects extra closing hash
+:error
+==================
+
+fn broken() { return r#"closed"## }
+
+---
+
+(ERROR)

@@ -7,7 +7,7 @@ module.exports = grammar({
 
   extras: ($) => [/[ \t\r]/, /\\\r?\n[ \t]*/, $.comment],
 
-  externals: ($) => [$._block_sep, $._line_sep],
+  externals: ($) => [$._block_sep, $._line_sep, $._hashed_raw_string],
 
   conflicts: ($) => [
     [$.dict_literal, $.shape_type],
@@ -51,6 +51,8 @@ module.exports = grammar({
   ],
 
   word: ($) => $.identifier,
+
+  inline: ($) => [$._value_identifier],
 
   rules: {
     source_file: ($) => topLevelSeparated($, $._top_level_item),
@@ -411,7 +413,7 @@ module.exports = grammar({
     assignment: ($) =>
       prec.right(seq(
         field("target", choice(
-          $.identifier,
+          $._value_identifier,
           $.property_access,
           $.subscript_expression
         )),
@@ -422,7 +424,7 @@ module.exports = grammar({
     compound_assignment: ($) =>
       prec.right(seq(
         field("target", choice(
-          $.identifier,
+          $._value_identifier,
           $.property_access,
           $.subscript_expression
         )),
@@ -798,7 +800,7 @@ module.exports = grammar({
         13,
         seq(
           field("function", choice(
-            $.identifier,
+            $._value_identifier,
             $.call_expression,
             $.property_access,
             $.subscript_expression,
@@ -1018,7 +1020,7 @@ module.exports = grammar({
         $.true,
         $.false,
         $.nil,
-        $.identifier,
+        $._value_identifier,
         $.list_literal,
         $.dict_literal,
         $.closure,
@@ -1049,11 +1051,11 @@ module.exports = grammar({
       ),
 
     raw_string_literal: ($) =>
-      seq(
+      choice($._hashed_raw_string, seq(
         alias('r"', $.raw_string_delimiter),
         optional($.raw_string_content),
         alias(token.immediate('"'), $.raw_string_delimiter)
-      ),
+      )),
 
     string_content: (_) =>
       token.immediate(prec(1, /[^"\\$\n]+/)),
@@ -1084,6 +1086,14 @@ module.exports = grammar({
     nil: (_) => "nil",
 
     identifier: (_) => /[a-zA-Z_][a-zA-Z0-9_]*/,
+
+    // These introduce blocks only before `{` at statement position. Preserve
+    // identifier nodes for their ordinary value, call and assignment uses.
+    _value_identifier: ($) => choice(
+      $.identifier,
+      alias("scope", $.identifier),
+      alias("block", $.identifier)
+    ),
 
     list_literal: ($) =>
       seq(

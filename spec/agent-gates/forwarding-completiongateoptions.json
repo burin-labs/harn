@@ -1,0 +1,23 @@
+[
+  {
+    "scope": "CompletionGateOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+    "expression": "const opts = options ?? {}",
+    "owner": "agent_completion_gate",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  },
+  {
+    "scope": "CompletionGateOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+    "expression": "opts[field]",
+    "owner": "__completion_gate_validate_options",
+    "evidence": "Dynamic key access in the owning normalizer/renderer; its call sites or declared option keys provide the literal inventory. Reachability remains explicitly unmeasured."
+  },
+  {
+    "scope": "CompletionGateOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+    "expression": "templates[key]",
+    "owner": "__completion_gate_validate_options",
+    "evidence": "Dynamic key access in the owning normalizer/renderer; its call sites or declared option keys provide the literal inventory. Reachability remains explicitly unmeasured."
+  }
+]

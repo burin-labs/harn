@@ -1,0 +1,51 @@
+[
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "__judge_stable_prefix(judge_cfg, opts, payload, system, schema)",
+    "owner": "__judge_stable_prefix",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "__normalize_judge_config(judge_cfg)",
+    "owner": "__normalize_judge_config",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+    "expression": "const reask_request = {\n    judge_cfg: judge_cfg,\n    opts: opts,\n    payload: payload,\n    checkpoint_name: \"agent.completion_judge\",\n    system: stable_prefix,\n    user: user,\n    schema: schema,\n  }",
+    "owner": "__judge_invoke_structured",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  },
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+    "expression": "__normalize_judge_config(value)",
+    "owner": "__normalize_judge_config",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__normalize_judge_config(judge_cfg)",
+    "owner": "__normalize_judge_config",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "JudgeConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "type_of(judge_cfg)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

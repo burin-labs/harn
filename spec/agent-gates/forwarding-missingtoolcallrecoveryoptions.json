@@ -1,0 +1,9 @@
+[
+  {
+    "scope": "MissingToolCallRecoveryOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

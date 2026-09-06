@@ -1,0 +1,171 @@
+[
+  {
+    "default": "true; owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 556,
+        "reader": "__normalize_tool_surface_narrowing"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: __default_tool_surface_hard_keep(); owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.hard_keep",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 567,
+        "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 281,
+        "reader": "__tool_surface_removed"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "[mutating, approval, session_control, progress, result_polling, unknown]; owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.keep_classes",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 571,
+        "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 265,
+        "reader": "__tool_surface_entry_prunable"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "safe; owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.mode",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 549,
+        "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 273,
+        "reader": "__tool_surface_entry_prunable"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unknown: owning normalizer or provider/host fallback requires review",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.narrow_window_turns",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 560,
+        "reader": "__normalize_tool_surface_narrowing"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "[read_only]; owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.prune_classes",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 569,
+        "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 277,
+        "reader": "__tool_surface_entry_prunable"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "keep; owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.unknown_tool_policy",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 573,
+        "reader": "__normalize_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 270,
+        "reader": "__tool_surface_entry_prunable"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "5; owner options_validation.harn:434",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ToolSurfaceNarrowingOptions.window_turns",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 560,
+        "reader": "__normalize_tool_surface_narrowing"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

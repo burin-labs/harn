@@ -1,0 +1,20 @@
+[
+  {
+    "default": "dynamic: configured provider",
+    "evidence": "Native workflow route/default owner; CLI try also reads at try_cmd.rs:37,48; static only",
+    "expiry": "2026-09-13",
+    "kind": "environment bridge",
+    "layer": "runner",
+    "name": "HARN_LLM_PROVIDER",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/orchestration/stage_options.rs",
+        "line": 89,
+        "reader": "non_empty_env"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

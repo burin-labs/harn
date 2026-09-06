@@ -1,0 +1,20 @@
+[
+  {
+    "default": "{\"kind\": \"value\", \"value\": 5}",
+    "evidence": "commands/try_cmd.rs injects environment; cli/try.harn:49 passes max_iterations into agent_loop. This proves harn try source wiring, not downstream canonical headless binding.",
+    "expiry": "2026-09-13",
+    "kind": "environment bridge",
+    "layer": "runner",
+    "name": "HARN_TRY_MAX_ITERS",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/cli/try.harn",
+        "line": 30,
+        "reader": "get_or"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

@@ -1,0 +1,334 @@
+import {
+  AgentGateEntry,
+  AgentGateRegistry,
+  agent_gate_audit,
+  agent_gate_findings,
+  agent_gate_reads,
+} from "std/dev/agent_gates"
+
+fn entry() -> AgentGateEntry {
+  return {
+    name: "options.enabled",
+    kind: "option",
+    layer: "runner",
+    default: "false",
+    readers: [{file: "fixture.harn", line: 1, reader: "example"}],
+    reachability: "unknown",
+    evidence: "Structural fixture only.",
+    verdict: "KEEP-with-expiry",
+    reason: "Fixture retention.",
+    expiry: "2026-09-20",
+  }
+}
+
+fn registry(path: string) -> AgentGateRegistry {
+  return {
+    schema_version: 1,
+    repo: "fixture",
+    entry_files: [],
+    forwarder_files: [],
+    non_behavior_files: [],
+    name_prefixes: [],
+    name_aliases: {},
+    projections: [],
+    binding_scopes: [],
+    scopes: [
+      {
+        id: "options",
+        kind: "option",
+        glob: path,
+        language: "harn",
+        query: "(property_access object: (identifier) @object property: (identifier) @key)",
+        prefix: "options.",
+        key_form: "field",
+      },
+    ],
+  }
+}
+
+@test
+pipeline test_structural_read_then_unregistered_key_fails(harness: Harness, task: unknown) {
+  const dir = harness.fs.workspace_temp_dir() + "/gate-registry-" + harness.random.uuid_v7()
+  harness.fs.mkdir(dir)
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "fixture.harn")
+  harness.fs.write_text(path, "fn example(options: dict) { return options.enabled }\n")
+  const scope = registry(path)
+  const original = agent_gate_reads(
+    {ast: harness.ast, fs: harness.fs, process: harness.process},
+    scope,
+  )
+  assert_eq(len(original), 1)
+  assert_eq(original[0].name, "options.enabled")
+  assert_eq(agent_gate_findings([entry()], original, []).failures, [])
+  let nested_owner = scope
+  nested_owner.name_prefixes = [{from: "options.", to: "NestedOptions."}]
+  const renamed = agent_gate_reads(
+    {ast: harness.ast, fs: harness.fs, process: harness.process},
+    nested_owner,
+  )
+  assert_eq(renamed[0].name, "NestedOptions.enabled")
+  harness.fs.write_text(path, "fn example(options: dict) { return options.unregistered }\n")
+  const changed = agent_gate_reads(
+    {ast: harness.ast, fs: harness.fs, process: harness.process},
+    scope,
+  )
+  assert_eq(len(changed), 1)
+  const findings = agent_gate_findings([entry()], changed, [])
+  assert_eq(len(findings.failures), 1)
+  assert_eq(changed[0].name, "options.unregistered")
+}
+
+@test
+pipeline test_dynamic_key_cannot_borrow_a_registered_identifier(harness: Harness, task: unknown) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-key-origin")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "fixture.harn")
+  let scope = registry(path)
+  scope.scopes = [
+    {
+      id: "options",
+      kind: "option",
+      glob: path,
+      language: "harn",
+      query:
+        "((call_expression function: (identifier) @callee (argument_list . (_) @key)) (#eq? @callee \"lookup\"))",
+      prefix: "options.",
+      key_form: "literal",
+    },
+  ]
+  harness.fs.write_text(path, "fn example() { return lookup(\"enabled\") }\n")
+  const original = agent_gate_reads(
+    {ast: harness.ast, fs: harness.fs, process: harness.process},
+    scope,
+  )
+  assert_eq(len(original), 1)
+  assert_eq(agent_gate_findings([entry()], original, []).failures, [])
+  harness.fs.write_text(path, "fn example(enabled: string) { return lookup(enabled) }\n")
+  const changed = agent_gate_reads(
+    {ast: harness.ast, fs: harness.fs, process: harness.process},
+    scope,
+  )
+  assert_eq(len(changed), 1)
+  assert_eq(changed[0].name, "")
+  assert_eq(len(agent_gate_findings([entry()], changed, []).failures), 1)
+}
+
+@test
+pipeline test_classification_is_unique_and_cannot_hide_flags(harness: Harness, task: unknown) {
+  const read = {
+    scope: "options",
+    file: "fixture.harn",
+    line: 1,
+    expression: "key",
+    name: "",
+    reader: "example",
+  }
+  const boundary = {
+    scope: "options",
+    file: "fixture.harn",
+    expression: "key",
+    owner: "resolver",
+    evidence: "Resolver validates the dynamic key.",
+  }
+  assert_eq(agent_gate_findings([entry()], [read], [boundary]).forwarded, 1)
+  assert(
+    is_err(
+      try {
+        agent_gate_findings([entry()], [read], [boundary, boundary])
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_gate_findings([entry()], [read], [boundary], [boundary])
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_gate_findings([entry()], [read], [], [boundary], ["options"])
+      },
+    ),
+  )
+  assert_eq(
+    len(agent_gate_findings([entry()], [read], [boundary + {expression: "other"}]).failures),
+    2,
+  )
+}
+
+@test
+pipeline test_audit_regenerates_reader_locations_and_refuses_drift(
+  harness: Harness,
+  task: unknown,
+) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-audit")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const source = path_join(dir, "source.harn")
+  const entries = path_join(dir, "entries.json")
+  const manifest = path_join(dir, "registry.json")
+  let config = registry(source)
+  config.entry_files = [entries]
+  config.projections = [
+    {layer: "runner", file: path_join(dir, "runner.md")},
+    {layer: "stop decision", file: path_join(dir, "stop.md")},
+    {layer: "stall handler", file: path_join(dir, "stall.md")},
+  ]
+  harness.fs.write_text(entries, json_stringify([entry()]))
+  harness.fs.write_text(manifest, json_stringify(config))
+  harness.fs.write_text(source, "fn example(options: dict) { return options.enabled }\n")
+  const capabilities = {ast: harness.ast, fs: harness.fs, process: harness.process}
+  const generated = agent_gate_audit(capabilities, manifest, true)
+  assert_eq(generated.reads, 1)
+  assert_eq(generated.pending, 0)
+  assert_eq(agent_gate_audit(capabilities, manifest).pending, 0)
+  harness.fs.write_text(source, "\nfn example(options: dict) { return options.enabled }\n")
+  const moved = agent_gate_audit(capabilities, manifest)
+  assert(contains(moved.failures, "stale readers options.enabled"))
+  assert_eq(agent_gate_audit(capabilities, manifest, true).pending, 0)
+  harness.fs.write_text(source, "fn example(options: dict) { return options.unregistered }\n")
+  const unknown = agent_gate_audit(capabilities, manifest, true)
+  assert_eq(unknown.reads, 1)
+  assert_eq(unknown.pending, 1)
+  assert_eq(unknown.unread_entries, ["options.enabled"])
+}
+
+@test
+pipeline test_stale_parameter_mapping_cannot_hide_configuration_reads(
+  harness: Harness,
+  task: unknown,
+) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-stale-parameter")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "source.harn")
+  harness.fs.write_text(path, "fn example(options: dict) { return options.enabled }")
+  let config = registry(path)
+  config.scopes = []
+  config.binding_scopes = [
+    {
+      glob: path,
+      config: {
+        id: "options",
+        prefix: "options.",
+        types: [],
+        parameters: [{function: "example", name: "options"}],
+        normalizers: [],
+      },
+    },
+  ]
+  const capabilities = {ast: harness.ast, fs: harness.fs, process: harness.process}
+  assert_eq(
+    agent_gate_reads(capabilities, config).map(fn(read) { return read.name }),
+    ["options.enabled"],
+  )
+  config.binding_scopes[0].config.parameters = [{function: "example", name: "obsolete"}]
+  const stale = try {
+    agent_gate_reads(capabilities, config)
+  }
+  assert(is_err(stale))
+  assert(contains(to_string(unwrap_err(stale)), "stale parameter origin options example(obsolete)"))
+}
+
+@test
+pipeline test_repository_environment_selectors_reject_new_keys(harness: Harness, task: unknown) {
+  const manifest = path_join(harness.fs.source_dir(), "../../spec/agent-gates/registry.json")
+  const config = schema_expect(
+    json_parse(harness.fs.read_text(manifest)),
+    schema_of(AgentGateRegistry),
+  )
+  const fixtures = {
+    "runner-model-environment": "fn example() { let _value = std::env::var(\"KEY\"); }",
+    "runner-native-environment": "fn example() { let _value = std::env::var(\"KEY\"); }",
+    "runner-stdlib-environment": "fn example(env: HarnessEnv) { return env.get_or(\"KEY\", \"\") }",
+    "native-stage-environment":
+      "fn example() { let _value = serde_json::json!({\"value\": non_empty_env(\"KEY\")}); }",
+    "cli-runner-environment":
+      "fn example(harness: Harness) { return __trimmed_env(harness.env, \"KEY\") }",
+    "runner-environment-constants": "const EXAMPLE_ENV: &str = \"KEY\";",
+  }
+  assert_eq(len(config.scopes), len(fixtures))
+  const dir = harness.fs.mkdtemp_in_workspace("gate-environment-selectors")
+  defer {
+    harness.fs.delete(dir)
+  }
+  for declared in config.scopes {
+    assert(contains(fixtures.keys(), declared.id))
+    const path = path_join(
+      dir,
+      declared.id
+        + if declared.language == "rust" {
+          ".rs"
+        } else {
+          ".harn"
+        },
+    )
+    let selected = registry(path)
+    selected.scopes = [declared + {glob: path}]
+    const allowed = entry() + {name: "HARN_LLM_MODEL"}
+    harness.fs.write_text(path, replace(fixtures[declared.id], "KEY", "HARN_LLM_MODEL"))
+    const baseline = agent_gate_reads(
+      {ast: harness.ast, fs: harness.fs, process: harness.process},
+      selected,
+    )
+    assert_eq(len(baseline), 1)
+    assert_eq(agent_gate_findings([allowed], baseline, []).failures, [])
+    harness.fs.write_text(path, replace(fixtures[declared.id], "KEY", "HARN_UNREGISTERED_CENSUS"))
+    const changed = agent_gate_reads(
+      {ast: harness.ast, fs: harness.fs, process: harness.process},
+      selected,
+    )
+    assert_eq(len(changed), 1)
+    assert_eq(len(agent_gate_findings([allowed], changed, []).failures), 1)
+  }
+}
+
+@test
+pipeline test_empty_and_invalid_sources_cannot_pass(harness: Harness, task: unknown) {
+  const dir = harness.fs.workspace_temp_dir() + "/gate-registry-" + harness.random.uuid_v7()
+  harness.fs.mkdir(dir)
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "fixture.harn")
+  const scope = registry(path)
+  assert(
+    is_err(
+      try {
+        agent_gate_reads({ast: harness.ast, fs: harness.fs, process: harness.process}, scope)
+      },
+    ),
+  )
+  harness.fs.write_text(path, "fn example() { return true }\n")
+  assert(
+    is_err(
+      try {
+        agent_gate_reads({ast: harness.ast, fs: harness.fs, process: harness.process}, scope)
+      },
+    ),
+  )
+  harness.fs.write_text(path, "fn example(options: dict) { return options.enabled + }\n")
+  assert(
+    is_err(
+      try {
+        agent_gate_reads({ast: harness.ast, fs: harness.fs, process: harness.process}, scope)
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        agent_gate_findings([entry()], [], [])
+      },
+    ),
+  )
+}

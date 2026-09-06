@@ -1,0 +1,58 @@
+[
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compaction_instruction_mode(policy)",
+    "owner": "__compaction_instruction_mode",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compaction_policy_event_fields(policy)",
+    "owner": "__compaction_policy_event_fields",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compaction_policy_merge_fields(policy, opts)",
+    "owner": "__compaction_policy_merge_fields",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__has_compaction_policy(policy)",
+    "owner": "__has_compaction_policy",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "const policy = __compaction_policy_from_options(compact_opts)\n    ?? __compaction_policy_from_options({policy: opts?.compaction_policy})\n    ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})",
+    "owner": "__compact_options",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "let fields = {\n    instruction_mode: __compaction_instruction_mode(policy),\n    compaction_policy: policy\n      + {instruction_mode: __compaction_instruction_mode(policy)},\n  }",
+    "owner": "__compaction_policy_event_fields",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(fields)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CompactionPolicy",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(policy)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

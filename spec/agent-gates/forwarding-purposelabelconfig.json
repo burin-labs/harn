@@ -1,0 +1,9 @@
+[
+  {
+    "scope": "PurposeLabelConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+    "expression": "__purpose_label_instruction(config)",
+    "owner": "__purpose_label_instruction",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

@@ -1,0 +1,9 @@
+[
+  {
+    "scope": "MonologueActuationConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

@@ -1,0 +1,16 @@
+[
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ToolSurfaceNarrowingOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+    "expression": "__tool_surface_entry_prunable(entry, config)",
+    "owner": "__tool_surface_entry_prunable",
+    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]

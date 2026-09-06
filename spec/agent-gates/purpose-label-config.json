@@ -1,0 +1,101 @@
+[
+  {
+    "default": "unknown: owning normalizer or provider/host fallback requires review",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.delivery",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 112,
+        "reader": "agent_purpose_label_turn_nudge"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 127,
+        "reader": "agent_purpose_label_prefill"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 243,
+        "reader": "agent_purpose_label_extract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 98,
+        "reader": "agent_purpose_label_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 150,
+        "reader": "agent_purpose_label_prompt_fragment"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unknown: owning normalizer or provider/host fallback requires review",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 112,
+        "reader": "agent_purpose_label_turn_nudge"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 127,
+        "reader": "agent_purpose_label_prefill"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 150,
+        "reader": "agent_purpose_label_prompt_fragment"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 236,
+        "reader": "agent_purpose_label_extract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "unknown: owning normalizer or provider/host fallback requires review",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.max_chars",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 262,
+        "reader": "agent_purpose_label_extract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 97,
+        "reader": "agent_purpose_label_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 174,
+        "reader": "__purpose_label_instruction"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

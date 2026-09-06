@@ -1,0 +1,1210 @@
+[
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.anthropic_beta_features",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.api_mode",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.audio",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.background",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.budget",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.cache",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.call_role",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.capabilities",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.compact",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.content",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.context_profile",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 657,
+        "reader": "__agent_context_profile_fragments"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.data_controls",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.effort",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.enabled",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.frequency_penalty",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.history",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.idle_timeout_ms",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.include",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.interleaved_thinking",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.label",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.logit_bias",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.logprobs",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_cost_usd",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_input_tokens",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_output_tokens",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback 0; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 361,
+        "reader": "__run_structural_validator"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_tool_calls",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.messages",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.metadata",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.min_p",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.mirostat",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.mock_scope",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.mode",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.on_no_dispatch",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.operation_timeout_ms",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.options",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.output",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 158,
+        "reader": "__agent_loop_output_contract"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.parallel_tool_calls",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.pdf",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prediction",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prefill",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.presence_penalty",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.previous_response_id",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prompt_cache_ttl",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.provider_options",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.provider_tools",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_policy",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_scale",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_task",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.repair",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.repetition_penalty",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.retries",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.schema_recover",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0 for tool_using profile; options_formats.harn:15 owns other profiles",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.schema_retries",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.schema_retry_nudge",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.seed",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.session_id",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 280,
+        "reader": "__tool_batch_emit_receipt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 218,
+        "reader": "__tool_batch_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 238,
+        "reader": "__tool_envelope"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.speed",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.stop",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.stop_at_tool_call",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.store",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.stream",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.structural_experiment",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.system",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 680,
+        "reader": "__agent_primary_system_text"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 681,
+        "reader": "__agent_primary_system_text"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 609,
+        "reader": "__agent_has_system_prompt_options"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.temperature",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.thinking",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.timeout_ms",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.tool_choice",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.tool_format",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 183,
+        "reader": "__autocontinue_should_continue"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1260,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 1344,
+        "reader": "__detect_native_fallback"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 359,
+        "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 931,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 913,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 1130,
+        "reader": "__agent_loop_prepare_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 107,
+        "reader": "__explicit_tool_format"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 497,
+        "reader": "__capability_gap_event"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 110,
+        "reader": "__explicit_tool_format"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 18,
+        "reader": "__native_tools_complete_naturally"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 202,
+        "reader": "__native_completion_context"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 918,
+        "reader": "agent_extract_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 1065,
+        "reader": "agent_compute_post_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 326,
+        "reader": "__text_family_toolless_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 491,
+        "reader": "__classify_missing_tool_call"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn",
+        "line": 197,
+        "reader": "agent_collapse_duplicate_read_calls"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.tool_search",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+        "line": 54,
+        "reader": "agent_loop"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 183,
+        "reader": "__autocontinue_should_continue"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1251,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 206,
+        "reader": "__agent_loop_next_tool_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 201,
+        "reader": "__agent_loop_next_tool_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 929,
+        "reader": "__parse_feedback_has_non_structural_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 352,
+        "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_projection.harn",
+        "line": 62,
+        "reader": "agent_loop_turn_projection"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 930,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 18,
+        "reader": "__native_tools_complete_naturally"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 474,
+        "reader": "__classify_missing_tool_call"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 911,
+        "reader": "agent_extract_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 202,
+        "reader": "__native_completion_context"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 917,
+        "reader": "agent_extract_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 1060,
+        "reader": "agent_compute_post_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 722,
+        "reader": "__maybe_inject_action_nudge"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 236,
+        "reader": "agent_has_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 399,
+        "reader": "__agent_text_tool_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 404,
+        "reader": "__agent_text_tool_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 767,
+        "reader": "agent_build_turn_system_fragments"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 773,
+        "reader": "agent_build_turn_system_fragments"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 300,
+        "reader": "__agent_json_tool_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 224,
+        "reader": "__stance_register_escape_tool"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 14,
+        "reader": "__tool_surface_current_entries"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 92,
+        "reader": "__tool_surface_claim_authority"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 504,
+        "reader": "agent_apply_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 517,
+        "reader": "agent_apply_tool_surface_narrowing"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.top_k",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.top_p",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.total_budget_usd",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.truncation",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.verbosity",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.video",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.vision",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

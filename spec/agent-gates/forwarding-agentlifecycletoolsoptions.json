@@ -1,0 +1,30 @@
+[
+  {
+    "scope": "AgentLifecycleToolsOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+    "expression": "__agent_lifecycle_await_enabled(opts)",
+    "owner": "__agent_lifecycle_await_enabled",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "AgentLifecycleToolsOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+    "expression": "__agent_lifecycle_has_subagent_capability(base, opts)",
+    "owner": "__agent_lifecycle_has_subagent_capability",
+    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "AgentLifecycleToolsOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+    "expression": "const opts: AgentLifecycleToolsOptions = options ?? {}",
+    "owner": "agent_lifecycle_tools",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  },
+  {
+    "scope": "AgentLifecycleToolsOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+    "expression": "let tools = if __agent_lifecycle_await_enabled(opts) {\n    __agent_lifecycle_add_await_tool(base)\n  } else {\n    base\n  }",
+    "owner": "agent_lifecycle_tools",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  }
+]

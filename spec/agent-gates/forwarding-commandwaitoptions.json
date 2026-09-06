@@ -1,0 +1,100 @@
+[
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_advance_schedule_row(row, now_ms, cw)",
+    "owner": "__cl_advance_schedule_row",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_apply_one(out[index], snapshot, now_ms, cw)",
+    "owner": "__cl_apply_one",
+    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_ceiling_breaches(ledger, now_ms, cw)",
+    "owner": "__cl_ceiling_breaches",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_decision_wording(ledger, cw)",
+    "owner": "__cl_decision_wording",
+    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_earliest_deadline(live, cw)",
+    "owner": "__cl_earliest_deadline",
+    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_row_fires(row, now_ms, cw)",
+    "owner": "__cl_row_fires",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_after_digest(live, now, cw)",
+    "owner": "command_ledger_after_digest",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_after_digest(live, now2, cw)",
+    "owner": "command_ledger_after_digest",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_apply_ceiling(\n      harness.agent,\n      harness.tools,\n      live,\n      now,\n      cw,\n      session_id,\n    )",
+    "owner": "command_ledger_apply_ceiling",
+    "evidence": "Configuration passed at argument 5. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_apply_updates(live, entries, now2, cw)",
+    "owner": "command_ledger_apply_updates",
+    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_build_digest(live, now, cw)",
+    "owner": "command_ledger_build_digest",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_build_digest(live, now2, cw)",
+    "owner": "command_ledger_build_digest",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_decide(live, now2, cw)",
+    "owner": "command_ledger_decide",
+    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "const digest = {\n    kind: \"command_status\",\n    commands: commands,\n    next_update_in_ms: next_update ?? 0,\n    decision: __cl_decision_wording(ledger, cw),\n  }",
+    "owner": "command_ledger_build_digest",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  }
+]

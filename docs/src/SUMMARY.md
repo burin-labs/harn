@@ -338,6 +338,10 @@
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [LLM dialect ownership](./dev/llm-dialect-contract.md)
 - [Agent plane ownership](./dev/agent-loops.md)
+- [Agent configuration registry](./dev/agent-gates.md)
+  - [Runner configuration](./dev/agent-gates/runner.md)
+  - [Stop decision configuration](./dev/agent-gates/stop-decision.md)
+  - [Stall handler configuration](./dev/agent-gates/stall-handler.md)
 - [Evidence-aware repair loop](./dev/repair-diagnostics.md)
 
 ## Protocol contributions

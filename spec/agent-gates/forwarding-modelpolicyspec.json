@@ -1,0 +1,44 @@
+[
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "__workflow_agent_loop_options(config, model_policy, tool_format)",
+    "owner": "__workflow_agent_loop_options",
+    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "__workflow_llm_options(config, model_policy, tool_format)",
+    "owner": "__workflow_llm_options",
+    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "__workflow_stage_tool_format(model_policy, host)",
+    "owner": "__workflow_stage_tool_format",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "let options = pick_keys(model_policy, model_option_keys, {drop_nil: true})\n    + {tool_format: tool_format}",
+    "owner": "__workflow_llm_options",
+    "evidence": "Configuration is carried in a constructed payload. The exact construction is reviewed here; adding or changing this boundary requires renewed classification."
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "pick_keys(model_policy, loop_option_keys, {drop_nil: true})",
+    "owner": "pick_keys",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "ModelPolicySpec",
+    "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+    "expression": "pick_keys(model_policy, model_option_keys, {drop_nil: true})",
+    "owner": "pick_keys",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  }
+]
