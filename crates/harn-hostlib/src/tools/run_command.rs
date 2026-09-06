@@ -241,6 +241,12 @@ fn drain_background_feedback(session_id: &str, handle_id: &str) -> Option<Backgr
         handle_id,
         &["tool_progress", "tool_result"],
     );
+    select_background_feedback(entries)
+}
+
+fn select_background_feedback(
+    entries: Vec<harn_vm::orchestration::agent_inbox::InboxEntry>,
+) -> Option<BackgroundFeedback> {
     let mut latest_progress = None;
     let mut terminal = None;
     for entry in entries {
@@ -544,6 +550,23 @@ fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, Hostlib
 mod tests {
     use super::*;
 
+    fn inbox_entry(
+        sequence: u64,
+        kind: &str,
+        content: serde_json::Value,
+    ) -> harn_vm::orchestration::agent_inbox::InboxEntry {
+        harn_vm::orchestration::agent_inbox::InboxEntry {
+            sequence,
+            session_id: "test-session".to_string(),
+            kind: kind.to_string(),
+            content: content.to_string(),
+            source: "test".to_string(),
+            ts_ms: 0,
+            payload: None,
+            delivery: None,
+        }
+    }
+
     #[test]
     fn policy_blocked_response_matches_public_schema() {
         let params = harn_vm::value::DictMap::new();
@@ -587,5 +610,51 @@ mod tests {
         );
         assert!(request_is_background(&delayed));
         assert!(!request_is_background(&harn_vm::value::DictMap::new()));
+    }
+
+    #[test]
+    fn latest_progress_overlay_matches_public_response_schema() {
+        let command_id = format!("progress-overlay-schema-{}", std::process::id());
+        let handle_id = "handle-progress-overlay";
+        let info = super::super::long_running::LongRunningHandleInfo {
+            command_id,
+            handle_id: handle_id.to_string(),
+            started_at: super::super::proc::now_rfc3339(),
+            cwd: std::env::current_dir().expect("current directory"),
+            pid: 123,
+            process_group_id: Some(123),
+            command_display: "test-command".to_string(),
+            snapshot_binding: None,
+        };
+        let mut response = initial_background_snapshot(&info, 500, 200);
+        let feedback = select_background_feedback(vec![
+            inbox_entry(
+                1,
+                "tool_progress",
+                serde_json::json!({"handle_id": handle_id, "stdout": "first\n"}),
+            ),
+            inbox_entry(
+                2,
+                "tool_progress",
+                serde_json::json!({"handle_id": handle_id, "stdout": "latest\n"}),
+            ),
+        ])
+        .expect("latest progress feedback");
+        overlay_progress_feedback(&mut response, feedback);
+
+        let response = VmValue::dict(response);
+        let schema =
+            crate::schemas::lookup("tools", "run_command", crate::schemas::SchemaKind::Response)
+                .expect("run_command response schema");
+        let schema: serde_json::Value = serde_json::from_str(schema).expect("valid schema JSON");
+        let schema = harn_vm::schema::json_to_vm_value(&schema);
+        harn_vm::schema::validate_value_against_schema(&response, &schema, false)
+            .expect("progress overlay must satisfy the public hostlib schema");
+        let response = response.as_dict().expect("dict response");
+        assert_eq!(dict_string(response, "stdout").as_deref(), Some("latest\n"));
+        assert_eq!(
+            dict_string(response, "feedback_kind").as_deref(),
+            Some("tool_progress")
+        );
     }
 }
