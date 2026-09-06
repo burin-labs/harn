@@ -5,3 +5,6 @@ manifest digest, and policy revision before release assets or crates are publish
 Main-push release checks now recognize the certified-tag wait state without
 failing, and advance to the next development version only after the GitHub
 Release is observably published.
+Promotion authenticates the signed durable candidate-to-run binding before it
+downloads any archive, and publication no longer mints a contents-write token
+for its read-only trusted-tag path.

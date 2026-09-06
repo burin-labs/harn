@@ -285,6 +285,7 @@ require_workflow_text 'candidate_archive_run_id:'
 require_workflow_text 'candidate-archive-manifest-'
 require_workflow_text 'should_package_archives'
 require_workflow_text 'name: Download and verify certified candidate archive bytes'
+require_workflow_text 'verify_candidate_archive_certification.sh'
 require_workflow_pattern "build_mode == 'candidate'" 'candidate packaging gate'
 
 echo "candidate archive promotion tests passed"

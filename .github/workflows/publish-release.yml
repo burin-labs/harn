@@ -279,6 +279,7 @@ jobs:
               # the subsequent development bump complete, main therefore
               # remains on X.Y.Z-dev while the immutable vX.Y.Z tag exists on
               # the certified history line. That is a wait state, not drift.
+              scripts/verify_release_tag_main_ancestry.sh --tag "$LATEST_TAG"
               DRIFT=false
               echo "::notice::Workspace $CARGO_VERSION precedes certified candidate tag $LATEST_TAG. Publication or the post-publication development bump is still pending; this main-push run will skip cleanly."
             else
@@ -391,28 +392,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
     steps:
-      # Mint a short-lived GitHub App installation token so the tag push
-      # below comes from the harn-release-bot identity instead of
-      # GITHUB_TOKEN. GHA suppresses workflow chains triggered by
-      # GITHUB_TOKEN-authenticated pushes, so a tag pushed under the
-      # default token would NOT fire build-release-binaries.yml — and
-      # we'd ship to crates.io without binaries or a container image.
-      # An App token bypasses that suppression cleanly.
-      - name: Mint GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || 'main' }}
-          # Persist the App token in .git/config so the later `git push`
-          # in release_ship.sh --finalize uses it for the tag push.
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Stage current release tools
         id: stage-release-tools
@@ -491,10 +474,9 @@ jobs:
       - name: Publish release
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          # gh CLI inside release_ship.sh uses GH_TOKEN for `gh release`.
-          # Use the App token so the GitHub release author is the bot,
-          # consistent with the tag pusher.
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Finalization is read-only on GitHub because the trusted tag already
+          # exists and --skip-github-release leaves assets to the binary path.
+          GH_TOKEN: ${{ github.token }}
           # First-release bootstrap recovery path. See harn#609.
           # release_ship.sh + verify_crate_packages.sh both honor the
           # env var: skip the publish dry-run and downstream package

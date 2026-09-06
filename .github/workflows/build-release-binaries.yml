@@ -2146,8 +2146,10 @@ jobs:
           MANIFEST_DIGEST: ${{ inputs.expected_manifest_digest }}
           SOURCE_SHA: ${{ inputs.expected_source_sha }}
           ARCHIVE_POLICY: ${{ inputs.expected_archive_policy_sha }}
+          TRUST_POLICY: ${{ inputs.expected_policy_sha }}
           REF: ${{ needs.setup.outputs.ref }}
         run: |
+          "$RUNNER_TEMP/release-provenance-policy/verify_candidate_archive_certification.sh" "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$ARCHIVE_RUN" "$ARCHIVE_POLICY" "$TRUST_POLICY" "$GITHUB_WORKSPACE"
           scripts/download_candidate_archive_promotion.sh "$GITHUB_REPOSITORY" "$ARCHIVE_RUN" "$MANIFEST_ID" "$MANIFEST_DIGEST" "$SOURCE_SHA" "$ARCHIVE_POLICY" "$RUNNER_TEMP/certified-archives"
           scripts/verify_candidate_archive_promotion.sh --manifest "$RUNNER_TEMP/certified-archives/candidate-archive-manifest.json" --tag "$REF" --repo "$GITHUB_REPOSITORY" --artifacts-dir "$RUNNER_TEMP/certified-archives" --expected-source-commit "$SOURCE_SHA" --expected-policy-revision "$ARCHIVE_POLICY" --expected-run-id "$ARCHIVE_RUN"
 

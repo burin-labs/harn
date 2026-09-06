@@ -74,6 +74,12 @@ grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VE
 grep -Fq 'release_development_target_precedes_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
   "$publish_workflow" \
   || fail "certified at-SHA tag turns its pending main state red"
+grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$LATEST_TAG"' \
+  "$publish_workflow" \
+  || fail "matching version strings bypass trusted candidate tag verification"
+if grep -Fq 'permission-contents: write' "$publish_workflow"; then
+  fail "read-only crate publication retains a contents-write credential"
+fi
 grep -Fq "needs.release.result == 'success'" "$binary_workflow" \
   || fail "development bump can run before release publication succeeds"
 grep -Fq "needs.setup.outputs.is_prerelease == 'false'" "$binary_workflow" \
