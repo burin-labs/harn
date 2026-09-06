@@ -442,13 +442,9 @@ if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
   echo "make received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
   exit 1
 fi
-if [[ "${1:-}" == "check-protocol-artifacts" && -n "${FAKE_WARMED_HARN_VERSION:-}" ]]; then
-  workspace_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
-  if [[ "$workspace_version" != "$FAKE_WARMED_HARN_VERSION" ]] &&
-    [[ " $* " != *" PROTOCOL_ARTIFACT_VERSION=$workspace_version "* ]]; then
-    echo "older warmed Harn binary checked bumped protocol artifacts without the workspace version" >&2
-    exit 20
-  fi
+if [[ "${1:-}" == "check-protocol-artifacts" ]] && [[ " $* " == *" PROTOCOL_ARTIFACT_VERSION="* ]]; then
+  echo "protocol-artifact check was given a version; artifacts have carried none since #8234" >&2
+  exit 20
 fi
 if [[ -n "${CARGO_TARGET_DIR-}" ]]; then
   rm -f "$CARGO_TARGET_DIR/debug/harn"
@@ -922,12 +918,18 @@ if ! grep -Fxq "publish --dry-run" "$audit_record"; then
 fi
 preserved_harn="$(grep -F "dump-protocol-artifacts" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
 
-# Preparation stamps 1.2.4 artifacts through the still-warmed 1.2.3 binary.
-# A later generated audit must tell that binary to check the workspace version,
-# not the version embedded when the binary was built.
-FAKE_WARMED_HARN_VERSION=1.2.3 run_audit bumped-metadata --receipt "$receipt"
-if ! grep -Fq "make check-protocol-artifacts PROTOCOL_ARTIFACT_VERSION=1.2.4" "$audit_record"; then
-  echo "release audit did not check bumped protocol artifacts against the workspace version" >&2
+# Preparation regenerates 1.2.4 artifacts through the still-warmed 1.2.3 binary.
+# Since #8234 the artifacts embed no version, so the audit must check them with
+# no version argument at all: passing one is now an unknown flag the CLI
+# rejects, and the version that produced the binary no longer matters.
+run_audit bumped-metadata --receipt "$receipt"
+if ! grep -Fq "make check-protocol-artifacts" "$audit_record"; then
+  echo "release audit did not check protocol artifacts" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if grep -Fq "PROTOCOL_ARTIFACT_VERSION" "$audit_record"; then
+  echo "release audit still stamps a version onto the protocol-artifact check" >&2
   cat "$audit_record" >&2
   exit 1
 fi
