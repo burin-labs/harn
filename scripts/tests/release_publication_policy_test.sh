@@ -65,19 +65,24 @@ grep -Fq "if: github.ref_type != 'tag' || !contains(github.ref_name, '-')" "$vsc
   || fail "prerelease tag would reach the stable-only VS Code version projection"
 
 publish_workflow="$root/.github/workflows/publish-release.yml"
+binary_workflow="$root/.github/workflows/build-release-binaries.yml"
 grep -Fq "grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'" "$publish_workflow" \
   || fail "stable drift comparison can select a prerelease tag"
 grep -Fq 'release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
   "$publish_workflow" \
   || fail "declared -dev workspace state does not bypass publication"
-grep -Fq 'release_development_bump_plan "$version" "$latest_tag"' "$publish_workflow" \
-  || fail "post-release bump bypasses the fixture-backed release-state plan"
-grep -Fq "github.event_name != 'workflow_dispatch' && needs.detect-drift.outputs.development_bump == 'true'" \
+grep -Fq 'release_development_target_precedes_stable "$CARGO_VERSION" "$LATEST_VERSION"' \
   "$publish_workflow" \
-  || fail "manual publication recovery can redundantly open a development bump"
-grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$publish_workflow" \
+  || fail "certified at-SHA tag turns its pending main state red"
+grep -Fq "needs.release.result == 'success'" "$binary_workflow" \
+  || fail "development bump can run before release publication succeeds"
+grep -Fq "needs.setup.outputs.is_prerelease == 'false'" "$binary_workflow" \
+  || fail "prerelease publication can open a stable development bump"
+grep -Fq 'release_development_bump_plan "$version" "$PUBLISHED_TAG" true' "$binary_workflow" \
+  || fail "post-publication bump bypasses the fixture-backed release-state plan"
+grep -Fq 'reason=$RELEASE_DEVELOPMENT_BUMP_REASON' "$binary_workflow" \
   || fail "post-release bump skip does not report its typed reason"
-grep -Fq 'HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh' "$publish_workflow" \
+grep -Fq 'HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh' "$binary_workflow" \
   || fail "post-release workflow bypasses the tested development preparation seam"
 development_opener="$root/scripts/open_development_bump.sh"
 grep -Fq 'echo "harn_bin=$harn_bin"' "$development_opener" \

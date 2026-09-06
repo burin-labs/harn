@@ -126,8 +126,6 @@ jobs:
       cargo_version: ${{ steps.check.outputs.cargo_version }}
       latest_tag: ${{ steps.check.outputs.latest_tag }}
       publish_ref: ${{ steps.check.outputs.publish_ref }}
-      development_bump: ${{ steps.development.outputs.required }}
-      development_version: ${{ steps.development.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -275,6 +273,14 @@ jobs:
               && release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"; then
               DRIFT=false
               echo "::notice::Workspace $CARGO_VERSION is the declared development target after $LATEST_TAG; publish job will skip."
+            elif release_development_target_precedes_stable "$CARGO_VERSION" "$LATEST_VERSION"; then
+              # An at-SHA release can tag its certified candidate without
+              # merging the release commit into main. Until publication and
+              # the subsequent development bump complete, main therefore
+              # remains on X.Y.Z-dev while the immutable vX.Y.Z tag exists on
+              # the certified history line. That is a wait state, not drift.
+              DRIFT=false
+              echo "::notice::Workspace $CARGO_VERSION precedes certified candidate tag $LATEST_TAG. Publication or the post-publication development bump is still pending; this main-push run will skip cleanly."
             else
               matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
               if [[ -z "$matching_tag_commit" ]]; then
@@ -378,71 +384,6 @@ jobs:
             echo "latest_tag=$LATEST_TAG"
             echo "publish_ref=$PUBLISH_REF"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Detect post-release development bump
-        id: development
-        run: |
-          set -euo pipefail
-          source scripts/lib/release_version.sh
-          version="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          latest_tag="$({
-            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sed -n '1p'
-          } || true)"
-          release_development_bump_plan "$version" "$latest_tag"
-          {
-            echo "required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED"
-            echo "version=$RELEASE_DEVELOPMENT_BUMP_VERSION"
-            echo "reason=$RELEASE_DEVELOPMENT_BUMP_REASON"
-          } >> "$GITHUB_OUTPUT"
-          echo "::notice::Post-release development bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>}"
-
-  open-development-bump:
-    name: Open post-release development bump
-    needs: detect-drift
-    if: github.event_name != 'workflow_dispatch' && needs.detect-drift.outputs.development_bump == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Mint GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: main
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Configure isolated Harn build
-        run: make setup-rust
-
-      - name: Prepare and open development bump
-        id: development-bump
-        env:
-          EXPECTED_DEVELOPMENT_VERSION: ${{ needs.detect-drift.outputs.development_version }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
-          HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
-
-      # A skipped open is a correct no-op, not a failure: main already carries
-      # the target development version. There is no pull request to arm, and the
-      # validator refuses an empty one, so it must not run.
-      - name: Validate grammar receipt and arm development bump
-        if: steps.development-bump.outputs.skipped != 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
-        run: |
-          set -euo pipefail
-          ./scripts/validate_development_bump.sh
 
   publish:
     name: Publish release
