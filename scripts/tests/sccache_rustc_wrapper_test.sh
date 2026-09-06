@@ -89,9 +89,33 @@ fn cargo_binary_environment_reached_rustc() {
 }
 RS
 
+# The probe asserts which route the wrapper picks, not that sccache caches
+# anything, and the sccache route ends in an exec of a program named `sccache`.
+# Where a real one is installed, use it and say so. Where none is (the
+# repository-policy lane installs no compiler cache), stand up a forwarding
+# stub rather than skipping: a probe that quietly does not run is the one
+# result this test must never produce.
+probe_path="$PATH"
+if sccache_binary=$(command -v sccache 2>/dev/null); then
+  probe_sccache="installed at $sccache_binary"
+else
+  stub_bin="$tmp_root/stub-bin"
+  mkdir -p "$stub_bin"
+  cat > "$stub_bin/sccache" <<'SH'
+#!/usr/bin/env bash
+# Stands in for sccache: run the compiler it was handed, cache nothing.
+exec "$@"
+SH
+  chmod +x "$stub_bin/sccache"
+  probe_path="$stub_bin:$PATH"
+  probe_sccache="absent; forwarding stub at $stub_bin/sccache"
+fi
+echo "sccache_rustc_wrapper_test: real Cargo probe sccache $probe_sccache"
+
 output="$tmp_root/cargo-output.txt"
 set +e
-CARGO_TARGET_DIR="$tmp_root/target" \
+PATH="$probe_path" \
+  CARGO_TARGET_DIR="$tmp_root/target" \
   RUSTC_WRAPPER="$wrapper_binary" \
   HARN_SCCACHE_WRAPPER_TRACE=1 \
   HARN_ALLOW_RAW_CARGO=1 \
