@@ -641,3 +641,85 @@ pipeline test_the_shared_precondition_is_the_only_copy(harness: Harness, task: u
     "and a red reading is not a positive answer",
   )
 }
+
+/** Every `judge_decision` event, in order. */
+fn __judge_decisions(events: unknown) {
+  return events.filter({ event -> event.type == "judge_decision" }).to_list()
+}
+
+pipeline test_a_conversion_names_the_gate_as_the_author(harness: Harness, task: unknown) {
+  // harn#8229 gave an overridden verdict an author and a typed override, but
+  // only in the direction the completion seam takes: the gate forcing a
+  // `continue` over the judge's `done`. This arbitration takes the other
+  // direction, a `done` of record over the judge's `continue`, and it used to
+  // stamp `converted_from` and nothing else — so `source` stayed `llm` and the
+  // record published the gate's answer under the model's name.
+  //
+  // Measured across an eval archive before this fix: eight conversions, every
+  // one of them attributed to the judge that had refused.
+  const captured = __run(
+    harness,
+    "conversion-names-its-author",
+    [
+      llm_done(),
+      __judge_says(
+        "failed_verification",
+        "the required verification command has not been executed successfully in the provided evidence",
+      ),
+    ],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  // The conversion must actually have happened, or every assertion below is
+  // vacuous against a run that simply finished.
+  assert_eq(__conversion_count(captured.events), 1)
+  // Only the model judge's decisions carry the pair. The deterministic gate
+  // emits its own `judge_decision` with no judge answer of its own, and reading
+  // that row as a conversion is the mistake this filter exists to prevent.
+  const converted = __judge_decisions(captured.events).filter(
+    { decision -> decision?.converted_from != nil },
+  )
+    .to_list()
+  assert_eq(len(converted), 1)
+  const decision = converted[0]
+  // The judge's own word, kept. Without this the record cannot show that a real
+  // refusal was overruled rather than that no refusal happened.
+  assert_eq(decision?.judge_verdict, "continue")
+  assert_eq(decision?.verdict, "done")
+  assert_eq(
+    decision?.source,
+    "gate",
+    "a converted verdict must name the gate as its author, not the model it overruled",
+  )
+  assert_eq(decision?.override?.party, "gate")
+  assert_eq(decision?.override?.rule, CONVERSION)
+  assert_eq(decision?.override?.judge_verdict, "continue")
+  // `converted_from` stays. Existing counters read it, and the typed override
+  // is an addition to the record rather than a replacement for it.
+  assert_eq(decision?.converted_from, CONVERSION)
+}
+
+pipeline test_an_unconverted_refusal_is_still_the_judges_own(harness: Harness, task: unknown) {
+  // The direction control. Without it the case above passes just as well
+  // against a build that stamps the gate on every decision it emits.
+  const captured = __run(
+    harness,
+    "unconverted-stays-llm",
+    [
+      llm_done(),
+      __judge_says("unmet_manner_clause", "the task forbade touching the vendored directory"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  assert_eq(__conversion_count(captured.events), 0)
+  const judged = __judge_decisions(captured.events).filter(
+    { decision -> decision?.judge_verdict != nil },
+  )
+    .to_list()
+  assert(len(judged) >= 1, "the model judge must have been asked, or this proves nothing")
+  for decision in judged {
+    assert_eq(decision?.source, "llm")
+    assert_eq(decision?.override, nil)
+    assert_eq(decision?.converted_from, nil)
+  }
+}
