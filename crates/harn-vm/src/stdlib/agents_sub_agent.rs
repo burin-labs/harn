@@ -2,18 +2,23 @@ use super::agents_workers;
 use super::sub_agent_lifecycle as lifecycle;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
 use crate::orchestration::CapabilityPolicy;
+#[cfg(test)]
+use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
 use crate::stdlib::args::{ErrorKind, Options};
 use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 use lifecycle::{
-    emit_subagent_stop_once, finish_sub_agent, normalize_run_identity, stop_details_for_error,
-    stop_details_for_result, SubagentStopDetails,
+    finish_sub_agent, normalize_run_identity, stop_details_for_error, stop_details_for_result,
+    SubagentStopDetails,
 };
 
 #[path = "agents_sub_agent_string_list.rs"]
 mod string_list;
 use string_list::parse_string_list;
+
+#[path = "agents_sub_agent_child_error.rs"]
+mod child_error;
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
 #[cfg(test)]
@@ -833,37 +838,7 @@ pub(super) async fn execute_sub_agent(
             let transcript_json = result.get("transcript").cloned().unwrap_or_default();
             (result, crate::stdlib::json_to_vm_value(&transcript_json))
         }
-        Err(error) => {
-            // `agent_loop` returns per-child terminal outcomes as values and throws
-            // exceptional terminals. Preserve that distinction at the worker seam.
-            let stop_details = stop_details_for_error(&error);
-            let error_value = match &error {
-                VmError::CategorizedError { message, category } => {
-                    sub_agent_error_dict(category.as_str(), message.clone(), None)
-                }
-                VmError::Thrown(VmValue::String(message)) => {
-                    sub_agent_error_dict("runtime", message.to_string(), None)
-                }
-                _ => sub_agent_error_dict(
-                    crate::value::error_to_category(&error).as_str(),
-                    error.to_string(),
-                    None,
-                ),
-            };
-            append_parent_sub_agent_event(
-                spec.parent_session_id.as_deref(),
-                sub_agent_result_event(
-                    &spec,
-                    false,
-                    "",
-                    0,
-                    false,
-                    Some(crate::llm::vm_value_to_json(&error_value)),
-                ),
-            );
-            emit_subagent_stop_once(&spec, stop_details);
-            return Err(error);
-        }
+        Err(error) => return child_error::child_error_outcome(&spec, error),
     };
     let tokens_used = transcript_tokens_used(&transcript);
 
@@ -1062,6 +1037,23 @@ pub(super) async fn execute_sub_agent(
 mod tests {
     use super::*;
     use crate::llm::mock::reset_llm_mock_state;
+
+    struct ExecutionPolicyGuard;
+
+    impl Drop for ExecutionPolicyGuard {
+        fn drop(&mut self) {
+            crate::orchestration::clear_execution_policy_stacks();
+        }
+    }
+
+    fn push_recursion_policy(limit: usize) -> ExecutionPolicyGuard {
+        crate::orchestration::clear_execution_policy_stacks();
+        crate::orchestration::push_execution_policy(CapabilityPolicy {
+            recursion_limit: Some(limit),
+            ..CapabilityPolicy::default()
+        });
+        ExecutionPolicyGuard
+    }
 
     #[test]
     fn stop_details_preserve_cancel_and_timeout_provenance() {
@@ -1509,11 +1501,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn execute_sub_agent_propagates_child_loop_configuration_errors() {
+    async fn execute_sub_agent_propagates_nested_budget_denial() {
         crate::agent_sessions::reset_session_store();
         reset_llm_mock_state();
-        let parent = crate::agent_sessions::open_or_create_for_test(Some("parent-config".into()));
-        let options = crate::value::DictMap::from_iter([
+        let _policy = push_recursion_policy(0);
+        let parent = crate::agent_sessions::open_or_create_for_test(Some("parent-budget".into()));
+        let mut options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("mock")),
@@ -1523,41 +1516,54 @@ mod tests {
                 VmValue::String(arcstr::ArcStr::from("mock")),
             ),
             (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
-            (crate::value::intern_key("persistent"), VmValue::Bool(true)),
         ]);
+        annotate_nested_execution_options(
+            &mut options,
+            NestedExecutionKind::SubAgentRun,
+            "budgeted-worker",
+        );
 
-        let stop_emitted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let spec = SubAgentRunSpec {
-            name: "misconfigured-worker".to_string(),
+            name: "budgeted-worker".to_string(),
             task: "inspect the repo".to_string(),
             system: None,
             options,
             returns_schema: None,
-            session_id: "child-config".to_string(),
-            run_id: "agent_run_child_config".to_string(),
+            session_id: "child-budget".to_string(),
+            run_id: "agent_run_child_budget".to_string(),
             parent_session_id: Some(parent.clone()),
-            parent_run_id: Some("agent_run_parent_config".to_string()),
+            parent_run_id: Some("agent_run_parent_budget".to_string()),
             reminder_propagation: Vec::new(),
             workspace_anchor: None,
-            stop_emitted: stop_emitted.clone(),
+            stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-        let error = match execute_sub_agent(&ctx, spec).await {
-            Err(error) => error,
-            Ok(_) => panic!("a child loop error must remain visible to parent control flow"),
-        };
+        let result = execute_sub_agent(&ctx, spec).await.unwrap();
 
-        let VmError::Thrown(VmValue::String(message)) = &error else {
-            panic!("expected the child configuration refusal, got {error}");
-        };
-        assert!(message.contains("`persistent` was removed"), "{message}");
-        assert!(
-            stop_emitted.load(std::sync::atomic::Ordering::Acquire),
-            "the failing child must still emit its terminal lifecycle event"
+        assert_eq!(result.payload["ok"].as_bool(), Some(false));
+        assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
+        assert_eq!(
+            result.payload["error"]["category"].as_str(),
+            Some("budget_exceeded")
         );
+        assert!(
+            result.payload["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("sub_agent_run")),
+            "{:?}",
+            result.payload
+        );
+        assert!(result
+            .payload
+            .get("transcript")
+            .and_then(|transcript| transcript.get("events"))
+            .and_then(|events| events.as_array())
+            .is_some_and(|events| events
+                .iter()
+                .any(|event| event["kind"] == "nested_execution_budget_denied")));
 
         let parent_events = crate::agent_sessions::snapshot(&parent)
             .and_then(|value| value.as_dict().cloned())
@@ -1579,15 +1585,10 @@ mod tests {
             .and_then(|value| value.as_dict())
             .expect("event metadata");
         assert!(matches!(metadata.get("ok"), Some(VmValue::Bool(false))));
-        assert_eq!(
-            metadata
-                .get("error")
-                .and_then(VmValue::as_dict)
-                .and_then(|error| error.get("message"))
-                .map(VmValue::display)
-                .as_deref(),
-            Some("agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence")
-        );
+        assert!(matches!(
+            metadata.get("budget_exceeded"),
+            Some(VmValue::Bool(true))
+        ));
 
         reset_llm_mock_state();
         crate::agent_sessions::reset_session_store();
