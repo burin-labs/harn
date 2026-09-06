@@ -146,6 +146,58 @@ fn command_creation_sweeps_stale_sibling_and_keeps_fresh_output_readable() {
 }
 
 #[test]
+fn command_id_read_uses_the_registered_artifact_namespace_not_ambient_tmpdir() {
+    let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+    let temp = tempdir().unwrap();
+    let _tmpdir_guard = TmpdirEnvGuard(std::env::var_os("TMPDIR"));
+    std::env::set_var("TMPDIR", temp.path());
+
+    let spawner = Arc::new(MockSpawner::new());
+    let _guard = install_spawner(spawner.clone());
+    spawner.enqueue(MockProcessConfig::with_stdout(0, "registered\n"));
+    let mut run_req = dict();
+    run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo registered"]));
+    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+
+    let unavailable_ambient_tmpdir = temp.path().join("does-not-exist");
+    std::env::set_var("TMPDIR", &unavailable_ambient_tmpdir);
+    let mut read_req = dict();
+    read_req.insert(
+        "command_id".into(),
+        vstr(&require_str(&run_resp, "command_id")),
+    );
+    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+
+    assert_eq!(require_str(&read_resp, "content"), "registered\n");
+    assert!(!unavailable_ambient_tmpdir.exists());
+}
+
+#[test]
+fn explicit_path_is_validated_before_namespace_lock_mutation_even_with_an_id() {
+    let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+    let temp = tempdir().unwrap();
+    let invalid_path = temp
+        .path()
+        .join("harn-command-not-a-canonical-id")
+        .join("combined.txt");
+    let mut read_req = dict();
+    read_req.insert("command_id".into(), vstr("ignored-command-id"));
+    read_req.insert("path".into(), vstr(&invalid_path.to_string_lossy()));
+
+    let error = call("hostlib_tools_read_command_output", read_req).unwrap_err();
+
+    assert!(matches!(
+        error,
+        HostlibError::InvalidParameter {
+            builtin: "hostlib_tools_read_command_output",
+            param: "path",
+            ..
+        }
+    ));
+    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn command_creation_pressure_caps_recent_completed_siblings_and_keeps_new_output_readable() {
     let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
     let temp = tempdir().unwrap();
@@ -208,6 +260,13 @@ fn registered_result_survives_a_foreign_pressure_sweep_until_bounded_eviction() 
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo parent"]));
     let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
 
+    let victim = temp
+        .path()
+        .join(format!("harn-command-cmd_{}_100_1", unused_high_pid()));
+    std::fs::create_dir(&victim).unwrap();
+    std::fs::write(victim.join("combined.txt"), "victim").unwrap();
+    filetime::set_file_mtime(&victim, FileTime::from_unix_time(0, 0)).unwrap();
+
     let child_test = "process_artifact_retention::foreign_pressure_sweep_child";
     let status = process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", child_test, "--nocapture"])
@@ -215,6 +274,10 @@ fn registered_result_survives_a_foreign_pressure_sweep_until_bounded_eviction() 
         .status()
         .unwrap();
     assert!(status.success(), "foreign pressure sweep child failed");
+    assert!(
+        !victim.exists(),
+        "foreign child must prove its pressure sweep fired"
+    );
 
     let mut read_req = dict();
     read_req.insert(

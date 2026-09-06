@@ -26,6 +26,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 const ACTIVE_LEASE_FILE: &str = ".active.lock";
 const NAMESPACE_LEASE_PREFIX: &str = ".harn-command-artifacts";
+const RUN_COMMAND_BUILTIN: &str = "hostlib_tools_run_command";
+const READ_COMMAND_OUTPUT_BUILTIN: &str = "hostlib_tools_read_command_output";
 // Command IDs are unique. Contention therefore indicates a stale process or
 // an identity collision, not useful work whose duration should be inherited.
 const ACTIVE_LEASE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -223,56 +225,98 @@ pub(crate) fn read_output(
     offset: u64,
     length: u64,
 ) -> Result<Option<CommandArtifactRead>, HostlibError> {
-    let temp_dir = path
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .map_or_else(std::env::temp_dir, Path::to_path_buf);
-    with_artifact_namespace_lock(&temp_dir, ACTIVE_LEASE_LOCK_TIMEOUT, || {
-        let path = path
-            .map(Path::to_path_buf)
-            .or_else(|| resolve_output_path(command_id, handle_id));
-        let Some(path) = path else {
-            return Ok(None);
-        };
-        let mut file = File::open(&path).map_err(|error| HostlibError::Backend {
-            builtin: "hostlib_tools_read_command_output",
-            message: format!(
-                "failed to open command output '{}': {error}",
-                path.display()
-            ),
+    let explicit = path
+        .map(|path| {
+            command_artifact_namespace(path)
+                .map(|namespace| (path.to_path_buf(), namespace))
+                .ok_or_else(|| HostlibError::InvalidParameter {
+                    builtin: READ_COMMAND_OUTPUT_BUILTIN,
+                    param: "path",
+                    message: "path must point at a harn-command artifact file".to_string(),
+                })
+        })
+        .transpose()?;
+    let candidate = explicit
+        .as_ref()
+        .map(|(path, _)| path.clone())
+        .or_else(|| resolve_output_path(command_id, handle_id));
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+    let namespace = explicit
+        .as_ref()
+        .map(|(_, namespace)| namespace.clone())
+        .or_else(|| command_artifact_namespace(&candidate))
+        .ok_or_else(|| HostlibError::Backend {
+            builtin: READ_COMMAND_OUTPUT_BUILTIN,
+            message: "registered command output has an invalid artifact path".to_string(),
         })?;
-        let total_bytes = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|error| HostlibError::Backend {
-                builtin: "hostlib_tools_read_command_output",
+    with_artifact_namespace_lock(
+        &namespace,
+        ACTIVE_LEASE_LOCK_TIMEOUT,
+        READ_COMMAND_OUTPUT_BUILTIN,
+        || {
+            let path = if explicit.is_some() {
+                candidate.clone()
+            } else {
+                let Some(resolved) = resolve_output_path(command_id, handle_id) else {
+                    return Ok(None);
+                };
+                if resolved != candidate {
+                    return Ok(None);
+                }
+                resolved
+            };
+            let mut file = File::open(&path).map_err(|error| HostlibError::Backend {
+                builtin: READ_COMMAND_OUTPUT_BUILTIN,
                 message: format!(
-                    "failed to seek command output '{}': {error}",
+                    "failed to open command output '{}': {error}",
                     path.display()
                 ),
             })?;
-        let mut bytes = vec![
-            0_u8;
-            usize::try_from(length)
-                .unwrap_or(usize::MAX)
-                .min(1024 * 1024)
-        ];
-        let bytes_read = file
-            .read(&mut bytes)
-            .map_err(|error| HostlibError::Backend {
-                builtin: "hostlib_tools_read_command_output",
-                message: format!(
-                    "failed to read command output '{}': {error}",
-                    path.display()
-                ),
-            })?;
-        bytes.truncate(bytes_read);
-        Ok(Some(CommandArtifactRead {
-            path,
-            offset,
-            bytes,
-            total_bytes,
-        }))
-    })
+            let total_bytes = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+            file.seek(SeekFrom::Start(offset))
+                .map_err(|error| HostlibError::Backend {
+                    builtin: READ_COMMAND_OUTPUT_BUILTIN,
+                    message: format!(
+                        "failed to seek command output '{}': {error}",
+                        path.display()
+                    ),
+                })?;
+            let mut bytes = vec![
+                0_u8;
+                usize::try_from(length)
+                    .unwrap_or(usize::MAX)
+                    .min(1024 * 1024)
+            ];
+            let bytes_read = file
+                .read(&mut bytes)
+                .map_err(|error| HostlibError::Backend {
+                    builtin: READ_COMMAND_OUTPUT_BUILTIN,
+                    message: format!(
+                        "failed to read command output '{}': {error}",
+                        path.display()
+                    ),
+                })?;
+            bytes.truncate(bytes_read);
+            Ok(Some(CommandArtifactRead {
+                path,
+                offset,
+                bytes,
+                total_bytes,
+            }))
+        },
+    )
+}
+
+fn command_artifact_namespace(path: &Path) -> Option<PathBuf> {
+    let file_name = path.file_name()?.to_str()?;
+    if !matches!(file_name, "combined.txt" | "stdout.txt" | "stderr.txt") {
+        return None;
+    }
+    let artifact_dir = path.parent()?;
+    parse_command_artifact_dir_name(artifact_dir.file_name()?.to_str()?)?;
+    artifact_dir.parent().map(Path::to_path_buf)
 }
 
 pub(crate) fn live_artifact_snapshot(
@@ -399,7 +443,7 @@ fn register_completed_artifacts_with_options(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, timeout, || {
+    with_artifact_namespace_lock(temp_dir, timeout, RUN_COMMAND_BUILTIN, || {
         let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
         register_completed_artifacts_in_store(
             &mut store,
@@ -476,7 +520,7 @@ fn create_and_mark_artifacts_active_with_timeout(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, timeout, || {
+    with_artifact_namespace_lock(temp_dir, timeout, RUN_COMMAND_BUILTIN, || {
         std::fs::create_dir_all(&dir).map_err(|error| HostlibError::Backend {
             builtin: "hostlib_tools_run_command",
             message: format!("failed to create command artifact dir: {error}"),
@@ -504,7 +548,7 @@ fn mark_artifacts_active_with_timeout(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, timeout, || {
+    with_artifact_namespace_lock(temp_dir, timeout, RUN_COMMAND_BUILTIN, || {
         mark_artifacts_active_under_namespace(artifacts, timeout)
     })
 }
@@ -551,10 +595,15 @@ fn mark_artifacts_active_under_namespace(
 fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
     if let Some(dir) = artifact_dir(artifacts) {
         let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-        let _ = with_artifact_namespace_lock(temp_dir, ACTIVE_LEASE_LOCK_TIMEOUT, || {
-            mark_artifact_dir_inactive_under_namespace(&dir);
-            Ok(())
-        });
+        let _ = with_artifact_namespace_lock(
+            temp_dir,
+            ACTIVE_LEASE_LOCK_TIMEOUT,
+            RUN_COMMAND_BUILTIN,
+            || {
+                mark_artifact_dir_inactive_under_namespace(&dir);
+                Ok(())
+            },
+        );
     }
 }
 
@@ -576,6 +625,7 @@ fn release_artifact_lease(dir: &Path) {
 fn with_artifact_namespace_lock<T>(
     temp_dir: &Path,
     timeout: Duration,
+    builtin: &'static str,
     operation: impl FnOnce() -> Result<T, HostlibError>,
 ) -> Result<T, HostlibError> {
     let lease_path = artifact_namespace_lease_path(temp_dir);
@@ -589,7 +639,7 @@ fn with_artifact_namespace_lock<T>(
     let lease = options
         .open(&lease_path)
         .map_err(|error| HostlibError::Backend {
-            builtin: "hostlib_tools_run_command",
+            builtin,
             message: format!("failed to open command artifact namespace lease: {error}"),
         })?;
     #[cfg(unix)]
@@ -601,7 +651,7 @@ fn with_artifact_namespace_lock<T>(
             .unwrap_or(true)
         {
             return Err(HostlibError::Backend {
-                builtin: "hostlib_tools_run_command",
+                builtin,
                 message: "command artifact namespace lease is not owned by the current user"
                     .to_string(),
             });
@@ -614,7 +664,7 @@ fn with_artifact_namespace_lock<T>(
         timeout,
     )
     .map_err(|error| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
+        builtin,
         message: format!("failed to lock command artifact namespace: {error}"),
     })?;
     let result = operation();
@@ -658,22 +708,27 @@ fn maybe_sweep_stale_artifacts(current_dir: Option<&Path>) {
         }
         *last = Some(now);
     }
-    let _ = with_artifact_namespace_lock(&temp_dir, ACTIVE_LEASE_LOCK_TIMEOUT, || {
-        let expired_before = SystemTime::now().checked_sub(retention);
-        retire_completed_artifacts_under_namespace(
-            &mut ARTIFACTS.lock().expect("command artifact store poisoned"),
-            max_dirs,
-            expired_before,
-        );
-        sweep_command_artifact_dirs_except(
-            &temp_dir,
-            retention,
-            max_dirs,
-            SystemTime::now(),
-            current_dir,
-        );
-        Ok(())
-    });
+    let _ = with_artifact_namespace_lock(
+        &temp_dir,
+        ACTIVE_LEASE_LOCK_TIMEOUT,
+        RUN_COMMAND_BUILTIN,
+        || {
+            let expired_before = SystemTime::now().checked_sub(retention);
+            retire_completed_artifacts_under_namespace(
+                &mut ARTIFACTS.lock().expect("command artifact store poisoned"),
+                max_dirs,
+                expired_before,
+            );
+            sweep_command_artifact_dirs_except(
+                &temp_dir,
+                retention,
+                max_dirs,
+                SystemTime::now(),
+                current_dir,
+            );
+            Ok(())
+        },
+    );
 }
 
 fn retention_duration() -> Option<Duration> {

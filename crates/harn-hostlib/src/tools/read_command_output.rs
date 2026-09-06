@@ -19,18 +19,6 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let length = optional_u64(NAME, &map, "length")?.unwrap_or(64 * 1024);
 
     let path = path.map(std::path::PathBuf::from);
-    if command_id.is_none()
-        && handle_id.is_none()
-        && path
-            .as_deref()
-            .is_some_and(|path| !looks_like_command_artifact_path(path))
-    {
-        return Err(HostlibError::InvalidParameter {
-            builtin: NAME,
-            param: "path",
-            message: "path must point at a harn-command artifact directory".to_string(),
-        });
-    }
     let Some(read) = proc::read_output(
         command_id.as_deref(),
         handle_id.as_deref(),
@@ -57,18 +45,4 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         )
         .str("content", String::from_utf8_lossy(&read.bytes).into_owned())
         .build())
-}
-
-fn looks_like_command_artifact_path(path: &std::path::Path) -> bool {
-    let Some(parent) = path.parent() else {
-        return false;
-    };
-    let Some(dir_name) = parent.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    dir_name.starts_with("harn-command-cmd_")
-        && matches!(file_name, "combined.txt" | "stdout.txt" | "stderr.txt")
 }
