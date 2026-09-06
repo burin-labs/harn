@@ -514,8 +514,14 @@ pub fn verification_gate_input(
     hashes,
     hashes_available,
   )
-  const previous_delta = __verification_gate_delta_value(previous_value, previous_classification)
-  const current_delta = __verification_gate_delta_value(current_value, current_classification)
+  const previous_delta = __verification_gate_delta_value(
+    __verification_command_fact(previous_value),
+    previous_classification,
+  )
+  const current_delta = __verification_gate_delta_value(
+    __verification_command_fact(current_value),
+    current_classification,
+  )
   const delta = verification_diagnostic_delta(agent, previous_delta, current_delta, opts)
   const status = __verification_gate_status(delta, current_classification)
   const feeds_gates = current_classification?.feedsGates ? true : false
