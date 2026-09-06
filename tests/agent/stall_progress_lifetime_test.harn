@@ -142,6 +142,19 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
       },
     },
   )
+  const complete_registry = tool_define(
+    registry,
+    "edit",
+    "Apply source change",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { _args ->
+        handlers = handlers + ["edit"]
+        return "Applied source change"
+      },
+    },
+  )
   const progress = { payload ->
     require payload.session_id == sid, "the callback must belong to the executing session"
     require len(payload.dispatch) == 1, "only an actual completed dispatch supplies progress"
@@ -156,10 +169,15 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
     return value
   }
   for step in [
-    {name: "verify", args: {failures: 3}, high: -3, flat: 0},
-    {name: "look", args: {path: "a.txt"}, high: -3, flat: 1},
-    {name: "verify", args: {failures: 1}, high: -1, flat: 0},
-    {name: "verify", args: {failures: 0}, high: 0, flat: 0},
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
+    {name: "edit", args: {path: "a.txt"}, high: -3, flat: 1, failed: 1},
+    {name: "look", args: {path: "a.txt"}, high: -3, flat: 2, failed: 1},
+    {name: "verify", args: {failures: 1}, high: -1, flat: 0, failed: 2},
+    {name: "verify", args: {failures: 0}, high: 0, flat: 0, failed: 0},
+    {name: "edit", args: {path: "b.txt"}, high: 0, flat: 1, failed: 0},
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
+    {name: "verify", args: {failures: 2}, high: -2, flat: 0, failed: 2},
+    {name: "verify", args: {failures: 1}, high: -1, flat: 0, failed: 3},
   ] {
     const before = len(observed)
     const result = with_llm_script(
@@ -173,7 +191,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
           {
             provider: "mock",
             session_id: sid,
-            tools: registry,
+            tools: complete_registry,
             tool_format: "native",
             max_iterations: 1,
             stall_checkpoint: checkpoint,
@@ -181,7 +199,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
               require len(observed) == len(handlers),
                 "completed progress must be visible before product post-turn effects"
               require info.stall_checkpoint.state.verify_state_high == step.high,
-                "the product callback must receive the same final progress checkpoint"
+                "completed ${step.name} ${json_stringify(step.args)}: expected high ${step.high}, got ${info.stall_checkpoint.state.verify_state_high}; handlers=${json_stringify(handlers)}"
               return nil
             },
             stall_diagnostics: {
@@ -207,10 +225,11 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
     const projected = agent_stall_checkpoint_state(harness.agent, checkpoint)
     require projected.verify_state_high == step.high && len(observed) == before + 1,
       "checkpoint projection must preserve progress without invoking the callback again"
-    require projected.failing_verify_turns == (step.high == 0 ? 0 : step.high == -1 ? 2 : 1),
+    require projected.failing_verify_turns == step.failed,
       "progress folding must preserve pending diagnostic evidence and clean verification reset"
   }
-  require handlers == [3, "a.txt", 1, 0] && observed == [-3, nil, -1, 0],
+  require handlers == [3, "edit", "a.txt", 1, 0, "edit", 3, 2, 1]
+    && observed == [-3, nil, nil, -1, 0, nil, -3, -2, -1],
     "every expected handler and supplied evidence must reach the canonical lifetime"
   harness.agent.close(sid)
 }
