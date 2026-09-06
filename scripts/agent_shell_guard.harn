@@ -399,7 +399,8 @@ pub fn worktree_admission_reported(checked: string, reported: string) -> Worktre
       available: false,
       command: "",
       denial: "no wrapper reported whether this repository owns a Fleet admission command ("
-        + ADMISSION_CHECKED_ENV + " is not set)",
+        + ADMISSION_CHECKED_ENV
+        + " is not set)",
     }
   }
   if reported == "" {
@@ -413,7 +414,8 @@ pub fn worktree_admission_reported(checked: string, reported: string) -> Worktre
       available: false,
       command: reported,
       denial: "the wrapper reported an admission command this policy does not know: `"
-        + reported + "`",
+        + reported
+        + "`",
     }
   }
   return {available: true, command: reported, denial: ""}
@@ -443,11 +445,15 @@ pub fn decision(payload: string, admission: WorktreeAdmission) -> ShellGuardDeci
         allow: false,
         reason: "Raw `git worktree add` is refused because this guard could not tell whether "
           + "this repository owns a Fleet admission command, and an unreadable census must not "
-          + "read as an absent one: " + admission.denial,
+          + "read as an absent one: "
+          + admission.denial,
       }
     }
     if admission.available {
-      return {allow: false, reason: worktree + " This repository provides it at " + admission.command + "."}
+      return {
+        allow: false,
+        reason: worktree + " This repository provides it at " + admission.command + ".",
+      }
     }
   }
   if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
