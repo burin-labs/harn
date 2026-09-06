@@ -182,3 +182,59 @@ pub(super) fn apply_post_tool_action(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm_string(value: &str) -> VmValue {
+        VmValue::String(arcstr::ArcStr::from(value))
+    }
+
+    fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::dict(
+            entries
+                .into_iter()
+                .map(|(key, value)| (crate::value::intern_key(key), value))
+                .collect::<crate::value::DictMap>(),
+        )
+    }
+
+    #[test]
+    fn parses_typed_denial() {
+        let action = parse_post_tool_result(dict(vec![
+            ("result", vm_string("request denied")),
+            (
+                "denial",
+                dict(vec![
+                    ("kind", vm_string("policy_blocked")),
+                    ("message", vm_string("policy wording")),
+                ]),
+            ),
+        ]))
+        .expect("typed post-tool denial");
+
+        match action {
+            PostToolAction::Deny { result, denial } => {
+                assert_eq!(result, "request denied");
+                assert_eq!(denial.kind, "policy_blocked");
+                assert_eq!(denial.message, "policy wording");
+            }
+            other => panic!("expected typed denial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_incomplete_denial() {
+        let error = parse_post_tool_result(dict(vec![
+            ("result", vm_string("request denied")),
+            (
+                "denial",
+                dict(vec![("message", vm_string("policy wording"))]),
+            ),
+        ]))
+        .expect_err("denial without a stable kind must fail");
+
+        assert!(error.to_string().contains("non-empty string kind"));
+    }
+}

@@ -1378,31 +1378,7 @@ pub async fn run_post_tool_hooks_with_ctx(
             }
             RuntimeHookHandler::NativePreTool(_) => continue,
         };
-        match action {
-            PostToolAction::Pass => {}
-            PostToolAction::Modify(new_result) => {
-                current.text = new_result;
-            }
-            PostToolAction::Deny { result, denial } => {
-                current.text = result;
-                current.denial = Some(denial);
-            }
-            PostToolAction::Truncate {
-                result,
-                dropped_bytes,
-            } => {
-                current.text = result;
-                current.dropped_bytes = current.dropped_bytes.saturating_add(dropped_bytes);
-            }
-            PostToolAction::Reminder { spec, then } => {
-                inject_hook_effects(
-                    "",
-                    vec![HookEffect::Reminder(spec)],
-                    Some(HookEvent::PostToolUse),
-                )?;
-                current = apply_post_tool_action(*then, current)?;
-            }
-        }
+        current = apply_post_tool_action(action, current)?;
     }
     Ok(current)
 }
@@ -1818,44 +1794,6 @@ mod tests {
         ]))
         .expect_err("truncation without dropped bytes must fail");
         assert!(error.to_string().contains("dropped_bytes"));
-    }
-
-    #[test]
-    fn post_tool_result_parses_typed_denial() {
-        let action = parse_post_tool_result(dict(vec![
-            ("result", vm_string("request denied")),
-            (
-                "denial",
-                dict(vec![
-                    ("kind", vm_string("policy_blocked")),
-                    ("message", vm_string("policy wording")),
-                ]),
-            ),
-        ]))
-        .expect("typed post-tool denial");
-
-        match action {
-            PostToolAction::Deny { result, denial } => {
-                assert_eq!(result, "request denied");
-                assert_eq!(denial.kind, "policy_blocked");
-                assert_eq!(denial.message, "policy wording");
-            }
-            other => panic!("expected typed denial, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn post_tool_result_rejects_incomplete_denial() {
-        let error = parse_post_tool_result(dict(vec![
-            ("result", vm_string("request denied")),
-            (
-                "denial",
-                dict(vec![("message", vm_string("policy wording"))]),
-            ),
-        ]))
-        .expect_err("denial without a stable kind must fail");
-
-        assert!(error.to_string().contains("non-empty string kind"));
     }
 
     #[test]
