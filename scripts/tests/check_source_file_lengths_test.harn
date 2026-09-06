@@ -512,3 +512,96 @@ pipeline test_unscanned_sources_reconciliation_is_strict_and_sorted(
     ["a.rs", "z.rs"],
   )
 }
+
+/**
+ * The class this ratchet kept producing: a file main already carries over the
+ * cap failed every later change that never touched it, and the workaround that
+ * bought was trimming comments on an unrelated branch.
+ *
+ * The negative control is in the same fixture: the same repository, the same
+ * oversized file, blamed the moment the change set touches it.
+ */
+@test
+pipeline test_oversized_debt_main_carries_is_reported_not_blamed_on_this_change(
+  harness: Harness,
+  task: unknown,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const carried = "crates/example/src/carried.rs"
+      const touched = "crates/example/src/touched.rs"
+      init_repo(harness.process, root)
+      write_source(harness, root, touched, 10)
+      write_inventory(harness, root, [])
+      const before = commit_all(harness.process, root, "clean base")
+      write_source(harness, root, carried, 1600)
+      const base = commit_all(harness.process, root, "main lands an oversized file")
+      // A change set that never touched the oversized file inherits it.
+      write_source(harness, root, touched, 20)
+      commit_all(harness.process, root, "unrelated change")
+      const inherited = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(finding_kinds(inherited.findings), ["new_oversized_source"])
+      assert_eq(inherited.findings[0]?.path, carried)
+      assert_eq(inherited.findings[0]?.actual, 1600)
+      assert_eq(inherited.findings[0]?.blocking, false)
+      assert_eq(inherited.blocking_count, 0)
+      assert_eq(inherited.carried_count, 1)
+      // Negative control: the same finding, blamed, when the change set is the
+      // one that introduced it.
+      const introduced = check_source_file_lengths(harness, root, "merge-base", before)
+      assert_eq(finding_kinds(introduced.findings), ["new_oversized_source"])
+      assert_eq(introduced.findings[0]?.blocking, true)
+      assert_eq(introduced.blocking_count, 1)
+      assert_eq(introduced.carried_count, 0)
+      // Second negative control: touching the oversized file at all blames it.
+      write_source(harness, root, carried, 1601)
+      commit_all(harness.process, root, "touch the oversized file")
+      const touched_report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(touched_report.blocking_count, 1)
+      assert_eq(touched_report.findings[0]?.blocking, true)
+    },
+  )
+}
+
+/**
+ * Blame is a filter over refusals, so an unanswerable change set must widen it
+ * rather than empty it. An unstamped finding blocks for the same reason.
+ */
+@test
+pipeline test_an_unreadable_change_set_blames_everything_rather_than_nothing(
+  harness: Harness,
+  task: unknown,
+) {
+  const carried: SourceLengthFinding = {
+    kind: "new_oversized_source",
+    path: "crates/example/src/carried.rs",
+    actual: 1600,
+    ceiling: 1500,
+    message: "oversized",
+  }
+  const policy: SourceLengthFinding = {
+    kind: "obsolete_legacy_path",
+    path: LEGACY_INVENTORY_PATH,
+    message: "policy",
+  }
+  const instrument: SourceLengthFinding = {
+    kind: "reconciliation_unavailable",
+    path: ".",
+    message: "git refused",
+  }
+  const known = blame_findings([carried, policy, instrument], [], true)
+  assert_eq(known.map({ finding -> finding.blocking }).to_list(), [false, true, true])
+  assert_eq(blocking_findings(known).count, 2)
+  assert_eq(carried_findings(known).count, 1)
+  const unknown_change_set = blame_findings([carried, policy, instrument], [], false)
+  assert_eq(unknown_change_set.map({ finding -> finding.blocking }).to_list(), [true, true, true])
+  assert_eq(blocking_findings(unknown_change_set).count, 3)
+  // Editing the policy makes every policy-derived finding this change's problem.
+  const policy_edit = blame_findings([carried], [LEGACY_INVENTORY_PATH], true)
+  assert_eq(policy_edit[0]?.blocking, true)
+  // An unstamped finding is blocking, so a finding that never reached blame
+  // cannot read as tolerated.
+  assert_eq(blocking_findings([carried]).count, 1)
+  assert_eq(carried_findings([carried]).count, 0)
+}

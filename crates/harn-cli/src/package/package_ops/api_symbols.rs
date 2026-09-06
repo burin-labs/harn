@@ -17,8 +17,7 @@ struct PublicDeclaration<'a> {
 /// any number of lines. Body-bearing declarations keep only their header,
 /// while aliases and constants retain their complete expression.
 pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let Ok(tokens) = lexer.tokenize_with_comments() else {
+    let Ok(tokens) = harn_lexer::Lexer::new(source).tokenize_with_comments() else {
         return Vec::new();
     };
     let parser_tokens = tokens
@@ -26,8 +25,7 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
         .filter(|token| !is_comment(&token.kind))
         .cloned()
         .collect::<Vec<_>>();
-    let mut parser = harn_parser::Parser::new(parser_tokens.clone());
-    let Ok(program) = parser.parse() else {
+    let Ok(program) = harn_parser::Parser::new(parser_tokens).parse() else {
         return Vec::new();
     };
 
@@ -35,12 +33,13 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
         .iter()
         .filter_map(|node| {
             let declaration = public_declaration(node)?;
-            let pub_token = parser_tokens.iter().rev().find(|token| {
+            let pub_index = tokens.iter().rposition(|token| {
                 matches!(&token.kind, TokenKind::Pub)
                     && token.span.end <= declaration.inner.span.start
             })?;
+            let pub_token = &tokens[pub_index];
             let signature_end = if declaration.strip_body {
-                outer_body_start(&parser_tokens, declaration.inner)?
+                outer_body_start(&tokens, declaration.inner)?
             } else {
                 declaration.inner.span.end
             };
@@ -57,9 +56,6 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
                 .unwrap_or(signature_source)
                 .trim()
                 .to_string();
-            let pub_index = tokens
-                .iter()
-                .position(|token| token.span.start == pub_token.span.start)?;
             let docs_index = if matches!(&node.node, Node::AttributedDecl { .. }) {
                 tokens
                     .iter()

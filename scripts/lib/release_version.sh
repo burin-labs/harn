@@ -55,6 +55,19 @@ release_development_target_matches_stable() {
   [[ "$development" == "$expected" ]]
 }
 
+# True when a development identity names the same patch that has since been
+# selected by a stable tag. This is the recovery shape where certification
+# tagged an immutable release candidate without merging that candidate back to
+# main: main remains on X.Y.Z-dev until publication completes, then advances to
+# X.Y.(Z+1)-dev.
+release_development_target_precedes_stable() {
+  local development="${1:-}"
+  local stable="${2:-}"
+  release_version_is_canonical "$stable" || return 1
+  release_version_is_prerelease "$stable" && return 1
+  [[ "$development" == "${stable}-${HARN_RELEASE_DEVELOPMENT_PRERELEASE}" ]]
+}
+
 release_published_version_for_workspace() {
   local workspace="${1:-}"
   if [[ "$workspace" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -94,6 +107,7 @@ release_head_is_release_commit_for_version() {
 release_development_bump_plan() {
   local workspace_version="${1:-}"
   local latest_tag="${2:-}"
+  local publication_complete="${3:-false}"
 
   RELEASE_DEVELOPMENT_BUMP_REQUIRED=false
   RELEASE_DEVELOPMENT_BUMP_VERSION=""
@@ -108,7 +122,20 @@ release_development_bump_plan() {
     RELEASE_DEVELOPMENT_BUMP_REASON="latest_tag_is_not_stable"
     return 0
   fi
-  if [[ "$workspace_version" != "${latest_tag#v}" ]]; then
+  if [[ "$publication_complete" != true ]]; then
+    RELEASE_DEVELOPMENT_BUMP_REASON="latest_stable_release_not_published"
+    return 0
+  fi
+
+  local latest_version="${latest_tag#v}"
+  if release_development_target_precedes_stable "$workspace_version" "$latest_version"; then
+    RELEASE_DEVELOPMENT_BUMP_VERSION="$(release_next_patch_development "$latest_version")" \
+      || return 1
+    RELEASE_DEVELOPMENT_BUMP_REQUIRED=true
+    RELEASE_DEVELOPMENT_BUMP_REASON="published_candidate_supersedes_development_identity"
+    return 0
+  fi
+  if [[ "$workspace_version" != "$latest_version" ]]; then
     RELEASE_DEVELOPMENT_BUMP_REASON="workspace_does_not_match_latest_stable"
     return 0
   fi
@@ -125,6 +152,21 @@ release_development_bump_plan() {
 
 release_tag_is_canonical() {
   [[ "${1:-}" == v* ]] && release_version_is_canonical "${1#v}"
+}
+
+# Resolve publication identity from the repository's complete stable tag list.
+# A certified tag may name an immutable candidate that is not in main's
+# ancestry, so callers must not narrow this inventory with `--merged`.
+release_latest_stable_tag() {
+  local tag
+  while IFS= read -r tag; do
+    if release_tag_is_canonical "$tag" \
+      && ! release_version_is_prerelease "${tag#v}"; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done < <(git tag --list 'v*' --sort=-v:refname)
+  return 1
 }
 
 release_branch_is_canonical() {

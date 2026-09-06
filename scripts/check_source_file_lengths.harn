@@ -6,7 +6,8 @@ const CHECK_NAME = "check-source-file-lengths"
 
 const MAX_LINES = 1500
 
-const LEGACY_INVENTORY_PATH = "scripts/source-file-length-legacy.json"
+/** The stable legacy-debt policy this ratchet reads and blames edits to. */
+pub const LEGACY_INVENTORY_PATH = "scripts/source-file-length-legacy.json"
 
 const LEGACY_INVENTORY_VERSION = 1
 
@@ -48,7 +49,8 @@ pub type SourceLengthFindingKind = "invalid_legacy_inventory" \
   | "growth" \
   | "unscanned_source" \
   | "base_unavailable" \
-  | "reconciliation_unavailable"
+  | "reconciliation_unavailable" \
+  | "change_set_unavailable"
 
 pub type SourceLengthFinding = {
   kind: SourceLengthFindingKind,
@@ -56,6 +58,11 @@ pub type SourceLengthFinding = {
   actual?: int,
   ceiling?: int,
   message: string,
+  /**
+   * Whether this run refuses over the finding. Absent means blocking: a
+   * finding that never reached the blame step must not read as tolerated.
+   */
+  blocking?: bool,
 }
 
 pub type SourceLengthReport = {
@@ -66,6 +73,10 @@ pub type SourceLengthReport = {
   oversized_count: int,
   comparison: string,
   base_revision?: string,
+  /** Findings this run refuses over, because the change set introduced them. */
+  blocking_count: int,
+  /** Findings main already carried into the change set; reported, never fatal. */
+  carried_count: int,
   findings: list<SourceLengthFinding>,
 }
 
@@ -832,6 +843,83 @@ pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<s
   return missing.sorted()
 }
 
+/** Kinds that report an instrument failure and must refuse regardless of blame. */
+const INSTRUMENT_FINDING_KINDS: list<string> = [
+  "base_unavailable",
+  "change_set_unavailable",
+  "reconciliation_unavailable",
+]
+
+/**
+ * Paths the change set under review added, deleted, or rewrote, plus whether
+ * git could answer.
+ *
+ * `--no-renames` keeps both sides of a rename: a rename is a deletion the
+ * ratchet must stop tracking and an addition it must start blaming, and
+ * rename detection reports only the destination.
+ */
+fn changed_source_paths(process: HarnessProcess, root: string, revision: string) -> dict {
+  const result = process.run(
+    {program: "git", args: ["-C", root, "diff", "--name-only", "--no-renames", revision, "HEAD"]},
+  )
+  if !result.success {
+    return {
+      ok: false,
+      paths: [],
+      error: git_failure(result, "list paths changed since " + revision),
+    }
+  }
+  let paths: list<string> = []
+  for line in result.stdout.lines() {
+    const path = line.trim()
+    if path != "" {
+      paths = paths.appending(normalize_source_path(path))
+    }
+  }
+  return {ok: true, paths: paths, error: ""}
+}
+
+/**
+ * Stamp each finding with whether this change set is answerable for it.
+ *
+ * The cap comparison is against a constant, not against the base, so a file
+ * main already carries over the cap fails every later merge commit that never
+ * touched it. That misattribution is the whole reason the ratchet reads as
+ * flaky, and the workaround it invites — trim a few comment lines on an
+ * unrelated pull request — leaves the oversized file exactly as oversized.
+ *
+ * Blame the change set for the paths it actually touched, report the rest, and
+ * keep instrument failures and a malformed policy fatal so a question this
+ * check could not answer never reads as a pass.
+ */
+pub fn blame_findings(
+  findings: list<SourceLengthFinding>,
+  changed_paths: list<string>,
+  change_set_known: bool,
+) -> list<SourceLengthFinding> {
+  const inventory_changed = changed_paths.contains(LEGACY_INVENTORY_PATH)
+  let blamed: list<SourceLengthFinding> = []
+  for finding in findings {
+    const blocking = !change_set_known
+      || INSTRUMENT_FINDING_KINDS.contains(to_string(finding.kind))
+      || finding.path == LEGACY_INVENTORY_PATH
+      || inventory_changed
+      || changed_paths.contains(finding.path)
+    blamed = blamed.appending({...finding, blocking: blocking})
+  }
+  return blamed
+}
+
+/** Findings this run refuses over. An unstamped finding blocks. */
+pub fn blocking_findings(findings: list<SourceLengthFinding>) -> list<SourceLengthFinding> {
+  return findings.filter({ finding -> finding.blocking ?? true }).to_list()
+}
+
+/** Findings the change set inherited rather than introduced. */
+pub fn carried_findings(findings: list<SourceLengthFinding>) -> list<SourceLengthFinding> {
+  return findings.filter({ finding -> !(finding.blocking ?? true) }).to_list()
+}
+
 pub fn check_source_file_lengths(
   harness: Harness,
   root: string = "",
@@ -925,6 +1013,30 @@ pub fn check_source_file_lengths(
       },
     )
   }
+  // Blame runs last so it sees every finding, including the instrument
+  // failures above. A change set the check cannot read is not an empty change
+  // set: it makes every finding blocking rather than tolerating all of them.
+  const changed = if base.ok {
+    changed_source_paths(harness.process, resolved_root, base.revision)
+  } else {
+    {ok: false, paths: [], error: base.error}
+  }
+  if base.ok && !changed.ok {
+    findings = findings.appending(
+      {
+        kind: "change_set_unavailable",
+        path: resolved_root,
+        message: "git could not list the paths this change set touched, so every finding is "
+          + "attributed to it: "
+          + to_string(changed.error ?? ""),
+      },
+    )
+  }
+  const blamed = blame_findings(
+    findings.sorted_by({ finding -> finding.path + ":" + finding.kind }),
+    changed.paths,
+    base.ok && changed.ok,
+  )
   return {
     root: resolved_root,
     max_lines: MAX_LINES,
@@ -937,33 +1049,63 @@ pub fn check_source_file_lengths(
     } else {
       nil
     },
-    findings: findings.sorted_by({ finding -> finding.path + ":" + finding.kind }),
+    blocking_count: blocking_findings(blamed).count,
+    carried_count: carried_findings(blamed).count,
+    findings: blamed,
   }
 }
 
+fn finding_detail(finding: SourceLengthFinding) -> string {
+  let detail = finding.path + ": " + finding.kind
+  if finding.actual != nil {
+    detail = detail + " actual=" + to_string(finding.actual)
+  }
+  if finding.ceiling != nil {
+    detail = detail + " ceiling=" + to_string(finding.ceiling)
+  }
+  return detail + " — " + finding.message
+}
+
+/**
+ * Name the files, never only the count.
+ *
+ * This text is what a check-run summary shows, so a red has to say which file
+ * and how many lines without opening a job log.
+ */
 fn render_report(report: SourceLengthReport) -> string {
-  if report.findings.count == 0 {
-    return "source file-length ratchet passed: ${report.source_count} source file(s), "
-      + "${report.legacy_count} legacy path(s), ${report.max_lines}-line cap, "
-      + "${report.comparison} ${report.base_revision}"
-  }
-  let lines = ["source file-length ratchet failed: ${report.findings.count} violation(s)", ""]
-  for finding in report.findings {
-    let detail = finding.path + ": " + finding.kind
-    if finding.actual != nil {
-      detail = detail + " actual=" + to_string(finding.actual)
-    }
-    if finding.ceiling != nil {
-      detail = detail + " ceiling=" + to_string(finding.ceiling)
-    }
-    lines = lines + [detail + " — " + finding.message]
-  }
-  lines = lines
-    + [
-      "",
-      "Split oversized files. Shrinkage automatically becomes the next merge-base ceiling.",
-      "Remove a path from the stable legacy inventory only after it reaches the 1,500-line cap.",
+  const blocking = blocking_findings(report.findings)
+  const carried = carried_findings(report.findings)
+  let lines: list<string> = []
+  if blocking.count == 0 {
+    lines = [
+      "source file-length ratchet passed: ${report.source_count} source file(s), "
+        + "${report.legacy_count} legacy path(s), ${report.max_lines}-line cap, "
+        + "${report.comparison} ${report.base_revision}",
     ]
+  } else {
+    lines = [
+      "source file-length ratchet failed: ${blocking.count} violation(s) this change introduced",
+      "",
+    ]
+    for finding in blocking {
+      lines = lines + [finding_detail(finding)]
+    }
+    lines = lines
+      + [
+        "",
+        "Split oversized files. Shrinkage automatically becomes the next merge-base ceiling.",
+        "Remove a path from the stable legacy inventory only after it reaches the ${report.max_lines}-line cap.",
+      ]
+  }
+  if carried.count > 0 {
+    lines = lines
+      + ["", "${carried.count} finding(s) this change did not introduce (reported, not fatal):"]
+    for finding in carried {
+      lines = lines + [finding_detail(finding)]
+    }
+    lines = lines
+      + ["", "Fix these where they were introduced; they do not block this change."]
+  }
   return join(lines, "\n")
 }
 
@@ -1009,7 +1151,7 @@ fn main(harness: Harness) {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
     const rendered = render_report(report)
-    if report.findings.count == 0 {
+    if report.blocking_count == 0 {
       harness.stdio.println(rendered)
     } else {
       harness.stdio.eprintln(rendered)
@@ -1022,7 +1164,7 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(empty_scan)
     harness.runtime.exit(1)
   }
-  if report.findings.count > 0 {
+  if report.blocking_count > 0 {
     harness.runtime.exit(1)
   }
   return nil
