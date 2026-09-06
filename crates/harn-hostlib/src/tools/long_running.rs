@@ -669,7 +669,8 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let timed_out = cancelled && cancellation.timed_out;
     let process_cleanup = cancellation.process_cleanup;
 
-    let sandbox_signal = status.is_some_and(|status| proc::is_sandbox_signal(status.signal));
+    let sandbox_signal = status
+        .is_some_and(|status| harn_vm::process_sandbox::is_process_sandbox_signal(status.signal));
     let (exit_code, signal_name) = match status {
         Some(status) => decode_exit_status(status),
         // wait() itself failed — treat as killed (extremely unusual).

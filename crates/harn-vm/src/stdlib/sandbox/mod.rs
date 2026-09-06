@@ -110,13 +110,13 @@ mod replace;
 pub(crate) use refusal::mechanism_skipped_warning;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use refusal::unavailable;
-pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 pub use refusal::{
-    process_violation_error, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
-    ProcessSandboxOperation, ProcessSandboxRefusal, ProcessSandboxReportingContext,
-    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
-    SandboxRequirement,
+    is_process_sandbox_signal, process_violation_error, ProcessSandboxAssessment,
+    ProcessSandboxDenialReporting, ProcessSandboxOperation, ProcessSandboxRefusal,
+    ProcessSandboxReportingContext, SandboxMechanism, SandboxMechanismAvailability,
+    SandboxMechanismUnavailable, SandboxRequirement,
 };
+pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
 #[cfg(target_os = "windows")]
@@ -1458,10 +1458,7 @@ pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
 fn sandbox_signal_status(output: &std::process::Output) -> bool {
     use std::os::unix::process::ExitStatusExt;
 
-    matches!(
-        output.status.signal(),
-        Some(libc::SIGSYS) | Some(libc::SIGABRT) | Some(libc::SIGKILL)
-    )
+    is_process_sandbox_signal(output.status.signal())
 }
 
 #[cfg(not(unix))]

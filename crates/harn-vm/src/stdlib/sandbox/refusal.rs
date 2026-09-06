@@ -95,6 +95,22 @@ impl ProcessSandboxOperation {
     }
 }
 
+/// Whether an OS exit signal is one of the signals a process sandbox may use
+/// for a mid-run refusal. Both `std::process` and hostlib's process adapter
+/// project their platform-specific exit status through this one classifier.
+#[cfg(unix)]
+pub fn is_process_sandbox_signal(signal: Option<i32>) -> bool {
+    matches!(
+        signal,
+        Some(libc::SIGSYS) | Some(libc::SIGABRT) | Some(libc::SIGKILL)
+    )
+}
+
+#[cfg(not(unix))]
+pub fn is_process_sandbox_signal(_signal: Option<i32>) -> bool {
+    false
+}
+
 /// A typed child-process sandbox refusal.
 ///
 /// Replaces reading the identity back out of an error message string. The
@@ -221,17 +237,9 @@ pub struct ProcessSandboxReportingContext {
 
 impl ProcessSandboxReportingContext {
     pub fn current() -> Self {
-        let reporting = match crate::orchestration::current_execution_policy() {
-            Some(policy)
-                if policy.sandbox_profile.confines_processes()
-                    && effective_fallback(policy.sandbox_profile) != SandboxFallback::Off =>
-            {
-                if ActiveBackend::available() {
-                    ProcessSandboxDenialReporting::InferredOnly
-                } else {
-                    ProcessSandboxDenialReporting::BackendUnavailable
-                }
-            }
+        let reporting = match super::active_sandbox_policy() {
+            Some(_) if ActiveBackend::available() => ProcessSandboxDenialReporting::InferredOnly,
+            Some(_) => ProcessSandboxDenialReporting::BackendUnavailable,
             _ => ProcessSandboxDenialReporting::NotEnforced,
         };
         Self {
@@ -251,15 +259,19 @@ impl ProcessSandboxReportingContext {
     ) -> ProcessSandboxAssessment {
         let stderr_lower = String::from_utf8_lossy(stderr).to_ascii_lowercase();
         let stdout_lower = String::from_utf8_lossy(stdout).to_ascii_lowercase();
-        let permission_errno = !success
-            && (stderr_lower.contains("operation not permitted")
-                || stderr_lower.contains("permission denied")
-                || stderr_lower.contains("access is denied")
-                || stdout_lower.contains("operation not permitted"));
+        let stderr_permission = stderr_lower.contains("operation not permitted")
+            || stderr_lower.contains("permission denied")
+            || stderr_lower.contains("access is denied");
+        let stdout_permission = stdout_lower.contains("operation not permitted");
+        let permission_errno = !success && (stderr_permission || stdout_permission);
         let refusal = (self.reporting == ProcessSandboxDenialReporting::InferredOnly
             && (permission_errno || sandbox_signal))
             .then(|| {
-                let evidence = if stderr.is_empty() { stdout } else { stderr };
+                let evidence = if stderr_permission || (!stdout_permission && !stderr.is_empty()) {
+                    stderr
+                } else {
+                    stdout
+                };
                 ProcessSandboxRefusal::inferred(
                     self.backend.clone(),
                     command.to_vec(),

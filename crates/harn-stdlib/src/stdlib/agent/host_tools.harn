@@ -671,6 +671,17 @@ fn __agent_host_wait_command_request(args: dict, tool_name: string, timeout_ms: 
   return req
 }
 
+fn __agent_host_wait_command_result(
+  tools: HarnessTools,
+  args: dict,
+  options: dict?,
+  tool_name: string,
+  timeout_ms: any,
+) {
+  const done = tools.wait_command(__agent_host_wait_command_request(args, tool_name, timeout_ms))
+  return agent_tool_handler_result_normalize(__agent_host_render(done, options, tool_name), done)
+}
+
 fn __agent_host_cancel_command_request(args: dict) {
   let req = {handle_id: __agent_host_command_handle_id(args, "kill_command")}
   if args?.wait_result_ms != nil {
@@ -1037,13 +1048,7 @@ pub fn agent_command_tools(
           },
           returns: {type: "object"},
           annotations: __agent_host_handle_annotations(opts, key),
-          handler: { args ->
-            __agent_host_render(
-              harness.tools.wait_command(__agent_host_wait_command_request(args, key, 0)),
-              opts,
-              key,
-            )
-          },
+          handler: { args -> __agent_host_wait_command_result(harness.tools, args, opts, key, 0) },
         },
       ),
     )
@@ -1071,16 +1076,12 @@ pub fn agent_command_tools(
           returns: {type: "object"},
           annotations: __agent_host_handle_annotations(opts, key),
           handler: { args ->
-            __agent_host_render(
-              harness.tools.wait_command(
-                __agent_host_wait_command_request(
-                  args,
-                  key,
-                  args?.timeout_ms ?? opts?.wait_command_timeout_ms ?? 60000,
-                ),
-              ),
+            __agent_host_wait_command_result(
+              harness.tools,
+              args,
               opts,
               key,
+              args?.timeout_ms ?? opts?.wait_command_timeout_ms ?? 60000,
             )
           },
         },

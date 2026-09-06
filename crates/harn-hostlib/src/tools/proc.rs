@@ -257,7 +257,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         mut process_cleanup,
     ) = match outcome {
         process_handle::WaitOutcome::Exited(status) => {
-            let sandbox_signal = is_sandbox_signal(status.signal);
+            let sandbox_signal = harn_vm::process_sandbox::is_process_sandbox_signal(status.signal);
             let (exit_code, signal) = decode_status(status);
             (
                 CommandStatus::Completed,
@@ -878,19 +878,6 @@ fn decode_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {
     } else {
         (-1, None)
     }
-}
-
-#[cfg(unix)]
-pub(crate) fn is_sandbox_signal(signal: Option<i32>) -> bool {
-    matches!(
-        signal,
-        Some(libc::SIGSYS) | Some(libc::SIGABRT) | Some(libc::SIGKILL)
-    )
-}
-
-#[cfg(not(unix))]
-pub(crate) fn is_sandbox_signal(_signal: Option<i32>) -> bool {
-    false
 }
 
 fn format_signal(sig: i32) -> String {
