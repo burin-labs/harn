@@ -5,6 +5,23 @@ import {
   runtime_plan,
 } from "../../crates/harn-stdlib/src/stdlib/runtime/install.harn"
 
+/**
+ * The fields this test reads back from the `resolve` receipt. Declaring the
+ * shape validates the parsed payload where it is bound, so a receipt that
+ * drops a field or changes its type fails by name instead of surfacing later
+ * as a comparison against nil.
+ */
+type ResolveReceipt = {version: string, asset: string}
+
+/** The fields this test reads back from the `install` receipt. */
+type InstallReceipt = {
+  schema_version: string,
+  version: string,
+  checksum: string,
+  cache_hit: bool,
+  binary_path: string,
+}
+
 fn fixture(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("runtime-install-")
   const platform = harness.system.platform()
@@ -97,7 +114,7 @@ pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
     },
   )
   assert(resolved.success, resolved.stderr ?? "bootstrap resolve failed")
-  const resolved_receipt = json_parse(trim(resolved.stdout ?? ""))
+  const resolved_receipt: ResolveReceipt = json_parse(trim(resolved.stdout ?? ""))
   assert_eq(resolved_receipt.version, f.request.version)
   assert_eq(resolved_receipt.asset, f.plan.asset)
   const resolve_outputs = harness.fs.read_text(output)
@@ -117,7 +134,7 @@ pipeline bootstrap_cli_projects_resolve_install_and_action_outputs(
     },
   )
   assert(installed.success, installed.stderr ?? "bootstrap install failed")
-  const receipt = json_parse(trim(installed.stdout ?? ""))
+  const receipt: InstallReceipt = json_parse(trim(installed.stdout ?? ""))
   assert_eq(receipt.schema_version, "harn-bootstrap-v1")
   assert_eq(receipt.version, f.request.version)
   assert_eq(receipt.checksum, f.checksum)
