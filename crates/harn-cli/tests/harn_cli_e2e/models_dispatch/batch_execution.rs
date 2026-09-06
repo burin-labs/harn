@@ -129,7 +129,9 @@ fn run_rejoin(execution_dir: &std::path::Path, manifest: &std::path::Path, case:
 }
 
 #[test]
-fn durable_fixture_execution_rejoins_every_supported_wire_family() {
+pub(crate) fn rejoin_cli_quarantines_an_artifact_without_matching_receipts() {
+    // Establish a valid rejoin for every wire family before tampering with the
+    // same durable execution. One fixture proves both acceptance and rejection.
     let tmp = tempfile::tempdir().expect("tempdir");
     let requests = tmp.path().join("requests.jsonl");
     let execution = tmp.path().join("execution");
@@ -201,37 +203,30 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
     assert!(receipt["rawArtifacts"]
         .as_array()
         .is_some_and(|artifacts| artifacts.len() == 7));
-}
-
-#[test]
-pub(crate) fn rejoin_cli_quarantines_an_artifact_without_matching_receipts() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let requests = tmp.path().join("requests.jsonl");
-    let execution_dir = tmp.path().join("execution");
-    initialize(&requests, &execution_dir);
-    advance(&execution_dir);
-    advance(&execution_dir);
-    assert_eq!(
-        success_data(&advance(&execution_dir))["phase"],
-        "downloaded"
-    );
-
-    let manifest_path = execution_dir.join("manifest.json");
+    let manifest_path = execution.join("manifest.json");
     let download: Value = serde_json::from_slice(
-        &fs::read(execution_dir.join("results/receipt.json")).expect("read download"),
+        &fs::read(execution.join("results/receipt.json")).expect("read download"),
     )
     .expect("parse download");
     let (_, artifact_path) = result_artifact(&download);
-    fs::write(artifact_path, b"changed without receipt update\n").expect("change raw artifact");
-    let changed = run_rejoin(&execution_dir, &manifest_path, "changed-artifact");
+    // Preserve valid provider JSON so a parser failure cannot impersonate the
+    // provenance check. Only the bytes covered by the recorded hash change.
+    let mut artifact = fs::read(artifact_path).expect("read raw artifact");
+    artifact.extend_from_slice(b"\n");
+    fs::write(artifact_path, artifact).expect("change raw artifact");
+    let changed = run_rejoin(&execution, &manifest_path, "changed-artifact");
     assert_eq!(changed["consumable"], false);
     assert_eq!(
         changed["quarantine"]["reasons"],
         serde_json::json!(["missing_results", "lineage_or_artifact_errors"])
     );
-    assert!(changed["errors"]
-        .as_array()
-        .is_some_and(|errors| !errors.is_empty()));
+    let hash_mismatch = format!("result_artifact_hash_mismatch: {artifact_path}");
+    assert!(
+        changed["errors"].as_array().is_some_and(|errors| errors
+            .iter()
+            .any(|error| error.as_str() == Some(hash_mismatch.as_str()))),
+        "the raw-artifact hash check did not fire: {changed}"
+    );
 }
 
 #[test]

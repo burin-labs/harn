@@ -5,6 +5,13 @@ import {
   producer_hosted_ceiling_minutes,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
+import {
+  HOST_BOUND_RUST_TEST_FILTER_COMMAND,
+  HOST_BOUND_RUST_TEST_FILTER_FLAG,
+  HOST_BOUND_RUST_TEST_FILTER_SETUP,
+  HOST_BOUND_RUST_TEST_FILTER_SOURCE,
+  NEUTRAL_RUST_TEST_FILTER_FLAG,
+} from "../ci_cache_policy/host_bound_rust_test_filter"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -170,8 +177,6 @@ fn elastic_lane(cache_key: string) {
 }
 
 fn workflow() {
-  const host_bound_filter =
-    "test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root) or test(a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling) or test(a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read)"
   const package_audit = hosted_lane("package-audit", true)
   const lint = elastic_lane("workspace-tests")
   const producer = persistent_lane(
@@ -196,7 +201,7 @@ fn workflow() {
       {
         name: "Run Rust workspace tests",
         run:
-          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace -E 'not (${host_bound_filter})'",
+          "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
       },
     ],
   }
@@ -237,7 +242,7 @@ fn workflow() {
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
               env: {HARN_LLM_CALLS_DISABLED: "1"},
               run:
-                "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (${host_bound_filter})'",
+                "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
             },
           ],
       },
@@ -327,7 +332,7 @@ fn workflow() {
             name: "Run Linux sandbox tests",
             id: "release-audit-rust-security",
             run:
-              "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace -E '${host_bound_filter}'",
+              "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace ${HOST_BOUND_RUST_TEST_FILTER_FLAG}",
           },
         ],
       },
@@ -910,6 +915,72 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(
   assert(
     errors.contains(
       "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 65-minute hosted ceiling sized from its step budgets plus a cache-save reserve",
+    ),
+  )
+}
+
+@test
+pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness, task: unknown) {
+  const root = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const test_names = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_SOURCE))
+    .split("\n")
+    .filter({ name -> trim(name) != "" })
+    .to_list()
+  assert_eq(test_names.count, 9)
+  const rendered = harness.process.run(
+    {program: path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND), args: []},
+  )
+  assert_eq(rendered.exit_code, 0)
+  assert_eq(
+    trim(rendered.stdout),
+    test_names.map({ name -> "test(${name})" }).to_list().join(" or "),
+  )
+  const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
+  assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
+  for projection in [
+    {path: ".github/workflows/ci.yml", references: 3},
+    {path: "scripts/release_audit_contract.json", references: 2},
+    {path: "scripts/release_gate.sh", references: 1},
+    {path: "scripts/ci/warm_rust_cache.sh", references: 1},
+    {path: "scripts/ci_cache_policy/host_bound_rust_test_filter.harn", references: 1},
+  ] {
+    const source = harness.fs.read_text(path_join(root, projection.path))
+    assert_eq(
+      source.split(HOST_BOUND_RUST_TEST_FILTER_COMMAND).count - 1,
+      projection.references,
+      projection.path + " must read the owned host-bound filter at every projection",
+    )
+    for test_name in test_names {
+      assert(
+        !source.contains("test(${test_name})"),
+        projection.path + " must not copy host-bound selector " + test_name,
+      )
+    }
+  }
+}
+
+@test
+pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness, task: unknown) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const unsafe = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.map(
+          { step ->
+            return {...step, run: to_string(step?.run ?? "").replace("set -euo pipefail; ", "")}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(unsafe).contains(
+      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
     ),
   )
 }

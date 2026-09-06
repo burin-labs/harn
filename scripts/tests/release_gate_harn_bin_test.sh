@@ -275,6 +275,7 @@ audit_root="$tmp_root/audit-root"
 mkdir -p \
   "$audit_root/scripts" \
   "$audit_root/scripts/ci" \
+  "$audit_root/scripts/config" \
   "$audit_root/docs/src" \
   "$audit_root/crates/harn-vm" \
   "$audit_root/crates/harn-cli" \
@@ -290,6 +291,8 @@ printf 'OAuth MCP trust boundary mutation session worker_update\n' > "$audit_roo
 printf 'spec\n' > "$audit_root/spec/HARN_SPEC.md"
 printf 'tag = "v1.2.3"\n' > "$audit_root/docs/src/embedding-rust.md"
 printf '{}\n' > "$audit_root/scripts/release_audit_contract.json"
+cp "$repo_root/scripts/ci/host_bound_rust_test_filter.sh" "$audit_root/scripts/ci/"
+cp "$repo_root/scripts/config/host-bound-rust-tests.txt" "$audit_root/scripts/config/"
 printf 'jobs: {}\n' > "$audit_root/.github/workflows/ci.yml"
 git -C "$audit_root" init -q
 git -C "$audit_root" config user.email test@example.com
@@ -596,15 +599,7 @@ do
   fi
 done
 
-expected_host_bound_filter="$(node -e '
-  const fs = require("node:fs")
-  const contract = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
-  const job = contract.merge_group_jobs.find((entry) => entry.job_id === "rust-check-inputs")
-  const command = job.steps.find((step) => step.id === "release-audit-rust-test").run
-  const match = command.match(/-E '\''not \((.*)\)'\''$/)
-  if (!match) process.exit(1)
-  process.stdout.write(match[1])
-' "$repo_root/scripts/release_audit_contract.json")"
+expected_host_bound_filter="$("$repo_root/scripts/ci/host_bound_rust_test_filter.sh")"
 HARN_RUNNER_TIER=blacksmith run_audit blacksmith --source-only
 expected_make="make test ARGS=--workspace -E 'not ($expected_host_bound_filter)'"
 if ! grep -Fq "$expected_make" "$audit_record"; then
