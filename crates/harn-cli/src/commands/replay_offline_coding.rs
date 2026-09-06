@@ -1401,7 +1401,9 @@ fn main(harness: Harness) {
                     "signal": null,
                     "status": "completed",
                     "stderr": "",
+                    "stderr_truncated": false,
                     "stdout": "1:hello world\n",
+                    "stdout_truncated": false,
                     "timed_out": false
                 })),
                 exit_code: Some(0),

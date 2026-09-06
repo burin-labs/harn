@@ -705,7 +705,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             )
         }
     };
-    let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
+    let inline = proc::inline_output(&stdout, &stderr, capture);
     let sandbox_assessment = context.sandbox_reporting.assess_exit(
         exit_code == 0 && signal_name.is_none(),
         command_status == CommandStatus::Completed && sandbox_signal,
@@ -756,8 +756,16 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         serde_json::Value::Number(exit_code.into()),
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
-    payload.insert("stdout".into(), serde_json::Value::String(inline_stdout));
-    payload.insert("stderr".into(), serde_json::Value::String(inline_stderr));
+    payload.insert("stdout".into(), serde_json::Value::String(inline.stdout));
+    payload.insert(
+        "stdout_truncated".into(),
+        serde_json::Value::Bool(inline.stdout_truncated),
+    );
+    payload.insert("stderr".into(), serde_json::Value::String(inline.stderr));
+    payload.insert(
+        "stderr_truncated".into(),
+        serde_json::Value::Bool(inline.stderr_truncated),
+    );
     payload.insert(
         "sandbox".into(),
         crate::json::vm_dict_to_json(&proc::sandbox_response(sandbox_assessment.reporting)),
@@ -928,7 +936,7 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 max_inline_bytes: context.max_inline_bytes,
                 ..CaptureConfig::default()
             };
-            let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
+            let inline = proc::inline_output(&stdout, &stderr, capture);
             let byte_count = stdout.len().saturating_add(stderr.len());
             // Milliseconds since the last output chunk (or since spawn if the
             // command has produced nothing yet). The loop reads this to detect a
@@ -947,8 +955,10 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "duration_ms": context.started.elapsed().as_millis() as i64,
                 "exit_code": null,
                 "signal": null,
-                "stdout": inline_stdout,
-                "stderr": inline_stderr,
+                "stdout": inline.stdout,
+                "stdout_truncated": inline.stdout_truncated,
+                "stderr": inline.stderr,
+                "stderr_truncated": inline.stderr_truncated,
                 "output_path": to_agent_path(&context.output_path),
                 "stdout_path": to_agent_path(&context.stdout_path),
                 "stderr_path": to_agent_path(&context.stderr_path),

@@ -85,7 +85,12 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .nil("signal")
         .bool("timed_out", false)
         .str("stdout", "")
+        // A blocked command ran nothing, so neither stream was capped. The
+        // flags are on the envelope for every path that carries `stdout`, so a
+        // reader never has to know which builder produced the response.
+        .bool("stdout_truncated", false)
         .str("stderr", message.clone())
+        .bool("stderr_truncated", false)
         .str("output_path", "")
         .str("stdout_path", "")
         .str("stderr_path", "")
@@ -304,7 +309,7 @@ fn initial_background_snapshot(
         max_inline_bytes,
         ..super::proc::CaptureConfig::default()
     };
-    let (inline_stdout, inline_stderr) = super::proc::inline_output(&stdout, &stderr, capture);
+    let inline = super::proc::inline_output(&stdout, &stderr, capture);
     let line_count = stdout
         .iter()
         .chain(stderr.iter())
@@ -329,8 +334,16 @@ fn initial_background_snapshot(
         harn_vm::value::intern_key("duration_ms"),
         VmValue::Int(wait_ms as i64),
     );
-    response.put_str("stdout", inline_stdout);
-    response.put_str("stderr", inline_stderr);
+    response.put_str("stdout", inline.stdout);
+    response.insert(
+        harn_vm::value::intern_key("stdout_truncated"),
+        VmValue::Bool(inline.stdout_truncated),
+    );
+    response.put_str("stderr", inline.stderr);
+    response.insert(
+        harn_vm::value::intern_key("stderr_truncated"),
+        VmValue::Bool(inline.stderr_truncated),
+    );
     response.insert(
         harn_vm::value::intern_key("byte_count"),
         VmValue::Int(byte_count as i64),
