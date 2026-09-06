@@ -1,0 +1,25 @@
+[
+  {
+    "default": "false",
+    "evidence": "caller_transport.__normalize_llm_caller_transport defaults the capability to false; prefill.agent_prefill_eligibility requires it for an external LLM caller. Canonical runtime reachability remains unmeasured.",
+    "expiry": "2026-09-13",
+    "kind": "capability declaration",
+    "layer": "runner",
+    "name": "AgentSpec.llm_caller_transport.forwards_assistant_prefill",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/caller_transport.harn",
+        "line": 28,
+        "reader": "__normalize_llm_caller_transport"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+        "line": 89,
+        "reader": "agent_prefill_eligibility"
+      }
+    ],
+    "reason": "A caller must declare whether its transport preserves assistant prefill before the runner relies on that capability.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

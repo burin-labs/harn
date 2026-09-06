@@ -1,0 +1,101 @@
+[
+  {
+    "default": "system",
+    "evidence": "purpose_labels.agent_purpose_label_config selects the default delivery channel. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.delivery",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 112,
+        "reader": "agent_purpose_label_turn_nudge"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 127,
+        "reader": "agent_purpose_label_prefill"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 243,
+        "reader": "agent_purpose_label_extract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 98,
+        "reader": "agent_purpose_label_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 150,
+        "reader": "agent_purpose_label_prompt_fragment"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false when omitted; true for a supplied configuration object",
+    "evidence": "purpose_labels.agent_purpose_label_config distinguishes an absent configuration from an explicit object. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 112,
+        "reader": "agent_purpose_label_turn_nudge"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 127,
+        "reader": "agent_purpose_label_prefill"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 150,
+        "reader": "agent_purpose_label_prompt_fragment"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 236,
+        "reader": "agent_purpose_label_extract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "64",
+    "evidence": "purpose_labels.agent_purpose_label_config uses PURPOSE_LABEL_DEFAULT_MAX_CHARS. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "PurposeLabelConfig.max_chars",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 262,
+        "reader": "agent_purpose_label_extract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 97,
+        "reader": "agent_purpose_label_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
+        "line": 174,
+        "reader": "__purpose_label_instruction"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

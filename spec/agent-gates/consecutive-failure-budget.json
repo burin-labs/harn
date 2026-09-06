@@ -1,0 +1,61 @@
+[
+  {
+    "default": "transient, rate_limit, provider_5xx",
+    "evidence": "options_validation.__normalize_consecutive_failure_budget supplies these transient failure classes. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ConsecutiveFailureBudget.kinds",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 277,
+        "reader": "__normalize_consecutive_failure_budget"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "required when consecutive_failures is configured",
+    "evidence": "options_validation.__normalize_consecutive_failure_budget rejects a configured object without max. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ConsecutiveFailureBudget.max",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 269,
+        "reader": "__normalize_consecutive_failure_budget"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 273,
+        "reader": "__normalize_consecutive_failure_budget"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0",
+    "evidence": "options_validation.__normalize_consecutive_failure_budget supplies a zero pause duration. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ConsecutiveFailureBudget.paused_for_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 294,
+        "reader": "__normalize_consecutive_failure_budget"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

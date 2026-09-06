@@ -1,0 +1,1865 @@
+[
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.anthropic_beta_features",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 142,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.api_mode",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 92,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.audio",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 144,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.background",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 165,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.budget",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 157,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+        "line": 2,
+        "reader": "__budget_envelope"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.cache",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 155,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.call_role",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 103,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 181,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 272,
+        "reader": "__agent_loop_effective_llm_options"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.capabilities",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 107,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.compact",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 167,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.context_profile",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 106,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 657,
+        "reader": "__agent_context_profile_fragments"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 643,
+        "reader": "__with_prompt_fragment"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 642,
+        "reader": "__with_prompt_fragment"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 221,
+        "reader": "__context_profile"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.data_controls",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 171,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.effort",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 137,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.frequency_penalty",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 125,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 269,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 243,
+        "reader": "opt_float"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.history",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.idle_timeout_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 160,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 308,
+        "reader": "opt_int"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.include",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 168,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 807,
+        "reader": "opt_str_list"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.interleaved_thinking",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 141,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.logit_bias",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 116,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.logprobs",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 115,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback 0; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 111,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 262,
+        "reader": "super::helpers::opt_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 227,
+        "reader": "opt_int"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 225,
+        "reader": "__invoke_llm_with_autocontinue"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 361,
+        "reader": "__run_structural_validator"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_tool_calls",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 169,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 808,
+        "reader": "opt_int"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.messages",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 101,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 61,
+        "reader": "__dispatch_request_has_payload"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.metadata",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 175,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.min_p",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 117,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 235,
+        "reader": "opt_float"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.mirostat",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 121,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.mock_scope",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 105,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 182,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 272,
+        "reader": "__agent_loop_effective_llm_options"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.operation_timeout_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 159,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.output",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 129,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 138,
+        "reader": "__dispatch_structured_output_schema"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 158,
+        "reader": "__agent_loop_output_contract"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.parallel_tool_calls",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 127,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.pdf",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 145,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prediction",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 119,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prefill",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 108,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+        "line": 44,
+        "reader": "agent_take_one_shot_prefill"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.presence_penalty",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 126,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 271,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 245,
+        "reader": "opt_float"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.previous_response_id",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 109,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 801,
+        "reader": "opt_str"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prompt_cache_ttl",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 156,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.provider_options",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 173,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.provider_tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 149,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_policy",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 345,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 138,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_scale",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 346,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 139,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.reasoning_task",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 347,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 140,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.repair",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 134,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.repetition_penalty",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 118,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 236,
+        "reader": "opt_float"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.retries",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 132,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.schema_recover",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 133,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0 for tool_using profile; options_formats.harn:15 owns other profiles",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.schema_retries",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 130,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 579,
+        "reader": "helpers::opt_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 749,
+        "reader": "helpers::opt_int"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.schema_retry_nudge",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 131,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.seed",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 124,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 241,
+        "reader": "opt_int"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.session_id",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 102,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_host_primitives.rs",
+        "line": 807,
+        "reader": "agent_primitive_option_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 52,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 171,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 117,
+        "reader": "__dispatch_emit_call_start"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 266,
+        "reader": "__dispatch_invoke_once"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 252,
+        "reader": "__dispatch_invoke_once"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 280,
+        "reader": "__tool_batch_emit_receipt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 218,
+        "reader": "__tool_batch_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 238,
+        "reader": "__tool_envelope"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.speed",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 162,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 867,
+        "reader": "opt_str"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.stop",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 122,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 240,
+        "reader": "opt_str_list"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.stop_at_tool_call",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 123,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 1098,
+        "reader": "opt_bool"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.store",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 164,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.stream",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 161,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.structural_experiment",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 177,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.system",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 100,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 680,
+        "reader": "__agent_primary_system_text"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 681,
+        "reader": "__agent_primary_system_text"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 609,
+        "reader": "__agent_has_system_prompt_options"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.temperature",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 112,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 266,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 230,
+        "reader": "opt_float"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.thinking",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 136,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.timeout_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 158,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 307,
+        "reader": "opt_int"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.tool_choice",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 150,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.tool_format",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 152,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_config.rs",
+        "line": 510,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 151,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/call.rs",
+        "line": 754,
+        "reader": "helpers::opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 488,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 129,
+        "reader": "__dispatch_emit_call_start"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 183,
+        "reader": "__autocontinue_should_continue"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "line": 58,
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1260,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 46,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 1344,
+        "reader": "__detect_native_fallback"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 359,
+        "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 1209,
+        "reader": "agent_direct_llm_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 931,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 913,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 1130,
+        "reader": "__agent_loop_prepare_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 107,
+        "reader": "__explicit_tool_format"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 497,
+        "reader": "__capability_gap_event"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
+        "line": 110,
+        "reader": "__explicit_tool_format"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 37,
+        "reader": "agent_refresh_tool_format_for_route"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 18,
+        "reader": "__native_tools_complete_naturally"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 202,
+        "reader": "__native_completion_context"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 918,
+        "reader": "agent_extract_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 1065,
+        "reader": "agent_compute_post_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 326,
+        "reader": "__text_family_toolless_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 491,
+        "reader": "__classify_missing_tool_call"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn",
+        "line": 197,
+        "reader": "agent_collapse_duplicate_read_calls"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.tool_search",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 151,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 91,
+        "reader": "__tool_search_client_requested"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 269,
+        "reader": "__tool_search_initial_state"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 148,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 149,
+        "reader": "agent_completion_claim_apply_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+        "line": 48,
+        "reader": "__judge_tool_entries"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+        "line": 54,
+        "reader": "agent_loop"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
+        "line": 183,
+        "reader": "__autocontinue_should_continue"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1251,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 259,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 913,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 206,
+        "reader": "__agent_loop_next_tool_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 201,
+        "reader": "__agent_loop_next_tool_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 929,
+        "reader": "__parse_feedback_has_non_structural_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 352,
+        "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_projection.harn",
+        "line": 62,
+        "reader": "agent_loop_turn_projection"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 930,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 89,
+        "reader": "__mcp_admit_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 355,
+        "reader": "agent_monologue_actuation_take_for_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 37,
+        "reader": "agent_refresh_tool_format_for_route"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 18,
+        "reader": "__native_tools_complete_naturally"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 474,
+        "reader": "__classify_missing_tool_call"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 911,
+        "reader": "agent_extract_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 202,
+        "reader": "__native_completion_context"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 917,
+        "reader": "agent_extract_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 1060,
+        "reader": "agent_compute_post_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 722,
+        "reader": "__maybe_inject_action_nudge"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 236,
+        "reader": "agent_has_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 399,
+        "reader": "__agent_text_tool_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 404,
+        "reader": "__agent_text_tool_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 767,
+        "reader": "agent_build_turn_system_fragments"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 773,
+        "reader": "agent_build_turn_system_fragments"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 300,
+        "reader": "__agent_json_tool_contract_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/progress.harn",
+        "line": 405,
+        "reader": "agent_progress_apply_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 164,
+        "reader": "__with_load_skill_tool"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 732,
+        "reader": "__skill_scoped_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 226,
+        "reader": "__served_tool_groups"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 730,
+        "reader": "__skill_scoped_tools"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 224,
+        "reader": "__stance_register_escape_tool"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 316,
+        "reader": "agent_stance_apply"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 319,
+        "reader": "agent_stance_apply"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 270,
+        "reader": "__tool_search_initial_state"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 292,
+        "reader": "__tool_search_initial_state"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 295,
+        "reader": "__tool_search_initial_state"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 14,
+        "reader": "__tool_surface_current_entries"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 92,
+        "reader": "__tool_surface_claim_authority"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 504,
+        "reader": "agent_apply_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 517,
+        "reader": "agent_apply_tool_surface_narrowing"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.top_k",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 114,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 268,
+        "reader": "super::helpers::opt_int"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 232,
+        "reader": "opt_int"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.top_p",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 113,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/cache.rs",
+        "line": 267,
+        "reader": "super::helpers::opt_float"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 231,
+        "reader": "opt_float"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.truncation",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 166,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 805,
+        "reader": "opt_str"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.verbosity",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 120,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.video",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 146,
+        "reader": "model-registry-key-domain"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.vision",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 143,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 422,
+        "reader": "opt_bool"
+      }
+    ],
+    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

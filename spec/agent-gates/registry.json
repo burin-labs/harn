@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "name_aliases": {
+    "AgentSpec._llm_caller_transport": "AgentSpec.llm_caller_transport",
+    "AgentSpec._llm_retry": "AgentSpec.llm_retry",
+    "AgentSpec._input_guardrail": "AgentSpec.input_guardrail",
+    "AgentSpec._pre_turn_scope_classifier": "AgentSpec.pre_turn_scope_classifier",
+    "AgentSpec._done_sentinel": "AgentSpec.done_sentinel",
+    "AgentSpec.max_retries": "RateLimitOptions.max_retries",
+    "AgentSpec.backoff_ms": "RateLimitOptions.backoff_ms",
+    "AgentSpec._structural_validator": "AgentSpec.structural_validator",
+    "AgentSpec.agent_await_resumption_enabled": "AgentLifecycleToolsOptions.agent_await_resumption_enabled",
+    "AgentSpec._tool_caller": "AgentSpec.tool_caller",
+    "AgentSpec._llm_caller": "AgentSpec.llm_caller",
+    "AgentSpec._max_concurrent_tools": "AgentSpec.max_concurrent_tools",
+    "AgentSpec._prefetch_next_turn": "AgentSpec.prefetch_next_turn",
+    "AgentSpec._intra_turn_resource_fail_fast": "AgentSpec.intra_turn_resource_fail_fast",
+    "AgentSpec._intra_turn_failure_fanout_cap": "AgentSpec.intra_turn_failure_fanout_cap",
+    "AgentSpec._stop_after_successful_tools": "AgentSpec.stop_after_successful_tools"
+  },
+  "name_prefixes": [
+    {"from": "AgentSpec._llm_caller_transport.", "to": "AgentSpec.llm_caller_transport."},
+    {"from": "AgentSpec._llm_retry.", "to": "AgentLoopRetryOptions."},
+    {"from": "AgentSpec.step_judge.", "to": "StepJudgeOptions."},
+    {"from": "AgentSpec.budget.", "to": "AgentBudget."},
+    {
+      "from": "AgentSpec.iteration_budget.consecutive_failures.",
+      "to": "ConsecutiveFailureBudget."
+    },
+    {
+      "from": "AgentSpec.iteration_budget.",
+      "to": "IterationBudget."
+    },
+    {
+      "from": "AgentSpec.turn_policy.",
+      "to": "TurnPolicy."
+    },
+    {
+      "from": "AgentSpec.missing_tool_call_recovery.",
+      "to": "MissingToolCallRecoveryOptions."
+    },
+    {
+      "from": "AgentSpec.stall_diagnostics.",
+      "to": "AgentStallConfig."
+    },
+    {
+      "from": "AgentSpec.verify_completion_judge.",
+      "to": "JudgeConfig."
+    },
+    {
+      "from": "AgentSpec.turn_end_condition.",
+      "to": "JudgeConfig."
+    },
+    {
+      "from": "AgentSpec.auto_compact.policy.",
+      "to": "CompactionPolicy."
+    },
+    {
+      "from": "AgentStallConfig.repair_diagnostics.",
+      "to": "AgentStallConfig."
+    },
+    {
+      "from": "AgentStallConfig.monologue_actuation.",
+      "to": "MonologueActuationConfig."
+    }
+  ],
+  "repo": "harn",
+  "entry_files": [
+    "spec/agent-gates/model-nested-options.json",
+    "spec/agent-gates/resume-routing-options.json",
+    "spec/agent-gates/skill-options.json",
+    "spec/agent-gates/compaction-options.json",
+    "spec/agent-gates/caller-transport-options.json",
+    "spec/agent-gates/agent-capability-spec.json",
+    "spec/agent-gates/agent-context-spec.json",
+    "spec/agent-gates/agent-execution-spec.json",
+    "spec/agent-gates/agent-lifecycle-spec.json",
+    "spec/agent-gates/agent-lifecycle-tools-options.json",
+    "spec/agent-gates/agent-loop-retry-options.json",
+    "spec/agent-gates/agent-model-spec.json",
+    "spec/agent-gates/agent-observability-spec.json",
+    "spec/agent-gates/agent-stall-config.json",
+    "spec/agent-gates/agent-stop-options.json",
+    "spec/agent-gates/command-wait-options.json",
+    "spec/agent-gates/compaction-policy.json",
+    "spec/agent-gates/completion-gate-options.json",
+    "spec/agent-gates/consecutive-failure-budget.json",
+    "spec/agent-gates/detector-spec.json",
+    "spec/agent-gates/harn_agent_tool_format.json",
+    "spec/agent-gates/harn_llm_model.json",
+    "spec/agent-gates/harn_llm_provider.json",
+    "spec/agent-gates/harn_try_max_iters.json",
+    "spec/agent-gates/harn_try_model.json",
+    "spec/agent-gates/harn_try_override_reason.json",
+    "spec/agent-gates/harn_try_provider.json",
+    "spec/agent-gates/harn_try_tool_format.json",
+    "spec/agent-gates/iteration-budget.json",
+    "spec/agent-gates/judge-config.json",
+    "spec/agent-gates/missing-tool-call-recovery-options.json",
+    "spec/agent-gates/model-policy-spec.json",
+    "spec/agent-gates/monologue-actuation-config.json",
+    "spec/agent-gates/purpose-label-config.json",
+    "spec/agent-gates/read-only-stance-options.json",
+    "spec/agent-gates/stage-spec.json",
+    "spec/agent-gates/tool-surface-narrowing-options.json",
+    "spec/agent-gates/turn-policy.json",
+    "spec/agent-gates/agent_done_contract.json",
+    "spec/agent-gates/autonomy_policy.json",
+    "spec/agent-gates/agent-model-routing.json",
+    "spec/agent-gates/agent-completion-policy.json",
+    "spec/agent-gates/nested-policy-options.json",
+    "spec/agent-gates/runtime-environment.json",
+    "spec/agent-gates/scratchpad-options.json",
+    "spec/agent-gates/completion-prompt-options.json",
+    "spec/agent-gates/step-judge-options.json",
+    "spec/agent-gates/agent-budget.json",
+    "spec/agent-gates/recovery-resource-options.json",
+    "spec/agent-gates/native-consumer-options.json",
+    "spec/agent-gates/judge-model-overrides.json"
+  ],
+  "scopes": [
+    {
+      "id": "native-budget-envelope", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/cost.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"fields\") (#eq? @method \"get\"))",
+      "prefix": "AgentBudget.", "key_form": "literal"
+    },
+    {
+      "id": "native-equivalent-failover", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/helpers/options/routing.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"dict\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.equivalent_failover.", "key_form": "literal"
+    },
+    {
+      "id": "native-system-replacement", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/helpers/options/system_prompt.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"spec\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.system.", "key_form": "literal"
+    },
+    {
+      "id": "native-model-step-identity", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/routing.rs", "language": "rust",
+      "query": "((call_expression function: (identifier) @helper arguments: (arguments . (string_literal) @key)) (#eq? @helper \"non_nil\"))",
+      "prefix": "AgentSpec.models[].", "key_form": "literal"
+    },
+    {
+      "id": "native-model-step-overrides", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/routing.rs", "language": "rust",
+      "query": "((call_expression function: (identifier) @helper arguments: (arguments . (call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)))) (#eq? @helper \"parse_ladder_step_overrides\") (#eq? @receiver \"dict\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.models[].", "key_form": "literal"
+    },
+    {
+      "id": "explicit-routing-key-domain", "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/llm/options.harn", "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (list_literal (string_literal) @key)) (#eq? @domain \"__LLM_EXPLICIT_ROUTING_KEYS\"))",
+      "prefix": "AgentSpec.", "key_form": "literal"
+    },
+    {
+      "id": "native-skill-match-options", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/skill_score.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"options\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.skill_match.", "key_form": "literal"
+    },
+    {
+      "id": "workflow-loop-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+      "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (list_literal (string_literal) @key)) (#eq? @domain \"loop_option_keys\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "model-registry-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-builtin-meta/src/llm_options.rs",
+      "language": "rust",
+      "query": "((const_item name: (identifier) @domain value: (reference_expression (array_expression (call_expression function: (scoped_identifier) @constructor arguments: (arguments . (string_literal) @key))))) (#eq? @domain \"LLM_CALL_OPTION_FIELDS\") (#eq? @constructor \"ShapeFieldDescriptor::optional\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "retry-destructured-options",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/llm/resilience.harn",
+      "language": "harn",
+      "query": "((fn_declaration name: (identifier) @owner (block (const_binding name: (dict_pattern (dict_pattern_field . (identifier) @key))))) (#eq? @owner \"with_retry\"))",
+      "prefix": "AgentLoopRetryOptions.",
+      "key_form": "field"
+    },
+    {
+      "id": "native-runner-option-helpers",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/**/*.rs",
+      "language": "rust",
+      "query": "((call_expression function: (_) @callee arguments: (arguments . (_) . (_) @key)) (#match? @callee \"(^|::)(opt_str|opt_int|opt_float|opt_bool|opt_json|opt_str_list|agent_primitive_option_str|agent_primitive_option_int|agent_primitive_option_bool)$\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-daemon-options",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/daemon.rs",
+      "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"options\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-reminder-options",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/reminder_providers.rs",
+      "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"options\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-reminder-policy",
+      "kind": "option",
+      "glob": "crates/harn-vm/src/llm/reminder_providers.rs",
+      "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments . (_) @key)) (#eq? @receiver \"reminders\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.reminders.",
+      "key_form": "literal"
+    },
+    {
+      "id": "missing-tool-recovery-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+      "language": "harn",
+      "query": "((for_statement variable: (identifier) @variable iterable: (list_literal (string_literal) @key)) (#eq? @variable \"key\"))",
+      "prefix": "MissingToolCallRecoveryOptions.",
+      "key_form": "literal"
+    },
+    {
+      "id": "judge-override-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+      "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (list_literal (string_literal) @key)) (#eq? @domain \"__JUDGE_LLM_OVERRIDE_KEYS\"))",
+      "prefix": "JudgeConfig.",
+      "key_form": "literal"
+    },
+    {
+      "id": "judge-model-key-domain",
+      "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
+      "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (string_literal) @key) (#eq? @domain \"__JUDGE_MODEL_SETTING\"))",
+      "prefix": "JudgeConfig.",
+      "key_form": "literal"
+    },
+    {
+      "id": "runner-model-environment",
+      "kind": "environment",
+      "glob": "crates/harn-vm/src/llm/**/*.rs",
+      "language": "rust",
+      "query": "((call_expression function: (_) @callee arguments: (arguments . (_) @key)) (#match? @callee \"(^|::)(var|var_os|env_var_seamed|env_var_os_seamed|non_empty_env|env_bool|env_usize|env_u64|env_flag_enabled)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "runner-native-environment",
+      "kind": "environment",
+      "glob": "crates/harn-vm/src/orchestration/**/*.rs",
+      "language": "rust",
+      "query": "((call_expression function: (_) @callee arguments: (arguments . (_) @key)) (#match? @callee \"(^|::)(var|var_os|env_var_seamed|env_var_os_seamed|non_empty_env|env_bool|env_usize|env_u64)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "runner-stdlib-environment",
+      "kind": "environment",
+      "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+      "language": "harn",
+      "query": "((call_expression function: (property_access object: (_) @receiver property: (identifier) @method) (argument_list . (_) @key)) (#match? @receiver \"^(harness\\.env|env)$\") (#match? @method \"^(get|get_or|require)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "native-stage-environment",
+      "kind": "environment",
+      "glob": "crates/harn-vm/src/orchestration/stage_options.rs",
+      "language": "rust",
+      "query": "[((call_expression function: (identifier) @callee arguments: (arguments . (_) @key)) (#eq? @callee \"non_empty_env\")) ((token_tree (identifier) @callee . (token_tree . (string_literal) @key)) (#eq? @callee \"non_empty_env\"))]",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "cli-runner-environment",
+      "kind": "environment",
+      "glob": "crates/harn-stdlib/src/stdlib/cli/try.harn",
+      "language": "harn",
+      "query": "[((call_expression function: (property_access object: (_) @receiver property: (identifier) @method) (argument_list . (_) @key)) (#match? @receiver \"^(harness\\.env|env)$\") (#match? @method \"^(get|get_or|require)$\")) ((call_expression function: (identifier) @callee (argument_list . (_) . (_) @key)) (#eq? @callee \"__trimmed_env\"))]",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "runner-environment-constants",
+      "kind": "environment",
+      "glob": "crates/harn-vm/src/llm/**/*.rs",
+      "language": "rust",
+      "query": "((const_item name: (identifier) @constant value: (string_literal) @key) (#match? @constant \"(_ENV|_ENV_VAR)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    }
+  ],
+  "binding_scopes": [],
+  "forwarder_files": [
+    "spec/agent-gates/reviewed-turn-preparation.json",
+    "spec/agent-gates/forwarding-agentspec-runner.json",
+    "spec/agent-gates/native-provider-forwarding.json",
+    "spec/agent-gates/reviewed-consumer-boundaries.json",
+    "spec/agent-gates/forwarding-agentlifecycletoolsoptions.json",
+    "spec/agent-gates/forwarding-agentspec.json",
+    "spec/agent-gates/forwarding-agentstallconfig.json",
+    "spec/agent-gates/forwarding-agentstopoptions.json",
+    "spec/agent-gates/forwarding-commandwaitoptions.json",
+    "spec/agent-gates/forwarding-compactionpolicy.json",
+    "spec/agent-gates/forwarding-completiongateoptions.json",
+    "spec/agent-gates/forwarding-consecutivefailurebudget.json",
+    "spec/agent-gates/forwarding-detectorspec.json",
+    "spec/agent-gates/forwarding-judgeconfig.json",
+    "spec/agent-gates/forwarding-missingtoolcallrecoveryoptions.json",
+    "spec/agent-gates/forwarding-modelpolicyspec.json",
+    "spec/agent-gates/forwarding-monologueactuationconfig.json",
+    "spec/agent-gates/forwarding-purposelabelconfig.json",
+    "spec/agent-gates/forwarding-readonlystanceoptions.json",
+    "spec/agent-gates/forwarding-toolsurfacenarrowingoptions.json",
+    "spec/agent-gates/environment-forwarding.json"
+  ],
+  "non_behavior_files": [
+    "spec/agent-gates/native-runtime-facts.json",
+    "spec/agent-gates/runtime-facts-agentspec.json",
+    "spec/agent-gates/environment-facts.json"
+  ],
+  "projections": [
+    {
+      "layer": "runner",
+      "file": "docs/src/dev/agent-gates/runner.md"
+    },
+    {
+      "layer": "stop decision",
+      "file": "docs/src/dev/agent-gates/stop-decision.md"
+    },
+    {
+      "layer": "stall handler",
+      "file": "docs/src/dev/agent-gates/stall-handler.md"
+    }
+  ],
+  "binding_scope_files": [
+    "spec/agent-gates/bindings/skill-match.json",
+    "spec/agent-gates/bindings/compaction-options.json",
+    "spec/agent-gates/bindings/caller-transport.json",
+    "spec/agent-gates/bindings/token-runaway.json",
+    "spec/agent-gates/bindings/judge-cadence.json",
+    "spec/agent-gates/bindings/agent-lifecycle-tools-options.json",
+    "spec/agent-gates/bindings/agent-loop-retry-options.json",
+    "spec/agent-gates/bindings/agent-spec.json",
+    "spec/agent-gates/bindings/agent-stall-config.json",
+    "spec/agent-gates/bindings/agent-stop-options.json",
+    "spec/agent-gates/bindings/command-wait-options.json",
+    "spec/agent-gates/bindings/compaction-policy.json",
+    "spec/agent-gates/bindings/completion-gate-options.json",
+    "spec/agent-gates/bindings/consecutive-failure-budget.json",
+    "spec/agent-gates/bindings/detector-spec.json",
+    "spec/agent-gates/bindings/iteration-budget.json",
+    "spec/agent-gates/bindings/judge-config.json",
+    "spec/agent-gates/bindings/missing-tool-call-recovery-options.json",
+    "spec/agent-gates/bindings/model-policy-spec.json",
+    "spec/agent-gates/bindings/monologue-actuation-config.json",
+    "spec/agent-gates/bindings/purpose-label-config.json",
+    "spec/agent-gates/bindings/read-only-stance-options.json",
+    "spec/agent-gates/bindings/stage-spec.json",
+    "spec/agent-gates/bindings/tool-surface-narrowing-options.json",
+    "spec/agent-gates/bindings/turn-policy.json",
+    "spec/agent-gates/bindings/agent-done-contract.json",
+    "spec/agent-gates/bindings/autonomy-policy.json",
+    "spec/agent-gates/bindings/step-judge-options.json",
+    "spec/agent-gates/bindings/agent-budget.json"
+  ]
+}

@@ -1,0 +1,56 @@
+[
+  {
+    "default": "true",
+    "evidence": "workers.__agent_lifecycle_await_enabled enables the structural await control when the setting is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentLifecycleToolsOptions.agent_await_resumption_enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 262,
+        "reader": "__agent_lifecycle_await_enabled"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false; existing sub_agent_run or spawn_agent tool entries also establish capability",
+    "evidence": "workers.__agent_lifecycle_has_subagent_capability checks both explicit settings and the tool registry. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentLifecycleToolsOptions.subagent_tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 254,
+        "reader": "__agent_lifecycle_has_subagent_capability"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false; existing sub_agent_run or spawn_agent tool entries also establish capability",
+    "evidence": "workers.__agent_lifecycle_has_subagent_capability checks both explicit settings and the tool registry. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentLifecycleToolsOptions.subagents",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 251,
+        "reader": "__agent_lifecycle_has_subagent_capability"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

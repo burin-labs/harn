@@ -1,0 +1,16 @@
+[
+  {
+    "scope": "DetectorSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+    "expression": "detector_spec_token_runaway(spec)",
+    "owner": "detector_spec_token_runaway",
+    "evidence": "Consumer detector_spec_token_runaway.spec in crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn is an independently required binding origin for DetectorSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "DetectorSpec",
+        "function": "detector_spec_token_runaway",
+        "parameter": "spec"
+      }
+    ]
+  }
+]

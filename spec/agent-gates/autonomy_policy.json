@@ -1,0 +1,110 @@
+[
+  {
+    "default": "dynamic: observed local fallback {}; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "autonomy_policy.action_tiers",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 193,
+        "reader": "autonomy_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; consulted only when agent_id is absent",
+    "evidence": "options_public.autonomy_policy resolves the canonical identity before this compatibility input. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "autonomy_policy.agent",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 191,
+        "reader": "autonomy_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback {}; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "autonomy_policy.agent_action_tiers",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 195,
+        "reader": "autonomy_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "agent alias; otherwise absent",
+    "evidence": "options_public.autonomy_policy resolves agent_id before agent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "autonomy_policy.agent_id",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 191,
+        "reader": "autonomy_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback {}; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "autonomy_policy.agent_tiers",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 194,
+        "reader": "autonomy_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback []; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "autonomy_policy.reviewers",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+        "line": 196,
+        "reader": "autonomy_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

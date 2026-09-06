@@ -1,0 +1,156 @@
+[
+  {
+    "default": "judge.feedback_fallback, then a built-in request to address the specific gaps",
+    "evidence": "judge.agent_done_contract resolves outer and nested feedback before its default text. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.feedback_fallback",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 756,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty dictionary",
+    "evidence": "judge.agent_done_contract uses an empty judge configuration unless a dictionary is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.judge",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 748,
+        "reader": "agent_done_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 747,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback true; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.loop_until_done",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 764,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "judge.max_invocations, then 3",
+    "evidence": "judge.agent_done_contract resolves the outer cap before the nested judge and fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.max_invocations",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 752,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "judge.model; otherwise absent for catalog resolution",
+    "evidence": "judge.agent_done_contract resolves the outer model before the nested judge model. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.model",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 760,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "judge.provider; otherwise absent for runner/provider resolution",
+    "evidence": "judge.agent_done_contract resolves the outer provider before the nested judge provider. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.provider",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 761,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.rubric",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 693,
+        "reader": "__done_contract_judge_system"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 324,
+        "reader": "__judge_stable_prefix"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "judge.system, then the built-in done-contract judge prompt",
+    "evidence": "judge.agent_done_contract resolves outer and nested system text before __done_contract_judge_system. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "agent_done_contract.system",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 762,
+        "reader": "agent_done_contract"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

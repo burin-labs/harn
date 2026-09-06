@@ -1,0 +1,35 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "PurposeLabelConfig",
+    "prefix": "PurposeLabelConfig.",
+    "types": [
+      "PurposeLabelConfig",
+      "PurposeLabelOptions"
+    ],
+    "parameters": [
+      {
+        "function": "__purpose_label_instruction",
+        "name": "config"
+      },
+      {
+        "function": "agent_purpose_label_extract",
+        "name": "config"
+      },
+      {
+        "function": "agent_purpose_label_prefill",
+        "name": "config"
+      },
+      {
+        "function": "agent_purpose_label_prompt_fragment",
+        "name": "config"
+      },
+      {
+        "function": "agent_purpose_label_turn_nudge",
+        "name": "config"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

@@ -1,0 +1,163 @@
+[
+  {
+    "default": "nil; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.armed",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 513,
+        "reader": "__normalize_read_only_stance"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 259,
+        "reader": "agent_stance_prepare"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "nil; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.classifier",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 261,
+        "reader": "agent_stance_prepare"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "nil; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.consent_check",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 183,
+        "reader": "__stance_register_escape_tool"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false when absent; object form true; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 509,
+        "reader": "__normalize_read_only_stance"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 256,
+        "reader": "agent_stance_prepare"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "request_write_access; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.escape_tool",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 517,
+        "reader": "__normalize_read_only_stance"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 182,
+        "reader": "__stance_register_escape_tool"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 276,
+        "reader": "agent_stance_prepare"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 347,
+        "reader": "agent_stance_post_turn"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "[]; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.hard_keep",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 525,
+        "reader": "__normalize_read_only_stance"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 285,
+        "reader": "agent_stance_prepare"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0.8; owner options_validation.harn:486",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ReadOnlyStanceOptions.min_confidence",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 521,
+        "reader": "__normalize_read_only_stance"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 270,
+        "reader": "agent_stance_prepare"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

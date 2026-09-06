@@ -1,0 +1,43 @@
+[
+  {
+    "default": "false",
+    "evidence": "workers.__agent_stop_options normalizes the public stop request. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentStopOptions.graceful",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 120,
+        "reader": "__agent_stop_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; an empty or whitespace-only reason is removed",
+    "evidence": "workers.__agent_stop_options trims the reason and omits an empty result. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentStopOptions.reason",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 124,
+        "reader": "__agent_stop_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 127,
+        "reader": "__agent_stop_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

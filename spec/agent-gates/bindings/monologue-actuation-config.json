@@ -1,0 +1,47 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "MonologueActuationConfig",
+    "prefix": "MonologueActuationConfig.",
+    "types": [
+      "MonologueActuationConfig",
+      "MonologueActuationOptions"
+    ],
+    "parameters": [
+      {
+        "function": "agent_has_tools",
+        "name": "opts",
+        "path": [
+          "stall_diagnostics",
+          "monologue_actuation"
+        ]
+      },
+      {
+        "function": "agent_monologue_actuation_config",
+        "name": "value"
+      },
+      {
+        "function": "agent_monologue_actuation_observe",
+        "name": "config"
+      },
+      {
+        "function": "agent_monologue_actuation_observe_completed_dispatch",
+        "name": "config"
+      },
+      {
+        "function": "agent_monologue_actuation_take",
+        "name": "config"
+      },
+      {
+        "function": "agent_monologue_actuation_take_for_turn",
+        "name": "turn_options",
+        "path": [
+          "stall_diagnostics",
+          "monologue_actuation"
+        ]
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

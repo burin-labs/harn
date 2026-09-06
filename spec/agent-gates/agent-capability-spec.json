@@ -1,0 +1,299 @@
+[
+  {
+    "default": "absent; inherit the current approval policy",
+    "evidence": "agent_session_host.session_policies installs an approval-policy override only when parse_approval_policy returns one. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.approval_policy",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1262,
+        "reader": "__dispatch_tool_calls"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit the current reviewer",
+    "evidence": "agent_session_host.session_policies pushes an approval reviewer only when an explicit value parses. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "AgentSpec.approval_reviewer",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1268,
+        "reader": "__dispatch_tool_calls"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no additional autonomy budget",
+    "evidence": "llm.autonomy_budget.parse_autonomy_budget returns None for absent or nil autonomy_budget. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.autonomy_budget",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no MCP bootstrap",
+    "evidence": "mcp.agent_mcp_bootstrap_if_needed returns options unchanged when no server specs exist. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.mcp_servers",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 9,
+        "reader": "agent_mcp_bootstrap_if_needed"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "enabled with inherited runner model/provider and classifier defaults",
+    "evidence": "postturn.__missing_tool_call_recovery_config enables absent configuration and resolves classifier route inheritance. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.missing_tool_call_recovery",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 192,
+        "reader": "__agent_loop_next_tool_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 749,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 750,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 410,
+        "reader": "__missing_tool_call_recovery_config"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit the current permissions",
+    "evidence": "agent_session_host.session_policies installs dynamic permissions only when an explicit permission value parses. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.permissions",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1270,
+        "reader": "__dispatch_tool_calls"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit the current capability policy",
+    "evidence": "agent_session_host.session_policies installs a capability policy only when supplied, intersecting it with any outer policy. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.policy",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+        "line": 99,
+        "reader": "__judge_tool_descriptor"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+        "line": 100,
+        "reader": "__judge_tool_descriptor"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 100,
+        "reader": "__tool_batch_call_classification"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 918,
+        "reader": "__intra_turn_resource_keys"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 939,
+        "reader": "__intra_turn_resource_guard"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1261,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 201,
+        "reader": "__agent_loop_next_tool_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 212,
+        "reader": "__tool_envelope"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+        "line": 353,
+        "reader": "__run_structural_validator"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 168,
+        "reader": "__with_mcp_tool_ceiling"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 356,
+        "reader": "agent_monologue_actuation_take_for_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 75,
+        "reader": "__stance_policy_patch"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 284,
+        "reader": "agent_stance_prepare"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 316,
+        "reader": "agent_stance_apply"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 320,
+        "reader": "agent_stance_apply"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn",
+        "line": 209,
+        "reader": "agent_collapse_duplicate_read_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 92,
+        "reader": "__tool_surface_claim_authority"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 504,
+        "reader": "agent_apply_tool_surface_narrowing"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
+        "line": 518,
+        "reader": "agent_apply_tool_surface_narrowing"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no injected progress tool",
+    "evidence": "progress.__agent_progress_tool_config returns nil for absent input; agent_progress_apply_options then returns the original options. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.progress_tool",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/progress.harn",
+        "line": 401,
+        "reader": "agent_progress_apply_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback {}; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.read_only_stance",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 32,
+        "reader": "__stance_config"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false; existing worker tool entries can independently establish capability",
+    "evidence": "workers.__agent_lifecycle_has_subagent_capability inspects both settings and tool entries. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.subagent_tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 254,
+        "reader": "__agent_lifecycle_has_subagent_capability"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false; existing worker tool entries can independently establish capability",
+    "evidence": "workers.__agent_lifecycle_has_subagent_capability inspects both settings and tool entries. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.subagents",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
+        "line": 251,
+        "reader": "__agent_lifecycle_has_subagent_capability"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

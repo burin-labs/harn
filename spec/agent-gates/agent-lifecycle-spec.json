@@ -1,0 +1,399 @@
+[
+  {
+    "default": "false for idle daemon compaction",
+    "evidence": "daemon.__daemon_compaction_summary requires both consolidate_on_idle and auto_compact before invoking the callback. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.auto_compact",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 165,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 279,
+        "reader": "__compaction_enabled"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 14,
+        "reader": "__daemon_compaction_summary"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no idle compaction summary",
+    "evidence": "daemon.__daemon_compaction_summary returns nil when the callback is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "AgentSpec.compact_callback",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 184,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 185,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 17,
+        "reader": "__daemon_compaction_summary"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent at the public input boundary; no concrete reader resolved",
+    "evidence": "options_types.AgentLifecycleSpec declares the optional integer; the inspected compaction projection does not consume this spelling. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.compact_keep_first",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; defer tail retention to the compaction engine",
+    "evidence": "autocompact.__compaction_keep_last first reads compaction.keep_last_n or keep_last, then compact_keep_last, and otherwise returns nil. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.compact_keep_last",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 159,
+        "reader": "__compaction_keep_last"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 158,
+        "reader": "__compaction_keep_last"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "observation_mask when compaction is enabled without a policy strategy",
+    "evidence": "autocompact.agent_autocompact_if_needed selects compaction policy strategy, compact_strategy, then observation_mask. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.compact_strategy",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 178,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 459,
+        "reader": "agent_autocompact_if_needed"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 458,
+        "reader": "agent_autocompact_if_needed"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 179,
+        "reader": "__compact_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no standalone threshold override",
+    "evidence": "autocompact.__compact_options copies compact_threshold only when explicitly supplied and not already set by auto_compact. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.compact_threshold",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 171,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 281,
+        "reader": "__compaction_enabled"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 172,
+        "reader": "__compact_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; does not enable compaction by itself",
+    "evidence": "autocompact.__compaction_enabled returns false when auto_compact, compaction and compact_threshold are all absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.compaction",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 151,
+        "reader": "__compaction_keep_last"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 280,
+        "reader": "__compaction_enabled"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 451,
+        "reader": "agent_autocompact_if_needed"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 452,
+        "reader": "agent_autocompact_if_needed"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 195,
+        "reader": "__compact_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "daemon.__daemon_compaction_summary and native daemon configuration enable only a true boolean. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.consolidate_on_idle",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 129,
+        "reader": "get"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 11,
+        "reader": "__daemon_compaction_summary"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 153,
+        "reader": "agent_daemon_step"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "loop_finalize.__agent_loop_finalize snapshots only an enabled daemon; postturn uses absent as false. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.daemon",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "line": 116,
+        "reader": "__agent_loop_finalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 323,
+        "reader": "__text_family_toolless_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 199,
+        "reader": "__native_completion_context"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent at native decoding",
+    "evidence": "llm.daemon parses an optional nonnegative integer without supplying an attempt limit. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.idle_watchdog_attempts",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 132,
+        "reader": "get"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; effective persistence path falls back to resume_path",
+    "evidence": "native daemon.parse_daemon_loop_config omits empty paths and DaemonLoopConfig.effective_persist_path supplies the resume fallback. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.persist_path",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 115,
+        "reader": "get"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no explicit resume path",
+    "evidence": "native daemon.parse_daemon_loop_config keeps only a nonempty supplied path. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.resume_path",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 119,
+        "reader": "get"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "fresh checkpoint for the current session",
+    "evidence": "loop_run.__agent_loop_run calls agent_stall_initial_checkpoint when no checkpoint is supplied and rejects another session identity. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.stall_checkpoint",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 75,
+        "reader": "__agent_loop_run"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "disabled; enabling an object inherits AgentStallConfig defaults",
+    "evidence": "stall_config.__agent_stall_config returns __agent_stall_default_config for nil, whose enabled field is false. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.stall_diagnostics",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "line": 48,
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 98,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 324,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 345,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 341,
+        "reader": "agent_monologue_actuation_take_for_turn"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0; timer wake disabled",
+    "evidence": "daemon.agent_daemon_step supplies zero; the native daemon parser accepts only positive wake intervals. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.wake_interval_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 123,
+        "reader": "get"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+        "line": 147,
+        "reader": "agent_daemon_step"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "native daemon.parse_daemon_loop_config normalizes an absent path input to an empty vector. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.watch_paths",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/daemon.rs",
+        "line": 96,
+        "reader": "get"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

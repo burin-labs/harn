@@ -1,0 +1,594 @@
+[
+  {
+    "default": "false",
+    "evidence": "completion_claim.agent_completion_claim_apply_options defaults the typed completion claim tool off. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.completion_tool",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 141,
+        "reader": "agent_completion_claim_apply_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"the configured done sentinel\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.done_sentinel",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 925,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/extract.rs",
+        "line": 926,
+        "reader": "opt_str"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 681,
+        "reader": "__done_contract_primary_prompt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 420,
+        "reader": "__agent_loop_wrapup_response_protocol_tail"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 595,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 596,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 39,
+        "reader": "__default_done_sentinel"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 17,
+        "reader": "__agent_done_sentinel"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback false; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.exit_when_verified",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 265,
+        "reader": "__agent_loop_contract_prompt"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true; owner loop_run/loop_finalize/loop_resource_dispatch/loop_call_budget/loop_turn_scope",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.final_wrapup",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "line": 82,
+        "reader": "__agent_loop_finalize"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback false; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.loop_until_done",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 199,
+        "reader": "__native_completion_context"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 256,
+        "reader": "__agent_loop_contract_prompt"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "8 for tool_using profile; options_formats.harn:15 owns other profiles",
+    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "AgentSpec.max_nudges",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "20; owner loop_run/loop_finalize/loop_resource_dispatch/loop_call_budget/loop_turn_scope",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.max_verify_attempts",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 137,
+        "reader": "opt_int"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "line": 59,
+        "reader": "agent_loop_run_settings"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 88,
+        "reader": "__agent_loop_run"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback false; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.require_action_or_yield",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 411,
+        "reader": "__agent_text_tool_contract_prompt"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "AgentExecutionSpec documents an empty default that checks no paths; canonical reachability remains unmeasured. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.require_artifacts",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "required_tools.__agent_required_tools_from_options returns no required tools when omitted. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.require_successful_tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 343,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 305,
+        "reader": "__required_tools_text_completion"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
+        "line": 48,
+        "reader": "__agent_required_tools_from_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; skip the step judge as not_configured",
+    "evidence": "step_judge.agent_step_judge returns an explicit skipped result when configuration is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.step_judge",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 741,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
+        "line": 238,
+        "reader": "agent_step_judge"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback []; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.stop_after_successful_tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 342,
+        "reader": "workflow-loop-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1279,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 117,
+        "reader": "__tool_batch_call_classification"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 179,
+        "reader": "__stop_after_successful_tools"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no callback verdict",
+    "evidence": "postturn.__terminal_callback_verdict returns kind none when the callback is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "AgentSpec.terminal_callback",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 728,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 729,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 162,
+        "reader": "__terminal_callback_verdict"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no turn-end judge",
+    "evidence": "options_public.agent_loop_options materializes this judge only when explicitly configured. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.turn_end_condition",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 194,
+        "reader": "__completion_claim_requirement_ids"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 924,
+        "reader": "__completion_policy_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 1001,
+        "reader": "__completion_boundary_ledger"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "line": 205,
+        "reader": "__agent_loop_project_terminal_result"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "line": 211,
+        "reader": "__agent_loop_project_terminal_result"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 631,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 632,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 633,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 634,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 635,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 638,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 643,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 648,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 653,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 992,
+        "reader": "__arbitrate_stalled_toolless_turn"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 184,
+        "reader": "__agent_turn_end_judge_stall_cadence"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 58,
+        "reader": "__turn_end_condition_config"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no deterministic completion callback",
+    "evidence": "judge.__completion_policy_plan adds a deterministic stage only when a callback is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.verify_completion",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 908,
+        "reader": "__completion_policy_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 909,
+        "reader": "__completion_policy_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 117,
+        "reader": "__agent_loop_verify_closure_exists"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 598,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 599,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 795,
+        "reader": "__completion_result"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no verification judge",
+    "evidence": "options_public.agent_loop_options materializes this judge only when explicitly configured. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.verify_completion_judge",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
+        "line": 187,
+        "reader": "__completion_claim_requirement_ids"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 911,
+        "reader": "__completion_policy_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 995,
+        "reader": "__completion_boundary_ledger"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "line": 185,
+        "reader": "__agent_loop_project_terminal_result"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
+        "line": 192,
+        "reader": "__agent_loop_project_terminal_result"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn",
+        "line": 117,
+        "reader": "__agent_loop_verify_closure_exists"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 601,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 602,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 603,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 604,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 607,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 612,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 617,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 622,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 627,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 795,
+        "reader": "__completion_result"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty dictionary",
+    "evidence": "loop_turn_scope.__agent_loop_effective_wrapup_context treats an absent or non-dictionary host context as empty. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.wrapup_context",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 498,
+        "reader": "__agent_loop_effective_wrapup_context"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 497,
+        "reader": "__agent_loop_effective_wrapup_context"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty string: use canonical terminal instruction; owner loop_run/loop_finalize/loop_resource_dispatch/loop_call_budget/loop_turn_scope",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.wrapup_directive",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 461,
+        "reader": "__agent_loop_wrapup_directive"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 481,
+        "reader": "__agent_loop_has_host_wrapup_directive"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

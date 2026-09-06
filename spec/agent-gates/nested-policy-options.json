@@ -1,0 +1,230 @@
+[
+  {
+    "default": "\"\"; use built-in decision wording",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/command_ledger.harn:525; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "wording",
+    "layer": "stall handler",
+    "name": "CommandWaitOptions.wording.decision",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 525,
+        "reader": "__cl_decision_wording"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "\"\"; use built-in stall wording",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/command_ledger.harn:519; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "wording",
+    "layer": "stall handler",
+    "name": "CommandWaitOptions.wording.stall",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 519,
+        "reader": "__cl_decision_wording"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no output-schema contract",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/loop_support.harn:165; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "schema",
+    "layer": "runner",
+    "name": "AgentSpec.output.schema",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 145,
+        "reader": "__dispatch_structured_output_schema"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 146,
+        "reader": "__dispatch_structured_output_schema"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 165,
+        "reader": "__agent_loop_output_contract"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 166,
+        "reader": "__agent_loop_output_contract"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/loop_support.harn:196; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.output_contract",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 196,
+        "reader": "__agent_loop_next_tool_output_contract"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; advisory omitted",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/preflight.harn:505; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.mcp_context.initialize_advisory",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 505,
+        "reader": "__agent_mcp_initialize_advisory_prompt"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherit the owning tool policy",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/stance.harn:79; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "tool policy",
+    "layer": "runner",
+    "name": "AgentSpec.policy.tools",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+        "line": 172,
+        "reader": "__with_mcp_tool_ceiling"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 79,
+        "reader": "__stance_policy_patch"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "always",
+    "evidence": "turn_end.__turn_end_judge_when_due supplies always when the condition is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "cadence",
+    "layer": "stop decision",
+    "name": "JudgeConfig.cadence.when",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 194,
+        "reader": "__validate_judge_cadence"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 81,
+        "reader": "__turn_end_judge_when_due"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+        "line": 189,
+        "reader": "__agent_turn_end_judge_stall_cadence"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "1; explicit retry policy takes precedence",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/workflow/stage.harn:836; canonical host binding has not been observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit",
+    "layer": "runner",
+    "name": "StageSpec.retry_policy.max_attempts",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/stage.harn",
+        "line": 836,
+        "reader": "__stage_max_attempts"
+      }
+    ],
+    "reason": "Explicit configuration consumed by the owning module; retain until the typed runner/stop/stall migration settles this seam.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/stall_verification.harn:177; canonical host binding has not been observed.",
+    "expiry": null,
+    "kind": "boolean option",
+    "layer": "stall handler",
+    "name": "AgentStallConfig.no_net_progress_predicates.hard_recurrence",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
+        "line": 177,
+        "reader": "agent_stall_no_net_progress"
+      }
+    ],
+    "reason": "Keep the default progress invariant and remove the per-predicate ablation switch during the stall-handler cutover.",
+    "verdict": "PROMOTE-TO-DEFAULT"
+  },
+  {
+    "default": "true",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/stall_verification.harn:163; canonical host binding has not been observed.",
+    "expiry": null,
+    "kind": "boolean option",
+    "layer": "stall handler",
+    "name": "AgentStallConfig.no_net_progress_predicates.long_stall",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
+        "line": 163,
+        "reader": "agent_stall_no_net_progress"
+      }
+    ],
+    "reason": "Keep the default progress invariant and remove the per-predicate ablation switch during the stall-handler cutover.",
+    "verdict": "PROMOTE-TO-DEFAULT"
+  },
+  {
+    "default": "true",
+    "evidence": "Structural read at crates/harn-stdlib/src/stdlib/agent/stall_verification.harn:181; canonical host binding has not been observed.",
+    "expiry": null,
+    "kind": "boolean option",
+    "layer": "stall handler",
+    "name": "AgentStallConfig.no_net_progress_predicates.write_axis",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
+        "line": 181,
+        "reader": "agent_stall_no_net_progress"
+      }
+    ],
+    "reason": "Keep the default progress invariant and remove the per-predicate ablation switch during the stall-handler cutover.",
+    "verdict": "PROMOTE-TO-DEFAULT"
+  }
+]

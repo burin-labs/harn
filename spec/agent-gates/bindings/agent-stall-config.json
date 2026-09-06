@@ -1,0 +1,144 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "AgentStallConfig",
+    "prefix": "AgentStallConfig.",
+    "types": [
+      "AgentStallConfig",
+      "RepairDiagnostics",
+      "StallDiagnostics"
+    ],
+    "parameters": [
+      {
+        "function": "__agent_loop_effective_llm_options",
+        "name": "opts",
+        "path": [
+          "stall_diagnostics"
+        ]
+      },
+      {
+        "function": "__agent_stall_apply_action_signal",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_apply_repair",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_classify_trip",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_config",
+        "name": "value"
+      },
+      {
+        "function": "__agent_loop_call_budget_new",
+        "name": "reserve_cfg"
+      },
+      {
+        "function": "__agent_loop_post_edit_reverify_mandated",
+        "name": "repair_cfg"
+      },
+      {
+        "function": "__agent_stall_emit_diagnostic_trip",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_maybe_emit",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_observation",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_process_call",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_repair_value",
+        "name": "flat"
+      },
+      {
+        "function": "__agent_stall_repair_value",
+        "name": "nested"
+      },
+      {
+        "function": "__agent_stall_fold_verify_state",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_observe_core",
+        "name": "raw_config"
+      },
+      {
+        "function": "__agent_stall_observe_no_progress",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_observe_parse_rejection",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_register_trip",
+        "name": "config"
+      },
+      {
+        "function": "__agent_stall_warning_record",
+        "name": "config"
+      },
+      {
+        "function": "agent_loop_run_settings",
+        "name": "opts",
+        "path": [
+          "stall_diagnostics"
+        ]
+      },
+      {
+        "function": "agent_stall_inject_feedback",
+        "name": "config"
+      },
+      {
+        "function": "agent_stall_no_net_progress",
+        "name": "raw_config"
+      },
+      {
+        "function": "agent_stall_observe_completed_dispatch",
+        "name": "raw_config"
+      },
+      {
+        "function": "agent_stall_repair_config",
+        "name": "raw_config"
+      },
+      {
+        "function": "agent_stall_verified_write_satisfied",
+        "name": "raw_config"
+      },
+      {
+        "function": "agent_merge_llm_options",
+        "name": "base",
+        "path": [
+          "stall_diagnostics"
+        ]
+      },
+      {
+        "function": "__agent_loop_llm_overrides",
+        "name": "opts",
+        "path": [
+          "stall_diagnostics"
+        ]
+      }
+    ],
+    "normalizers": [
+      "__agent_stall_config",
+      "__agent_stall_default_config",
+      "agent_stall_repair_config"
+    ],
+    "containers": [
+      "repair_diagnostics",
+      "monologue_actuation",
+      "no_net_progress_predicates"
+    ]
+  }
+}

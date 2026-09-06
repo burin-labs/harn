@@ -1,0 +1,355 @@
+[
+  {
+    "default": "enabled unless explicitly false",
+    "evidence": "options_validation.__context_profile_disabled disables only a false boolean. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.auto_context_profile",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 77,
+        "reader": "__context_profile_disabled"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback {}; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.context_profile_options",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 66,
+        "reader": "__context_profile_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "project_root, then root, then cwd, then current directory",
+    "evidence": "options_validation.__context_profile_root resolves the context-root precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.context_profile_root",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 62,
+        "reader": "__context_profile_root"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "options_validation.__task_ledger_from_shorthand filters nonempty deliverable text from the supplied list. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.deliverables",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 33,
+        "reader": "__task_ledger_from_shorthand"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; built-in prompt catalog; prompts takes precedence",
+    "evidence": "prompts.__agent_prompt_overrides checks prompts before this compatibility input. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prompt_overrides",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 185,
+        "reader": "__agent_prompt_overrides"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 186,
+        "reader": "__agent_prompt_overrides"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; built-in prompt catalog",
+    "evidence": "prompts.__agent_prompt_overrides checks prompts, then prompt_overrides, then a direct prompt catalog, otherwise an empty override map. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.prompts",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 182,
+        "reader": "__agent_prompt_overrides"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+        "line": 183,
+        "reader": "__agent_prompt_overrides"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty policy object; native default reminder providers apply",
+    "evidence": "options_validation.__normalize_reminder_provider_options inserts an empty dictionary when omitted. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.reminders",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-builtin-meta/src/llm_options.rs",
+        "line": 176,
+        "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/reminder_providers.rs",
+        "line": 1455,
+        "reader": "get"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "line": 1271,
+        "reader": "__dispatch_tool_calls"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 770,
+        "reader": "__normalize_reminder_provider_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 773,
+        "reader": "__normalize_reminder_provider_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 774,
+        "reader": "__normalize_reminder_provider_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; session-store environment root, otherwise runtime state root",
+    "evidence": "stdlib.session_store.canonical_store_state_dir resolves explicit root, HARN_SESSION_STORE_ROOT, then runtime_paths.state_root(runtime_root_base()). Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.root",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 62,
+        "reader": "__context_profile_root"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.root_task",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 31,
+        "reader": "__task_ledger_from_shorthand"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "disabled",
+    "evidence": "scratchpad.agent_scratchpad_options returns disabled default options when scratchpad is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.scratchpad",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 764,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
+        "line": 65,
+        "reader": "agent_scratchpad_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty configuration: catalog strategy, top_n 1, sticky true",
+    "evidence": "skills.__match_config defaults to an empty object; the strategy/top_n/sticky consumers supply these fallbacks. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.skill_match",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 294,
+        "reader": "__match_config"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no fallback skill registry",
+    "evidence": "skills.__skills_registry reads skill_registry before skills; __skills_entries returns an empty list for absent registry. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.skills",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 9,
+        "reader": "__skills_registry"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "derived from root_task and deliverables when present; otherwise absent",
+    "evidence": "options_validation.__with_task_ledger_shorthand retains explicit task_ledger and constructs only a nonempty shorthand ledger. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.task_ledger",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 414,
+        "reader": "__agent_text_tool_contract_prompt"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false; legacy message_timestamps is consulted when absent",
+    "evidence": "preflight.__agent_decorate_turn_message resolves the timestamp switches before applying the decorator. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.timestamp_messages",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 571,
+        "reader": "__agent_decorate_turn_message"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 887,
+        "reader": "agent_build_turn_messages"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no explicit projection override",
+    "evidence": "preflight.__agent_projection_options returns nil when omitted. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.transcript_projection",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+        "line": 872,
+        "reader": "__agent_loop_final_wrapup"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 761,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 762,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 803,
+        "reader": "__agent_projection_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "skills skill-scoring input construction defaults working_files to an empty list. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.working_files",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 576,
+        "reader": "__score_candidates"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 618,
+        "reader": "__record_matched"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

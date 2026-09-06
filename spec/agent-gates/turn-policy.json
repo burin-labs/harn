@@ -1,0 +1,44 @@
+[
+  {
+    "default": "true",
+    "evidence": "orchestration.policy.types TurnPolicy::default enables the done sentinel. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "TurnPolicy.allow_done_sentinel",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no turn-policy prose cap",
+    "evidence": "orchestration.policy.types TurnPolicy::default sets max_prose_chars to None. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "TurnPolicy.max_prose_chars",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false",
+    "evidence": "orchestration.policy.types TurnPolicy::default does not require an action or yield. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "TurnPolicy.require_action_or_yield",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 411,
+        "reader": "__agent_text_tool_contract_prompt"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

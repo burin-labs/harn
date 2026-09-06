@@ -1,0 +1,336 @@
+[
+  {
+    "default": "absent; use the supplied write facts without a custom classifier",
+    "evidence": "completion_gate.__completion_gate_evaluate passes the optional classifier to the write-count reducer. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.classify_write",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 299,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 170,
+        "reader": "__completion_gate_validate_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no explicit escalation destination",
+    "evidence": "completion_gate.__completion_gate_evaluate forwards the optional destination to the gate ladder. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.escalation_target",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 180,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 364,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 185,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 181,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 182,
+        "reader": "__completion_gate_validate_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback 3; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.escalation_threshold",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 173,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 363,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 178,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 174,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 175,
+        "reader": "__completion_gate_validate_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no host fact provider; absent facts and verify_command produce facts_unavailable",
+    "evidence": "completion_gate.agent_completion_gate determines facts availability from these two inputs and does not claim a measured pass when both are absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.facts",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 301,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 170,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 424,
+        "reader": "agent_completion_gate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; retain gate feedback",
+    "evidence": "completion_gate.__completion_gate_decorate_feedback returns the original verdict when no decorator is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.feedback_decorator",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 392,
+        "reader": "__completion_gate_evaluate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; built-in feedback templates",
+    "evidence": "completion_gate.__completion_gate_evaluate supplies the optional templates to the gate ladder. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.feedback_templates",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 193,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 381,
+        "reader": "__completion_gate_evaluate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no additional model judge",
+    "evidence": "completion_gate.agent_completion_gate installs a judge only when configured and truthy. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.judge",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 435,
+        "reader": "agent_completion_gate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback \"verify_completion_judge\"; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.judge_seam",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 187,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 189,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 442,
+        "reader": "agent_completion_gate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 188,
+        "reader": "__completion_gate_validate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 191,
+        "reader": "__completion_gate_validate_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback 3; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.max_vetoes",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 302,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 431,
+        "reader": "agent_completion_gate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "dynamic: observed local fallback true; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.require_source_write",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 352,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 432,
+        "reader": "agent_completion_gate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "facts.requires_write, then require_source_write, then true",
+    "evidence": "completion_gate.__completion_gate_evaluate resolves the explicit setting before the fact and legacy setting. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.requires_write",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 347,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 348,
+        "reader": "__completion_gate_evaluate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; use raw.verify when supplied by facts, otherwise no verifier observation",
+    "evidence": "completion_gate.__completion_gate_evaluate prioritizes fact-provided verification before the optional verifier callback. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.verify_command",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 300,
+        "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 424,
+        "reader": "agent_completion_gate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "all verifier results must be ok; empty input is unmeasured",
+    "evidence": "judge_internals.__completion_gate_combine_verify reduces every verdict and returns nil for absent or empty input. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.veto_combine",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "line": 346,
+        "reader": "__completion_gate_evaluate"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

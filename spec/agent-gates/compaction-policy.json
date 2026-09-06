@@ -1,0 +1,248 @@
+[
+  {
+    "default": "absent",
+    "evidence": "autocompact.__compaction_policy_merge_fields copies only explicitly supplied attribution. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CompactionPolicy.author",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 80,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 140,
+        "reader": "__compaction_policy_event_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 54,
+        "reader": "__has_compaction_policy"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 81,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 143,
+        "reader": "__compaction_policy_event_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 144,
+        "reader": "__compaction_policy_event_fields"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "autocompact.__compaction_policy_list normalizes absent exclusion content to an empty list. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CompactionPolicy.drop",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 74,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 104,
+        "reader": "__compaction_policy_from_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 75,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 121,
+        "reader": "__compaction_instruction_mode"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 51,
+        "reader": "__has_compaction_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true in compaction_policy; absent when no policy is configured",
+    "evidence": "autocompact.compaction_policy defaults a nonempty policy to extending the standard instructions. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "CompactionPolicy.extend_default_instructions",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 77,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 328,
+        "reader": "compaction_policy"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 125,
+        "reader": "__compaction_instruction_mode"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 53,
+        "reader": "__has_compaction_policy"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 78,
+        "reader": "__compaction_policy_merge_fields"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; use default compaction instructions",
+    "evidence": "autocompact.compaction_policy adds instructions only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CompactionPolicy.instructions",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 47,
+        "reader": "__has_compaction_policy"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 62,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 118,
+        "reader": "__compaction_instruction_mode"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 63,
+        "reader": "__compaction_policy_merge_fields"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent",
+    "evidence": "autocompact.__compaction_policy_merge_fields copies only an explicitly supplied mode. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CompactionPolicy.mode",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 65,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 66,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 48,
+        "reader": "__has_compaction_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty list",
+    "evidence": "autocompact.__compaction_policy_list normalizes absent preservation content to an empty list. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CompactionPolicy.preserve",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 71,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 100,
+        "reader": "__compaction_policy_from_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 72,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 119,
+        "reader": "__compaction_instruction_mode"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 50,
+        "reader": "__has_compaction_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent",
+    "evidence": "autocompact.__compaction_policy_merge_fields copies only an explicitly supplied scope. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CompactionPolicy.scope",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 68,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 69,
+        "reader": "__compaction_policy_merge_fields"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 49,
+        "reader": "__has_compaction_policy"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

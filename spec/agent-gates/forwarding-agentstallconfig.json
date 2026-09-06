@@ -1,0 +1,760 @@
+[
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+    "expression": "__agent_loop_effective_llm_options(llm, opts)",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Consumer __agent_loop_effective_llm_options.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_loop_effective_llm_options",
+        "parameter": "opts",
+        "path": [
+          "stall_diagnostics"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+    "expression": "agent_stall_repair_config(opts?.stall_diagnostics)",
+    "owner": "agent_stall_repair_config",
+    "evidence": "Consumer agent_stall_repair_config.raw_config in crates/harn-stdlib/src/stdlib/agent/stall_verification.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "agent_stall_repair_config",
+        "parameter": "raw_config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_post_turn.harn",
+    "expression": "__agent_loop_post_edit_reverify_mandated(\n    repair_cfg,\n    context.turn_opts,\n    next.stall_state,\n    context.dispatch,\n    next.opts?.tools,\n  )",
+    "owner": "__agent_loop_post_edit_reverify_mandated",
+    "evidence": "Consumer __agent_loop_post_edit_reverify_mandated.repair_cfg in crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_loop_post_edit_reverify_mandated",
+        "parameter": "repair_cfg"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__agent_loop_call_budget_new(opts, __reserve_cfg)",
+    "owner": "__agent_loop_call_budget_new",
+    "evidence": "Consumer __agent_loop_call_budget_new.reserve_cfg in crates/harn-stdlib/src/stdlib/agent/loop_call_budget.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_loop_call_budget_new",
+        "parameter": "reserve_cfg"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "__agent_loop_llm_overrides(base)",
+    "owner": "__agent_loop_llm_overrides",
+    "evidence": "Consumer __agent_loop_llm_overrides.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_loop_llm_overrides",
+        "parameter": "opts",
+        "path": [
+          "stall_diagnostics"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "agent_merge_llm_options(base, __agent_loop_llm_overrides(base))",
+    "owner": "agent_merge_llm_options",
+    "evidence": "Consumer agent_merge_llm_options.base in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "agent_merge_llm_options",
+        "parameter": "base",
+        "path": [
+          "stall_diagnostics"
+        ]
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn",
+    "expression": "__agent_stall_classify_trip(\n    config,\n    {\n      context_streak: new_context_streak,\n      same_error_streak: new_same_error_streak,\n      same_observation_streak: new_same_observation_streak,\n      same_success_streak: new_same_success_streak,\n      outcome_kind: outcome_kind,\n      ping_pong_cycles: next_state.ping_pong_alternations / 2,\n      outcome_present: outcome != nil,\n      streak: streak,\n    },\n  )",
+    "owner": "__agent_stall_classify_trip",
+    "evidence": "Consumer __agent_stall_classify_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_classify_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"action_signal\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"no_net_progress_extend_after\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"no_net_progress_extend_guard\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"no_net_progress_hard_cap_after\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"no_net_progress_predicates\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"no_verifier_progress_limit\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"post_edit_reverify\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"progress_signal\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"remediation_delivered\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"repair_aware\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"reserved_terminal_verify\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"reserved_terminal_verify_iterations\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"stuck_same_diagnostic_after\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"turns_since_clean_verify\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"verify_state_recurrence_hard\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"verify_state_stall_turns\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"verify_state_streak\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "__agent_stall_repair_value(value, repair_diagnostics, \"zero_write_terminal_verify\")",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Consumer __agent_stall_repair_value.flat in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_repair_value",
+        "parameter": "flat"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "agent_monologue_actuation_config(value?.monologue_actuation)",
+    "owner": "agent_monologue_actuation_config",
+    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "flat[key]",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Dynamic key access in the owning normalizer/renderer; its call sites or declared option keys provide the literal inventory. Reachability remains explicitly unmeasured."
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "nested[key]",
+    "owner": "__agent_stall_repair_value",
+    "evidence": "Dynamic key access in the owning normalizer/renderer; its call sites or declared option keys provide the literal inventory. Reachability remains explicitly unmeasured."
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "type_of(repair_diagnostics)",
+    "owner": "type_of",
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_config(raw_config)",
+    "owner": "__agent_stall_config",
+    "evidence": "Consumer __agent_stall_config.value in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_config",
+        "parameter": "value"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_emit_diagnostic_trip(\n        agent,\n        session_id,\n        config,\n        tripped,\n        iteration,\n        \"delivered_fix_not_landing\",\n        tripped.same_diagnostic_streak,\n        STALL_DELIVERED_FIX_AFTER,\n        defer_feedback,\n        true,\n      )",
+    "owner": "__agent_stall_emit_diagnostic_trip",
+    "evidence": "Consumer __agent_stall_emit_diagnostic_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_emit_diagnostic_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_emit_diagnostic_trip(\n      agent,\n      session_id,\n      config,\n      tripped,\n      iteration,\n      \"no_net_progress_hard_cap\",\n      tripped.failing_verify_turns,\n      config.no_net_progress_hard_cap_after,\n      defer_feedback,\n    )",
+    "owner": "__agent_stall_emit_diagnostic_trip",
+    "evidence": "Consumer __agent_stall_emit_diagnostic_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_emit_diagnostic_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_emit_diagnostic_trip(\n      agent,\n      session_id,\n      config,\n      tripped,\n      iteration,\n      \"turns_since_clean_verify_floor\",\n      tripped.turns_since_clean_verify,\n      config.turns_since_clean_verify ?? 0,\n      defer_feedback,\n    )",
+    "owner": "__agent_stall_emit_diagnostic_trip",
+    "evidence": "Consumer __agent_stall_emit_diagnostic_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_emit_diagnostic_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_emit_diagnostic_trip(\n    agent,\n    session_id,\n    config,\n    tripped,\n    iteration,\n    \"flailing_action\",\n    trips,\n    config.hard_stop_after_trips,\n    defer_feedback,\n  )",
+    "owner": "__agent_stall_emit_diagnostic_trip",
+    "evidence": "Consumer __agent_stall_emit_diagnostic_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_emit_diagnostic_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_emit_diagnostic_trip(\n    agent,\n    session_id,\n    config,\n    tripped,\n    iteration,\n    \"stuck_same_diagnostic\",\n    tripped.same_diagnostic_streak,\n    config.stuck_same_diagnostic_after,\n    defer_feedback,\n  )",
+    "owner": "__agent_stall_emit_diagnostic_trip",
+    "evidence": "Consumer __agent_stall_emit_diagnostic_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_emit_diagnostic_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_maybe_emit(\n        agent,\n        session_id,\n        warning,\n        config,\n        next_state,\n        defer_feedback,\n      )",
+    "owner": "__agent_stall_maybe_emit",
+    "evidence": "Consumer __agent_stall_maybe_emit.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_maybe_emit",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_maybe_emit(\n      agent,\n      session_id,\n      warning,\n      config,\n      next_state,\n      defer_feedback,\n    )",
+    "owner": "__agent_stall_maybe_emit",
+    "evidence": "Consumer __agent_stall_maybe_emit.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_maybe_emit",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_maybe_emit(\n    agent,\n    session_id,\n    warning,\n    config,\n    next_state,\n    defer_feedback,\n  )",
+    "owner": "__agent_stall_maybe_emit",
+    "evidence": "Consumer __agent_stall_maybe_emit.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_maybe_emit",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_maybe_emit(\n    agent,\n    session_id,\n    warning,\n    config,\n    tripped,\n    defer_feedback,\n  )",
+    "owner": "__agent_stall_maybe_emit",
+    "evidence": "Consumer __agent_stall_maybe_emit.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_maybe_emit",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_observation(\n      __agent_stall_register_recovery(\n        __agent_stall_reset_action(active_state)\n          + {no_progress_streak: 0, last_no_progress_signature: \"\", last_no_progress_tokens: []},\n      ),\n      nil,\n      config,\n      false,\n    )",
+    "owner": "__agent_stall_observation",
+    "evidence": "Consumer __agent_stall_observation.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_observation",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_observation(next_state, emitted_warning, config, feedback_deferred)",
+    "owner": "__agent_stall_observation",
+    "evidence": "Consumer __agent_stall_observation.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_observation",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_observation(next_state, nil, config, false)",
+    "owner": "__agent_stall_observation",
+    "evidence": "Consumer __agent_stall_observation.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_observation",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)",
+    "owner": "__agent_stall_observation",
+    "evidence": "Consumer __agent_stall_observation.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_observation",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_observe_no_progress(\n        agent,\n        session_id,\n        iteration,\n        config,\n        active_state,\n        defer_feedback,\n        if to_string(turn_text) != \"\" {\n          turn_text\n        } else {\n          json_stringify(tool_calls)\n        },\n        turn_stop_reason,\n      )",
+    "owner": "__agent_stall_observe_no_progress",
+    "evidence": "Consumer __agent_stall_observe_no_progress.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_observe_no_progress",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_observe_parse_rejection(\n      agent,\n      session_id,\n      iteration,\n      config,\n      state,\n      defer_feedback,\n    )",
+    "owner": "__agent_stall_observe_parse_rejection",
+    "evidence": "Consumer __agent_stall_observe_parse_rejection.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_observe_parse_rejection",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_process_call(\n      agent,\n      next_state,\n      config,\n      call,\n      tool_name,\n      prev_dispatch,\n      turn_made_edit,\n    )",
+    "owner": "__agent_stall_process_call",
+    "evidence": "Consumer __agent_stall_process_call.config in crates/harn-stdlib/src/stdlib/agent/stall_action_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_process_call",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_register_trip(current, config)",
+    "owner": "__agent_stall_register_trip",
+    "evidence": "Consumer __agent_stall_register_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_register_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_register_trip(next_state, config)",
+    "owner": "__agent_stall_register_trip",
+    "evidence": "Consumer __agent_stall_register_trip.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_register_trip",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_warning_record(\n        {\n          iteration: iteration,\n          tool_name: tool_name,\n          args: __agent_tool_call_args(call),\n          signature: __agent_tool_call_signature(call),\n          pattern: trip.pattern,\n          count: trip.count,\n          consecutive_trips: next_state.consecutive_trips,\n          hard_stop: next_state.hard_stop,\n          threshold: trip.threshold,\n        },\n        config,\n      )",
+    "owner": "__agent_stall_warning_record",
+    "evidence": "Consumer __agent_stall_warning_record.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_warning_record",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_warning_record(\n      {\n        iteration: iteration,\n        tool_name: tool_name,\n        args: __agent_tool_call_args(call),\n        signature: __agent_tool_call_signature(call),\n        pattern: \"repeated_observation_recurrence\",\n        count: recurrence.count,\n        consecutive_trips: next_state.consecutive_trips,\n        hard_stop: false,\n        threshold: config.repeat_same_observation,\n      },\n      config,\n    )",
+    "owner": "__agent_stall_warning_record",
+    "evidence": "Consumer __agent_stall_warning_record.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_warning_record",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_warning_record(\n    {\n      iteration: iteration,\n      tool_name: \"\",\n      args: {},\n      signature: \"parse_rejection\",\n      pattern: \"repeated_parse_rejection\",\n      count: next_state.parse_rejection_streak,\n      consecutive_trips: next_state.consecutive_trips,\n      hard_stop: next_state.hard_stop,\n      threshold: config.repeat_parse_rejection,\n    },\n    config,\n  )",
+    "owner": "__agent_stall_warning_record",
+    "evidence": "Consumer __agent_stall_warning_record.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_warning_record",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_warning_record(\n    {\n      iteration: iteration,\n      tool_name: \"\",\n      args: {},\n      signature: signature,\n      pattern: pattern,\n      count: next_state.no_progress_streak,\n      consecutive_trips: next_state.consecutive_trips,\n      hard_stop: next_state.hard_stop,\n      threshold: config.no_progress_messages,\n    },\n    config,\n  )",
+    "owner": "__agent_stall_warning_record",
+    "evidence": "Consumer __agent_stall_warning_record.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_warning_record",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "__agent_stall_warning_record(\n    {\n      iteration: iteration,\n      tool_name: \"\",\n      args: {},\n      signature: tripped.last_diagnostic_signature,\n      pattern: pattern,\n      count: count,\n      consecutive_trips: tripped.consecutive_trips,\n      hard_stop: tripped.hard_stop,\n      threshold: threshold,\n    },\n    config,\n  )",
+    "owner": "__agent_stall_warning_record",
+    "evidence": "Consumer __agent_stall_warning_record.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_warning_record",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_observation.harn",
+    "expression": "agent_stall_inject_feedback(agent, session_id, warning, config, state)",
+    "owner": "agent_stall_inject_feedback",
+    "evidence": "Consumer agent_stall_inject_feedback.config in crates/harn-stdlib/src/stdlib/agent/stall_observation.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "agent_stall_inject_feedback",
+        "parameter": "config"
+      }
+    ]
+  },
+  {
+    "scope": "AgentStallConfig",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_verification.harn",
+    "expression": "__agent_stall_config(raw_config)",
+    "owner": "__agent_stall_config",
+    "evidence": "Consumer __agent_stall_config.value in crates/harn-stdlib/src/stdlib/agent/stall_config.harn is an independently required binding origin for AgentStallConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentStallConfig",
+        "function": "__agent_stall_config",
+        "parameter": "value"
+      }
+    ]
+  }
+]

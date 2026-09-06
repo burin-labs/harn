@@ -1,0 +1,218 @@
+[
+  {
+    "default": "absent; use the stage max_iterations bound",
+    "evidence": "orchestration.policy.types ModelPolicy defaults iteration_budget to None; workflow.options omits nil keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.iteration_budget",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "16",
+    "evidence": "workflow.options.__workflow_agent_loop_options sets the workflow stage iteration bound. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ModelPolicySpec.max_iterations",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 351,
+        "reader": "__workflow_agent_loop_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "3",
+    "evidence": "workflow.options.__workflow_agent_loop_options sets the workflow stage nudge bound. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ModelPolicySpec.max_nudges",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 352,
+        "reader": "__workflow_agent_loop_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; provider/model defaults apply",
+    "evidence": "orchestration.policy.types ModelPolicy defaults max_tokens to None; workflow.options omits nil model keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ModelPolicySpec.max_tokens",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherited model resolution",
+    "evidence": "orchestration.policy.types ModelPolicy defaults model to None; workflow.options omits nil model keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.model",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no stage tier override",
+    "evidence": "orchestration.policy.types ModelPolicy defaults model_tier to None; workflow.options omits nil model keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.model_tier",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "reject",
+    "evidence": "workflow.options.__workflow_native_tool_fallback resolves an absent policy. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.native_tool_fallback",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 357,
+        "reader": "__workflow_agent_loop_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; runner default nudge",
+    "evidence": "orchestration.policy.types ModelPolicy defaults nudge to None; workflow.options omits nil loop keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.nudge",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no stage callback",
+    "evidence": "orchestration.policy.types ModelPolicy defaults post_turn_callback to None. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "ModelPolicySpec.post_turn_callback",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherited provider resolution",
+    "evidence": "orchestration.policy.types ModelPolicy defaults provider to None; workflow.options omits nil model keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.provider",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no stage successful-tool clauses",
+    "evidence": "orchestration.policy.types ModelPolicy defaults require_successful_tools to None. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.require_successful_tools",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no tool-triggered stage stop",
+    "evidence": "orchestration.policy.types ModelPolicy defaults stop_after_successful_tools to None. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.stop_after_successful_tools",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; provider/model defaults apply",
+    "evidence": "orchestration.policy.types ModelPolicy defaults temperature to None; workflow.options omits nil model keys. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "ModelPolicySpec.temperature",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no stage examples",
+    "evidence": "orchestration.policy.types ModelPolicy defaults tool_examples to None. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.tool_examples",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "host environment format, then host default format, then text",
+    "evidence": "workflow.options.__workflow_stage_tool_format resolves this precedence. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.tool_format",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
+        "line": 268,
+        "reader": "__workflow_stage_tool_format"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no stage turn-policy override",
+    "evidence": "orchestration.policy.types ModelPolicy defaults turn_policy to None. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "ModelPolicySpec.turn_policy",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

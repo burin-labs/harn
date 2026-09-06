@@ -1,0 +1,54 @@
+[
+  {
+    "default": "AgentSpec.tool_examples, then empty string",
+    "evidence": "The text tool contract reads turn_policy.tool_examples before the runner fallback.",
+    "expiry": "2026-09-13",
+    "kind": "option",
+    "layer": "runner",
+    "name": "TurnPolicy.tool_examples",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+        "line": 415,
+        "reader": "__agent_text_tool_contract_prompt"
+      }
+    ],
+    "reason": "Caller-provided tool examples are prompt policy content.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "the configured done sentinel",
+    "evidence": "Read by __done_contract_primary_prompt when constructing the actor completion instructions.",
+    "kind": "option",
+    "layer": "stop decision",
+    "name": "agent_done_contract.done_sentinel",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
+        "line": 681,
+        "reader": "__done_contract_primary_prompt"
+      }
+    ],
+    "reason": "Replace the prose sentinel completion contract with a typed actor completion packet.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "absent; a supplied key is rejected",
+    "evidence": "__validate_removed_agent_loop_options rejects this removed option.",
+    "kind": "option",
+    "layer": "runner",
+    "name": "AgentSpec.persistent",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 589,
+        "reader": "__validate_removed_agent_loop_options"
+      }
+    ],
+    "reason": "Move removed-option rejection to the owning closed input contract and remove the one-off guard.",
+    "verdict": "DELETE"
+  }
+]

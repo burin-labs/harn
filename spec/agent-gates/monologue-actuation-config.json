@@ -1,0 +1,154 @@
+[
+  {
+    "default": "false; object form true (monologue_actuation.harn:25 normalizer)",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "stall handler",
+    "name": "MonologueActuationConfig.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 42,
+        "reader": "agent_monologue_actuation_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 95,
+        "reader": "agent_monologue_actuation_observe"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 120,
+        "reader": "agent_monologue_actuation_observe_completed_dispatch"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 225,
+        "reader": "agent_monologue_actuation_take"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "1 (monologue_actuation.harn:25 normalizer)",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "stall handler",
+    "name": "MonologueActuationConfig.max_firings",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 47,
+        "reader": "agent_monologue_actuation_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 64,
+        "reader": "agent_monologue_actuation_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 235,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 208,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 233,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 243,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 253,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 263,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 275,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 285,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 295,
+        "reader": "agent_monologue_actuation_take"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 306,
+        "reader": "agent_monologue_actuation_take"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "4 (monologue_actuation.harn:25 normalizer)",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "stall handler",
+    "name": "MonologueActuationConfig.read_only_turns",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 52,
+        "reader": "agent_monologue_actuation_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 127,
+        "reader": "agent_monologue_actuation_observe_completed_dispatch"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 65,
+        "reader": "agent_monologue_actuation_config"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "empty string (monologue_actuation.harn:25 normalizer)",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "stall handler",
+    "name": "MonologueActuationConfig.write_tool",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 57,
+        "reader": "agent_monologue_actuation_config"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

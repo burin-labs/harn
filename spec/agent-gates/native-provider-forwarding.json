@@ -1,0 +1,9 @@
+[
+  {
+    "scope": "native-reminder-policy",
+    "file": "crates/harn-vm/src/llm/reminder_providers.rs",
+    "expression": "provider_id",
+    "owner": "provider_config_json",
+    "evidence": "The dynamic id selects a provider policy payload from the canonical or user provider registry; it does not select an independent top-level agent option."
+  }
+]

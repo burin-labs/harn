@@ -1,0 +1,15 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+  "config": {
+    "id": "TokenRunaway",
+    "prefix": "DetectorSpec.token_runaway.",
+    "types": [],
+    "parameters": [
+      {"function": "token_runaway_decision", "name": "config"},
+      {"function": "token_runaway_post_turn", "name": "config"},
+      {"function": "token_runaway_resolve_cap", "name": "input"}
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}

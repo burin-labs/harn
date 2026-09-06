@@ -1,0 +1,295 @@
+[
+  {
+    "default": "kill unless explicitly release; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CommandWaitOptions.auto_resolve",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 113,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 663,
+        "reader": "command_ledger_apply_ceiling"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "30000; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.decision_base_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 206,
+        "reader": "__cl_new_row"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 207,
+        "reader": "__cl_new_row"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 120,
+        "reader": "command_wait_normalize"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "300000; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.decision_cap_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 422,
+        "reader": "__cl_advance_schedule_row"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 122,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 584,
+        "reader": "command_ledger_after_digest"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "2; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.decision_multiplier",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 422,
+        "reader": "__cl_advance_schedule_row"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 121,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 583,
+        "reader": "command_ledger_after_digest"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "8; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.hold_reentry_budget",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 783,
+        "reader": "command_ledger_hold"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 130,
+        "reader": "command_wait_normalize"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "96; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.hold_reentry_max_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 127,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 774,
+        "reader": "command_ledger_hold"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 805,
+        "reader": "command_ledger_hold"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "10000; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.inline_window_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 119,
+        "reader": "command_wait_normalize"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "900000; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.max_awaited_wall_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 125,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 468,
+        "reader": "__cl_earliest_deadline"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 618,
+        "reader": "__cl_ceiling_breaches"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "300000; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.silence_floor_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 123,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 415,
+        "reader": "__cl_row_fires"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "300000; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "CommandWaitOptions.stall_after_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 409,
+        "reader": "__cl_row_fires"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 124,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 514,
+        "reader": "__cl_decision_wording"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 593,
+        "reader": "command_ledger_after_digest"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "{}; owner command_ledger.harn:107",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CommandWaitOptions.wording",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 133,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 132,
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 525,
+        "reader": "__cl_decision_wording"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "line": 519,
+        "reader": "__cl_decision_wording"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

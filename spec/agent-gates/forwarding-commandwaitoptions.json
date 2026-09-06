@@ -1,0 +1,191 @@
+[
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_advance_schedule_row(row, now_ms, cw)",
+    "owner": "__cl_advance_schedule_row",
+    "evidence": "Consumer __cl_advance_schedule_row.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "__cl_advance_schedule_row",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_apply_one(out[index], snapshot, now_ms, cw)",
+    "owner": "__cl_apply_one",
+    "evidence": "Consumer __cl_apply_one.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "__cl_apply_one",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_ceiling_breaches(ledger, now_ms, cw)",
+    "owner": "__cl_ceiling_breaches",
+    "evidence": "Consumer __cl_ceiling_breaches.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "__cl_ceiling_breaches",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_decision_wording(ledger, cw)",
+    "owner": "__cl_decision_wording",
+    "evidence": "Consumer __cl_decision_wording.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "__cl_decision_wording",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_earliest_deadline(live, cw)",
+    "owner": "__cl_earliest_deadline",
+    "evidence": "Consumer __cl_earliest_deadline.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "__cl_earliest_deadline",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "__cl_row_fires(row, now_ms, cw)",
+    "owner": "__cl_row_fires",
+    "evidence": "Consumer __cl_row_fires.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "__cl_row_fires",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_after_digest(live, now, cw)",
+    "owner": "command_ledger_after_digest",
+    "evidence": "Consumer command_ledger_after_digest.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_after_digest",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_after_digest(live, now2, cw)",
+    "owner": "command_ledger_after_digest",
+    "evidence": "Consumer command_ledger_after_digest.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_after_digest",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_apply_ceiling(\n      harness.agent,\n      harness.tools,\n      live,\n      now,\n      cw,\n      session_id,\n    )",
+    "owner": "command_ledger_apply_ceiling",
+    "evidence": "Consumer command_ledger_apply_ceiling.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_apply_ceiling",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_apply_updates(live, entries, now2, cw)",
+    "owner": "command_ledger_apply_updates",
+    "evidence": "Consumer command_ledger_apply_updates.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_apply_updates",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_build_digest(live, now, cw)",
+    "owner": "command_ledger_build_digest",
+    "evidence": "Consumer command_ledger_build_digest.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_build_digest",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_build_digest(live, now2, cw)",
+    "owner": "command_ledger_build_digest",
+    "evidence": "Consumer command_ledger_build_digest.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_build_digest",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_decide(live, now2, cw)",
+    "owner": "command_ledger_decide",
+    "evidence": "Consumer command_ledger_decide.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_decide",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "type_of(raw)",
+    "owner": "type_of",
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
+  }
+]

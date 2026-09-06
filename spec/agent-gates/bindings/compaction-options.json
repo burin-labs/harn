@@ -1,0 +1,11 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+  "config": {
+    "id": "CompactionOptions",
+    "prefix": "AgentSpec.compaction.",
+    "types": [],
+    "parameters": [{"function": "__compaction_strategy_label", "name": "value"}],
+    "normalizers": [],
+    "containers": ["policy"]
+  }
+}

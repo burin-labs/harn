@@ -1,0 +1,71 @@
+[
+  {
+    "default": "absent; no explicit transcript-directory override",
+    "evidence": "native lifecycle converts an absent or empty llm_transcript_dir to no override. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.llm_transcript_dir",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/agent_session_host/lifecycle.rs",
+        "line": 157,
+        "reader": "opt_str"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no custom delta callback",
+    "evidence": "options_public.agent_options reads the optional callback and projects it into _on_delta without supplying one. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "AgentSpec.on_delta",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 734,
+        "reader": "__validate_agent_loop_callback_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 735,
+        "reader": "__validate_agent_loop_callback_options"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "disabled",
+    "evidence": "purpose_labels.agent_purpose_label_config returns disabled configuration when no setting is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "AgentSpec.purpose_labels",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+        "line": 59,
+        "reader": "agent_loop"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_purpose_labels.harn",
+        "line": 41,
+        "reader": "__purpose_label_arm"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+        "line": 167,
+        "reader": "__agent_loop_turn_setup"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

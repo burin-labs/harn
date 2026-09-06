@@ -1,0 +1,20 @@
+[
+  {
+    "default": "{\"kind\": \"dynamic\", \"reason\": \"CLI routing/default selection or absent optional override\"}",
+    "evidence": "commands/try_cmd.rs injects environment; cli/try.harn:49 passes provider into agent_loop. This proves harn try source wiring, not downstream canonical headless binding.",
+    "expiry": "2026-09-13",
+    "kind": "environment bridge",
+    "layer": "runner",
+    "name": "HARN_TRY_PROVIDER",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/cli/try.harn",
+        "line": 36,
+        "reader": "__trimmed_env"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

@@ -1,0 +1,240 @@
+[
+  {
+    "default": "absent; use the built-in typed model checkpoint",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier invokes the custom closure only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "callback",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.classifier",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 379,
+        "reader": "__validate_missing_tool_call_recovery"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 437,
+        "reader": "__missing_tool_call_recovery_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 265,
+        "reader": "missing_tool_call_classifier"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0.65",
+    "evidence": "llm.missing_tool_call.__missing_tool_call_threshold supplies and validates the confidence threshold. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.confidence_threshold",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 264,
+        "reader": "missing_tool_call_classifier"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; provider/catalog default",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards effort only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.effort",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 314,
+        "reader": "missing-tool-recovery-key-domain"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "true; a false parent missing_tool_call_recovery setting disables recovery",
+    "evidence": "postturn.__missing_tool_call_recovery_config and llm.missing_tool_call.missing_tool_call_classifier both enable omitted configuration. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 375,
+        "reader": "__validate_missing_tool_call_recovery"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 377,
+        "reader": "__validate_missing_tool_call_recovery"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 426,
+        "reader": "__missing_tool_call_recovery_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 255,
+        "reader": "missing_tool_call_classifier"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "192",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier supplies the typed checkpoint output bound. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.max_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 304,
+        "reader": ""
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "inherit runner model; standalone classifier omits the model for provider resolution",
+    "evidence": "postturn.__missing_tool_call_recovery_config copies the actor model only when classifier configuration omits it. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.model",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 422,
+        "reader": "__missing_tool_call_recovery_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 263,
+        "reader": "missing_tool_call_classifier"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "inherit runner provider; standalone classifier omits the provider for normal resolution",
+    "evidence": "postturn.__missing_tool_call_recovery_config copies the actor provider only when classifier configuration omits it. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.provider",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
+        "line": 419,
+        "reader": "__missing_tool_call_recovery_config"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 311,
+        "reader": ""
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 312,
+        "reader": ""
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; provider default",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards seed only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.seed",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 314,
+        "reader": "missing-tool-recovery-key-domain"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0.0",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier supplies the classifier sampling temperature. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.temperature",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 305,
+        "reader": ""
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; checkpoint/provider default",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards timeout_ms only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.timeout_ms",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 314,
+        "reader": "missing-tool-recovery-key-domain"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; provider default",
+    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards top_p only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.top_p",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "line": 314,
+        "reader": "missing-tool-recovery-key-domain"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

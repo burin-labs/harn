@@ -1,0 +1,340 @@
+[
+  {
+    "default": "dynamic: observed local fallback true; normalization may override",
+    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "expiry": "2026-09-13",
+    "kind": "boolean option",
+    "layer": "runner",
+    "name": "DetectorSpec.enabled",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 255,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0.0; no token ceiling without positive history or fallback",
+    "evidence": "stall_detectors.token_runaway_decision supplies zero and returns no_cap when the resolved ceiling is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.token_runaway.fallback",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 83,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 116,
+        "reader": "token_runaway_decision"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "3.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_HARD_OVERSHOOT_MULTIPLE. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.token_runaway.hard_multiple",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 129,
+        "reader": "token_runaway_decision"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "3 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides hard_stop_after_trips only when supplied; stall_config defaults it to STALL_HARD_STOP_AFTER_TRIPS. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.hard_stop_after_trips",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 278,
+        "reader": "detector_spec_to_stall"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 279,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; preserve native loop-detector defaults",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides repeat and ping-pong only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.loop",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 256,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0.0; no median history",
+    "evidence": "stall_detectors.token_runaway_decision supplies zero to token_runaway_resolve_cap when no history is supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.token_runaway.median",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 80,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 119,
+        "reader": "token_runaway_decision"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "3 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves no_progress_messages unchanged when absent; stall_config defaults it to STALL_NO_PROGRESS_MESSAGES. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.no_progress.messages",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 266,
+        "reader": "detector_spec_to_stall"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 267,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; preserve native no-progress default",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides no_progress_messages only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.no_progress",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 265,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "6 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves ping_pong_cycles unchanged when absent; stall_config defaults it to STALL_PING_PONG_CYCLES. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.loop.ping_pong_cycles",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 261,
+        "reader": "detector_spec_to_stall"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 262,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "4 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves repeat_same_observation unchanged when absent; stall_config defaults it to STALL_REPEAT_SAME_OBSERVATION. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.loop.repeat",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 258,
+        "reader": "detector_spec_to_stall"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 259,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; does not independently enable repair-aware detection",
+    "evidence": "stall_detectors.detector_spec_to_stall sets repair_aware only for an explicit same_diagnostic value; native stall configuration owns its own defaults. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.stuck.same_diagnostic",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 274,
+        "reader": "detector_spec_to_stall"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 275,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "3 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves repeat_same_error unchanged when absent; stall_config defaults it to STALL_REPEAT_SAME_ERROR. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.stuck.same_error",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 271,
+        "reader": "detector_spec_to_stall"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 272,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "2.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.token_runaway.sigma",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 82,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 115,
+        "reader": "token_runaway_decision"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "0.0; use the thin-history margin",
+    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.token_runaway.stddev",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 81,
+        "reader": "token_runaway_resolve_cap"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 120,
+        "reader": "token_runaway_decision"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; preserve native stuck-detector defaults",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides error/diagnostic behavior only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.stuck",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 269,
+        "reader": "detector_spec_to_stall"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no token-runaway post-turn overlay",
+    "evidence": "stall_detectors.unified_detectors_post_turn returns nil when token_runaway is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "expiry": "2026-09-13",
+    "kind": "limit or threshold",
+    "layer": "runner",
+    "name": "DetectorSpec.token_runaway",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+        "line": 293,
+        "reader": "detector_spec_token_runaway"
+      }
+    ],
+    "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

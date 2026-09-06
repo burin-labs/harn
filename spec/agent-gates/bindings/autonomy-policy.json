@@ -1,0 +1,16 @@
+{
+  "glob": "crates/harn-stdlib/src/stdlib/agent/**/*.harn",
+  "config": {
+    "id": "autonomy_policy",
+    "prefix": "autonomy_policy.",
+    "types": [],
+    "parameters": [
+      {
+        "function": "autonomy_policy",
+        "name": "options"
+      }
+    ],
+    "normalizers": [],
+    "containers": []
+  }
+}
