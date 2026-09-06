@@ -1654,43 +1654,62 @@ class HarnPreparedSessionUpdate(_HarnDataclass):
 HARN_SESSION_RECAP_QUERY_METHOD: str = "harn.session_recap.query"
 HARN_SESSION_RECAP_SCHEMA_VERSION: int = 1
 
+
+
 class HarnSessionRecapCompletionState(str, Enum):
     OPEN = "open"
     COMPLETE = "complete"
     INCOMPLETE = "incomplete"
     UNASSIGNED = "unassigned"
+
+
 class HarnSessionRecapToolState(str, Enum):
     OPEN = "open"
     COMPLETED = "completed"
     FAILED = "failed"
     INCOMPLETE = "incomplete"
+
+
 class HarnSessionRecapPlanStepStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     BLOCKED = "blocked"
     CANCELLED = "cancelled"
+
+
 class HarnSessionRecapPlanEventKind(str, Enum):
     CREATED = "created"
     UPDATED = "updated"
+
+
 class HarnSessionRecapProgressStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+
+
 class HarnSessionRecapProgressPriority(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+
+
 class HarnSessionRecapVerificationStatus(str, Enum):
     PASSED = "passed"
+
+
 class HarnSessionRecapUnavailableReason(str, Enum):
     JOURNAL_UNAVAILABLE = "journal_unavailable"
     SESSION_MISSING = "session_missing"
     PROJECTION_FAILED = "projection_failed"
     ADMISSION_TERMINAL = "admission_terminal"
+
+
 class HarnSessionRecapAvailabilityState(str, Enum):
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
+
 
 class _HarnStrictRecapDataclass(_HarnDataclass):
     @classmethod
@@ -1726,106 +1745,172 @@ def _harn_recap_wire(value: Any) -> Any:
 
 @dataclass
 class HarnSessionRecapQuery(_HarnStrictRecapDataclass):
-    sessionId: str; runId: Optional[str]; turnId: Optional[str]; fromEventId: Optional[int]; limit: Optional[int]
+    sessionId: str
+    runId: Optional[str]
+    turnId: Optional[str]
+    fromEventId: Optional[int]
+    limit: Optional[int]
+
 @dataclass
 class HarnSessionRecapCursor(_HarnStrictRecapDataclass):
-    lastEventId: Optional[int]; nextEventId: Optional[int]
+    lastEventId: Optional[int]
+    nextEventId: Optional[int]
+
 @dataclass
 class HarnSessionRecapCoverage(_HarnStrictRecapDataclass):
-    scanned: int; matched: int; pending: int; unassigned: int; truncated: bool
+    scanned: int
+    matched: int
+    pending: int
+    unassigned: int
+    truncated: bool
+
 @dataclass
 class HarnSessionRecapSourceEvent(_HarnStrictRecapDataclass):
-    eventId: int; recordHash: str
+    eventId: int
+    recordHash: str
+
 @dataclass
 class HarnSessionRecapSource(_HarnStrictRecapDataclass):
-    firstEventId: Optional[int]; lastEventId: Optional[int]; events: List[HarnSessionRecapSourceEvent]
+    firstEventId: Optional[int]
+    lastEventId: Optional[int]
+    events: List[HarnSessionRecapSourceEvent]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapSource":
         values = cls._strict_values(data)
         values["events"] = [HarnSessionRecapSourceEvent.from_wire(item) for item in values["events"]]
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapTextFact(_HarnStrictRecapDataclass):
-    text: str; sourceEventId: int
+    text: str
+    sourceEventId: int
+
 @dataclass
 class HarnSessionRecapVerificationFact(_HarnStrictRecapDataclass):
-    schema: str; status: HarnSessionRecapVerificationStatus; verifiedPaths: List[str]; sourceEventId: int
+    schema: str
+    status: HarnSessionRecapVerificationStatus
+    verifiedPaths: List[str]
+    sourceEventId: int
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapVerificationFact":
         values = cls._strict_values(data)
         values["status"] = HarnSessionRecapVerificationStatus(values["status"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapToolExchange(_HarnStrictRecapDataclass):
-    toolCallId: str; toolName: Optional[str]; state: HarnSessionRecapToolState; callObserved: bool
-    resultObserved: bool; input: Optional[JsonValue]; output: Optional[JsonValue]
-    verification: Optional[HarnSessionRecapVerificationFact]; sourceEventIds: List[int]
+    toolCallId: str
+    toolName: Optional[str]
+    state: HarnSessionRecapToolState
+    callObserved: bool
+    resultObserved: bool
+    input: Optional[JsonValue]
+    output: Optional[JsonValue]
+    verification: Optional[HarnSessionRecapVerificationFact]
+    sourceEventIds: List[int]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapToolExchange":
         values = cls._strict_values(data)
         values["state"] = HarnSessionRecapToolState(values["state"])
-        if values["verification"] is not None:
-            values["verification"] = HarnSessionRecapVerificationFact.from_wire(values["verification"])
+        values["verification"] = None if values["verification"] is None else HarnSessionRecapVerificationFact.from_wire(values["verification"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapPlanStep(_HarnStrictRecapDataclass):
-    id: str; content: str; status: HarnSessionRecapPlanStepStatus
+    id: str
+    content: str
+    status: HarnSessionRecapPlanStepStatus
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapPlanStep":
         values = cls._strict_values(data)
         values["status"] = HarnSessionRecapPlanStepStatus(values["status"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapPlanEventFact(_HarnStrictRecapDataclass):
-    kind: HarnSessionRecapPlanEventKind; eventId: str; inputRevisionId: Optional[str]
+    kind: HarnSessionRecapPlanEventKind
+    eventId: str
+    inputRevisionId: Optional[str]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapPlanEventFact":
         values = cls._strict_values(data)
         values["kind"] = HarnSessionRecapPlanEventKind(values["kind"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapPlanFact(_HarnStrictRecapDataclass):
-    documentId: str; revisionId: str; title: str; summary: str; steps: List[HarnSessionRecapPlanStep]
-    event: Optional[HarnSessionRecapPlanEventFact]; sourceEventId: int
+    documentId: str
+    revisionId: str
+    title: str
+    summary: str
+    steps: List[HarnSessionRecapPlanStep]
+    event: Optional[HarnSessionRecapPlanEventFact]
+    sourceEventId: int
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapPlanFact":
         values = cls._strict_values(data)
         values["steps"] = [HarnSessionRecapPlanStep.from_wire(item) for item in values["steps"]]
-        if values["event"] is not None:
-            values["event"] = HarnSessionRecapPlanEventFact.from_wire(values["event"])
+        values["event"] = None if values["event"] is None else HarnSessionRecapPlanEventFact.from_wire(values["event"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapProgressEntry(_HarnStrictRecapDataclass):
-    content: str; status: HarnSessionRecapProgressStatus; priority: Optional[HarnSessionRecapProgressPriority]
+    content: str
+    status: HarnSessionRecapProgressStatus
+    priority: Optional[HarnSessionRecapProgressPriority]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapProgressEntry":
         values = cls._strict_values(data)
         values["status"] = HarnSessionRecapProgressStatus(values["status"])
-        if values["priority"] is not None:
-            values["priority"] = HarnSessionRecapProgressPriority(values["priority"])
+        values["priority"] = None if values["priority"] is None else HarnSessionRecapProgressPriority(values["priority"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapProgressFact(_HarnStrictRecapDataclass):
-    message: Optional[str]; entries: List[HarnSessionRecapProgressEntry]; replace: bool; sourceEventId: int
+    message: Optional[str]
+    entries: List[HarnSessionRecapProgressEntry]
+    replace: bool
+    sourceEventId: int
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapProgressFact":
         values = cls._strict_values(data)
         values["entries"] = [HarnSessionRecapProgressEntry.from_wire(item) for item in values["entries"]]
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapTerminalFact(_HarnStrictRecapDataclass):
-    state: HarnSessionRecapCompletionState; finalStatus: Optional[str]; stopReason: Optional[str]
-    kind: Optional[str]; owner: Optional[str]; reason: Optional[str]; sourceEventId: int
+    state: HarnSessionRecapCompletionState
+    finalStatus: Optional[str]
+    stopReason: Optional[str]
+    kind: Optional[str]
+    owner: Optional[str]
+    reason: Optional[str]
+    sourceEventId: int
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapTerminalFact":
         values = cls._strict_values(data)
         values["state"] = HarnSessionRecapCompletionState(values["state"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapIteration(_HarnStrictRecapDataclass):
-    iteration: Optional[int]; state: HarnSessionRecapCompletionState; assistantText: List[HarnSessionRecapTextFact]
-    tools: List[HarnSessionRecapToolExchange]; plans: List[HarnSessionRecapPlanFact]
-    progress: List[HarnSessionRecapProgressFact]; sourceEventIds: List[int]
+    iteration: Optional[int]
+    state: HarnSessionRecapCompletionState
+    assistantText: List[HarnSessionRecapTextFact]
+    tools: List[HarnSessionRecapToolExchange]
+    plans: List[HarnSessionRecapPlanFact]
+    progress: List[HarnSessionRecapProgressFact]
+    sourceEventIds: List[int]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapIteration":
         values = cls._strict_values(data)
@@ -1835,24 +1920,39 @@ class HarnSessionRecapIteration(_HarnStrictRecapDataclass):
         values["plans"] = [HarnSessionRecapPlanFact.from_wire(item) for item in values["plans"]]
         values["progress"] = [HarnSessionRecapProgressFact.from_wire(item) for item in values["progress"]]
         return cls(**values)
+
 @dataclass
 class HarnSessionPromptTurnRecap(_HarnStrictRecapDataclass):
-    turnId: str; runId: str; state: HarnSessionRecapCompletionState; prompts: List[HarnSessionRecapTextFact]
-    iterations: List[HarnSessionRecapIteration]; terminal: Optional[HarnSessionRecapTerminalFact]; sourceEventIds: List[int]
+    turnId: str
+    runId: str
+    state: HarnSessionRecapCompletionState
+    prompts: List[HarnSessionRecapTextFact]
+    iterations: List[HarnSessionRecapIteration]
+    terminal: Optional[HarnSessionRecapTerminalFact]
+    sourceEventIds: List[int]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionPromptTurnRecap":
         values = cls._strict_values(data)
         values["state"] = HarnSessionRecapCompletionState(values["state"])
         values["prompts"] = [HarnSessionRecapTextFact.from_wire(item) for item in values["prompts"]]
         values["iterations"] = [HarnSessionRecapIteration.from_wire(item) for item in values["iterations"]]
-        if values["terminal"] is not None:
-            values["terminal"] = HarnSessionRecapTerminalFact.from_wire(values["terminal"])
+        values["terminal"] = None if values["terminal"] is None else HarnSessionRecapTerminalFact.from_wire(values["terminal"])
         return cls(**values)
+
 @dataclass
 class HarnSessionRecapSnapshot(_HarnStrictRecapDataclass):
-    schemaVersion: int; sessionId: str; query: HarnSessionRecapQuery; cursor: HarnSessionRecapCursor
-    coverage: HarnSessionRecapCoverage; source: HarnSessionRecapSource; contentHash: str; projectionHash: str
-    turns: List[HarnSessionPromptTurnRecap]; extensions: Dict[str, JsonValue]
+    schemaVersion: int
+    sessionId: str
+    query: HarnSessionRecapQuery
+    cursor: HarnSessionRecapCursor
+    coverage: HarnSessionRecapCoverage
+    source: HarnSessionRecapSource
+    contentHash: str
+    projectionHash: str
+    turns: List[HarnSessionPromptTurnRecap]
+    extensions: Dict[str, JsonValue]
+
     @classmethod
     def from_wire(cls, data: Mapping[str, Any]) -> "HarnSessionRecapSnapshot":
         values = cls._strict_values(data)
@@ -1862,6 +1962,8 @@ class HarnSessionRecapSnapshot(_HarnStrictRecapDataclass):
         values["source"] = HarnSessionRecapSource.from_wire(values["source"])
         values["turns"] = [HarnSessionPromptTurnRecap.from_wire(item) for item in values["turns"]]
         return cls(**values)
+
+
 @dataclass
 class HarnSessionRecapAvailability(_HarnDataclass):
     state: HarnSessionRecapAvailabilityState
