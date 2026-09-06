@@ -478,7 +478,7 @@ jobs:
       # deliberate change to which release semantics this repository is
       # checked against.
       ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 28105649eb80eb609579a506eeced2bf090a1d1a
+      ORCHESTRATOR_REF: 0eb9ccd5efdd2f94b0037999a8a70f97c5ea0c5e
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
