@@ -99,7 +99,7 @@ pub(super) fn append(out: &mut String, target: Target) {
             if record.name == "HarnPlanStep" {
                 match (field.wire_name.as_ref(), target) {
                     ("status", Target::Typescript) => {
-                        field.kind = FieldKind::Named("HarnPlanStepStatus".into())
+                        field.kind = FieldKind::Named("HarnPlanStepStatus".into());
                     }
                     ("priority", Target::Typescript | Target::Python) => {
                         field.kind = FieldKind::Json;

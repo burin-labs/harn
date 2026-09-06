@@ -237,8 +237,11 @@ pub fn __agent_stall_fold_diagnostic(
       write_epoch: new_write_epoch,
       same_diagnostic_streak: new_streak,
       failing_verify_turns: failing_turns,
-      last_completed_failure_count: delta.current.complete && delta.current.failure_count > 0 ? delta.current.failure_count : state
-        .last_completed_failure_count,
+      last_completed_failure_count: if delta.current.complete && delta.current.failure_count > 0 {
+        delta.current.failure_count
+      } else {
+        state.last_completed_failure_count
+      },
       turns_since_clean_verify: new_turns_since_clean_verify,
       edit_since_failure: false,
       reverify_owed: false,

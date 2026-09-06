@@ -220,7 +220,7 @@ impl Record {
                     camel_ident(&field.wire_name)
                 )),
                 Target::Typescript => {
-                    out.push_str(&format!("  {}{optional}: {kind}\n", field.wire_name))
+                    out.push_str(&format!("  {}{optional}: {kind}\n", field.wire_name));
                 }
                 Target::Python => out.push_str(&format!(
                     "    {}: {kind}{}\n",
