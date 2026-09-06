@@ -3,7 +3,7 @@ use std::hash::Hasher;
 use std::io::Write;
 use std::path::Path;
 
-use harn_lexer::{Lexer, LexerError, Token};
+use harn_lexer::{Lexer, LexerError};
 
 use crate::{InlayHintInfo, TypeCheckFacts};
 use crate::{Parser, ParserError, SNode, TypeChecker, TypeDiagnostic};
@@ -73,7 +73,7 @@ pub struct TypeCheckOutput {
     pub inlay_hints: Vec<InlayHintInfo>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnalysisError {
     MissingSource(SourceId),
     Lex {
@@ -214,7 +214,7 @@ struct SourceEntry {
     source: String,
     version: SourceVersion,
     digest: SourceDigest,
-    tokens: Option<Result<Vec<Token>, LexerError>>,
+    lex_error: Option<LexerError>,
     program: Option<Result<Vec<SNode>, Vec<ParserError>>>,
     typechecks: HashMap<TypeCheckCacheKey, CachedTypeCheck>,
 }
@@ -225,7 +225,7 @@ impl SourceEntry {
             source,
             version,
             digest,
-            tokens: None,
+            lex_error: None,
             program: None,
             typechecks: HashMap::new(),
         }
@@ -235,7 +235,7 @@ impl SourceEntry {
         self.source = source;
         self.version = version;
         self.digest = digest;
-        self.tokens = None;
+        self.lex_error = None;
         self.program = None;
         self.typechecks.clear();
     }
@@ -261,7 +261,7 @@ impl AnalysisDatabase {
     ///
     /// Long-running batch consumers that retain their own compact projection
     /// of a parsed program should release the database entry as soon as that
-    /// projection is built. Otherwise tokens, the cached AST, type-check
+    /// projection is built. Otherwise the cached AST, type-check
     /// diagnostics, and the consumer's projection all stay live together.
     pub fn remove_source(&mut self, id: &SourceId) -> bool {
         self.entries.remove(id).is_some()
@@ -320,57 +320,36 @@ impl AnalysisDatabase {
     }
 
     pub fn parse(&mut self, id: &SourceId) -> Result<ParseOutput, AnalysisError> {
-        if let Some(entry) = self.entries.get(id) {
-            if let Some(program) = &entry.program {
-                return match program {
-                    Ok(program) => Ok(ParseOutput {
-                        source: entry.source.clone(),
-                        program: program.clone(),
-                    }),
-                    Err(errors) => Err(AnalysisError::Parse {
-                        source: entry.source.clone(),
-                        errors: errors.clone(),
-                    }),
-                };
-            }
-        }
-
-        let mut lexed = false;
-        let mut parsed_now = false;
-        let entry = self.entry_mut(id)?;
-        if entry.tokens.is_none() {
-            lexed = true;
-            let mut lexer = Lexer::new(&entry.source);
-            entry.tokens = Some(lexer.tokenize());
-        }
-        let tokens = match entry.tokens.as_ref().expect("tokens initialized") {
-            Ok(tokens) => tokens.clone(),
-            Err(error) => {
-                let source = entry.source.clone();
-                let error = error.clone();
-                if lexed {
-                    self.stats.lex_runs += 1;
-                }
-                return Err(AnalysisError::Lex { source, error });
-            }
-        };
-
+        let entry = self
+            .entries
+            .get_mut(id)
+            .ok_or_else(|| AnalysisError::MissingSource(id.clone()))?;
         if entry.program.is_none() {
-            parsed_now = true;
-            let mut parser = Parser::new(tokens);
-            entry.program = Some(match parser.parse() {
-                Ok(program) => Ok(program),
-                Err(error) => {
-                    let mut errors = parser.all_errors().to_vec();
-                    if errors.is_empty() {
-                        errors.push(error);
-                    }
-                    Err(errors)
+            if let Some(error) = &entry.lex_error {
+                return Err(AnalysisError::Lex {
+                    source: entry.source.clone(),
+                    error: error.clone(),
+                });
+            }
+            self.stats.lex_runs += 1;
+            let tokens = Lexer::new(&entry.source).tokenize().map_err(|error| {
+                entry.lex_error = Some(error.clone());
+                AnalysisError::Lex {
+                    source: entry.source.clone(),
+                    error,
                 }
-            });
+            })?;
+            self.stats.parse_runs += 1;
+            let mut parser = Parser::new(tokens);
+            entry.program = Some(parser.parse().map_err(|error| {
+                let mut errors = parser.all_errors().to_vec();
+                if errors.is_empty() {
+                    errors.push(error);
+                }
+                errors
+            }));
         }
-
-        let result = match entry.program.as_ref().expect("program initialized") {
+        match entry.program.as_ref().expect("program initialized") {
             Ok(program) => Ok(ParseOutput {
                 source: entry.source.clone(),
                 program: program.clone(),
@@ -379,14 +358,7 @@ impl AnalysisDatabase {
                 source: entry.source.clone(),
                 errors: errors.clone(),
             }),
-        };
-        if lexed {
-            self.stats.lex_runs += 1;
         }
-        if parsed_now {
-            self.stats.parse_runs += 1;
-        }
-        result
     }
 
     pub fn typecheck(
@@ -430,12 +402,6 @@ impl AnalysisDatabase {
             diagnostics,
             inlay_hints,
         })
-    }
-
-    fn entry_mut(&mut self, id: &SourceId) -> Result<&mut SourceEntry, AnalysisError> {
-        self.entries
-            .get_mut(id)
-            .ok_or_else(|| AnalysisError::MissingSource(id.clone()))
     }
 }
 
@@ -510,6 +476,24 @@ mod tests {
         db.parse(&id).expect("same digest parse");
         assert_eq!(db.stats().lex_runs, 1);
         assert_eq!(db.stats().parse_runs, 1);
+    }
+
+    #[test]
+    fn failed_analysis_is_cached_until_source_changes() {
+        for (source, parses) in [("#", 0), ("const =", 1)] {
+            let mut db = AnalysisDatabase::new();
+            let id = source_id();
+            db.set_source(id.clone(), source.into(), SourceVersion(1));
+            let first = db.parse(&id).unwrap_err();
+            let second = db.parse(&id).unwrap_err();
+            assert_eq!(first, second);
+            assert_eq!(db.stats().lex_runs, 1);
+            assert_eq!(db.stats().parse_runs, parses);
+            db.set_source(id.clone(), "const x = 1\n".into(), SourceVersion(2));
+            assert_eq!(db.parse(&id).unwrap().program.len(), 1);
+            assert_eq!(db.stats().lex_runs, 2);
+            assert_eq!(db.stats().parse_runs, parses + 1);
+        }
     }
 
     #[test]
