@@ -76,8 +76,6 @@ harness.stdio.log(harness.runtime.atomic_get(survived))
                 )
                 .await
             });
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_secs(30)).await;
             let (output, _) = handle.await.expect("join VM task").expect("run Harn");
             assert_eq!(output.trim_end(), "[harn] caught: boom\n[harn] 0");
         })
@@ -116,8 +114,6 @@ harness.stdio.log(harness.runtime.atomic_get(survived))
                 )
                 .await
             });
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_secs(30)).await;
             let (output, _) = handle.await.expect("join VM task").expect("run Harn");
             assert_eq!(output.trim_end(), "[harn] caught: each boom\n[harn] 0");
         })
