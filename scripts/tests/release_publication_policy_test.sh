@@ -57,9 +57,8 @@ grep -Fq -- "--prerelease \\" "$workflow" \
   || fail "stable release placeholder is no longer created as prerelease"
 grep -Fq 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF"' "$workflow" \
   || fail "binary publication does not prove the tag selects merged main"
-if grep -Eq 'promote_only|candidate_run_id|BUILD_MODE.?=.?promote' "$workflow"; then
-  fail "binary publication retains obsolete candidate-promotion authority"
-fi
+grep -Fq 'scripts/validate_release_promotion_inputs.sh' "$workflow" \
+  || fail "candidate promotion bypasses the closed publication intent"
 
 vscode_workflow="$root/.github/workflows/publish-vscode.yml"
 grep -Fq "if: github.ref_type != 'tag' || !contains(github.ref_name, '-')" "$vscode_workflow" \

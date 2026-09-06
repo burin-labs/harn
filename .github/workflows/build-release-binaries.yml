@@ -46,6 +46,28 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
+      promote_only:
+        description: 'Publish exact certified candidate archives without rebuilding.'
+        type: boolean
+        default: false
+      candidate_archive_run_id:
+        description: 'Completed certified candidate archive producer run.'
+        type: string
+      candidate_manifest_artifact_id:
+        description: 'Exact candidate manifest artifact ID.'
+        type: string
+      expected_manifest_digest:
+        description: 'Exact sha256: digest of the manifest artifact ZIP.'
+        type: string
+      expected_source_sha:
+        description: 'Certified source commit and signed tag target.'
+        type: string
+      expected_archive_policy_sha:
+        description: 'Original archive producer policy commit.'
+        type: string
+      expected_policy_sha:
+        description: 'Exact current-main workflow execution commit.'
+        type: string
       tag:
         description: 'Tag to (re-)release, e.g. v0.7.31. Leave empty when warm_cache_only is true.'
         required: false
@@ -214,6 +236,13 @@ jobs:
         id: resolve
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PROMOTE_ONLY: ${{ inputs.promote_only && 'true' || 'false' }}
+          PROMOTION_RUN: ${{ inputs.candidate_archive_run_id }}
+          PROMOTION_MANIFEST_ID: ${{ inputs.candidate_manifest_artifact_id }}
+          PROMOTION_MANIFEST_DIGEST: ${{ inputs.expected_manifest_digest }}
+          PROMOTION_SOURCE: ${{ inputs.expected_source_sha }}
+          PROMOTION_ARCHIVE_POLICY: ${{ inputs.expected_archive_policy_sha }}
+          PROMOTION_POLICY: ${{ inputs.expected_policy_sha }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
@@ -369,6 +398,7 @@ jobs:
           }
 
           BUILD_MATRIX="[]"
+          scripts/validate_release_promotion_inputs.sh
           REQUESTED_TARGETS_JSON="$(requested_targets_json "$INPUT_TARGETS")"
           REQUESTED_TARGET_COUNT="$(jq 'length' <<<"$REQUESTED_TARGETS_JSON")"
           if (( REQUESTED_TARGET_COUNT > 0 )); then
@@ -395,7 +425,15 @@ jobs:
             echo "::error::candidate_source_ref and candidate_source_sha require candidate_only=true"
             exit 1
           fi
-          if [[ "$INPUT_CANDIDATE_ONLY" == "true" ]]; then
+          if [[ "$INPUT_PROMOTE_ONLY" == "true" ]]; then
+            scripts/verify_release_tag_main_ancestry.sh --tag "$REF"
+            [[ "$(git rev-parse "refs/tags/$REF^{commit}")" == "$PROMOTION_SOURCE" ]] || { echo '::error::Signed tag target differs from certified source'; exit 1; }
+            IS_RELEASE=true
+            BUILD_MODE=promote
+            VERSION="${REF#v}"
+            SHOULD_FINALIZE_RELEASE=true
+            SHOULD_PUBLISH_CONTAINER=true
+          elif [[ "$INPUT_CANDIDATE_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::candidate_only is only valid for workflow_dispatch"
               exit 1
@@ -600,7 +638,7 @@ jobs:
           release_publication_plan "$VERSION" "$MAKE_LATEST"
           IS_PRERELEASE="$RELEASE_IS_PRERELEASE"
           MAKE_LATEST="$RELEASE_MAKE_LATEST"
-          if [[ "$IS_RELEASE" == "true" ]]; then
+          if [[ "$IS_RELEASE" == "true" && "$BUILD_MODE" != "promote" ]]; then
             EXPECTED_ARCHIVES=(
               "harn-aarch64-apple-darwin.tar.gz"
               "harn-aarch64-unknown-linux-gnu.tar.gz"
@@ -2082,6 +2120,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       attestations: read
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2098,11 +2137,26 @@ jobs:
           policy_dir="$RUNNER_TEMP/release-provenance-policy"
           cp .github/release-bot-allowed-signers "$policy_dir/release-bot-allowed-signers"
 
+      - name: Download and verify certified candidate archive bytes
+        if: needs.setup.outputs.build_mode == 'promote'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_RUN: ${{ inputs.candidate_archive_run_id }}
+          MANIFEST_ID: ${{ inputs.candidate_manifest_artifact_id }}
+          MANIFEST_DIGEST: ${{ inputs.expected_manifest_digest }}
+          SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          ARCHIVE_POLICY: ${{ inputs.expected_archive_policy_sha }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          scripts/download_candidate_archive_promotion.sh "$GITHUB_REPOSITORY" "$ARCHIVE_RUN" "$MANIFEST_ID" "$MANIFEST_DIGEST" "$SOURCE_SHA" "$ARCHIVE_POLICY" "$RUNNER_TEMP/certified-archives"
+          scripts/verify_candidate_archive_promotion.sh --manifest "$RUNNER_TEMP/certified-archives/candidate-archive-manifest.json" --tag "$REF" --repo "$GITHUB_REPOSITORY" --artifacts-dir "$RUNNER_TEMP/certified-archives" --expected-source-commit "$SOURCE_SHA" --expected-policy-revision "$ARCHIVE_POLICY" --expected-run-id "$ARCHIVE_RUN"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
       - name: Download release archives
+        if: needs.setup.outputs.build_mode != 'promote'
         env:
           GH_TOKEN: ${{ github.token }}
           REF: ${{ needs.setup.outputs.ref }}
@@ -2157,6 +2211,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
           REF: ${{ needs.setup.outputs.ref }}
+          BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
         run: |
           set -euo pipefail
           args=(
@@ -2165,6 +2220,11 @@ jobs:
             --repo "$GITHUB_REPOSITORY"
             --allowed-signers "$RUNNER_TEMP/release-provenance-policy/release-bot-allowed-signers"
           )
+          if [[ "$BUILD_MODE" == "promote" ]]; then
+            mkdir -p artifacts
+            cp "$RUNNER_TEMP/certified-archives"/harn-* artifacts/
+            args+=(--candidate-manifest "$RUNNER_TEMP/certified-archives/candidate-archive-manifest.json")
+          fi
           if [[ -n "$LEGACY_PROVENANCE_OVERRIDE" ]]; then
             args+=(--legacy-override "$LEGACY_PROVENANCE_OVERRIDE")
           fi

@@ -678,6 +678,9 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/verify_release_archive_provenance_test.sh
+	./scripts/tests/candidate_archive_promotion_test.sh
+	./scripts/tests/download_candidate_archive_promotion_test.sh
+	./scripts/tests/certified_publication_inputs_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
