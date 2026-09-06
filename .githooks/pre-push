@@ -214,6 +214,33 @@ else
   echo "=== Pre-push: skipping CHANGELOG retroactive-edit check (no CHANGELOG.md changes) ==="
 fi
 
+# The source file-length ratchet, locally, on the same script CI runs.
+#
+# It is deliberately reachable without a warm worktree binary: `make
+# check-source-file-lengths` resolves `harn` with --no-build and refuses when a
+# lane has not compiled one, which is how this gate came to be something people
+# only met in CI. Reuse any harn already on this machine, including PATH, and
+# never start a build from a hook.
+if ! hook_paths_match "$changed" "$HOOK_SOURCE_LENGTH_PATTERN"; then
+  echo "=== Pre-push: skipping source file-length ratchet (no Rust, stdlib Harn, or policy changes) ==="
+elif hook_skip_no_local_build "pre-push source file-length ratchet"; then
+  :
+else
+  echo "=== Pre-push: checking source file lengths ==="
+  source_length_harn=$(hook_find_existing_harn_bin || true)
+  if [ -z "$source_length_harn" ]; then
+    echo "    SKIPPED: no harn binary on this machine (run 'make build' or install a release)." >&2
+    echo "    This is a skip, not a pass; CI still gates source file lengths." >&2
+  elif ! "$source_length_harn" run scripts/check_source_file_lengths.harn; then
+    echo "" >&2
+    echo "  Split the file named above. Trimming comments to clear the cap" >&2
+    echo "  leaves it the same size and the next change inherits it." >&2
+    exit 1
+  else
+    echo "    Source file lengths OK."
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Phase 2 — Rust/Harn compilation and generated-mirror rebuilds (the
 # expensive steps). Reached only once the fast validators above pass.

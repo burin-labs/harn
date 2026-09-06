@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$repo_root/.github/workflows/publish-release.yml"
+workflow="$repo_root/.github/workflows/build-release-binaries.yml"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 fixture="$tmp_root/workspace"
