@@ -1,0 +1,93 @@
+import { CompletionFacts, agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+const RESPONSE_REQUIREMENT = {
+  requirements: [
+    {requirement_id: "answer", name: "Answer the question", evidence_roles: ["assistant_output"]},
+  ],
+}
+
+const ANSWER_EVIDENCE = {
+  evidence_index: -1,
+  role: "assistant_output",
+  supports_completion: true,
+  summary: "The requested answer was provided.",
+  representative_artifact_ids: [],
+}
+
+fn check_requirement_case(harness: Harness, extra: CompletionFacts, expected_pending: int) {
+  const session_id = "stop-requirements-" + harness.random.uuid()
+  const calls_key = session_id + ".facts_calls"
+  harness.runtime.store_set(calls_key, 0)
+  with_llm_script(
+    harness.llm,
+    [llm_text("The answer.\n##DONE##"), llm_text("The answer.\n##DONE##")],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Answer the question.",
+          nil,
+          {provider: "mock", session_id: session_id, max_iterations: 2, loop_until_done: true}
+            + agent_completion_gate(
+              harness.runtime,
+              {
+                max_vetoes: 1,
+                requirement_contract: RESPONSE_REQUIREMENT,
+                facts: fn(ctx) {
+                  assert_eq(ctx.session_id, session_id)
+                  assert(len(ctx.messages) > 0)
+                  harness.runtime.store_set(calls_key, harness.runtime.store_get(calls_key) + 1)
+                  return {source_write_count: 0, requires_write: false, verify: {ok: true}}
+                    + extra
+                },
+              },
+            ),
+        ) },
+      )
+      assert(harness.runtime.store_get(calls_key) > 0, "The live loop must consult the facts")
+      assert_eq(captured.result.status == "done", expected_pending == 0)
+      const receipts = captured.events.filter(
+        fn(event) { return event.type == "typed_checkpoint"
+          && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1" },
+      )
+        .to_list()
+      assert(len(receipts) > 0, "The live stop decision must publish its evidence")
+      for event in receipts {
+        const report = event.checkpoint.requirements
+        assert(report != nil, "A required roster cannot disappear from the decision")
+        assert_eq(report.required_count, 1)
+        assert_eq(report.pending_count, expected_pending)
+        assert_eq(len(report.pending_names), expected_pending)
+      }
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  // Missing and empty observations cannot pass because an unrelated verifier did.
+  check_requirement_case(harness, {}, 1)
+  check_requirement_case(harness, {requirement_assessments: [], requirement_evidence: []}, 1)
+  check_requirement_case(
+    harness,
+    {
+      requirement_assessments: [{requirement_id: "answer", met: true, evidence_refs: [-1]}],
+      requirement_evidence: [ANSWER_EVIDENCE + {supports_completion: false}],
+    },
+    1,
+  )
+  // A read-only answer can complete without invented tool calls or artifacts.
+  check_requirement_case(
+    harness,
+    {
+      requirement_assessments: [{requirement_id: "answer", met: true, evidence_refs: [-1]}],
+      requirement_evidence: [ANSWER_EVIDENCE],
+    },
+    0,
+  )
+  harness.stdio.println("stop requirement cases passed")
+}

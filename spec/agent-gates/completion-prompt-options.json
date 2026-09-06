@@ -27,7 +27,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 681,
+        "line": 682,
         "reader": "__done_contract_primary_prompt"
       }
     ],

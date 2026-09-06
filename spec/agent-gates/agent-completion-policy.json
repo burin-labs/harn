@@ -38,7 +38,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 681,
+        "line": 682,
         "reader": "__done_contract_primary_prompt"
       },
       {
@@ -48,12 +48,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 595,
+        "line": 601,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 596,
+        "line": 602,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
@@ -294,12 +294,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 728,
+        "line": 734,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 729,
+        "line": 735,
         "reader": "__validate_agent_loop_callback_options"
       },
       {
@@ -327,12 +327,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 924,
+        "line": 925,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 1001,
+        "line": 1002,
         "reader": "__completion_boundary_ledger"
       },
       {
@@ -347,27 +347,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 631,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 632,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 633,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 634,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 635,
+        "line": 637,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
@@ -377,17 +357,37 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 643,
+        "line": 639,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 648,
+        "line": 640,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 653,
+        "line": 641,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 644,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 649,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 654,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 659,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
@@ -420,12 +420,12 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 908,
+        "line": 909,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 909,
+        "line": 910,
         "reader": "__completion_policy_plan"
       },
       {
@@ -435,12 +435,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 598,
+        "line": 604,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 599,
+        "line": 605,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
@@ -468,12 +468,12 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 911,
+        "line": 912,
         "reader": "__completion_policy_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
-        "line": 995,
+        "line": 996,
         "reader": "__completion_boundary_ledger"
       },
       {
@@ -493,47 +493,47 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 601,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 602,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 603,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 604,
-        "reader": "__validate_agent_loop_completion_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
         "line": 607,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 612,
+        "line": 608,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 617,
+        "line": 609,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 622,
+        "line": 610,
         "reader": "__validate_agent_loop_completion_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-        "line": 627,
+        "line": 613,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 618,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 623,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 628,
+        "reader": "__validate_agent_loop_completion_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+        "line": 633,
         "reader": "__validate_agent_loop_completion_options"
       },
       {

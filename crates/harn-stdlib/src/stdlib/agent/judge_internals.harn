@@ -687,8 +687,7 @@ pub fn __completion_gate_classify_writes(writes: list?, classify_write: any) {
 
 /**
  * Combine one or more host verifier verdicts (`{ok, findings?}`) into a single
- * verdict. A caller-supplied `veto_combine(verdicts)` overrides the default; the
- * default is explicit AND-of-oracles arithmetic — the combined verdict is green
+ * verdict. The combined verdict is green
  * only when EVERY verdict is green, and red findings are concatenated. Returns
  * nil when there is no verdict to combine (verifier state unknown).
  *
@@ -696,7 +695,7 @@ pub fn __completion_gate_classify_writes(writes: list?, classify_write: any) {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __completion_gate_combine_verify(verify: any, veto_combine: any) {
+pub fn __completion_gate_combine_verify(verify: any) {
   if verify == nil {
     return nil
   }
@@ -707,9 +706,6 @@ pub fn __completion_gate_combine_verify(verify: any, veto_combine: any) {
   }
   if len(verdicts) == 0 {
     return nil
-  }
-  if veto_combine != nil {
-    return veto_combine(verdicts)
   }
   let all_ok = true
   let findings = []

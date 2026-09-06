@@ -1512,7 +1512,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
-        "line": 54,
+        "line": 64,
         "reader": "agent_loop"
       },
       {
