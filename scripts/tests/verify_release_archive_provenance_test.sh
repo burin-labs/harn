@@ -68,6 +68,9 @@ sha256_file() {
 }
 
 case "${1:-} ${2:-}" in
+  "api --paginate")
+    printf '%s\n' "${EXISTING_RELEASES_JSON:-[[]]}"
+    ;;
   "api repos/"*)
     if [[ "$2" == *"/git/ref/tags/"* ]]; then
       cat "$FIXTURE_DIR/tag-ref.json"
@@ -293,14 +296,35 @@ expect_failure wrong_source run_verifier
 write_attestation harn-aarch64-apple-darwin.tar.gz 100 v9.9.9 "$source_commit"
 expect_failure mixed_version run_verifier
 
-# Candidate-phase attestations are pre-merge evidence, not publication
-# authority. Even matching bytes and source identity cannot substitute for an
-# attestation produced from the merged-main release tag.
+# Candidate evidence requires an explicit manifest binding, never a phase fallback.
 new_fixture
 for archive in "${archives[@]}"; do
   write_attestation "$archive" 300 "" "$source_commit" candidate
 done
 expect_failure candidate_phase run_verifier
+jq -n --arg source "$source_commit" --arg policy "$policy_revision" \
+  --argjson archives "$(for archive in "${archives[@]}"; do
+    jq -n --arg target "$(target_for_archive "$archive")" --arg archive "$archive" --arg digest "$(sha256_file "$fixture/artifacts/$archive")" \
+      '{key:$target,value:{archive:$archive,sha256:$digest,signingStatus:"signed",notarizationStatus:"notarized",attestationIdentity:"https://harnlang.com/attestations/release-archive/v1",runId:"300",runAttempt:"1"}}'
+  done | jq -s from_entries)" \
+  '{schemaVersion:"harn.candidate_archive_manifest.v1",sourceCommit:$source,policyRevision:$policy,runId:"300",runAttempt:"1",archives:$archives}' > "$fixture/candidate.json"
+# Empty third arg in write_attestation defaults to the legacy tag; candidate producer uses empty.
+for archive in "${archives[@]}"; do
+  jq '.results[0].verificationResult.statement.predicate.tag = ""' "$fixture/attest/$archive.json" > "$fixture/attest/tmp.json"
+  mv "$fixture/attest/tmp.json" "$fixture/attest/$archive.json"
+done
+expect_success candidate_bound run_verifier --candidate-manifest "$fixture/candidate.json"
+export EXISTING_RELEASES_JSON='[[{"tag_name":"v0.10.40","assets":[{"name":"harn-aarch64-apple-darwin.tar.gz","digest":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}]}]]'
+expect_failure candidate_existing_conflict run_verifier --candidate-manifest "$fixture/candidate.json"
+unset EXISTING_RELEASES_JSON
+jq '.runId = "301" | .archives |= map_values(.runId = "301")' "$fixture/candidate.json" > "$fixture/wrong-run.json"
+expect_failure candidate_wrong_run run_verifier --candidate-manifest "$fixture/wrong-run.json"
+jq '.runAttempt = "2" | .archives |= map_values(.runAttempt = "2")' "$fixture/candidate.json" > "$fixture/wrong-attempt.json"
+expect_failure candidate_wrong_attempt run_verifier --candidate-manifest "$fixture/wrong-attempt.json"
+jq '.policyRevision = "3333333333333333333333333333333333333333"' "$fixture/candidate.json" > "$fixture/wrong-policy.json"
+expect_failure candidate_wrong_policy run_verifier --candidate-manifest "$fixture/wrong-policy.json"
+jq '.archives["aarch64-apple-darwin"].sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' "$fixture/candidate.json" > "$fixture/wrong-digest.json"
+expect_failure candidate_wrong_digest run_verifier --candidate-manifest "$fixture/wrong-digest.json"
 
 # A self-asserted policy revision must also match the signer digest carried by
 # the verified certificate.
@@ -414,10 +438,9 @@ require_workflow_text "should_package_archives"
 require_workflow_text "BUILD_MODE=candidate"
 require_workflow_text 'scripts/verify_release_tag_main_ancestry.sh --tag "$REF"'
 require_workflow_text 'Building missing release archives from merged-main tag $REF'
-if grep -Eq 'promote_only|candidate_run_id|BUILD_MODE.?=.?promote|Promote candidate archives' "$workflow"; then
-  echo "FAIL: obsolete candidate promotion path remains in the release workflow" >&2
-  exit 1
-fi
+require_workflow_text 'scripts/validate_release_promotion_inputs.sh'
+require_workflow_text 'BUILD_MODE=promote'
+require_workflow_text '"$BUILD_MODE" != "promote"'
 if grep -Fq "make_latest: true" "$workflow"; then
   echo "FAIL: historical recovery must not unconditionally move /releases/latest" >&2
   exit 1

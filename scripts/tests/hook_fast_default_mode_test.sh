@@ -273,6 +273,12 @@ if ! grep -Fq "skipping pre-push CHANGELOG retroactive-edit check" "$tmp_root/pr
   exit 1
 fi
 
+if ! grep -Fq "skipping pre-push source file-length ratchet" "$tmp_root/pre-push.out"; then
+  echo "pre-push did not report skipping the Harn-backed source file-length ratchet" >&2
+  cat "$tmp_root/pre-push.out" >&2
+  exit 1
+fi
+
 if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push.out"; then
   echo "pre-push did not exit before expensive local checks" >&2
   cat "$tmp_root/pre-push.out" >&2

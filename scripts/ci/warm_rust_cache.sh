@@ -14,7 +14,7 @@ set -euo pipefail
 
 cargo build --locked --bin harn
 cargo nextest run --locked --workspace --profile ci --no-run \
-  -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
+  -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root) or test(a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling) or test(a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read))'
 # Match rust-check-inputs' exact GitHub-owned security archive compile shape.
 cargo nextest run --locked --workspace --profile ci --no-run \
   -E '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'

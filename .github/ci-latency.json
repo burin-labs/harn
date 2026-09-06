@@ -96,6 +96,7 @@
       "rust-test": { "budget_ms": 600000 },
       "rust-security": { "budget_ms": 120000 },
       "harn-audit": { "budget_ms": 430000 },
+      "source-length-ratchet": { "budget_ms": 430000 },
       "ci-walltime-report": { "budget_ms": 120000 },
       "audit-scripts": { "budget_ms": 390000 },
       "stack-frames": { "budget_ms": 600000 },
