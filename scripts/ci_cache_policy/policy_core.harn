@@ -531,8 +531,10 @@ pub fn supported_release_path_pattern(pattern: string) -> bool {
     return true
   }
   return len(regex_captures(r"^\*\*/[^*/]+$", pattern)) == 1
-    || len(regex_captures(r"^[^*]+/\*\*$", pattern))
-      == 1
+    || len(
+    regex_captures(r"^[^*]+/\*\*$", pattern),
+  )
+    == 1
 }
 
 /** Parse the one path policy consumed by the release workflow. */
@@ -544,7 +546,9 @@ pub fn release_warm_cache_path_policy_parse(value: any) -> ReleaseWarmCachePathP
   const paths = report.value.release_build_inputs.map({ path -> trim(path) }).to_list()
   if len(paths) == 0
     || len(paths) != len(paths.unique())
-    || paths.any({ path -> path.starts_with("/") || path.contains("..") || path.ends_with("/") })
+    || paths.any(
+    { path -> path.starts_with("/") || path.contains("..") || path.ends_with("/") },
+  )
     || paths.any({ path -> !supported_release_path_pattern(path) }) {
     return nil
   }
@@ -640,24 +644,28 @@ pub fn release_warm_cache_path_policy_errors(
     .to_list()
   if len(filter_steps) != 1 {
     return errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must contain exactly one ${RELEASE_PATH_FILTER_ID} step"]
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must contain exactly one ${RELEASE_PATH_FILTER_ID} step",
+    ]
   }
   const filter_step = filter_steps[0]
   if !release_path_filter_action_is_pinned(step_uses(filter_step)) {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:setup must use ${RELEASE_PATH_FILTER_ACTION} pinned to a full commit SHA",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:setup must use ${RELEASE_PATH_FILTER_ACTION} pinned to a full commit SHA",
+    ]
   }
   if trim(filter_step?.if ?? "") != RELEASE_PATH_FILTER_IF {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:setup must restrict release path filtering to main-branch pushes",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:setup must restrict release path filtering to main-branch pushes",
+    ]
   }
   if trim(filter_step?.with?.filters ?? "") != RELEASE_WARM_CACHE_PATH_POLICY {
     errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must consume ${RELEASE_WARM_CACHE_PATH_POLICY} directly"]
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must consume ${RELEASE_WARM_CACHE_PATH_POLICY} directly",
+    ]
   }
   const resolve_steps = steps.filter({ step -> trim(step?.id ?? "") == "resolve" }).to_list()
   if len(resolve_steps) != 1 {
@@ -669,14 +677,14 @@ pub fn release_warm_cache_path_policy_errors(
   if trim(resolve_step?.env?.RELEASE_BUILD_INPUTS_CHANGED ?? "") != RELEASE_PATH_FILTER_OUTPUT {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:setup resolve step must receive the typed release-build-input filter output",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:setup resolve step must receive the typed release-build-input filter output",
+    ]
   }
   if !contains(resolve_step?.run ?? "", RELEASE_PATH_FILTER_BRANCH) {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:setup resolve step must branch on the release-build-input filter result",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:setup resolve step must branch on the release-build-input filter result",
+    ]
   }
   return errors
 }
@@ -689,31 +697,35 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != RELEASE_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW} must give branch pushes run-qualified workflow lanes"]
+      + [
+      "${RELEASE_BINARY_WORKFLOW} must give branch pushes run-qualified workflow lanes",
+    ]
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "")
     != RELEASE_WORKFLOW_CANCEL_POLICY {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for full scheduled/manual warms",
-      ]
+      "${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for full scheduled/manual warms",
+    ]
   }
   const build_concurrency = workflow?.jobs?.build?.concurrency
   if trim(workflow?.jobs?.build?.if ?? "") != RELEASE_BUILD_IF {
     errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:build must instantiate only after setup selects a real build"]
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:build must instantiate only after setup selects a real build",
+    ]
   }
   if trim(build_concurrency?.group ?? "") != RELEASE_BUILD_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:build must share one warm lane per target and qualify every other run",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:build must share one warm lane per target and qualify every other run",
+    ]
   }
   if trim(build_concurrency?.["cancel-in-progress"] ?? "") != RELEASE_BUILD_CANCEL_POLICY {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
+    ]
   }
   const resolve_run = (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == "resolve" })
     .to_list()[0]?.run
@@ -725,8 +737,8 @@ pub fn release_warm_cache_concurrency_errors(workflow: dict) -> list<string> {
   if contains(resolve_run, RELEASE_ACTIVE_DISPATCH_SELECTOR) {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:setup must not misclassify benchmark or warm dispatches as releases",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:setup must not misclassify benchmark or warm dispatches as releases",
+    ]
   }
   return errors
 }
@@ -736,13 +748,15 @@ pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
   const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
   if setup_outputs?.cli_aot_primary_runner != RELEASE_AOT_SETUP_PRIMARY {
     errors = errors
-      + ["${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT primary runner"]
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT primary runner",
+    ]
   }
   if setup_outputs?.cli_aot_standard_runner != RELEASE_AOT_SETUP_STANDARD {
     errors = errors
       + [
-        "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT standard runner",
-      ]
+      "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT standard runner",
+    ]
   }
   const runner = trim(workflow?.jobs?.prepare_cli_aot?.["runs-on"] ?? "")
   for required in [
@@ -752,7 +766,9 @@ pub fn release_aot_runner_errors(workflow: dict) -> list<string> {
   ] {
     if !contains(runner, required) {
       errors = errors
-        + ["${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot runner selection must include ${required}"]
+        + [
+        "${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot runner selection must include ${required}",
+      ]
     }
   }
   return errors
@@ -903,10 +919,12 @@ pub fn cache_target_input_errors(action: dict, step: dict) -> list<string> {
   const expected_cache_targets = "$" + "{{ inputs.target-dir == '' }}"
   const expected_cache_directories = "$" + "{{ inputs.target-dir }}"
   if trim(action?.inputs?.["target-dir"]?.default ?? "") != ""
-    || trim(step?.with?.["cache-targets"] ?? "")
-      != expected_cache_targets
+    || trim(
+    step?.with?.["cache-targets"] ?? "",
+  )
+    != expected_cache_targets
     || trim(step?.with?.["cache-directories"] ?? "")
-      != expected_cache_directories {
+    != expected_cache_directories {
     return ["${ACTION_PATH} must cache an explicit Cargo target directory directly"]
   }
   return []
@@ -926,7 +944,9 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
   }
   if len(broad_restore) != 1 {
     errors = errors
-      + ["${ACTION_PATH} must contain one pinned restore-only broad Rust cache fallback step"]
+      + [
+      "${ACTION_PATH} must contain one pinned restore-only broad Rust cache fallback step",
+    ]
   } else {
     const restore_if = trim(broad_restore[0]?.if ?? "")
     if !contains(restore_if, "inputs.broad-restore-prefix != ''") {
@@ -935,10 +955,15 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
     const restore_keys = trim(broad_restore[0]?.with?.["restore-keys"] ?? "")
     const restore_key = trim(broad_restore[0]?.with?.key ?? "")
     if !contains(restore_keys, "inputs.broad-restore-prefix")
-      || !contains(restore_key, "inputs.broad-restore-prefix")
+      || !contains(
+      restore_key,
+      "inputs.broad-restore-prefix",
+    )
       || !contains(restore_key, "github.sha") {
       errors = errors
-        + ["${ACTION_PATH} broad fallback must restore by prefix without becoming a writer"]
+        + [
+        "${ACTION_PATH} broad fallback must restore by prefix without becoming a writer",
+      ]
     }
     if !(broad_restore[0]?.["continue-on-error"] ?? false) {
       errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
@@ -947,7 +972,9 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
     if !contains(restore_paths, "env.CARGO_HOME")
       || !contains(restore_paths, "env.CARGO_TARGET_DIR") {
       errors = errors
-        + ["${ACTION_PATH} broad fallback must follow the active Cargo home and target directory"]
+        + [
+        "${ACTION_PATH} broad fallback must follow the active Cargo home and target directory",
+      ]
     }
   }
   const step = upstream[0]
@@ -955,24 +982,33 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
     + "{{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-${WORKSPACE_CACHE_GENERATION}' || '') }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key
     || trim(step?.with?.key ?? "")
-      != "" {
+    != "" {
     errors = errors
       + [
-        "${ACTION_PATH} must compose source-key and workspace retention into the effective upstream shared-key",
-      ]
+      "${ACTION_PATH} must compose source-key and workspace retention into the effective upstream shared-key",
+    ]
   }
   if trim(to_string(action?.inputs?.[WORKSPACE_CACHE_INPUT]?.default ?? "")) != "false"
-    || trim(step?.with?.[WORKSPACE_CACHE_INPUT] ?? "")
-      != "$" + "{{ inputs.${WORKSPACE_CACHE_INPUT} }}" {
+    || trim(
+    step?.with?.[WORKSPACE_CACHE_INPUT] ?? "",
+  )
+    != "$" + "{{ inputs.${WORKSPACE_CACHE_INPUT} }}" {
     errors = errors
-      + ["${ACTION_PATH} must pass an opt-in workspace-crate retention input to Swatinem"]
+      + [
+      "${ACTION_PATH} must pass an opt-in workspace-crate retention input to Swatinem",
+    ]
   }
   errors = errors + cache_target_input_errors(action, step)
   const save_if = trim(step?.with?.["save-if"] ?? "")
   if !contains(save_if, "inputs.save == 'true'")
-    || !contains(save_if, "github.ref == 'refs/heads/main'") {
+    || !contains(
+    save_if,
+    "github.ref == 'refs/heads/main'",
+  ) {
     errors = errors
-      + ["${ACTION_PATH} must hard-gate saves on explicit authorization and refs/heads/main"]
+      + [
+      "${ACTION_PATH} must hard-gate saves on explicit authorization and refs/heads/main",
+    ]
   }
   if !(step?.["continue-on-error"] ?? false) {
     errors = errors + ["${ACTION_PATH} must keep cache-service failures non-fatal"]
@@ -989,26 +1025,33 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
   } else {
     const prune_if = trim(pruners[0]?.if ?? "")
     if !contains(prune_if, "inputs.${CACHE_PRUNE_INPUT} == 'true'")
-      || !contains(prune_if, "inputs.save == 'true'")
+      || !contains(
+      prune_if,
+      "inputs.save == 'true'",
+    )
       || !contains(prune_if, "github.ref == 'refs/heads/main'") {
       errors = errors
         + [
-          "${ACTION_PATH} release-generation pruning must require explicit main-branch save authorization",
-        ]
+        "${ACTION_PATH} release-generation pruning must require explicit main-branch save authorization",
+      ]
     }
     if pruners[0]?.["continue-on-error"] ?? false {
       errors = errors
-        + ["${ACTION_PATH} release-generation pruning must fail before the cache writer runs"]
+        + [
+        "${ACTION_PATH} release-generation pruning must fail before the cache writer runs",
+      ]
     }
     const expected_prefix = "v0-rust-$" + "{{ inputs.shared-key }}-"
     const expected_token = "$" + "{{ github.token }}"
     if trim(pruners[0]?.env?.HARN_CACHE_FAMILY_PREFIX ?? "") != expected_prefix
-      || trim(pruners[0]?.env?.GH_TOKEN ?? "")
-        != expected_token {
+      || trim(
+      pruners[0]?.env?.GH_TOKEN ?? "",
+    )
+      != expected_token {
       errors = errors
         + [
-          "${ACTION_PATH} release-generation pruning must target the active shared key with the workflow token",
-        ]
+        "${ACTION_PATH} release-generation pruning must target the active shared key with the workflow token",
+      ]
     }
   }
   return errors
@@ -1072,12 +1115,14 @@ pub fn setup_harn_cache_action_errors(action: dict) -> list<string> {
   if !contains(trim(restores[0]?.if ?? ""), "github.ref != ${default_ref}") {
     errors = errors
       + [
-        "${SETUP_HARN_ACTION_PATH} must use restore-only caching away from the caller's default branch",
-      ]
+      "${SETUP_HARN_ACTION_PATH} must use restore-only caching away from the caller's default branch",
+    ]
   }
   if !contains(trim(caches[0]?.if ?? ""), "github.ref == ${default_ref}") {
     errors = errors
-      + ["${SETUP_HARN_ACTION_PATH} must save archives only on the caller's default branch"]
+      + [
+      "${SETUP_HARN_ACTION_PATH} must save archives only on the caller's default branch",
+    ]
   }
   const restore_path = trim(restores[0]?.with?.path ?? "")
   const cache_path = trim(caches[0]?.with?.path ?? "")
@@ -1088,8 +1133,8 @@ pub fn setup_harn_cache_action_errors(action: dict) -> list<string> {
     || !contains(restore_key, "setup-harn-v2-") {
     errors = errors
       + [
-        "${SETUP_HARN_ACTION_PATH} restore-only consumers and default-branch writer must share one versioned path and key",
-      ]
+      "${SETUP_HARN_ACTION_PATH} restore-only consumers and default-branch writer must share one versioned path and key",
+    ]
   }
   if !(restores[0]?.["continue-on-error"] ?? false)
     || !(caches[0]?.["continue-on-error"] ?? false) {
@@ -1138,14 +1183,16 @@ pub fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
   if len(reporters) != 1 {
     errors = errors
       + [
-        "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once",
-      ]
+      "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once",
+    ]
   }
   const tolerant_reporters = reporters.filter({ step -> step?.["continue-on-error"] ?? false })
     .to_list()
   if len(tolerant_reporters) > 0 {
     errors = errors
-      + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must fail when cache telemetry fails"]
+      + [
+      "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must fail when cache telemetry fails",
+    ]
   }
   const pruning_reporters = reporters.filter(
     { step -> trim(step?.env?.HARN_PRUNE_SUPERSEDED_RELEASE_CACHES ?? "") == "1" },
@@ -1153,7 +1200,9 @@ pub fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
     .to_list()
   if len(pruning_reporters) != 1 {
     errors = errors
-      + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must prune superseded release caches"]
+      + [
+      "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must prune superseded release caches",
+    ]
   }
   const enforcing_reporters = reporters.filter(
     { step -> trim(step?.env?.HARN_ENFORCE_CACHE_BUDGET ?? "") == "1" },
@@ -1179,39 +1228,39 @@ pub fn release_cache_retention_errors(workflows: dict) -> list<string> {
   if trim(job?.env?.HARN_RELEASE_CACHE_SAVE_ENABLED ?? "") != RELEASE_CACHE_SAVE_ENV {
     errors = errors
       + [
-        "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must let main warm runs and exact candidate builds refresh the release cache",
-      ]
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must let main warm runs and exact candidate builds refresh the release cache",
+    ]
   }
   const writers = (job?.steps ?? []).filter(
     { step ->
       return step_uses(step) == "./.github/actions/rust-cache"
         && trim(step?.with?.["shared-key"] ?? "")
-          == RELEASE_CACHE_SHARED_KEY
+        == RELEASE_CACHE_SHARED_KEY
     },
   )
     .to_list()
   if len(writers) != 1
     || lowercase(trim(to_string(writers[0]?.with?.[CACHE_PRUNE_INPUT] ?? "")))
-      != "true" {
+    != "true" {
     errors = errors
       + [
-        "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must prune superseded release generations before saving",
-      ]
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must prune superseded release generations before saving",
+    ]
   }
   if len(writers) == 1
     && trim(to_string(writers[0]?.with?.save ?? "")) != RELEASE_CACHE_SAVE_REQUEST {
     errors = errors
       + [
-        "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must derive the release cache write from HARN_RELEASE_CACHE_SAVE_ENABLED",
-      ]
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must derive the release cache write from HARN_RELEASE_CACHE_SAVE_ENABLED",
+    ]
   }
   if len(writers) == 1
     && trim(to_string(writers[0]?.with?.["source-key"] ?? ""))
-      != RELEASE_CACHE_SOURCE_KEY {
+    != RELEASE_CACHE_SOURCE_KEY {
     errors = errors
       + [
-        "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must bind the exact release cache to the runner-compatibility projection",
-      ]
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must bind the exact release cache to the runner-compatibility projection",
+    ]
   }
   return errors
 }
@@ -1242,8 +1291,8 @@ pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   if workflow?.["on"]?.pull_request != nil {
     errors = errors
       + [
-        "${CLI_COLD_START_WORKFLOW} must not run release-build cold-start benchmarks on pull_request",
-      ]
+      "${CLI_COLD_START_WORKFLOW} must not run release-build cold-start benchmarks on pull_request",
+    ]
   }
   if len(workflow?.["on"]?.schedule ?? []) == 0 {
     errors = errors + ["${CLI_COLD_START_WORKFLOW} must keep a scheduled main-branch advisory run"]
@@ -1255,25 +1304,27 @@ pub fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   }
   if trim(job?.if ?? "") != CLI_COLD_START_JOB_IF {
     errors = errors
-      + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs"]
+      + [
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs",
+    ]
   }
   if job?.["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
     errors = errors
       + [
-        "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at ${CLI_COLD_START_JOB_TIMEOUT_MINUTES} minutes",
-      ]
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at ${CLI_COLD_START_JOB_TIMEOUT_MINUTES} minutes",
+    ]
   }
   const build_step = step_by_name(job?.steps ?? [], CLI_COLD_START_BUILD_STEP)
   if build_step == nil {
     errors = errors
       + [
-        "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly",
-      ]
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly",
+    ]
   } else if build_step?.["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
     errors = errors
       + [
-        "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at ${CLI_COLD_START_BUILD_TIMEOUT_MINUTES} minutes",
-      ]
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at ${CLI_COLD_START_BUILD_TIMEOUT_MINUTES} minutes",
+    ]
   }
   return errors
 }
@@ -1306,21 +1357,21 @@ pub fn cache_key_inputs(
     if step_uses(step) == "./.github/actions/rust-cache" {
       inputs = inputs
         + [
-          "rust-cache-source-key=" + trim(step?.with?.["source-key"] ?? ""),
-          "rust-cache-target-dir=" + trim(step?.with?.["target-dir"] ?? ""),
-          "rust-cache-broad-restore-prefix=" + trim(step?.with?.["broad-restore-prefix"] ?? ""),
-        ]
+        "rust-cache-source-key=" + trim(step?.with?.["source-key"] ?? ""),
+        "rust-cache-target-dir=" + trim(step?.with?.["target-dir"] ?? ""),
+        "rust-cache-broad-restore-prefix=" + trim(step?.with?.["broad-restore-prefix"] ?? ""),
+      ]
       break
     }
     const uses = step_uses(step)
     inputs = inputs
       + [
-        if uses == "" {
-          "pre-cache-run=" + trim(step?.name ?? "<unnamed>")
-        } else {
-          "pre-cache-uses=" + uses
-        },
-      ]
+      if uses == "" {
+        "pre-cache-run=" + trim(step?.name ?? "<unnamed>")
+      } else {
+        "pre-cache-uses=" + uses
+      },
+    ]
   }
   return inputs
 }
@@ -1351,8 +1402,8 @@ pub fn ci_cache_policy_errors(
         if uses.starts_with(UPSTREAM_SCCACHE_PREFIX) {
           errors = errors
             + [
-              "${workflow}:${job} installs sccache directly; use ${SCCACHE_INSTALL_ACTION} so the version stays pinned to the self-hosted server",
-            ]
+            "${workflow}:${job} installs sccache directly; use ${SCCACHE_INSTALL_ACTION} so the version stays pinned to the self-hosted server",
+          ]
         }
         const ephemeral_error = ephemeral_cache_writer_error(workflow, job, step, policy)
         if ephemeral_error != nil {
@@ -1385,14 +1436,19 @@ pub fn ci_cache_policy_errors(
           == "true"
         if pruning_requested
           && !(workflow == RELEASE_CACHE_WORKFLOW
-            && job == RELEASE_CACHE_JOB
-            && trim(step?.with?.["shared-key"] ?? "")
-              == RELEASE_CACHE_SHARED_KEY
-            && writer_allowed(policy, workflow, job, trim(step?.with?.["shared-key"] ?? ""))) {
+          && job == RELEASE_CACHE_JOB
+          && trim(step?.with?.["shared-key"] ?? "")
+          == RELEASE_CACHE_SHARED_KEY
+          && writer_allowed(
+          policy,
+          workflow,
+          job,
+          trim(step?.with?.["shared-key"] ?? ""),
+        )) {
           errors = errors
             + [
-              "${workflow}:${job} enables release-generation pruning outside its configured writer",
-            ]
+            "${workflow}:${job} enables release-generation pruning outside its configured writer",
+          ]
         }
       }
     }
@@ -1412,8 +1468,8 @@ pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "ci.yml concurrency.group must share one main lane while preserving PR, merge-group, and ref keys",
-      ]
+      "ci.yml concurrency.group must share one main lane while preserving PR, merge-group, and ref keys",
+    ]
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
     errors = errors
@@ -1426,7 +1482,8 @@ pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
-  const elastic_runner = "$" + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
+  const elastic_runner = "$"
+    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
   for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
     if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
