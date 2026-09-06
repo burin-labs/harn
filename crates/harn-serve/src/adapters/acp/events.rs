@@ -1089,6 +1089,11 @@ impl AgentEventSink for AcpAgentEventSink {
                 converted_from,
                 escalation_recommended,
                 escalation_target,
+                judge_verdict,
+                judge_override,
+                gap_class,
+                judge_outcome,
+                terminal_evidence_preserved,
             } => {
                 self.emit_agent_event_ext(
                     "judge_decision",
@@ -1106,6 +1111,14 @@ impl AgentEventSink for AcpAgentEventSink {
                         "convertedFrom": converted_from,
                         "escalationRecommended": escalation_recommended,
                         "escalationTarget": escalation_target,
+                        // `verdict` above is the answer of record. These two
+                        // are what let a reader tell an override from the
+                        // judge's own word instead of reading one as the other.
+                        "judgeVerdict": judge_verdict,
+                        "override": judge_override,
+                        "gapClass": gap_class,
+                        "judgeOutcome": judge_outcome,
+                        "terminalEvidencePreserved": terminal_evidence_preserved,
                     }),
                 );
             }

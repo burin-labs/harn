@@ -110,6 +110,12 @@ pub fn __judge_emit_decision(
       escalation_target: verdict?.escalation_target,
       judge_outcome: verdict?.judge_outcome,
       terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
+      // The judge's own answer beside the answer of record, and the typed
+      // override when the two differ. Without the pair a reader cannot tell an
+      // override from the judge's word, which is how a record came to report
+      // `done` on a run whose every judge decision was `continue`.
+      judge_verdict: verdict?.judge_verdict,
+      override: verdict?.override,
     },
   )
   return nil
