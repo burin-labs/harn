@@ -16,7 +16,6 @@ from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Type, TypeVar, Union
 
 __all__ = [
-    "HARN_PROTOCOL_ARTIFACT_VERSION",
     "HARN_SESSION_RECAP_QUERY_METHOD",
     "HARN_SESSION_RECAP_SCHEMA_VERSION",
     "HARN_AGENT_EVENT_METHOD",
@@ -165,7 +164,6 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.132-dev"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"

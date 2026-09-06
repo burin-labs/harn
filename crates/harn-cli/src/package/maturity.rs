@@ -94,8 +94,6 @@ pub enum AuditCode {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ArtifactDriftReport {
-    pub current_artifact_version: String,
-    pub vendored_artifact_version: Option<String>,
     pub schema_version: u32,
     pub vendored_schema_version: Option<u32>,
     pub differences: Vec<String>,
@@ -530,15 +528,6 @@ fn check_artifact_manifest_from(
         PackageError::Ops(format!("failed to parse generated manifest: {error}"))
     })?;
 
-    let current_artifact_version = current
-        .get("artifactVersion")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let vendored_artifact_version = vendored
-        .get("artifactVersion")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
     let schema_version = current
         .get("schemaVersion")
         .and_then(|value| value.as_u64())
@@ -553,8 +542,6 @@ fn check_artifact_manifest_from(
     differences.dedup();
     let ok = differences.is_empty();
     Ok(ArtifactDriftReport {
-        current_artifact_version,
-        vendored_artifact_version,
         schema_version,
         vendored_schema_version,
         differences,
@@ -789,15 +776,6 @@ fn print_audit_report(report: &AuditReport) {
 }
 
 fn print_artifact_drift_report(report: &ArtifactDriftReport) {
-    println!(
-        "current artifact version: {}",
-        report.current_artifact_version
-    );
-    if let Some(version) = &report.vendored_artifact_version {
-        println!("vendored artifact version: {version}");
-    } else {
-        println!("vendored artifact version: <missing>");
-    }
     println!("schema version:           {}", report.schema_version);
     if let Some(version) = report.vendored_schema_version {
         println!("vendored schema version:  {version}");
@@ -1032,14 +1010,13 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
         let path = tmp.path().join("manifest.json");
         let stale = serde_json::json!({
             "schemaVersion": 1,
-            "artifactVersion": "0.0.0",
             "generatedBy": "harn dump-protocol-artifacts",
         });
         fs::write(&path, serde_json::to_string_pretty(&stale).unwrap() + "\n").unwrap();
         let report =
             check_artifact_manifest_from(&path, Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         assert!(!report.ok);
-        assert_eq!(report.vendored_artifact_version.as_deref(), Some("0.0.0"));
+        assert_eq!(report.vendored_schema_version, Some(1));
         assert!(!report.differences.is_empty());
     }
 

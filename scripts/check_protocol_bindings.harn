@@ -33,10 +33,6 @@ def main() -> int:
     hp = load_bindings(artifacts)
     fixture = json.loads((artifacts / "fixtures" / "round_trip.json").read_text())
 
-    if fixture["artifactVersion"] != hp.HARN_PROTOCOL_ARTIFACT_VERSION:
-        raise AssertionError(
-            f"version drift: bindings={hp.HARN_PROTOCOL_ARTIFACT_VERSION} fixture={fixture['artifactVersion']}"
-        )
     if fixture["harnAgentEventMethod"] != hp.HARN_AGENT_EVENT_METHOD:
         raise AssertionError(
             f"agent-event method drift: bindings={hp.HARN_AGENT_EVENT_METHOD} fixture={fixture['harnAgentEventMethod']}"

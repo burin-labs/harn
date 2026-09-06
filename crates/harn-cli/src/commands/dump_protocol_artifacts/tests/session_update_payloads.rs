@@ -30,9 +30,9 @@ fn typed_session_update_payloads_cover_schema_required_identity() {
 
 #[test]
 fn dump_emits_typed_session_update_payloads_in_every_language() {
-    let rust = generate_rust();
-    let swift = generate_swift();
-    let typescript = generate_typescript();
+    let rust = generate_rust_for_tests();
+    let swift = generate_swift_for_tests();
+    let typescript = generate_typescript_for_tests();
     let python = generate_python();
     let go = generate_go();
 

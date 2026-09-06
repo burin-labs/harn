@@ -29,17 +29,15 @@ use prompt_terminal::append_prompt_terminal_types;
 use session_timeline::append_session_timeline_types;
 
 #[cfg(test)]
-pub(super) fn generate_swift() -> String {
-    generate_swift_for_version(
-        env!("CARGO_PKG_VERSION"),
+pub(super) fn generate_swift_for_tests() -> String {
+    generate_swift(
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
         &ActivityVocabulary::load_for_tests(),
     )
 }
 
-pub(super) fn generate_swift_for_version(
-    artifact_version: &str,
+pub(super) fn generate_swift(
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
     activity: &ActivityVocabulary,
@@ -47,10 +45,6 @@ pub(super) fn generate_swift_for_version(
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
     out.push_str("public enum HarnProtocolConstants {\n");
-    out.push_str(&format!(
-        "    public static let artifactVersion = {}\n",
-        json_string_literal(artifact_version)
-    ));
     out.push_str(&format!(
         "    public static let acpSchemaCompatibility = {}\n",
         json_string_literal(ACP_SCHEMA_COMPATIBILITY)

@@ -21,25 +21,20 @@ use super::swift::{deprecated_wire_value, deprecation_message, wire_value_proper
 use super::values::*;
 
 #[cfg(test)]
-pub(super) fn generate_typescript() -> String {
-    generate_typescript_for_version(
-        env!("CARGO_PKG_VERSION"),
+pub(super) fn generate_typescript_for_tests() -> String {
+    generate_typescript(
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
         &ActivityVocabulary::load_for_tests(),
     )
 }
 
-pub(super) fn generate_typescript_for_version(
-    artifact_version: &str,
+pub(super) fn generate_typescript(
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
     activity: &ActivityVocabulary,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "typescript");
-    out.push_str("export const HARN_PROTOCOL_ARTIFACT_VERSION = ");
-    out.push_str(&json_string_literal(artifact_version));
-    out.push_str("\n\n");
     out.push_str("export const HARN_TOOL_PERMISSION_DECISION_SCHEMA = \"harn.tool_permission_decision.v1\" as const\n");
     out.push_str("export const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA = \"harn.tool_permission_activity.v1\" as const\n\n");
     out.push_str("export const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA = \"harn.external_action_activity.v1\" as const\n");

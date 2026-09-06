@@ -2,7 +2,6 @@ import { with_temp_dir } from "std/testing"
 import "../check_protocol_bindings.harn"
 
 const FAKE_PYTHON_BINDING = """
-HARN_PROTOCOL_ARTIFACT_VERSION = "{VERSION}"
 HARN_AGENT_EVENT_METHOD = "harn/agent_event"
 HARN_PROVIDER_CATALOG_METHOD = "harn/provider_catalog"
 HARN_STRICT_SESSION_RECAP_BINDING = False
@@ -64,7 +63,7 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   return nil
 }
 
-fn fixture_payload(version: string) -> dict {
+fn fixture_payload() -> dict {
   const envelopes = {
     request: {jsonrpc: "2.0", id: 1, method: "session/new", params: {project: "demo"}},
     response: {jsonrpc: "2.0", id: 1, result: {ok: true}},
@@ -73,7 +72,6 @@ fn fixture_payload(version: string) -> dict {
     agentEventNotification: {jsonrpc: "2.0", method: "harn/agent_event", params: {event: "tick"}},
   }
   return {
-    artifactVersion: version,
     harnAgentEventMethod: "harn/agent_event",
     harnProviderCatalogMethod: "harn/provider_catalog",
     envelopes: envelopes,
@@ -92,23 +90,18 @@ fn fixture_payload(version: string) -> dict {
   }
 }
 
-fn write_fake_artifacts(
-  fs: HarnessFs,
-  root: string,
-  binding_version: string,
-  fixture_version: string,
-) -> nil {
+fn write_fake_artifacts(fs: HarnessFs, root: string, agent_event_method: string) -> nil {
   write_text(
     fs,
     root,
     "spec/protocol-artifacts/python/harn_protocol.py",
-    FAKE_PYTHON_BINDING.replace("{VERSION}", binding_version),
+    FAKE_PYTHON_BINDING.replace("harn/agent_event", agent_event_method),
   )
   write_text(
     fs,
     root,
     "spec/protocol-artifacts/fixtures/round_trip.json",
-    json_stringify_pretty(fixture_payload(fixture_version)) + "\n",
+    json_stringify_pretty(fixture_payload()) + "\n",
   )
   return nil
 }
@@ -129,7 +122,7 @@ pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task: unkn
   with_temp_dir(
     harness.fs,
     { root ->
-      write_fake_artifacts(harness.fs, root, "test-version", "test-version")
+      write_fake_artifacts(harness.fs, root, "harn/agent_event")
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, true)
       assert_eq(report.stage, "ok")
@@ -139,15 +132,15 @@ pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task: unkn
 }
 
 @test
-pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, task: unknown) {
+pipeline test_method_drift_is_reported_as_round_trip_failure(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
-      write_fake_artifacts(harness.fs, root, "binding-version", "fixture-version")
+      write_fake_artifacts(harness.fs, root, "harn/agent_event_drifted")
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, false)
       assert_eq(report.stage, "round_trip")
-      assert(to_string(report.stderr).contains("version drift"))
+      assert(to_string(report.stderr).contains("agent-event method drift"))
     },
   )
 }

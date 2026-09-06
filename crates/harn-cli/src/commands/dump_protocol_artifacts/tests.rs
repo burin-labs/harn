@@ -59,7 +59,7 @@ fn protocol_source() -> ProtocolArtifactSource {
 /// bug can't escape the harn build again.
 #[test]
 fn typescript_artifact_has_no_dangling_type_references() {
-    let ts = generate_typescript();
+    let ts = generate_typescript_for_tests();
     let declared: std::collections::HashSet<&str> = regex::Regex::new(
             r"(?m)^\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?(?:interface|type|enum|class)\s+([A-Za-z_][A-Za-z0-9_]*)",
         )
@@ -96,12 +96,12 @@ fn tool_annotations_project_typed_completion_evidence_roles_to_every_binding() {
 
     for (binding, type_declaration, field_declaration) in [
         (
-            generate_typescript(),
+            generate_typescript_for_tests(),
             "export type HarnCompletionEvidenceRole =",
             "completion_evidence_role?: HarnCompletionEvidenceRole",
         ),
         (
-            generate_swift(),
+            generate_swift_for_tests(),
             "public enum HarnCompletionEvidenceRole:",
             "public var completionEvidenceRole: HarnCompletionEvidenceRole?",
         ),
@@ -116,7 +116,7 @@ fn tool_annotations_project_typed_completion_evidence_roles_to_every_binding() {
             "CompletionEvidenceRole *HarnCompletionEvidenceRole `json:\"completion_evidence_role,omitempty\"`",
         ),
         (
-            generate_rust(),
+            generate_rust_for_tests(),
             "pub enum HarnCompletionEvidenceRole {",
             "pub completion_evidence_role: Option<HarnCompletionEvidenceRole>",
         ),
@@ -137,7 +137,7 @@ fn tool_annotations_project_typed_completion_evidence_roles_to_every_binding() {
 
 #[test]
 fn generated_types_include_harn_wire_vocabularies() {
-    let ts = generate_typescript();
+    let ts = generate_typescript_for_tests();
     assert!(ts.contains("export type JsonRpcId = number | string | null"));
     assert!(ts.contains("export const MCP_PROTOCOL_VERSION = \"2026-07-28\""));
     assert!(ts.contains("export interface MCPRequestMeta"));
@@ -162,7 +162,7 @@ fn generated_types_include_harn_wire_vocabularies() {
     {
         assert!(ts.contains(value), "TypeScript artifact missing {value}");
     }
-    let swift = generate_swift();
+    let swift = generate_swift_for_tests();
     assert!(swift.contains("public enum HarnACPAgentMethod"));
     assert!(swift.contains("public enum HarnACPDispatchedMethod"));
     assert!(swift.contains("public enum HarnACPTransportControlMethod"));
@@ -246,8 +246,8 @@ fn swift_and_rust_publish_identical_acp_method_vocabularies() {
             .collect()
     }
 
-    let swift = generate_swift();
-    let rust = generate_rust();
+    let swift = generate_swift_for_tests();
+    let rust = generate_rust_for_tests();
 
     for vocabulary in acp_method_vocabularies() {
         let (_, swift_enum) = swift
@@ -288,9 +288,9 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     let vocabulary = ExternalActionVocabulary::load(&protocol_source()).unwrap();
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
-    let ts = generate_typescript_for_version("1.0.0", &vocabulary, &setup, &activity);
-    let swift = generate_swift_for_version("1.0.0", &vocabulary, &setup, &activity);
-    let rust = generate_rust_for_version("1.0.0", &vocabulary, &setup, &activity);
+    let ts = generate_typescript(&vocabulary, &setup, &activity);
+    let swift = generate_swift(&vocabulary, &setup, &activity);
+    let rust = generate_rust(&vocabulary, &setup, &activity);
 
     assert!(ts.contains("export type HarnExternalActionOutcome"));
     assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
@@ -345,16 +345,10 @@ fn generic_permission_activity_projects_to_every_supported_host() {
     let generated = [
         (
             "TypeScript",
-            generate_typescript_for_version("1.0.0", &actions, &setup, &activity),
+            generate_typescript(&actions, &setup, &activity),
         ),
-        (
-            "Swift",
-            generate_swift_for_version("1.0.0", &actions, &setup, &activity),
-        ),
-        (
-            "Rust",
-            generate_rust_for_version("1.0.0", &actions, &setup, &activity),
-        ),
+        ("Swift", generate_swift(&actions, &setup, &activity)),
+        ("Rust", generate_rust(&actions, &setup, &activity)),
     ];
 
     for value in activity
@@ -407,9 +401,9 @@ fn adding_external_action_values_updates_all_host_projections() {
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
     for generated in [
-        generate_typescript_for_version("1.0.0", &vocabulary, &setup, &activity),
-        generate_swift_for_version("1.0.0", &vocabulary, &setup, &activity),
-        generate_rust_for_version("1.0.0", &vocabulary, &setup, &activity),
+        generate_typescript(&vocabulary, &setup, &activity),
+        generate_swift(&vocabulary, &setup, &activity),
+        generate_rust(&vocabulary, &setup, &activity),
     ] {
         for future_value in [
             "future_outcome",
@@ -440,9 +434,9 @@ fn complete_external_action_activity_projects_without_sensitive_values() {
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
     for generated in [
-        generate_typescript_for_version("1.0.0", &actions, &setup, &activity),
-        generate_swift_for_version("1.0.0", &actions, &setup, &activity),
-        generate_rust_for_version("1.0.0", &actions, &setup, &activity),
+        generate_typescript(&actions, &setup, &activity),
+        generate_swift(&actions, &setup, &activity),
+        generate_rust(&actions, &setup, &activity),
     ] {
         for required in [
             "HarnExternalActionActivityRecord",
@@ -501,16 +495,10 @@ fn connector_setup_vocabulary_projects_to_every_supported_host() {
     let generated = [
         (
             "TypeScript",
-            generate_typescript_for_version("1.0.0", &actions, &setup, &activity),
+            generate_typescript(&actions, &setup, &activity),
         ),
-        (
-            "Swift",
-            generate_swift_for_version("1.0.0", &actions, &setup, &activity),
-        ),
-        (
-            "Rust",
-            generate_rust_for_version("1.0.0", &actions, &setup, &activity),
-        ),
+        ("Swift", generate_swift(&actions, &setup, &activity)),
+        ("Rust", generate_rust(&actions, &setup, &activity)),
     ];
 
     for value in setup
@@ -586,7 +574,7 @@ fn swift_case_name_emits_valid_identifiers() {
     assert_eq!(swift_case_name("private_room"), "privateRoom");
     // The full emitted Swift artifact should contain the escaped form for
     // any enum whose wire value lands on a reserved keyword.
-    let swift = generate_swift();
+    let swift = generate_swift_for_tests();
     assert!(
         !swift.contains("case private = "),
         "Swift artifact contains unescaped `case private = ...`"
@@ -601,7 +589,7 @@ fn swift_case_name_emits_valid_identifiers() {
 
 #[test]
 fn generated_rust_includes_harn_wire_vocabularies() {
-    let rust = generate_rust();
+    let rust = generate_rust_for_tests();
     assert!(
         rust.ends_with('\n'),
         "Rust artifact must end with a newline"
@@ -614,7 +602,6 @@ fn generated_rust_includes_harn_wire_vocabularies() {
         rust.starts_with("// GENERATED by `harn dump-protocol-artifacts` - do not edit by hand."),
         "Rust artifact missing provenance header"
     );
-    assert!(rust.contains("pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str ="));
     assert!(rust.contains("pub struct HarnPlanDocument"));
     assert!(rust.contains("pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str ="));
     assert!(rust.contains("pub const AGENT_TERMINAL_CLASSES: &[&str] = &["));
@@ -686,9 +673,9 @@ fn generated_rust_includes_harn_wire_vocabularies() {
 
 #[test]
 fn generated_bindings_expose_one_open_session_timeline_contract() {
-    let rust = generate_rust();
-    let swift = generate_swift();
-    let typescript = generate_typescript();
+    let rust = generate_rust_for_tests();
+    let swift = generate_swift_for_tests();
+    let typescript = generate_typescript_for_tests();
     let python = generate_python();
     let go = generate_go();
 
@@ -1115,9 +1102,8 @@ fn generated_go_artifact_fails_closed_without_gofmt() {
 
 #[test]
 fn generated_rust_artifact_is_rustfmt_stable() {
-    const VERSION: &str = "9.8.7-test.1";
     let source = protocol_source();
-    let artifacts = generate_artifacts(&source, VERSION).expect("generate artifacts");
+    let artifacts = generate_artifacts(&source).expect("generate artifacts");
     let rust = artifacts
         .iter()
         .find(|artifact| artifact.relative_path == "harn-protocol.rs")
@@ -1274,8 +1260,7 @@ fn manifest_advertises_python_and_go_bindings() {
 
 #[test]
 fn generated_artifacts_publish_the_harn_tools_contract() {
-    let artifacts =
-        generate_artifacts(&protocol_source(), env!("CARGO_PKG_VERSION")).expect("artifacts");
+    let artifacts = generate_artifacts(&protocol_source()).expect("artifacts");
     let schema = artifacts
         .iter()
         .find(|artifact| {
@@ -1368,52 +1353,36 @@ fn generated_manifest_references_schema_artifacts() {
 }
 
 #[test]
-fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
-    const VERSION: &str = "9.8.7-beta.1";
-    assert_eq!(
-        resolve_artifact_version(None),
-        Ok(env!("CARGO_PKG_VERSION"))
-    );
-    assert_eq!(resolve_artifact_version(Some(VERSION)), Ok(VERSION));
-    assert!(resolve_artifact_version(Some("v9.8.7")).is_err());
-    assert!(resolve_artifact_version(Some("next")).is_err());
-
-    let artifacts = generate_artifacts(&protocol_source(), VERSION).expect("artifacts");
-    for path in [
-        "harn-protocol.ts",
-        "HarnProtocol.swift",
-        "harn-protocol.rs",
-        "python/harn_protocol.py",
-        "go/harnprotocol/harnprotocol.go",
-    ] {
-        let artifact = artifacts
-            .iter()
-            .find(|artifact| artifact.relative_path == path)
-            .unwrap_or_else(|| panic!("missing generated artifact {path}"));
+fn generated_artifacts_never_carry_the_crate_version() {
+    // The falsifier for dropping the stamp: a development bump must leave
+    // every committed artifact byte-identical. Any artifact that embeds the
+    // crate version restales the whole set on a version bump alone, which is
+    // what made the committed-artifacts check red on main after each release.
+    let artifacts = generate_artifacts(&protocol_source()).expect("artifacts");
+    let version = env!("CARGO_PKG_VERSION");
+    for artifact in &artifacts {
         assert!(
-            artifact.contents.contains(VERSION),
-            "{path} did not use the explicit artifact version"
+            !artifact.contents.contains(version),
+            "{} embeds the crate version {version}; a bump would restale it",
+            artifact.relative_path
         );
     }
 
-    for path in ["manifest.json", "fixtures/round_trip.json"] {
-        let artifact = artifacts
-            .iter()
-            .find(|artifact| artifact.relative_path == path)
-            .unwrap_or_else(|| panic!("missing generated artifact {path}"));
-        let value: serde_json::Value =
-            serde_json::from_str(&artifact.contents).expect("generated JSON");
-        assert_eq!(value["artifactVersion"], json!(VERSION));
-    }
-    let round_trip = artifacts
+    // The manifest still declares the schema version it speaks, which is the
+    // field consumers actually compare against.
+    let manifest = artifacts
         .iter()
-        .find(|artifact| artifact.relative_path == "fixtures/round_trip.json")
-        .expect("round-trip fixture");
-    let round_trip: serde_json::Value =
-        serde_json::from_str(&round_trip.contents).expect("round-trip JSON");
-    assert_eq!(
-        round_trip["mcpDiscoverResult"]["_meta"]["io.modelcontextprotocol/serverInfo"]["version"],
-        json!(VERSION)
+        .find(|artifact| artifact.relative_path == "manifest.json")
+        .expect("manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest.contents).expect("manifest JSON");
+    assert!(
+        manifest.get("artifactVersion").is_none(),
+        "manifest must not stamp an artifact version"
+    );
+    assert!(
+        manifest.get("schemaVersion").is_some(),
+        "manifest must still declare its schema version"
     );
 }
 
@@ -1460,7 +1429,7 @@ fn agent_lifecycle_registry_owns_worker_and_a2a_projections() {
 #[test]
 fn committed_protocol_artifacts_match_generator() {
     let source = protocol_source();
-    let artifacts = generate_artifacts(&source, env!("CARGO_PKG_VERSION")).expect("artifacts");
+    let artifacts = generate_artifacts(&source).expect("artifacts");
     let output_root = source.repo_root().join("spec/protocol-artifacts");
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);

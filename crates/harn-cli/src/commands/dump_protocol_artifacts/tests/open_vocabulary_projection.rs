@@ -23,8 +23,8 @@ use super::*;
 /// follows.
 #[test]
 fn every_open_rust_vocabulary_is_open_in_swift_too() {
-    let swift = generate_swift();
-    let rust = generate_rust();
+    let swift = generate_swift_for_tests();
+    let rust = generate_rust_for_tests();
 
     let open_in_rust = [
         "HarnAgentTerminalClass",
