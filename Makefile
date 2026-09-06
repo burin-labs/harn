@@ -678,6 +678,11 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_tag_main_ancestry_test.sh
 	./scripts/tests/verify_release_archive_provenance_test.sh
+	./scripts/tests/candidate_archive_promotion_test.sh
+	./scripts/tests/candidate_archive_certification_binding_test.sh
+	./scripts/tests/download_candidate_archive_promotion_test.sh
+	./scripts/tests/publish_certified_release_assets_test.sh
+	./scripts/tests/certified_publication_inputs_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
 	./scripts/tests/release_publication_policy_test.sh
@@ -749,6 +754,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
+	./scripts/tests/sccache_rustc_wrapper_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_preemption_recover_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/check_harn_syntax_sensitive_scans_performance_test.sh

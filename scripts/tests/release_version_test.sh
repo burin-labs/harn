@@ -50,6 +50,14 @@ release_development_target_matches_stable 1.2.4-dev 1.2.3 || {
   echo "release_version_test: matching development target rejected" >&2
   exit 1
 }
+release_development_target_precedes_stable 1.2.4-dev 1.2.4 || {
+  echo "release_version_test: development identity behind its stable tag rejected" >&2
+  exit 1
+}
+if release_development_target_precedes_stable 1.2.5-dev 1.2.4; then
+  echo "release_version_test: next development identity reported behind stable tag" >&2
+  exit 1
+fi
 if release_development_target_matches_stable 1.2.5-dev 1.2.3; then
   echo "release_version_test: stale or skipped development target accepted" >&2
   exit 1
@@ -95,7 +103,7 @@ fi
 git -C "$tmp_repo" tag v1.2.4 HEAD~1
 (
   cd "$tmp_repo"
-  release_development_bump_plan 1.2.4 v1.2.4
+  release_development_bump_plan 1.2.4 v1.2.4 true
   [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == true ]]
   [[ "$RELEASE_DEVELOPMENT_BUMP_VERSION" == 1.2.5-dev ]]
   [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == published_stable_needs_development_identity ]]
@@ -105,11 +113,34 @@ git -C "$tmp_repo" tag v1.2.4 HEAD~1
 }
 (
   cd "$tmp_repo"
-  release_development_bump_plan 1.2.5-dev v1.2.4
+  release_development_bump_plan 1.2.5-dev v1.2.4 true
   [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == false ]]
   [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == workspace_does_not_match_latest_stable ]]
 ) || {
   echo "release_version_test: development workspace produced another bump" >&2
+  exit 1
+}
+
+# An immutable candidate tag is not publication. The at-SHA recovery shape
+# leaves main on the same patch's -dev identity and the certified tag on a
+# separate history line. It must stay inert until the GitHub Release exists.
+(
+  cd "$tmp_repo"
+  release_development_bump_plan 1.2.4-dev v1.2.4 false
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == false ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == latest_stable_release_not_published ]]
+) || {
+  echo "release_version_test: candidate tag alone triggered a development bump" >&2
+  exit 1
+}
+(
+  cd "$tmp_repo"
+  release_development_bump_plan 1.2.4-dev v1.2.4 true
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == true ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_VERSION" == 1.2.5-dev ]]
+  [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == published_candidate_supersedes_development_identity ]]
+) || {
+  echo "release_version_test: published at-SHA candidate did not advance development" >&2
   exit 1
 }
 git -C "$tmp_repo" switch --orphan orphan --quiet
@@ -119,7 +150,7 @@ git -C "$tmp_repo" add Cargo.toml
 git -C "$tmp_repo" commit --quiet -m orphan
 (
   cd "$tmp_repo"
-  release_development_bump_plan 1.2.4 v1.2.4
+  release_development_bump_plan 1.2.4 v1.2.4 true
   [[ "$RELEASE_DEVELOPMENT_BUMP_REQUIRED" == false ]]
   [[ "$RELEASE_DEVELOPMENT_BUMP_REASON" == latest_stable_tag_is_not_in_head_ancestry ]]
 ) || {
@@ -134,6 +165,13 @@ fi
 release_branch_is_canonical release/v1.2.3-rc.0
 if release_branch_is_canonical releases/v1.2.3-rc.0; then
   echo "release_version_test: malformed release branch accepted" >&2
+  exit 1
+fi
+
+git -C "$tmp_repo" tag v1.3.0-rc.1
+git -C "$tmp_repo" tag not-a-release
+if [[ "$(cd "$tmp_repo" && release_latest_stable_tag)" != "v1.2.4" ]]; then
+  echo "release_version_test: latest stable tag selection accepted a prerelease or invalid tag" >&2
   exit 1
 fi
 

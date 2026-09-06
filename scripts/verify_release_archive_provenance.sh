@@ -14,10 +14,15 @@ usage() {
 Usage: scripts/verify_release_archive_provenance.sh \
   --artifacts-dir DIR --tag vX.Y.Z --repo OWNER/REPO \
   [--allowed-signers FILE] \
+  [--candidate-manifest PATH] \
   [--legacy-override JSON]
 
 Verifies every release archive against its GitHub artifact attestation before
 release metadata is regenerated or the release is marked latest.
+
+Candidate promotion requires an explicit verified manifest. Its original
+candidate-phase attestations remain bound to the producer run and policy;
+promotion does not mint or claim release-phase attestations.
 
 The optional legacy override is only for releases predating attestations. It
 must be an audited, exact binding:
@@ -30,6 +35,7 @@ tag=""
 repo=""
 allowed_signers=""
 legacy_override=""
+candidate_manifest=""
 while (($#)); do
   case "$1" in
     --artifacts-dir) artifacts_dir="${2:-}"; shift 2 ;;
@@ -37,6 +43,7 @@ while (($#)); do
     --repo) repo="${2:-}"; shift 2 ;;
     --allowed-signers) allowed_signers="${2:-}"; shift 2 ;;
     --legacy-override) legacy_override="${2:-}"; shift 2 ;;
+    --candidate-manifest) candidate_manifest="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -143,10 +150,34 @@ if [[ "$tag_signature_verified" != "true" ]]; then
   exit 1
 fi
 
-release_json="$(gh release view "$tag" --repo "$repo" --json assets)"
+candidate_proof='null'
+if [[ -n "$candidate_manifest" ]]; then
+  if [[ -n "$legacy_override" ]]; then
+    echo "error: candidate promotion cannot use a legacy override" >&2
+    exit 2
+  fi
+  # shellcheck source=scripts/lib/candidate_archive_contract.sh
+  source "$script_dir/lib/candidate_archive_contract.sh"
+  validate_candidate_manifest_json "$candidate_manifest"
+  candidate_proof="$(jq -ce --arg source "$source_commit" 'select(.sourceCommit == $source)' "$candidate_manifest")"
+  # Prove absence through a successful complete inventory, not a swallowed 404.
+  existing_releases="$(gh api --paginate --slurp "repos/$repo/releases?per_page=100")"
+  jq -e --arg tag "$tag" --argjson candidate "$candidate_proof" '
+    [.[][] | select(.tag_name == $tag)] as $releases |
+    ($releases | length) <= 1 and
+    all($candidate.archives[];
+      . as $archive |
+      [$releases[].assets[] | select(.name == $archive.archive)] as $existing |
+      ($existing | length) <= 1 and
+      all($existing[]; .digest == ("sha256:" + $archive.sha256)))
+  ' <<<"$existing_releases" >/dev/null || { echo 'error: existing release archive conflicts with certified bytes' >&2; exit 1; }
+  release_json='{"assets":[]}'
+else
+  release_json="$(gh release view "$tag" --repo "$repo" --json assets)"
+fi
 for archive in "${expected_archives[@]}"; do
   count="$(jq --arg name "$archive" '[.assets[] | select(.name == $name)] | length' <<<"$release_json")"
-  if [[ "$count" != "1" ]]; then
+  if [[ -z "$candidate_manifest" && "$count" != "1" ]]; then
     echo "error: release $tag must contain exactly one asset named $archive (found $count)" >&2
     exit 1
   fi
@@ -209,13 +240,21 @@ predicate_matches() {
     --arg digest "$digest" \
     --arg workflow "$signer_workflow" \
     --arg expectedPolicyRevision "$expected_policy_revision" \
+    --argjson candidate "$candidate_proof" \
     'any(.[];
       .verificationResult.statement.predicate as $p |
       $p.schemaVersion == $schema and
       $p.repository == $repo and
       (
-        ($p.phase // "release") == "release" and
-        $p.tag == $tag
+        if $candidate == null then
+          ($p.phase // "release") == "release" and $p.tag == $tag
+        else
+          $p.phase == "candidate" and ($p.tag // "") == "" and
+          $p.buildPolicy.revision == $candidate.policyRevision and
+          $p.workflow.runId == $candidate.runId and
+          $p.workflow.runAttempt == $candidate.archives[$target].runAttempt and
+          $digest == $candidate.archives[$target].sha256
+        end
       ) and
       $p.sourceCommit == $source and
       $p.archive == $archive and
@@ -257,13 +296,18 @@ for archive in "${expected_archives[@]}"; do
         --arg archive "$archive" \
         --arg target "$target" \
         --arg digest "$digest" \
+        --argjson candidate "$candidate_proof" \
         '.[] |
          .verificationResult.statement.predicate as $p |
          select(
            $p.schemaVersion == $schema and
            (
-             ($p.phase // "release") == "release" and
-             $p.tag == $tag
+             if $candidate == null then
+               ($p.phase // "release") == "release" and $p.tag == $tag
+             else
+               $p.phase == "candidate" and ($p.tag // "") == "" and
+               $p.buildPolicy.revision == $candidate.policyRevision
+             end
            ) and
            $p.sourceCommit == $source and
            $p.archive == $archive and
