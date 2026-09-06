@@ -842,7 +842,7 @@ fn capability_apply_widens_cross_module_carrier_without_duplicate_arguments() {
 #[test]
 fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
     let (result, updated) = apply_single(
-        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count, with_mocks } from \"std/testing\"\n\npipeline main(harness: Harness, _task: any) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
+        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count, with_mocks } from \"std/testing\"\n\npipeline main(harness: Harness) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -1350,7 +1350,7 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
     let entry = temp.path().join("main.harn");
     fs::write(
         &entry,
-        "import { append_trailers } from \"./trailers\"\n\npipeline render_trailers(_task: any) {\n  return append_trailers(\"note.txt\")\n}\n",
+        "import { append_trailers } from \"./trailers\"\n\npipeline render_trailers() {\n  return append_trailers(\"note.txt\")\n}\n",
     )
     .unwrap();
 

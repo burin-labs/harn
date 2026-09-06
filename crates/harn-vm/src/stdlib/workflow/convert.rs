@@ -28,37 +28,55 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
     };
     let mut nodes = (*nodes_dict).clone();
     for (node_id, node) in &graph.nodes {
-        // Re-attach raw VmValue fields serde drops so closure-carrying values
-        // survive the graph round-trip.
-        if node.raw_tools.is_none()
-            && node.raw_verify.is_none()
-            && node.raw_executor.is_none()
-            && node.retry_policy.repair_prompt_builder.is_none()
-        {
-            continue;
-        }
-        let Some(node_value) = nodes.get(node_id.as_str()).cloned() else {
-            continue;
-        };
-        let VmValue::Dict(node_dict) = node_value else {
-            continue;
-        };
-        let mut node_map = (*node_dict).clone();
-        if let Some(raw_tools) = node.raw_tools.clone() {
-            node_map.insert(crate::value::intern_key("tools"), raw_tools);
-        }
-        if let Some(raw_verify) = node.raw_verify.clone() {
-            node_map.insert(crate::value::intern_key("verify"), raw_verify);
-        }
-        // Inline executor closure: survives the graph round-trip like fn-verify.
-        if let Some(raw_executor) = node.raw_executor.clone() {
-            node_map.insert(crate::value::intern_key("executor"), raw_executor);
-        }
-        reattach_retry_prompt_builder(&mut node_map, node);
-        nodes.insert(crate::value::intern_key(node_id), VmValue::dict(node_map));
+        nodes.insert(
+            crate::value::intern_key(node_id),
+            node_to_vm_with_raw(node)?,
+        );
     }
     graph_dict.insert(crate::value::intern_key("nodes"), VmValue::dict(nodes));
     Ok(VmValue::dict(graph_dict))
+}
+
+/// Preserve live policy values and closures at every node-to-VM crossing.
+pub(super) fn node_to_vm_with_raw(node: &WorkflowNode) -> Result<VmValue, VmError> {
+    let encoded = to_vm(node)?;
+    let VmValue::Dict(dict) = encoded else {
+        return Ok(encoded);
+    };
+    let mut dict = (*dict).clone();
+    for (key, raw) in [
+        ("tools", &node.raw_tools),
+        ("model_policy", &node.raw_model_policy),
+        ("context_assembler", &node.raw_context_assembler),
+        ("auto_compact", &node.raw_auto_compact),
+        ("verify", &node.raw_verify),
+        ("executor", &node.raw_executor),
+    ] {
+        if let Some(value) = raw {
+            let value = if key == "model_policy" {
+                // Keep normalized workflow defaults beneath live policy entries.
+                let mut policy = dict
+                    .get(key)
+                    .and_then(VmValue::as_dict)
+                    .cloned()
+                    .unwrap_or_default();
+                if let Some(raw) = value.as_dict() {
+                    for (key, value) in raw
+                        .iter()
+                        .filter(|(_, value)| !matches!(value, VmValue::Nil))
+                    {
+                        policy.insert(key.clone(), value.clone());
+                    }
+                }
+                VmValue::dict(policy)
+            } else {
+                value.clone()
+            };
+            dict.insert(crate::value::intern_key(key), value);
+        }
+    }
+    reattach_retry_prompt_builder(&mut dict, node);
+    Ok(VmValue::dict(dict))
 }
 
 fn reattach_retry_prompt_builder(node_map: &mut DictMap, node: &WorkflowNode) {

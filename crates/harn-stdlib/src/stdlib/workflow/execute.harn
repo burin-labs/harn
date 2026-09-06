@@ -1,5 +1,6 @@
 // @harn-entrypoint-category workflow.stdlib
 import { agent_loop } from "std/agent/loop"
+import { AgentStallCheckpoint } from "std/agent/stall_types"
 import { workflow_execute_map_stage } from "std/workflow/map"
 import "std/workflow/prompts"
 import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
@@ -54,6 +55,8 @@ fn __workflow_execute_enqueue_edges(queue: list<string>, edges: unknown) -> list
 
 /**
  * workflow_execute.
+ * `stall_checkpoints` carries explicit session-bound detector lifetimes between
+ * workflow runs. Within a run, stages share evidence only by actual session id.
  *
  * @effects: [llm.call, host]
  * @errors: []
@@ -67,6 +70,7 @@ pub fn workflow_execute(
   options: dict? = nil,
 ) {
   const opts = options ?? {}
+  let stall_checkpoints: dict<string, AgentStallCheckpoint> = opts?.stall_checkpoints ?? {}
   let state = __host_workflow_prepare_run(task, graph, artifacts ?? [], opts)
   const state_id = state.state_id
   const workflow_graph = state.graph
@@ -105,7 +109,15 @@ pub fn workflow_execute(
             plan.map_options,
           )
         } else if plan.run_agent_loop {
-          agent_loop(harness, plan.prompt, plan.system, plan.agent_loop_options)
+          const agent_options = plan.agent_loop_options
+          const checkpoint = stall_checkpoints?.[agent_options.session_id]
+            ?? agent_options?.stall_checkpoint
+          agent_loop(
+            harness,
+            plan.prompt,
+            plan.system,
+            agent_options + {stall_checkpoint: checkpoint},
+          )
         } else {
           harness.llm.call(plan.prompt, plan.system, plan.llm_options)
         }
@@ -119,6 +131,10 @@ pub fn workflow_execute(
         }
       }
     }
+    if llm_result?.stall_checkpoint != nil {
+      stall_checkpoints = stall_checkpoints
+        + {[llm_result.stall_checkpoint.session_id]: llm_result.stall_checkpoint}
+    }
     const executed = __host_workflow_stage_complete(state_id, current, llm_result)
     state = executed.state
     const edges = workflow_next_edges(
@@ -128,5 +144,5 @@ pub fn workflow_execute(
     state = __host_workflow_record_transitions(state_id, ready, executed.stage, edges)
     ready = __workflow_execute_node_ids(state?.ready_nodes)
   }
-  return __host_workflow_finalize_run(state_id, ready)
+  return __host_workflow_finalize_run(state_id, ready) + {stall_checkpoints: stall_checkpoints}
 }

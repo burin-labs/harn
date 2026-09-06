@@ -267,7 +267,7 @@ fn apply_writes_clean_repairs_and_reports_post_check_count() {
     let script = temp.path().join("repair_demo.harn");
     fs::write(
         &script,
-        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
 
@@ -288,7 +288,7 @@ fn apply_directory_skips_invalid_files_after_applying_valid_files() {
     let invalid = temp.path().join("invalid.harn");
     fs::write(
         &valid,
-        "pipeline main(_harness: Harness) { const count = 1; const greeting = \"hello \" + count; greeting }\n",
+        "pipeline main() { const count = 1; const greeting = \"hello \" + count; greeting }\n",
     )
     .unwrap();
     fs::write(&invalid, "fn bad() {\n").unwrap();
