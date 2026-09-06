@@ -9,6 +9,11 @@ use super::{
 pub enum PostToolAction {
     Pass,
     Modify(String),
+    /// Replace the visible result and classify the tool call as denied.
+    Deny {
+        result: String,
+        denial: Box<PostToolDenial>,
+    },
     /// Replace the result and account for bytes removed from model-visible
     /// output. This survives a later hook appending text.
     Truncate {
@@ -21,11 +26,28 @@ pub enum PostToolAction {
     },
 }
 
-/// Final PostToolUse output plus cumulative, hook-declared data loss.
+/// Stable machine-readable reason supplied by a PostToolUse hook denial.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PostToolDenial {
+    pub kind: String,
+    pub message: String,
+}
+
+impl PostToolDenial {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": self.kind,
+            "message": self.message,
+        })
+    }
+}
+
+/// Final PostToolUse output plus cumulative hook metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostToolHookResult {
     pub text: String,
     pub dropped_bytes: usize,
+    pub denial: Option<Box<PostToolDenial>>,
 }
 
 impl PostToolHookResult {
@@ -33,8 +55,30 @@ impl PostToolHookResult {
         Self {
             text: text.to_string(),
             dropped_bytes: 0,
+            denial: None,
         }
     }
+}
+
+fn parse_denial(map: &crate::value::DictMap) -> Result<Option<PostToolDenial>, VmError> {
+    let Some(value) = map.get("denial") else {
+        return Ok(None);
+    };
+    let VmValue::Dict(denial) = value else {
+        return Err(VmError::Runtime(
+            "PostToolUse denial must be a {kind, message} record".to_string(),
+        ));
+    };
+    let field = |name: &str| match denial.get(name) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
+        _ => Err(VmError::Runtime(format!(
+            "PostToolUse denial requires non-empty string {name}"
+        ))),
+    };
+    Ok(Some(PostToolDenial {
+        kind: field("kind")?,
+        message: field("message")?,
+    }))
 }
 
 pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, VmError> {
@@ -47,9 +91,24 @@ pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, V
             PostToolAction::Modify(text.to_string()),
         )),
         VmValue::Dict(map) => {
+            let denial = parse_denial(&map)?;
             if let Some(result) = map.get("result") {
                 let result = result.display();
                 let truncated = matches!(map.get("truncated"), Some(VmValue::Bool(true)));
+                if let Some(denial) = denial {
+                    if truncated {
+                        return Err(VmError::Runtime(
+                            "PostToolUse denial cannot also declare truncation".to_string(),
+                        ));
+                    }
+                    return Ok(wrap_post_tool_effects(
+                        effects,
+                        PostToolAction::Deny {
+                            result,
+                            denial: Box::new(denial),
+                        },
+                    ));
+                }
                 if truncated {
                     let dropped_bytes = map
                         .get("dropped_bytes")
@@ -75,6 +134,11 @@ pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, V
                     PostToolAction::Modify(result),
                 ));
             }
+            if denial.is_some() {
+                return Err(VmError::Runtime(
+                    "PostToolUse denial requires a model-visible result".to_string(),
+                ));
+            }
             Ok(wrap_post_tool_effects(effects, PostToolAction::Pass))
         }
         other => Err(VmError::Runtime(format!(
@@ -95,6 +159,11 @@ pub(super) fn apply_post_tool_action(
             current.text = new_result;
             Ok(current)
         }
+        PostToolAction::Deny { result, denial } => {
+            current.text = result;
+            current.denial = Some(denial);
+            Ok(current)
+        }
         PostToolAction::Truncate {
             result,
             dropped_bytes,
@@ -111,5 +180,61 @@ pub(super) fn apply_post_tool_action(
             )?;
             apply_post_tool_action(*then, current)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm_string(value: &str) -> VmValue {
+        VmValue::String(arcstr::ArcStr::from(value))
+    }
+
+    fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::dict(
+            entries
+                .into_iter()
+                .map(|(key, value)| (crate::value::intern_key(key), value))
+                .collect::<crate::value::DictMap>(),
+        )
+    }
+
+    #[test]
+    fn parses_typed_denial() {
+        let action = parse_post_tool_result(dict(vec![
+            ("result", vm_string("request denied")),
+            (
+                "denial",
+                dict(vec![
+                    ("kind", vm_string("policy_blocked")),
+                    ("message", vm_string("policy wording")),
+                ]),
+            ),
+        ]))
+        .expect("typed post-tool denial");
+
+        match action {
+            PostToolAction::Deny { result, denial } => {
+                assert_eq!(result, "request denied");
+                assert_eq!(denial.kind, "policy_blocked");
+                assert_eq!(denial.message, "policy wording");
+            }
+            other => panic!("expected typed denial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_incomplete_denial() {
+        let error = parse_post_tool_result(dict(vec![
+            ("result", vm_string("request denied")),
+            (
+                "denial",
+                dict(vec![("message", vm_string("policy wording"))]),
+            ),
+        ]))
+        .expect_err("denial without a stable kind must fail");
+
+        assert!(error.to_string().contains("non-empty string kind"));
     }
 }

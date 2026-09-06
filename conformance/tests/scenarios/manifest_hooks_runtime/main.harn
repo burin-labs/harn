@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
@@ -15,6 +16,21 @@ pipeline default(harness: Harness) {
     "Read a note from disk",
     {parameters: {path: {type: "string"}}, handler: { args -> "original result " + args.path }},
   )
+  const first_denial = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "blocked_1", name: "read_note", arguments: {path: "blocked-first"}},
+    registry,
+  )
+  const second_denial = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "blocked_2", name: "read_note", arguments: {path: "blocked-second"}},
+    registry,
+  )
+  assert(first_denial?.ok == false, "typed PostToolUse denial marks the call failed")
+  assert(first_denial?.error_category == "tool_rejected", "denial uses the tool category")
+  assert(first_denial?.denial?.kind == "policy_blocked", "denial kind reaches the caller")
+  assert(second_denial?.denial?.kind == "policy_blocked", "message wording does not set kind")
+  assert(first_denial?.denial?.message != second_denial?.denial?.message, "control rewords denial")
   with_llm_script(
     harness.llm,
     [
