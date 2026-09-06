@@ -239,6 +239,41 @@ pipeline test_an_uncited_gap_is_not_a_violation(harness: Harness, task: unknown)
   assert(len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0, "and is not a violation")
 }
 
+pipeline test_an_emptied_quote_after_a_reask_is_still_not_a_violation(
+  harness: Harness,
+  task: unknown,
+) {
+  // The exit the re-ask prompt exists to close, pinned here as CODE behaviour
+  // so the division of labour is explicit. A judge whose paraphrase was
+  // rejected can drop `evidence_quote` entirely and keep the refusal: this
+  // checker skips an empty quote deliberately, because the field is required
+  // only for file-content gaps, and tightening it here would fail every judge
+  // that legitimately cites nothing.
+  //
+  // Nothing in this file closes that exit, and it is not a defect in this
+  // checker. What closes it is the `ungrounded_quote` re-ask prompt, which
+  // refuses an empty quote by name and asks for a copied span or a `continue`
+  // whose gap is stated without claiming evidence. If this assertion is ever
+  // changed to convict, revisit that prompt: the two are one contract.
+  const gaps = __judge_completion_gaps_read(
+    {
+      gaps: [
+        {
+          criterion: "queue sorted",
+          gap_class: "other",
+          detail: "the ready queue is still unsorted",
+          evidence_quote: "",
+        },
+      ],
+    },
+  )
+  assert(len(gaps) == 1, "the emptied gap still reads")
+  assert(
+    len(__judge_ungrounded_gap_quotes(gaps, SCHEDULER_VIEW)) == 0,
+    "and the checker does not convict it; the re-ask prompt is what refuses it",
+  )
+}
+
 pipeline test_no_rendered_evidence_cannot_convict(harness: Harness, task: unknown) {
   // Refusing here would fail a judge for the harness having shown it nothing.
   const gaps = __judge_completion_gaps_read(
