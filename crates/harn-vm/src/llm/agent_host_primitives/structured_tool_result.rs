@@ -29,6 +29,48 @@ pub(super) fn data(
     result.get("data")?.as_object()
 }
 
+pub(super) struct FailureProjection {
+    pub category: Option<&'static str>,
+    pub error: Option<String>,
+}
+
+pub(super) fn failure_projection(
+    raw_result: &serde_json::Value,
+    declared_failure: Option<&'static str>,
+    rendered: &str,
+    hook_denial: Option<&crate::orchestration::PostToolDenial>,
+) -> FailureProjection {
+    let denied = super::agent_tools::is_denied_tool_result(raw_result);
+    let category = if hook_denial.is_some() || denied {
+        Some("tool_rejected")
+    } else {
+        declared_failure.or_else(|| super::agent_tools::ok_result_failure_category(raw_result))
+    };
+    let error = hook_denial
+        .map(|denial| denial.message.clone())
+        .or_else(|| category.is_some().then(|| rendered.to_string()));
+    FailureProjection { category, error }
+}
+
+pub(super) fn report_post_hook_truncation(
+    dropped_bytes: usize,
+    tool_name: &str,
+    session_id: &str,
+) -> bool {
+    if dropped_bytes == 0 {
+        return false;
+    }
+    crate::boundary::BoundaryFailure::new(
+        crate::boundary::BoundaryId::PostToolOutput,
+        crate::boundary::BoundaryFailureKind::Truncated,
+        format!("PostToolUse hooks truncated output from tool {tool_name}"),
+    )
+    .with_dropped_bytes(dropped_bytes)
+    .in_session(session_id)
+    .report();
+    true
+}
+
 fn fact<'a>(result: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
     result.get(key).or_else(|| data(result)?.get(key))
 }
