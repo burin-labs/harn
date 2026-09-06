@@ -6,8 +6,7 @@ fn __agent_host_options(options: dict?) {
 }
 
 fn __agent_host_root(options: dict?) {
-  const opts = __agent_host_options(options)
-  return opts?.root ?? opts?.cwd
+  return options?.root ?? options?.cwd
 }
 
 fn __agent_host_list_contains(values: list | string | nil, needle: any) {
