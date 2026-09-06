@@ -32,6 +32,26 @@ pub(super) fn lint_source_at(source: &str, path: &str) -> Vec<LintDiagnostic> {
     lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
 }
 
+/// `lint_source_at` with the project's declared test roots, so a test can
+/// exercise `[lint] test_root_components` the way a consumer repository sets it.
+pub(super) fn lint_source_at_with_test_roots(
+    source: &str,
+    path: &str,
+    test_roots: &[String],
+) -> Vec<LintDiagnostic> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let path = std::path::PathBuf::from(path);
+    let options = LintOptions {
+        file_path: Some(&path),
+        test_root_components: test_roots,
+        ..LintOptions::default()
+    };
+    lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
+}
+
 pub(super) fn has_rule(diagnostics: &[LintDiagnostic], rule: &str) -> bool {
     diagnostics.iter().any(|d| d.rule == rule)
 }

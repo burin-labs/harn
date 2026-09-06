@@ -13,6 +13,7 @@ pub(crate) struct HarnLintConfig {
     pub(crate) require_docstrings: bool,
     pub(crate) complexity_threshold: Option<usize>,
     pub(crate) persona_step_allowlist: Vec<String>,
+    pub(crate) test_root_components: Vec<String>,
     pub(crate) template_variant_branch_threshold: Option<usize>,
     pub(crate) severity_overrides: HashMap<String, harn_lint::LintSeverity>,
 }
@@ -25,6 +26,7 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
             require_docstrings: cfg.lint.require_docstrings.unwrap_or(false),
             complexity_threshold: cfg.lint.complexity_threshold,
             persona_step_allowlist: cfg.lint.persona_step_allowlist,
+            test_root_components: cfg.lint.test_root_components,
             template_variant_branch_threshold: cfg.lint.template_variant_branch_threshold,
             severity_overrides: cfg.lint.severity,
         },
@@ -83,6 +85,7 @@ pub(crate) fn lint_options<'a>(
         require_docstrings: lint_config.require_docstrings,
         complexity_threshold: lint_config.complexity_threshold,
         persona_step_allowlist: &lint_config.persona_step_allowlist,
+        test_root_components: &lint_config.test_root_components,
         require_stdlib_metadata: surface == LintSurface::Lint
             && harn_lint::path_is_stdlib_source(path),
         engine_rules,

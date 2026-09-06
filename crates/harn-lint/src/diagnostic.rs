@@ -80,6 +80,10 @@ pub struct LintOptions<'a> {
     /// Extra non-stdlib function names that persona bodies may call
     /// without requiring a `@step` declaration.
     pub persona_step_allowlist: &'a [String],
+    /// Directory names this project treats as test roots, from
+    /// `[lint] test_root_components`. Additive to the built-in set in
+    /// [`crate::TEST_LAYOUT`]; a project can widen it and never narrow it.
+    pub test_root_components: &'a [String],
     /// When true, stdlib contract lints enforce an `@effects` + `@errors`
     /// metadata block (HARN-STD-101) and an explicit return type
     /// (HARN-STD-102) on every public stdlib `pub fn`. Auto-enabled by

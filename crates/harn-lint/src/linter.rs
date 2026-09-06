@@ -68,6 +68,9 @@ pub(crate) struct Linter<'a> {
     pub(super) persona_body_calls: Vec<(String, Span, String)>,
     /// Opt-in function names allowed directly inside `@persona` bodies.
     pub(super) persona_step_allowlist: HashSet<String>,
+    /// Project-declared directory names whose subtree is test source, from
+    /// `[lint] test_root_components`. Additive to `harn_lint::TEST_LAYOUT`.
+    pub(super) test_root_components: HashSet<String>,
     /// Whether the file has wildcard imports (import "module").
     /// If true, skip undefined-function checks since we can't know what was imported.
     pub(super) has_wildcard_import: bool,
@@ -189,6 +192,7 @@ impl<'a> Linter<'a> {
             persona_steps: HashMap::new(),
             persona_body_calls: Vec::new(),
             persona_step_allowlist: HashSet::new(),
+            test_root_components: HashSet::new(),
             has_wildcard_import: false,
             use_module_graph_for_wildcards: false,
             module_graph_wildcard_exports: None,
