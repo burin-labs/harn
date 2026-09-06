@@ -1,3 +1,4 @@
+import { read_yaml } from "std/fs"
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
@@ -8,6 +9,7 @@ import {
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
   macos_warm_errors,
+  minimal_pr_capacity_errors,
   nextest_version_errors,
   release_aot_runner_errors,
   release_warm_cache_concurrency_errors,
@@ -102,23 +104,58 @@ pipeline test_sccache_action_rejects_a_step_local_inherited_size_override(
 }
 
 @test
-pipeline test_ci_concurrency_preserves_every_main_commit(harness: Harness, task: unknown) {
+pipeline test_ci_concurrency_keeps_one_current_main_run(harness: Harness, task: unknown) {
   assert_eq(ci_workflow_concurrency_errors({concurrency: ci_concurrency()}), [])
 }
 
 @test
-pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task: unknown) {
+pipeline test_ci_concurrency_rejects_per_commit_main_runs(harness: Harness, task: unknown) {
   const invalid = {
     concurrency: {
       group: gha_expression("github.workflow")
         + "-"
         + gha_expression(
-          "github.event.pull_request.number || github.event.merge_group.head_sha || github.ref",
+          "github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref",
         ),
-      "cancel-in-progress": gha_expression("github.event_name == 'pull_request'"),
+      "cancel-in-progress": ci_concurrency()["cancel-in-progress"],
     },
   }
   assert_eq(len(ci_workflow_concurrency_errors(invalid)), 1)
+}
+
+@test
+pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness, task: unknown) {
+  const publish = read_yaml(harness.fs, "../../.github/workflows/publish-release.yml")
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(minimal_pr_capacity_errors(ci, publish), [])
+  let self_hosted_waiter = ci
+  self_hosted_waiter.jobs["rust-artifacts-ready"]["runs-on"] = "self-hosted"
+  assert(
+    minimal_pr_capacity_errors(self_hosted_waiter, publish).contains(
+      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-latest",
+    ),
+  )
+  let pr_policy = ci
+  pr_policy.jobs["audit-scripts"].if = "needs.changes.outputs.rust == 'true'"
+  assert(
+    minimal_pr_capacity_errors(pr_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
+    ),
+  )
+  let main_publish = publish
+  main_publish["on"].push.branches = ["main"]
+  assert(
+    minimal_pr_capacity_errors(ci, main_publish).contains(
+      "publish-release.yml must not trigger on branch pushes",
+    ),
+  )
+  let unrouted_source_checks = ci
+  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-latest"
+  assert(
+    minimal_pr_capacity_errors(unrouted_source_checks, publish).contains(
+      "ci.yml:harn-audit must use the shared elastic Linux runner switch",
+    ),
+  )
 }
 
 @test

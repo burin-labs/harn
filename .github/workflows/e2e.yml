@@ -54,7 +54,8 @@ jobs:
   e2e:
     name: Slow E2E suite
     needs: runner-availability
-    # Main pushes prefer the big self-hosted rung: 24 cores at no cost, and
+    # The fleet-evacuation switch takes every event to elastic paid capacity.
+    # When it is off, main pushes prefer the big self-hosted rung: 24 cores at no cost, and
     # this suite compiles the whole workspace before it runs a single test.
     # `online` rather than `idle` is the deliberate part. A main push is not
     # racing anyone, so waiting for a busy box costs queue time and nothing
@@ -68,7 +69,9 @@ jobs:
     # work on a shared box to serve them is the trade this repository already
     # declined for its per-PR lanes.
     runs-on: >-
-      ${{ (github.event_name == 'push'
+      ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'
+        && 'blacksmith-8vcpu-ubuntu-2404')
+        || (github.event_name == 'push'
         && needs.runner-availability.outputs.selfhosted_disabled == ''
         && needs.runner-availability.outputs.capacity != ''
         && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0
@@ -95,7 +98,8 @@ jobs:
     # one.
     env:
       HARN_E2E_JOBS: >-
-        ${{ (github.event_name == 'push'
+        ${{ (vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && '4')
+          || (github.event_name == 'push'
           && needs.runner-availability.outputs.selfhosted_disabled == ''
           && needs.runner-availability.outputs.capacity != ''
           && fromJSON(needs.runner-availability.outputs.capacity).linux_big.online > 0

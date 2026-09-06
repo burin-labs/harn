@@ -227,9 +227,16 @@ pub const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
 pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
   + "{{ github.workflow }}-$"
-  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}"
+  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}"
 
-pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
+pub const CI_WORKFLOW_CANCEL_POLICY = "$"
+  + "{{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}"
+
+pub const MAIN_ONLY_RUST_IF =
+  "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
+
+pub const MAIN_ONLY_POLICY_IF = MAIN_ONLY_RUST_IF
+  + " && needs.rust-artifacts-ready.result == 'success'"
 
 pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
 
@@ -1399,22 +1406,85 @@ pub fn ci_cache_policy_errors(
   return errors
 }
 
-/**
- * Main pushes are immutable integration proofs, so each commit needs its own
- * concurrency key. Grouping every push under `refs/heads/main` allows GitHub's
- * one-pending-run rule to evict an older commit before any job starts.
- */
+/** Keep one current pull-request proof and one current main proof. */
 pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "ci.yml concurrency.group must key main pushes by github.sha while preserving PR, merge-group, and ref keys",
+        "ci.yml concurrency.group must share one main lane while preserving PR, merge-group, and ref keys",
       ]
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + ["ci.yml may cancel superseded pull-request runs only"]
+      + ["ci.yml must cancel superseded pull-request and main-push runs only"]
+  }
+  return errors
+}
+
+/** Keep integration ratchets and publication tails off pull-request runners. */
+pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
+  let errors: list<string> = []
+  const jobs = ci?.jobs ?? {}
+  const elastic_runner = "$"
+    + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
+  for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
+      errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
+    }
+  }
+  for name in ["rust-checks", "rust-check-inputs", "harn-audit"] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
+      errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
+    }
+  }
+  if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {
+    errors = errors + ["ci.yml:audit-scripts must run on Rust-changing main pushes only"]
+  }
+  if trim(jobs["windows-cross-check"]?.if ?? "") != MAIN_ONLY_RUST_IF {
+    errors = errors + ["ci.yml:windows-cross-check must run on Rust-changing main pushes only"]
+  }
+  const status = jobs["ci-status"] ?? {}
+  for name in ["audit-scripts", "windows-cross-check", ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
+    if !(status?.needs ?? []).contains(name) {
+      errors = errors + ["ci.yml:ci-status must retain ${name}"]
+    }
+  }
+  const status_run = step_by_name(status?.steps ?? [], "Verify required CI jobs")?.run ?? ""
+  for message in [
+    "Repository policy checks failed or skipped on a Rust-changing main push.",
+    "Windows cross-compile check failed or skipped on a Rust-changing main push.",
+  ] {
+    if !contains(status_run, message) {
+      errors = errors + ["ci.yml:ci-status does not enforce '${message}'"]
+    }
+  }
+  const publish_on = publish["on"] ?? {}
+  const push = publish_on?.push ?? {}
+  if len(push?.branches ?? []) != 0 {
+    errors = errors + ["publish-release.yml must not trigger on branch pushes"]
+  }
+  if (push?.tags ?? []) != ["v*"] {
+    errors = errors + ["publish-release.yml must trigger on release tags"]
+  }
+  if publish_on?.workflow_dispatch == nil {
+    errors = errors + ["publish-release.yml must retain manual recovery dispatch"]
+  }
+  return errors
+}
+
+/** Keep the slow suite evacuable through the same paid-capacity switch. */
+pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
+  const job = e2e?.jobs?.e2e ?? {}
+  let errors: list<string> = []
+  for field in [job?.["runs-on"], job?.env?.HARN_E2E_JOBS] {
+    if !contains(to_string(field ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
+      errors = errors
+        + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
+    }
+  }
+  if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
+    errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
   }
   return errors
 }
