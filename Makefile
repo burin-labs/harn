@@ -1394,6 +1394,7 @@ check-rust-test-lane-policy:
 	@echo "=== Checking Rust test lane stack contract ==="
 	@$(HARN_CMD) run scripts/check_rust_test_lane_policy.harn
 	@bash scripts/tests/e2e_resource_budget_test.sh
+	@bash scripts/tests/e2e_runner_capacity_test.sh
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="

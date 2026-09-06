@@ -51,9 +51,33 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
+  # Say where this suite is about to land, and refuse when that cannot be
+  # measured. The routing expression below can only choose; it cannot report,
+  # and it reads an unreadable census exactly like a census that reported no
+  # capacity. Both would fall through to a hosted runner and silently downgrade
+  # the tier, leaving nothing to attribute the downgrade to.
+  e2e-capacity:
+    name: Name the E2E runner capacity decision
+    needs: runner-availability
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Decide where the slow E2E suite lands
+        run: bash scripts/ci/e2e_runner_capacity.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
+          RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
+
   e2e:
     name: Slow E2E suite
-    needs: runner-availability
+    needs: [runner-availability, e2e-capacity]
     # Main pushes prefer the big self-hosted rung: 24 cores at no cost, and
     # this suite compiles the CLI integration tests before running them.
     # `online` rather than `idle` is the deliberate part. A main push is not
