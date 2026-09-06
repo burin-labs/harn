@@ -1,4 +1,6 @@
 //! Repository-owned measurement policy over the shared physical counter and language parsers.
+//! Rust and Harn count lexical source spans, including documentation comments as comments.
+//! Other languages retain Tokei's embedded-code policy; nonphysical partitions remain unsupported.
 
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -324,6 +326,8 @@ pub fn measure(root: &Path, registry: &LocRegistry) -> Result<LocReport, LocErro
                     None
                 }
             }
+        } else if path.ends_with(".rs") {
+            Some(("Rust".to_owned(), rust_counts(source)))
         } else {
             LanguageType::from_path(entry.path(), &Config::default()).and_then(|language| {
                 // Child blobs are disjoint from the parent counters. Fold them exactly once;
@@ -399,39 +403,73 @@ pub fn measure(root: &Path, registry: &LocRegistry) -> Result<LocReport, LocErro
 }
 
 fn harn_counts(source: &str) -> Result<Counts, LocError> {
-    let physical = crate::text::count_lines(source.as_bytes());
-    let mut lines = vec![0u8; physical as usize];
-    for token in Lexer::new(source)
+    let tokens = Lexer::new(source)
         .tokenize_with_comments()
-        .map_err(|error| LocError(error.to_string()))?
-    {
+        .map_err(|error| LocError(error.to_string()))?;
+    Ok(lexical_counts(
+        source,
+        tokens.into_iter().map(|token| {
+            let class = match token.kind {
+                TokenKind::Eof | TokenKind::Newline => 0,
+                TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } => 1,
+                _ => 2,
+            };
+            (token.span.start..token.span.end.min(source.len()), class)
+        }),
+        true,
+    ))
+}
+
+fn rust_counts(source: &str) -> Counts {
+    use ra_ap_rustc_lexer::{strip_shebang, tokenize, FrontmatterAllowed, TokenKind};
+    let mut offset = strip_shebang(source).unwrap_or(0);
+    let shebang = (0..offset, 1);
+    let tokens = tokenize(&source[offset..], FrontmatterAllowed::Yes).map(|token| {
+        let start = offset;
+        offset += token.len as usize;
         let class = match token.kind {
-            TokenKind::Eof | TokenKind::Newline => continue,
+            TokenKind::Whitespace => 0,
             TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } => 1,
             _ => 2,
         };
-        let end = token.span.end.min(source.len());
-        let last = token.span.line - 1
-            + source.as_bytes()[token.span.start..end]
-                .iter()
-                .filter(|&&byte| byte == b'\n')
-                .count();
-        for line in lines.iter_mut().take(last + 1).skip(token.span.line - 1) {
-            *line = (*line).max(class);
+        (start..offset, class)
+    });
+    lexical_counts(source, std::iter::once(shebang).chain(tokens), false)
+}
+
+fn lexical_counts(
+    source: &str,
+    spans: impl IntoIterator<Item = (std::ops::Range<usize>, u8)>,
+    harn_delimiters: bool,
+) -> Counts {
+    let physical = crate::text::count_lines(source.as_bytes());
+    let mut lines = vec![0u8; physical as usize];
+    let (mut offset, mut row) = (0, 0);
+    for (span, class) in spans {
+        row += source[offset..span.start]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        for line in source[span.clone()].split_inclusive('\n') {
+            lines[row] = lines[row].max(class);
+            row += usize::from(line.ends_with('\n'));
         }
+        offset = span.end;
     }
-    Ok(Counts {
+    Counts {
         physical,
         doc_delimiter_lines: source
             .lines()
             .zip(&lines)
-            .filter(|(text, class)| **class == 1 && matches!(text.trim(), "/**" | "*/"))
+            .filter(|(text, class)| {
+                harn_delimiters && **class == 1 && matches!(text.trim(), "/**" | "*/")
+            })
             .count() as u64,
         code: lines.iter().filter(|&&line| line == 2).count() as u64,
         comment: lines.iter().filter(|&&line| line == 1).count() as u64,
         blank: lines.iter().filter(|&&line| line == 0).count() as u64,
         files: 1,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -544,6 +582,31 @@ mod tests {
     }
 
     #[test]
+    fn rust_documentation_and_multiline_strings_keep_their_physical_owner() {
+        let source =
+            "const VALUE: &str = \"value\";\n\n/// first\n/// second\n/// third\nfn main() {}\n";
+        let counts = rust_counts(source);
+        assert_eq!(
+            (counts.physical, counts.code, counts.comment, counts.blank),
+            (6, 2, 3, 1)
+        );
+        // Fenced examples remain Rust comments; quoted comment syntax remains Rust code.
+        let counts = rust_counts(
+            "/// ```rust\n///\n/// fn example() {}\n/// ```\nconst TEXT: &str = r#\"\n/* text */\n\"#; // mixed\n",
+        );
+        assert_eq!(
+            (counts.physical, counts.code, counts.comment, counts.blank),
+            (7, 3, 4, 0)
+        );
+        let counts =
+            rust_counts("#!/usr/bin/env rust-script\n/* nested /* comment */ */\n\nfn main() {}");
+        assert_eq!(
+            (counts.physical, counts.code, counts.comment, counts.blank),
+            (4, 1, 2, 1)
+        );
+    }
+
+    #[test]
     fn notebook_cell_counts_cannot_masquerade_as_physical_source_counts() {
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("main.rs"), "fn main() {}\n").unwrap();
@@ -573,6 +636,18 @@ mod tests {
         assert!(!unsupported_only.complete);
         assert_eq!(unsupported_only.total.files, 0);
         assert_eq!(unsupported_only.unsupported[0].physical, 5);
+        fs::write(
+            root.path().join("example.md"),
+            "```rust\n\nfn main() {}\n\n```\n",
+        )
+        .unwrap();
+        let markdown = measure(root.path(), &registry).unwrap();
+        assert!(markdown
+            .unsupported
+            .iter()
+            .any(|file| file.path == "example.md"
+                && file.physical == 5
+                && file.reason.contains("classified 3 of 5")));
     }
 
     #[test]

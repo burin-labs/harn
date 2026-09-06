@@ -141,6 +141,7 @@ tokio = { version = "1", features = ["rt", "macros", "sync", "fs", "net", "proce
 thiserror = "2"
 tracing = "0.1"
 tokei = { version = "14", default-features = false }
+ra-ap-rustc_lexer = "0.174"
 tempfile = "3"
 uuid = { version = "1", features = ["v7"] }
 

@@ -3731,6 +3731,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "notify",
+ "ra-ap-rustc_lexer",
  "regex",
  "regex-automata",
  "rusqlite",
@@ -7072,6 +7073,17 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "ra-ap-rustc_lexer"
+version = "0.174.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e3150be7e79139b0f085e886dd71b0bb9cd6b35da0a61fca1042ac400b1687e"
+dependencies = [
+ "memchr",
+ "unicode-ident",
+ "unicode-properties",
+]
 
 [[package]]
 name = "radium"
