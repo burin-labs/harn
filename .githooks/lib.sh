@@ -34,6 +34,10 @@ HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/gr
 # executes Harn source from this checkout; only compiled Rust deltas require a
 # fresh worktree runtime.
 HOOK_GENREGISTRY_PATTERN='(^scripts/generated_artifacts\.toml$|^scripts/check_generated_registry\.harn$|^Makefile$|^\.github/workflows/ci\.yml$|^\.githooks/)'
+# Everything the source file-length ratchet governs, plus the policy and the
+# script itself. The ratchet reads the whole tree, so this pattern decides only
+# whether a push is worth ~10 seconds of local proof.
+HOOK_SOURCE_LENGTH_PATTERN='(\.rs$|^crates/harn-stdlib/src/stdlib/.*\.harn$|^scripts/source-file-length-legacy\.json$|^scripts/check_source_file_lengths\.harn$)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
 hook_paths_match() {
