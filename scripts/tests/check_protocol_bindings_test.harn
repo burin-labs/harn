@@ -1,3 +1,4 @@
+import "std/schema"
 import { with_temp_dir } from "std/testing"
 import "../check_protocol_bindings.harn"
 
@@ -38,7 +39,13 @@ fn write_fixture_artifacts(
   fixture_version: string,
 ) -> nil {
   const artifacts = path_join(fs.source_dir(), "../../spec/protocol-artifacts")
-  const fixture = json_parse(fs.read_text(path_join(artifacts, "fixtures/round_trip.json")))
+  // Validated, not merely parsed: the fixture's stamped version is read below
+  // and the round-trip document is written back with every other key intact,
+  // so the shape is checked open rather than closed.
+  const fixture = schema_expect(
+    json_parse(fs.read_text(path_join(artifacts, "fixtures/round_trip.json"))),
+    schema_object({artifactVersion: schema_string()}),
+  )
   const binding = fs.read_text(path_join(artifacts, "python/harn_protocol.py"))
   write_text(
     fs,

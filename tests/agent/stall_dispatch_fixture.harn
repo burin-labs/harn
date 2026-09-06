@@ -5,7 +5,7 @@ import {
 } from "std/agent/stall"
 
 pub type StallObservationInput = {
-  config: dict | bool?,
+  config?: dict | bool,
   session_id?: string?,
   calls?: list?,
   iteration?: int?,
