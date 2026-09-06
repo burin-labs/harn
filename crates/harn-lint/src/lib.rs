@@ -205,23 +205,81 @@ pub fn is_generated_path(path: &Path) -> bool {
         .is_some_and(|name| name.ends_with(GENERATED_HARN_SUFFIX))
 }
 
-/// True when `path` is test source: anywhere under a directory named `tests`,
-/// or a file whose stem ends in `_test`.
+/// Every spelling of "this path is test source" the linter recognises.
+///
+/// One value owns the whole vocabulary so that a rule cannot quietly grow a
+/// fourth spelling by writing its own match. Adding a layout is an edit to
+/// [`TEST_LAYOUT`] and nothing else, and every caller picks it up.
+///
+/// The previous predicate inlined two of these spellings, a literal `tests`
+/// component and a `_test` stem, which is why a consumer repository whose
+/// suites live in `pipeline-tests/` and end in `-test.harn` was invisible to
+/// the rule: its test files read as production source and every assert in
+/// them was a finding.
+pub struct TestLayout {
+    /// Directory names whose entire subtree is test source.
+    pub root_components: &'static [&'static str],
+    /// File-stem suffixes that make a single file test source wherever it sits.
+    pub stem_suffixes: &'static [&'static str],
+}
+
+/// The layouts Harn recognises with no project configuration.
+///
+/// `root_components` stays at the single historical entry, so no existing
+/// project changes behaviour. A project declares its own roots through
+/// `[lint] test_root_components`, which is still a structural fact visible in
+/// review rather than a per-file escape hatch. `stem_suffixes` gains the
+/// kebab-case spelling, which needs no configuration because it is the same
+/// convention under a different separator.
+pub const TEST_LAYOUT: TestLayout = TestLayout {
+    root_components: &["tests"],
+    stem_suffixes: &["_test", "-test"],
+};
+
+impl TestLayout {
+    /// True when `path` sits under a test root or is itself a test file.
+    ///
+    /// `extra_roots` holds the project-declared directory names, which are
+    /// additive: a project widens the set it recognises and can never narrow
+    /// the built-in one.
+    pub fn matches(&self, path: &Path, extra_roots: &HashSet<String>) -> bool {
+        use std::path::Component;
+        let is_root =
+            |name: &str| self.root_components.contains(&name) || extra_roots.contains(name);
+        if path.components().any(|component| {
+            matches!(component, Component::Normal(name) if name.to_str().is_some_and(is_root))
+        }) {
+            return true;
+        }
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| {
+                self.stem_suffixes
+                    .iter()
+                    .any(|suffix| stem.ends_with(suffix))
+            })
+    }
+}
+
+/// True when `path` is test source under any layout in [`TEST_LAYOUT`].
 ///
 /// Path-driven for the same reason [`is_generated_path`] is. A test root is a
 /// structural fact about where a file lives, visible in review and not
 /// forgeable by pasting a marker into a file that wants a rule turned off.
+///
+/// Callers, censused across the workspace: this crate's
+/// `Linter::in_test_source`, which decides whether an `assert` outside a
+/// `pipeline test_*` is production control flow, and which calls the
+/// roots-aware form below. That is the only caller inside or outside the
+/// crate. This zero-configuration form stays public so a consumer host can
+/// ask the same question without building a config.
 pub fn is_test_source_path(path: &Path) -> bool {
-    use std::path::Component;
-    if path
-        .components()
-        .any(|component| matches!(component, Component::Normal(name) if name == "tests"))
-    {
-        return true;
-    }
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .is_some_and(|stem| stem.ends_with("_test"))
+    TEST_LAYOUT.matches(path, &HashSet::new())
+}
+
+/// [`is_test_source_path`] plus the project's declared test roots.
+pub fn is_test_source_path_with_roots(path: &Path, extra_roots: &HashSet<String>) -> bool {
+    TEST_LAYOUT.matches(path, extra_roots)
 }
 
 /// True when `path` points at Harn's canonical embedded stdlib source tree.
@@ -314,6 +372,9 @@ fn lint_full(
     linter
         .persona_step_allowlist
         .extend(options.persona_step_allowlist.iter().cloned());
+    linter
+        .test_root_components
+        .extend(options.test_root_components.iter().cloned());
     linter.lint_program(program);
     if let Some((module_graph, file_path)) = module_graph {
         for issue in module_graph.selective_import_issues(file_path) {

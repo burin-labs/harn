@@ -1206,6 +1206,31 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
       "windows-nightly.yml:nextest must always emit the terminal storage receipt through the shared budget owner",
     ),
   )
+  // Dropping the gate flag leaves a step that still reports before_build, so
+  // every receipt assertion above stays satisfied. Without this control the
+  // job could go back to measuring free space and entering the build anyway.
+  const unguarded_before_build = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Report Windows storage (before build)" {
+              return step
+            }
+            return {...step, run: "./scripts/ci/windows_storage_budget.sh report before_build"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_release_certify_warm_errors(declared_policy, unguarded_before_build).contains(
+      "windows-nightly.yml:nextest must refuse the build when the before_build reading is under the declared headroom",
+    ),
+  )
 }
 
 pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task: unknown) {
@@ -1275,14 +1300,14 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(
     nextest_version: base.nextest_version,
     windows_workspace_warm: {
       ...base.windows_workspace_warm,
-      dev_drive_size_release_certify: base.windows_workspace_warm.dev_drive_size_default,
+      dev_drive_size_full_workspace: base.windows_workspace_warm.dev_drive_size_default,
     },
     macos_workspace_warm: base.macos_workspace_warm,
     writers: base.writers,
   }
   assert(
     actions_cache_capacity_errors(flat_drive).contains(
-      "cache-policy.json windows_workspace_warm must give full-workspace and release-certify runs larger Dev Drive ceilings than the default",
+      "cache-policy.json windows_workspace_warm must give full-workspace runs a larger Dev Drive ceiling than the default",
     ),
   )
   // The macOS ceiling is governed too. Without this the new block could declare
