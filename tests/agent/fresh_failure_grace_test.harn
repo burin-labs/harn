@@ -1,0 +1,192 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_tool_call, with_llm_script } from "std/testing"
+
+/** Every step executes the real loop and carries its explicit checkpoint lifetime. */
+fn fixture(harness: Harness, enabled: bool, cap: int = 2) {
+  const session = harness.agent.open()
+  let executed = []
+  let checkpoint = nil
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify the task",
+    {
+      parameters: {failure: {type: "string"}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { args ->
+        executed = executed + [args.failure]
+        const passed = args.failure == "pass"
+        return agent_tool_handler_result(
+          passed ? "Verification passed" : "AssertionError: ${args.failure}: expected 5 got 4",
+          {
+            run_outcome: {
+              command_status: passed ? "completed" : "failed",
+              exit_code: passed ? 0 : 1,
+            },
+          },
+        )
+      },
+    },
+  )
+  const registry = tool_define(
+    tools,
+    "look",
+    "Inspect source",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "read"},
+      handler: { args ->
+        executed = executed + [args.path]
+        return "Contents: " + args.path
+      },
+    },
+  )
+  return {
+    session: session,
+    calls: fn() { return executed },
+    step: fn(name: string, value: string) {
+      const result = with_llm_script(
+        harness.llm,
+        [llm_tool_call(name, name == "verify" ? {failure: value} : {path: value}, value)],
+        { ->
+          agent_loop(
+            harness,
+            "Continue",
+            nil,
+            {
+              provider: "mock",
+              session_id: session,
+              tools: registry,
+              tool_format: "native",
+              max_iterations: 1,
+              stall_checkpoint: checkpoint,
+              stall_diagnostics: {
+                enabled: true,
+                fresh_failure_grace: enabled,
+                no_net_progress_extend_guard: true,
+                no_net_progress_hard_cap_after: cap,
+                repair_aware: false,
+                post_edit_reverify: false,
+                repeat_same_observation: 99,
+                repeat_same_error: 99,
+                repeat_success: 99,
+                ping_pong_cycles: 99,
+                hard_stop_after_trips: 99,
+              },
+            },
+          )
+        },
+      )
+      checkpoint = result.stall_checkpoint
+      return result
+    },
+  }
+}
+
+pipeline test_fresh_failure_grace_defers_but_does_not_lose_the_cap(harness: Harness) {
+  for enabled in [false, true] {
+    const run = fixture(harness, enabled)
+    const captured = agent_capture_events(
+      harness.agent,
+      run.session,
+      fn() {
+        run.step("verify", "first")
+        run.step("verify", "second")
+        const boundary = run.step("look", "at-cap")
+      assert_eq(
+        boundary.stall_checkpoint.state.failing_verify_turns,
+        2,
+        "both actual typed failures must reach the canonical fold",
+      )
+      assert_eq(len(keys(boundary.stall_checkpoint.state.verify_signature_counts)), 2,
+        "the two failures must produce distinct canonical diagnostic signatures")
+        if !enabled {
+          assert(
+            boundary.stall_checkpoint.state.hard_stop,
+            "standalone cap option must stop without grace",
+          )
+          assert_eq(run.calls(), ["first", "second"], "the capped read must not execute")
+          return
+        }
+        assert(!boundary.stall_checkpoint.state.hard_stop, "fresh cap-boundary failure gets grace")
+        assert(
+          boundary.stall_checkpoint.state.verification_cap_deferred,
+          "the cap crossing remains owed",
+        )
+        const following = run.step("look", "following")
+        assert(!following.stall_checkpoint.state.hard_stop, "the next dispatch also gets grace")
+        assert(
+          !following.stall_checkpoint.state.fresh_failure_grace_pending,
+          "a read cannot renew freshness from the previous diagnostic",
+        )
+        const expired = run.step("look", "must-not-run")
+        assert(
+          expired.stall_checkpoint.state.hard_stop,
+          "the deferred cap fires when grace expires",
+        )
+        assert(
+          !expired.stall_checkpoint.state.verification_cap_deferred,
+          "emitting the cap consumes its debt",
+        )
+        assert_eq(
+          run.calls(),
+          ["first", "second", "at-cap", "following"],
+          "grace grants exactly the intended completed dispatches",
+        )
+      },
+    )
+    const stops = captured.events.filter(
+      { event ->
+        event.type == "agent_loop_stall_warning"
+          && event.warning?.pattern == "no_net_progress_hard_cap"
+      },
+    )
+    assert_eq(len(stops), 1, "the actual loop emits one attributed cap stop")
+    harness.agent.close(run.session)
+  }
+}
+
+pipeline test_revisited_failure_does_not_renew_grace(harness: Harness) {
+  const run = fixture(harness, true, 3)
+  for failure in ["first", "second", "first"] {
+    run.step("verify", failure)
+  }
+  const revisit = run.step("look", "after-revisit")
+  assert(
+    !revisit.stall_checkpoint.state.fresh_failure_grace_pending,
+    "an older failure is not newly discovered evidence",
+  )
+  assert(
+    revisit.stall_checkpoint.state.verification_cap_deferred,
+    "the prior fresh failure grants its remaining grace turn",
+  )
+  const stopped = run.step("look", "must-not-run")
+  assert(
+    stopped.stall_checkpoint.state.hard_stop,
+    "revisiting old evidence cannot keep the cap deferred",
+  )
+  assert_eq(run.calls(), ["first", "second", "first", "after-revisit"])
+  harness.agent.close(run.session)
+}
+
+pipeline test_passing_verification_clears_deferred_cap(harness: Harness) {
+  const run = fixture(harness, true)
+  run.step("verify", "first")
+  run.step("verify", "second")
+  const pending = run.step("verify", "pass")
+  assert(
+    pending.stall_checkpoint.state.verification_cap_deferred,
+    "the cap must really be deferred first",
+  )
+  const cleared = run.step("look", "after-pass")
+  const state = cleared.stall_checkpoint.state
+  assert_eq(state.last_diagnostic_class, "pass", "actual successful verification must be folded")
+  assert(
+    !state.verification_cap_deferred && !state.fresh_failure_grace_pending && !state.hard_stop,
+    "successful verification clears both grace and cap debt",
+  )
+  assert_eq(run.calls(), ["first", "second", "pass", "after-pass"])
+  harness.agent.close(run.session)
+}

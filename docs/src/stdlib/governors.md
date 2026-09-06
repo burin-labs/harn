@@ -110,6 +110,12 @@ to `false` to suppress the advisory for identical read results recurring across
 interleaved calls. Consecutive-repeat safeguards remain enabled, and repeated
 observations still count as no information gain for the iteration budget.
 
+`stall_diagnostics.fresh_failure_grace` defaults to `false`. When enabled, a
+previously unseen verification failure defers the failing-verification cap for
+that turn and the following turn. Revisiting an older failure does not renew
+grace. A deferred cap remains due until it fires or verification passes; this
+setting does not defer other stop conditions.
+
 ```harn,ignore
 import { with_governance } from "std/agent/governors"
 

@@ -1020,22 +1020,35 @@ pub fn __agent_stall_apply_repair(
   // independently gated on its own config, so folding here changes nothing when only
   // the knob is set beyond maintaining the counter and arming its floor.
   const clean_verify_floor_active = config.turns_since_clean_verify != nil
-  const folded = __agent_stall_fold_diagnostic(
+  let folded = __agent_stall_fold_diagnostic(
     agent,
     observation.state,
     prev_dispatch,
     turn_made_edit,
   )
-  if !should_fold_current_failure && !clean_verify_floor_active {
+  if !should_fold_current_failure && !clean_verify_floor_active
+    && !config.no_net_progress_extend_guard {
     return observation + {state: folded}
   }
-  const hard_cap_due = config.no_net_progress_extend_guard
+  const fresh_failure = config.fresh_failure_grace
+    && folded.failing_verify_turns > observation.state.failing_verify_turns
+    && folded.verify_signature_counts[folded.last_diagnostic_signature] == 1
+  const grace_active = config.fresh_failure_grace
+    && (fresh_failure || (observation.state.fresh_failure_grace_pending ?? false))
+  const cap_pending = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
     && folded.failing_verify_turns
       >= config.no_net_progress_hard_cap_after
-    && observation.state.failing_verify_turns
-      < config.no_net_progress_hard_cap_after
-  if hard_cap_due {
+    && (observation.state.failing_verify_turns < config.no_net_progress_hard_cap_after
+      || (observation.state.verification_cap_deferred ?? false))
+  // Retain a deferred crossing until it fires or verification passes. Testing
+  // only the crossing loses the stop; testing >= alone re-arms it after recovery.
+  folded = folded
+    + {
+      fresh_failure_grace_pending: fresh_failure,
+      verification_cap_deferred: cap_pending && grace_active,
+    }
+  if cap_pending && !grace_active {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
       agent,
