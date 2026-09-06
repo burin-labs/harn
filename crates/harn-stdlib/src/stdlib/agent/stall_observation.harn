@@ -1366,7 +1366,8 @@ pub fn agent_stall_observe_tool_calls(
           resolved.state,
           observation.config,
           payload,
-          turn_made_edit,
+          turn_made_edit && !diagnostic_consumed,
+          state,
         ),
       }
   }

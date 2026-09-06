@@ -50,11 +50,13 @@ pub fn agent_stall_repair_config(raw_config: dict | bool | nil) -> dict {
  * is configured. The loop calls it after dispatch, before product post-turn
  * callbacks, with dispatch, declared verification_dispatch, iteration and
  * session_id. It must derive facts from that payload. The callback returns
- * the turn's monotone best verify-state scalar (e.g. tests-passing count, or 1
+ * the repair episode's monotone best verify-state scalar (e.g. tests-passing count, or 1
  * when the build is clean else 0); nil means "no verification evidence this
  * turn" = FLAT (the high-water mark is preserved and the turn does NOT count as
  * an advance). `turn_made_edit` reports whether a workspace write landed on the
- * turn `payload` describes.
+ * turn `payload` describes. Direct intake supplies `before_diagnostic` because
+ * its diagnostic fold has already advanced the write epoch. Both intake paths
+ * begin a new episode only on the first mutation after a verified clean state.
  *
  *   - scalar > high-water (or first ever) => VERIFIER ADVANCED: raise the
  *     high-water, reset `verify_turns_since_advance` to 0 and clear
@@ -67,13 +69,26 @@ pub fn agent_stall_repair_config(raw_config: dict | bool | nil) -> dict {
  * @errors: []
  */
 pub fn __agent_stall_fold_verify_state(
-  state: AgentStallState,
+  prior_state: AgentStallState,
   config: AgentStallConfig,
   payload: any,
   turn_made_edit: bool,
+  before_diagnostic: AgentStallState? = nil,
 ) -> AgentStallState {
+  let state = prior_state
   if config.progress_signal == nil {
     return state
+  }
+  const episode = before_diagnostic ?? state
+  if turn_made_edit && episode.last_diagnostic_class == "pass"
+    && episode.write_epoch == episode.verified_write_epoch {
+    state = state
+      + {
+        verify_state_seen: false,
+        verify_state_high: 0.0,
+        verify_turns_since_advance: 0,
+        verify_wrote_since_advance: false,
+      }
   }
   const raw = config.progress_signal(payload)
   if raw == nil {

@@ -1,5 +1,6 @@
 import { agent_loop } from "std/agent/loop"
 import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { agent_stall_observe_tool_calls } from "std/agent/stall_observation"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
@@ -106,6 +107,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
   const sid = harness.agent.open()
   let handlers = []
   let observed = []
+  let empty_observations = 0
   let checkpoint: any = nil
   const tools = tool_define(
     tool_registry(),
@@ -157,7 +159,11 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
   )
   const progress = { payload ->
     require payload.session_id == sid, "the callback must belong to the executing session"
-    require len(payload.dispatch) == 1, "only an actual completed dispatch supplies progress"
+    if payload.dispatch == nil {
+      empty_observations += 1
+    } else {
+      require len(payload.dispatch) == 1, "only one actual dispatch supplies progress"
+    }
     const verifications = payload.verification_dispatch
     const value = if len(verifications) == 0 {
       nil
@@ -178,11 +184,18 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
     {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
     {name: "verify", args: {failures: 2}, high: -2, flat: 0, failed: 2},
     {name: "verify", args: {failures: 1}, high: -1, flat: 0, failed: 3},
+    {name: "done", args: {}, high: -1, flat: 1, failed: 0},
+    {name: "edit", args: {path: "c.txt"}, high: 0, flat: 1, failed: 0},
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
   ] {
     const before = len(observed)
+    const before_state = checkpoint == nil ? nil : agent_stall_checkpoint_state(
+      harness.agent,
+      checkpoint,
+    )
     const result = with_llm_script(
       harness.llm,
-      [llm_tool_call(step.name, step.args)],
+      [step.name == "done" ? llm_text("Done") : llm_tool_call(step.name, step.args)],
       { ->
         agent_loop(
           harness,
@@ -196,7 +209,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
             max_iterations: 1,
             stall_checkpoint: checkpoint,
             post_turn_callback: { info ->
-              require len(observed) == len(handlers),
+              require len(observed) == len(handlers) + empty_observations,
                 "completed progress must be visible before product post-turn effects"
               require info.stall_checkpoint.state.verify_state_high == step.high,
                 "completed ${step.name} ${json_stringify(step.args)}: expected high ${step.high}, got ${info.stall_checkpoint.state.verify_state_high}; handlers=${json_stringify(handlers)}"
@@ -216,7 +229,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
       },
     )
     checkpoint = result.stall_checkpoint
-    require len(observed) == before + 1 && len(handlers) == len(observed),
+    require len(observed) == before + 1 && len(handlers) + empty_observations == len(observed),
       "hydration and each real dispatch must invoke the callback exactly once"
     require checkpoint.state.verify_state_high == step.high,
       "a final pending dispatch must expose its progress before another stage starts"
@@ -227,9 +240,62 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
       "checkpoint projection must preserve progress without invoking the callback again"
     require projected.failing_verify_turns == step.failed,
       "progress folding must preserve pending diagnostic evidence and clean verification reset"
+    if step.name == "done" {
+      require projected.last_diagnostic_delta_reason == "terminal_success",
+        "the actual successful terminal boundary must establish the clean episode"
+    }
+    if step.name == "edit" {
+      require before_state != nil, "an edit comparison must have a real prior checkpoint"
+      const direct = agent_stall_observe_tool_calls(
+        harness.agent,
+        sid,
+        [],
+        1,
+        {enabled: true, progress_signal: { _ -> nil }},
+        before_state,
+        false,
+        checkpoint.dispatch,
+        "",
+        false,
+        true,
+        "",
+        {},
+      )
+      assert_eq(
+        direct.state.verify_state_high,
+        checkpoint.state.verify_state_high,
+        "direct intake must use the same pre-diagnostic episode boundary",
+      )
+      assert_eq(
+        direct.state.verify_turns_since_advance,
+        checkpoint.state.verify_turns_since_advance,
+      )
+      const replay = agent_stall_observe_tool_calls(
+        harness.agent,
+        sid,
+        [],
+        1,
+        {enabled: true, progress_signal: { _ -> nil }},
+        before_state,
+        false,
+        checkpoint.dispatch,
+        "",
+        false,
+        true,
+        "",
+        {},
+        true,
+      )
+      assert_eq(
+        replay.state.verify_state_seen,
+        before_state.verify_state_seen,
+        "an already-consumed edit cannot start another progress episode",
+      )
+    }
   }
-  require handlers == [3, "edit", "a.txt", 1, 0, "edit", 3, 2, 1]
-    && observed == [-3, nil, nil, -1, 0, nil, -3, -2, -1],
+  require handlers == [3, "edit", "a.txt", 1, 0, "edit", 3, 2, 1, "edit", 3]
+    && observed == [-3, nil, nil, -1, 0, nil, -3, -2, -1, nil, nil, -3]
+    && empty_observations == 1,
     "every expected handler and supplied evidence must reach the canonical lifetime"
   harness.agent.close(sid)
 }

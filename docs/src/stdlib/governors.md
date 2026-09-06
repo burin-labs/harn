@@ -126,6 +126,12 @@ failed diagnostic sets cannot earn credit or replace the last completed failure
 baseline. Passing verification clears that baseline; later unchanged failures
 can exhaust the restarted budget.
 
+The optional `progress_signal` callback reports a scalar whose high-water mark
+is monotone within a repair episode. The first successful workspace mutation
+after clean verification or successful terminal completion starts a new episode.
+Edits during an unresolved failure preserve the existing high-water mark and
+flat-progress counter, so repeated edits cannot manufacture progress.
+
 ```harn,ignore
 import { with_governance } from "std/agent/governors"
 
