@@ -1059,7 +1059,7 @@ mod tests {
     /// The falsifier from #7675: a capture over the cap must say so.
     #[test]
     fn inline_output_reports_stdout_over_the_cap_as_truncated() {
-        let bytes = vec![b'a'; 64];
+        let bytes = [b'a'; 64];
         let inline = inline_output(
             &bytes,
             &[],
@@ -1078,7 +1078,7 @@ mod tests {
     /// flag would carry no information.
     #[test]
     fn inline_output_reports_stdout_exactly_at_the_cap_as_whole() {
-        let bytes = vec![b'a'; 32];
+        let bytes = [b'a'; 32];
         let inline = inline_output(
             &bytes,
             &[],
@@ -1095,8 +1095,8 @@ mod tests {
     #[test]
     fn inline_output_reports_each_stream_independently() {
         let inline = inline_output(
-            &vec![b'a'; 64],
-            &vec![b'b'; 8],
+            &[b'a'; 64],
+            &[b'b'; 8],
             CaptureConfig {
                 max_inline_bytes: 32,
                 ..CaptureConfig::default()
@@ -1107,8 +1107,8 @@ mod tests {
         assert!(!inline.stderr_truncated);
 
         let swapped = inline_output(
-            &vec![b'a'; 8],
-            &vec![b'b'; 64],
+            &[b'a'; 8],
+            &[b'b'; 64],
             CaptureConfig {
                 max_inline_bytes: 32,
                 ..CaptureConfig::default()
@@ -1125,8 +1125,8 @@ mod tests {
     #[test]
     fn inline_output_reports_truncation_of_the_merged_stream_on_stdout() {
         let inline = inline_output(
-            &vec![b'a'; 64],
-            &vec![b'b'; 64],
+            &[b'a'; 64],
+            &[b'b'; 64],
             CaptureConfig {
                 merge_stderr: true,
                 max_inline_bytes: 32,
@@ -1144,8 +1144,8 @@ mod tests {
     #[test]
     fn inline_output_does_not_report_an_uncaptured_stream_as_truncated() {
         let inline = inline_output(
-            &vec![b'a'; 64],
-            &vec![b'b'; 64],
+            &[b'a'; 64],
+            &[b'b'; 64],
             CaptureConfig {
                 stdout: false,
                 stderr: false,

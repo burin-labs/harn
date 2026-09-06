@@ -85,7 +85,12 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .nil("signal")
         .bool("timed_out", false)
         .str("stdout", "")
+        // A blocked command ran nothing, so neither stream was capped. The
+        // flags are on the envelope for every path that carries `stdout`, so a
+        // reader never has to know which builder produced the response.
+        .bool("stdout_truncated", false)
         .str("stderr", message.clone())
+        .bool("stderr_truncated", false)
         .str("output_path", "")
         .str("stdout_path", "")
         .str("stderr_path", "")
