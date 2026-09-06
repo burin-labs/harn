@@ -19,7 +19,7 @@
 // Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
 // permission decision on stdout. Exit status is always 0 — a crashed guard
 // must not look like a denial.
-import { DISPOSABLE_PATH_POLICY } from "./agent_shell_guard_policy"
+import { DISPOSABLE_PATH_POLICY, WORKTREE_ADMISSION_POLICY } from "./agent_shell_guard_policy"
 
 // Commands whose full output is worth keeping. Grepping any of these through a
 // pipe without a redirect is what forces a rerun.
@@ -38,6 +38,17 @@ const CARGO_VERB_TARGETS = {
 }
 
 pub type ShellGuardDecision = {allow: bool, reason: string}
+
+/**
+ * Whether the repository this command runs in owns a Fleet admission command.
+ *
+ * `available` false with an empty `denial` means the guard looked and the
+ * repository genuinely has none, so raw worktree creation is allowed there.
+ * A non-empty `denial` means the guard could NOT look, which is not the same
+ * answer and must never read as "no admission command": the guard refuses and
+ * says the census failed.
+ */
+pub type WorktreeAdmission = {available: bool, command: string, denial: string}
 
 type ShellCommandStage = {text: string, argv: list<string>, writes_to_file: bool}
 
@@ -356,7 +367,59 @@ pub fn discarded_output_violation(command: string) -> string {
   return ""
 }
 
-pub fn decision(payload: string) -> ShellGuardDecision {
+/**
+ * Read the admission answer the wrapper measured.
+ *
+ * The guard runs in the standalone hook host, which permits no filesystem
+ * builtin at all, so it cannot look for the admission command itself. The
+ * wrapper beside it is ordinary shell with full access, measures once, and
+ * reports the answer here.
+ *
+ * Two variables, because "no admission command in this repository" and "nobody
+ * measured" are different answers and only the first may allow. The checked
+ * flag is the discriminator: an unset flag means the guard was invoked outside
+ * its wrapper, and it refuses rather than reading a missing measurement as an
+ * absent file.
+ */
+pub const ADMISSION_ENV: string = "HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION"
+
+pub const ADMISSION_CHECKED_ENV: string = "HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED"
+
+pub fn worktree_admission_from_env(env: HarnessEnv) -> WorktreeAdmission {
+  return worktree_admission_reported(
+    to_string(env.get(ADMISSION_CHECKED_ENV) ?? ""),
+    to_string(env.get(ADMISSION_ENV) ?? ""),
+  )
+}
+
+/** The same answer from the two values the wrapper reports, for direct testing. */
+pub fn worktree_admission_reported(checked: string, reported: string) -> WorktreeAdmission {
+  if checked != "1" {
+    return {
+      available: false,
+      command: "",
+      denial: "no wrapper reported whether this repository owns a Fleet admission command ("
+        + ADMISSION_CHECKED_ENV + " is not set)",
+    }
+  }
+  if reported == "" {
+    return {available: false, command: "", denial: ""}
+  }
+  // The wrapper has to name the path in shell, so the two spellings can drift.
+  // Catching a divergence here keeps a renamed admission command from silently
+  // turning the rule off, which is the failure this whole change is about.
+  if !WORKTREE_ADMISSION_POLICY.admission_command_paths.contains(reported) {
+    return {
+      available: false,
+      command: reported,
+      denial: "the wrapper reported an admission command this policy does not know: `"
+        + reported + "`",
+    }
+  }
+  return {available: true, command: reported, denial: ""}
+}
+
+pub fn decision(payload: string, admission: WorktreeAdmission) -> ShellGuardDecision {
   let parsed = nil
   try {
     parsed = json_parse(payload)
@@ -372,7 +435,20 @@ pub fn decision(payload: string) -> ShellGuardDecision {
   }
   const worktree = raw_worktree_add_violation(command)
   if worktree != "" {
-    return {allow: false, reason: worktree}
+    // The rule is pure argv analysis, so it fires in every repository that
+    // wires this guard. Only a repository that actually owns the admission
+    // command can be told to use it.
+    if admission.denial != "" {
+      return {
+        allow: false,
+        reason: "Raw `git worktree add` is refused because this guard could not tell whether "
+          + "this repository owns a Fleet admission command, and an unreadable census must not "
+          + "read as an absent one: " + admission.denial,
+      }
+    }
+    if admission.available {
+      return {allow: false, reason: worktree + " This repository provides it at " + admission.command + "."}
+    }
   }
   if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
     const cargo = cargo_violation(command)
@@ -395,7 +471,8 @@ fn main(harness: Harness) {
   // Both hook hosts send one compact JSON object. read_line has been a typed
   // Harness capability since before the oldest release this adapter supports.
   const input = harness.stdio.read_line({trim: false})
-  const verdict = decision(input.value ?? "")
+  const payload = input.value ?? ""
+  const verdict = decision(payload, worktree_admission_from_env(harness.env))
   if verdict.allow {
     return nil
   }
