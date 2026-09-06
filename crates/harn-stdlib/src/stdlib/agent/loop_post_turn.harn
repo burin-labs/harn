@@ -687,24 +687,20 @@ pub fn agent_loop_post_turn_transition(
       // shares the `max_nudges` number and DOES seal `stuck`. Two mechanisms,
       // one config knob. That stop is untouched and has its own control below.
       //
-      // WHAT A READER SEES, and what they cannot. This receipt is projected into
-      // the typed `FeedbackInjected` event, whose fields are fixed: kind,
-      // content, and streak survive; everything else in this payload is dropped
-      // on the way out, including a `delivered: false` flag that would have said
-      // the demotion out loud. So the receipt cannot name its own demotion, and
-      // the signal is the PAIR: before this change every firing wrote both a
-      // `no_progress_streak` row and a `no_progress_streak_nudge` row, and now
-      // it writes only the second. A timeline carrying the nudge row alone is a
-      // turn where the loop observed the stall and said nothing.
+      // WHAT A READER SEES. This receipt is projected into the typed
+      // `FeedbackInjected` event, which now carries `delivered`, so the row
+      // says out loud that nothing reached the model. It used to be unable to:
+      // the variant is named for injection and could express nothing else, so
+      // the only signal was the PAIR. Before the demotion every firing wrote a
+      // `no_progress_streak` row and a `no_progress_streak_nudge` row; after
+      // it, only the second. A reader had to notice a missing sibling row to
+      // conclude the loop observed the stall and said nothing, which is
+      // reasoning from absence inside the events people read to find out what a
+      // run did.
       //
-      // That is a weaker receipt than it should be, and the fix belongs to the
-      // event schema rather than here: `FeedbackInjected` has no field for
-      // whether the feedback reached the model. Filed rather than smuggled in.
-      //
-      // `iteration`, `has_tools` and `made_tool_calls` are kept in the payload
-      // deliberately even though the projection drops them today. They are the
-      // fields a widened variant would want, and removing them would make the
-      // widening look like new instrumentation instead of a projection fix.
+      // `iteration` now survives the projection as well. `has_tools` and
+      // `made_tool_calls` still do not; they are kept here deliberately, as the
+      // fields a further widening would want.
       agent_emit_event(
         harness.agent,
         session.session_id,
@@ -716,6 +712,9 @@ pub fn agent_loop_post_turn_transition(
           turns_since_progress: next.turns_since_progress,
           has_tools: has_tools,
           made_tool_calls: made_tool_calls,
+          // The receipt now names its own demotion instead of leaving a reader
+          // to infer it from a missing sibling row.
+          delivered: false,
         },
       )
     }
