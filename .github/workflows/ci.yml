@@ -695,9 +695,9 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      # The Harn consumers can now start while this independent test-profile
-      # archive is compiled. Keeping it in the same producer preserves the warm
-      # target graph without putting it on the Harn critical path.
+      # Harn consumers start while the workspace test graph compiles once.
+      # Only security binaries enter this archive; the following workspace
+      # tests reuse the same profile and unified features without rebuilding.
       - name: Build security test archive
         timeout-minutes: 12
         env:
