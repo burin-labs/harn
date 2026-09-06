@@ -577,6 +577,119 @@ mod tests {
     use crate::module_artifact::ModuleProvenance;
     use std::fs;
 
+    /// Write `contents` to `path` keeping its length and its exact nanosecond
+    /// modification time, which is the one edit a length-and-timestamp identity
+    /// cannot observe.
+    fn overwrite_preserving_len_and_mtime(path: &Path, contents: &str) {
+        let before = fs::metadata(path).expect("stat before");
+        let previous = fs::read_to_string(path).expect("read before");
+        assert_eq!(
+            contents.len(),
+            previous.len(),
+            "the probe is only meaningful when the byte length is unchanged"
+        );
+        fs::write(path, contents).expect("write edit");
+        let handle = fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("reopen to restamp");
+        handle
+            .set_modified(before.modified().expect("mtime before"))
+            .expect("restore mtime");
+        drop(handle);
+        let after = fs::metadata(path).expect("stat after");
+        assert_eq!(
+            before.modified().unwrap(),
+            after.modified().unwrap(),
+            "the probe is only meaningful when the modification time is unchanged"
+        );
+    }
+
+    /// harn#8138. A closed packaged tree is the one place the loader accepts an
+    /// artifact on a root-relative context, so it is the one place a stale
+    /// artifact could plausibly win over edited source. It cannot: the graph
+    /// binding is a digest over source CONTENT, so an edit that preserves both
+    /// length and nanosecond modification time still fails verification.
+    ///
+    /// The edit here is the reported one, an error-message string in an
+    /// imported module, and the falsifier is below it: the unedited graph must
+    /// verify, or this test would pass with a digest that never matched
+    /// anything.
+    #[test]
+    fn linked_graph_binding_refuses_an_edited_source_at_identical_length_and_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library.harn");
+        let entry = dir.path().join("entry.harn");
+        fs::write(
+            &library,
+            "pub fn explain() { \"ERROR: original message\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            "import { explain } from \"./library.harn\"\nfn main() { println(explain()) }\n",
+        )
+        .unwrap();
+
+        let linked = link_program(&entry, dir.path()).expect("link succeeds");
+        let digest = linked.identity.graph_digest_blake3.clone();
+        let root = dir.path().to_path_buf();
+        let read_from_disk = |path: &Path| fs::read(root.join(path)).ok();
+
+        // Control: the graph as linked must verify. Without this the refusal
+        // below would prove only that the digest never matches anything.
+        verify_graph_binding(&linked.report, &digest, read_from_disk)
+            .expect("the unedited graph verifies");
+
+        overwrite_preserving_len_and_mtime(
+            &library,
+            "pub fn explain() { \"ERROR: replaced message\" }\n",
+        );
+
+        let error = verify_graph_binding(&linked.report, &digest, read_from_disk)
+            .expect_err("an edited source must not verify against the linked digest");
+        assert!(
+            error.message.contains("linked graph digest mismatch"),
+            "the refusal must name the mismatch, got: {}",
+            error.message
+        );
+    }
+
+    /// The other half of the same question: a source that no longer parses is
+    /// still read as bytes by the binding check, so the artifact cannot stand
+    /// in for it. This is the corrupt-source probe from the issue, at the
+    /// linked-program seam.
+    #[test]
+    fn linked_graph_binding_refuses_a_corrupted_source_it_cannot_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library.harn");
+        let entry = dir.path().join("entry.harn");
+        fs::write(
+            &library,
+            "pub fn explain() { \"ERROR: original message\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            "import { explain } from \"./library.harn\"\nfn main() { println(explain()) }\n",
+        )
+        .unwrap();
+
+        let linked = link_program(&entry, dir.path()).expect("link succeeds");
+        let digest = linked.identity.graph_digest_blake3.clone();
+        let root = dir.path().to_path_buf();
+        let read_from_disk = |path: &Path| fs::read(root.join(path)).ok();
+
+        overwrite_preserving_len_and_mtime(
+            &library,
+            "@@@ this source does not parse at all@@@@@@@@@\n",
+        );
+
+        let error = verify_graph_binding(&linked.report, &digest, read_from_disk)
+            .expect_err("a corrupted source must not verify against the linked digest");
+        assert!(error.message.contains("linked graph digest mismatch"));
+    }
+
     #[test]
     fn identity_rejects_codegen_drift() {
         let mut identity = LinkedProgramIdentity::current("blake3:test".to_string());
