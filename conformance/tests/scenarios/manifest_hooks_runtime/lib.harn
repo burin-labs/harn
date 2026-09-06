@@ -7,5 +7,14 @@ pub fn deny_write_like_tools(_harness: Harness, event: dict) {
 }
 
 pub fn rewrite_read_results(_harness: Harness, event: dict) {
+  const path = event?.tool?.args?.path ?? ""
+  if path.starts_with("blocked-") {
+    const message = if path == "blocked-first" {
+      "first wording"
+    } else {
+      "second wording"
+    }
+    return {result: "Error: " + message, denial: {kind: "policy_blocked", message: message}}
+  }
   return "HOOKED:" + (event?.result?.text ?? "")
 }
