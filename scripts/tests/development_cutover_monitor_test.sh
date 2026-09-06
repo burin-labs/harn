@@ -124,6 +124,59 @@ grep -Fq 'open_pr_count=0' "$merged_log"
 grep -Fq 'merged_pr_count=1' "$merged_log"
 grep -Fq 'MERGED:https://example.invalid/pull/41' "$merged_log"
 
+# A certified release tag may name its immutable candidate rather than a main
+# ancestor. The repository's stable tag list still owns publication identity,
+# so a main already at the following development version is current.
+off_ancestry_fixture="$tmp_root/off-ancestry"
+off_ancestry_rows="$tmp_root/off-ancestry-rows.tsv"
+mkdir -p "$off_ancestry_fixture"
+git -C "$off_ancestry_fixture" init --quiet
+git -C "$off_ancestry_fixture" config user.name "Development Cutover Monitor Test"
+git -C "$off_ancestry_fixture" config user.email "development-cutover-monitor@example.com"
+git -C "$off_ancestry_fixture" config commit.gpgsign false
+git -C "$off_ancestry_fixture" config tag.gpgSign false
+printf '[workspace.package]\nversion = "1.2.3"\n' > "$off_ancestry_fixture/Cargo.toml"
+git -C "$off_ancestry_fixture" add Cargo.toml
+git -C "$off_ancestry_fixture" commit --quiet -m initial
+git -C "$off_ancestry_fixture" tag v1.2.3
+default_branch="$(git -C "$off_ancestry_fixture" branch --show-current)"
+git -C "$off_ancestry_fixture" switch --quiet -c release-candidate
+printf '[workspace.package]\nversion = "1.2.4"\n' > "$off_ancestry_fixture/Cargo.toml"
+git -C "$off_ancestry_fixture" add Cargo.toml
+git -C "$off_ancestry_fixture" commit --quiet -m 'Release v1.2.4 candidate'
+git -C "$off_ancestry_fixture" tag v1.2.4
+git -C "$off_ancestry_fixture" switch --quiet "$default_branch"
+printf '[workspace.package]\nversion = "1.2.5-dev"\n' > "$off_ancestry_fixture/Cargo.toml"
+git -C "$off_ancestry_fixture" add Cargo.toml
+git -C "$off_ancestry_fixture" commit --quiet -m 'Start 1.2.5-dev development'
+git -C "$off_ancestry_fixture" update-ref refs/remotes/origin/main HEAD
+: > "$off_ancestry_rows"
+
+off_ancestry_log="$tmp_root/off-ancestry.log"
+HARN_DEVELOPMENT_CUTOVER_ROOT="$off_ancestry_fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$off_ancestry_rows" \
+  "$repo_root/scripts/check_development_cutover.sh" > "$off_ancestry_log"
+grep -Fq 'latest_tag=v1.2.4' "$off_ancestry_log"
+grep -Fq 'main_version=1.2.5-dev' "$off_ancestry_log"
+grep -Fq 'expected_development_version=1.2.5-dev' "$off_ancestry_log"
+
+# The same non-ancestor release tag must reject a genuinely stale development
+# fold rather than treating any development version as current.
+printf '[workspace.package]\nversion = "1.2.4-dev"\n' > "$off_ancestry_fixture/Cargo.toml"
+git -C "$off_ancestry_fixture" add Cargo.toml
+git -C "$off_ancestry_fixture" commit --quiet -m 'Fixture stale development fold'
+git -C "$off_ancestry_fixture" update-ref refs/remotes/origin/main HEAD
+stale_fold_log="$tmp_root/stale-fold.log"
+if HARN_DEVELOPMENT_CUTOVER_ROOT="$off_ancestry_fixture" \
+  HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$off_ancestry_rows" \
+    "$repo_root/scripts/check_development_cutover.sh" > "$stale_fold_log" 2>&1; then
+  echo "stale development fold passed against a non-ancestor release tag" >&2
+  exit 1
+fi
+grep -Fq 'latest_tag=v1.2.4' "$stale_fold_log"
+grep -Fq 'main_version=1.2.4-dev' "$stale_fold_log"
+grep -Fq 'expected_development_version=1.2.5-dev' "$stale_fold_log"
+
 # An unreadable PR census is unknown, not a measured zero or green state.
 cat > "$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
