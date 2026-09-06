@@ -1,0 +1,238 @@
+// Run: harn test tests/agent/no_progress_streak_receipts_only_test.harn
+//
+// The no-progress streak observes; it does not steer. It used to inject a
+// paragraph of advice on every unproductive turn, and on the v0.10.130 agent run
+// under a coding workload that was 22 of the run's 30 feedback injections in a
+// 22-turn run that still ended unverified. It never terminated anything, so
+// what those turns bought was a near-identical paragraph re-entering the packet
+// each time, crowding the evidence the completion judge is asked to read.
+//
+// WHY IT CANNOT STOP ITSELF. Read from that run's event log: the counter on the
+// eleven receipts is 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2. It never reaches 4. The
+// agent had backgrounded a verifier and was alternating a narrating turn with a
+// successful poll of it. A turn with no successful tool raises the counter by
+// one; a turn with a successful tool LOWERS it by one rather than zeroing it,
+// deliberately, so that mixed prose-and-tool churn cannot evade the nudge. The
+// pair nets zero, so the run parks between the floor of two and the ceiling of
+// `max_nudges`, and the guard is satisfied forever. The nudge is not escalating
+// toward a stop. It is stuck, and it fires on the polling turns too, because a
+// decay to two still clears the floor and a successful poll leaves nothing in
+// the rejected list.
+//
+// These fixtures pin both halves of the demotion: the receipt still fires, and
+// nothing reaches the transcript. The third pins the mechanism that shares its
+// budget and DOES still seal a run, because the two are one config knob and a
+// careless removal takes both. See harn#8110.
+//
+// READ THE SELECTORS BEFORE EDITING THEM. Every custom loop event is captured as
+// a `feedback_injected` row carrying its emitted name in `kind`, so this file
+// matches on `kind` and never on `type`. A selector written against `type`
+// returns an empty list on every run, which reads as a mechanism that never
+// fires. That is not a hypothetical: it is how the streak was first reported
+// unreachable, after five product shapes were measured against a selector that
+// could not return a non-empty answer. The injection and the receipt are both
+// `feedback_injected` and differ only by a suffix on `kind`, so the match is
+// exact rather than a prefix.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { with_llm_script } from "std/testing"
+
+/** The poll the stalled run kept making. It succeeds and settles nothing. */
+fn __idle_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "poll_command",
+    "Poll a backgrounded command for its result.",
+    {
+      handler: { _args -> "still running" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  return tools
+}
+
+/**
+ * The RECEIPT rows: what the loop recorded about the streak.
+ *
+ * Selected on `kind`, not on `type`. Every custom loop event is captured as a
+ * `feedback_injected` row carrying its name in `kind`, so a selector written
+ * against `type` matches nothing and a demotion test built on it passes while
+ * measuring an empty list. That is how this mechanism first read as unreachable.
+ */
+fn __nudge_receipts(events: unknown) {
+  return events.filter(
+    { event ->
+      to_string(event.type) == "feedback_injected"
+        && to_string(event?.kind ?? "") == "no_progress_streak_nudge"
+    },
+  )
+    .to_list()
+}
+
+/**
+ * The DELIVERY rows: what actually entered the model's packet.
+ *
+ * The injection carries `kind: "no_progress_streak"`, one character-run away
+ * from the receipt's `no_progress_streak_nudge`, so the match is exact rather
+ * than a prefix. Read from the structured field rather than the transcript
+ * text: a mechanism that stopped delivering and one whose wording changed would
+ * look the same in a text search.
+ */
+fn __nudge_feedback(events: unknown) {
+  return events.filter(
+    { event ->
+      to_string(event.type) == "feedback_injected"
+        && to_string(event?.kind ?? "") == "no_progress_streak"
+    },
+  )
+    .to_list()
+}
+
+/** The run's options, typed once so both fixtures pass the same shape. */
+fn __stall_spec(session: string, iterations: int, max_nudges: int) -> AgentSpec {
+  return {
+    provider: "mock",
+    session_id: session,
+    tools: __idle_tools(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: iterations,
+    max_nudges: max_nudges,
+  }
+}
+
+/**
+ * The measured turn sequence, reduced to what the counter can see.
+ *
+ * The real run backgrounded a verifier at iteration 6 and from iteration 9 on
+ * alternated a narrating turn with a successful `poll_command` against it. What
+ * the streak reads of that is only "no successful tool" then "one successful
+ * tool", so the fixture reproduces the alternation with a poll that always
+ * succeeds and returns the same unfinished answer. Reproducing the background
+ * command itself would add a scheduler to the fixture and change nothing the
+ * counter reads.
+ *
+ * `tool_format: "native"` with a done sentinel matters, and it is what the run
+ * had. It closes the gates on the toolless correctives, so nothing competes for
+ * the narrating turns. Every feedback composition in the archive carries one
+ * message and an empty suppressed list, which is that fact from the other side.
+ */
+fn __run_polling_stall(harness: Harness, label: string, pairs: int, max_nudges: int) {
+  // The ramp comes first, and it is load-bearing. The counter starts at zero and
+  // the guard has a floor of two, so the alternation alone never reaches the
+  // mechanism: each pair nets zero and the run sits at one. The measured run ramped
+  // on iterations 8, 9 and 10, three turns with no tool call at all, and only
+  // then began polling. Without those the fixture measures nothing.
+  let script: list = [
+    {text: "The verifier is still running; I will wait."},
+    {text: "Still waiting on the verifier."},
+    {text: "Continuing to wait on the verifier."},
+  ]
+  for i in range(0, pairs) {
+    script = script
+      + [
+        {text: "", tool_calls: [{id: "poll-" + to_string(i), name: "poll_command", arguments: {}}]},
+        {text: "Verifier has not settled yet, attempt " + to_string(i) + "."},
+      ]
+  }
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the requested change.",
+          nil,
+          __stall_spec(session, 3 + pairs * 2, max_nudges),
+        ) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+pipeline test_the_streak_still_reports_itself(harness: Harness, task: unknown) {
+  // Non-vacuity first. A demotion that also stopped the mechanism from firing
+  // would satisfy the delivery assertion below while removing the evidence
+  // this change exists to keep.
+  const captured = __run_polling_stall(harness, "streak-reports", 3, 8)
+  const receipts = __nudge_receipts(captured.events)
+  assert(len(receipts) >= 2, "the streak must still emit its receipt on every stalled turn")
+  assert(
+    trim(to_string(receipts[0].content ?? "")) != "",
+    "the receipt still carries what the loop would have said",
+  )
+  assert(receipts[0].streak >= 2, "the receipt names the streak it observed")
+  // The receipt cannot say "not delivered" itself. It is projected into the
+  // typed `FeedbackInjected` event, which carries kind, content and streak and
+  // drops the rest, so a `delivered` flag never reaches a reader. The demotion
+  // shows in the PAIR instead: this row present, its `no_progress_streak`
+  // sibling absent. Asserted here so the pair is what the file pins, and so a
+  // later attempt to add the flag finds this note before the assertion.
+  assert_eq(receipts[0].delivered, nil)
+  assert_eq(len(__nudge_feedback(captured.events)), 0)
+}
+
+pipeline test_the_streak_fires_on_the_polling_turn_too(harness: Harness, task: unknown) {
+  // The measured shape's least obvious half, and the reason this fixture alternates
+  // rather than narrating straight through. The counter DECAYS on a successful
+  // tool instead of zeroing, so a poll that succeeds lands it back on the floor
+  // of two, which still clears the guard. Pinning only the narrating turns would
+  // leave a "reset on success" rewrite looking correct.
+  const captured = __run_polling_stall(harness, "streak-oscillates", 3, 8)
+  const streaks = __nudge_receipts(captured.events).map({ receipt -> receipt.streak }).to_list()
+  assert(len(streaks) >= 4, "the alternation must reach the mechanism repeatedly")
+  assert(
+    len(streaks.filter({ value -> value == 2 }).to_list()) >= 2,
+    "the decay half of the alternation must fire, not only the raise half",
+  )
+  assert(
+    len(streaks.filter({ value -> value > 3 }).to_list()) == 0,
+    "the counter oscillates between the floor and one above it; it never escalates",
+  )
+}
+
+pipeline test_the_streak_delivers_nothing_to_the_model(harness: Harness, task: unknown) {
+  const captured = __run_polling_stall(harness, "streak-silent", 3, 8)
+  assert(
+    len(__nudge_receipts(captured.events)) >= 2,
+    "the mechanism fired, so the absence below is a demotion and not a miss",
+  )
+  assert_eq(len(__nudge_feedback(captured.events)), 0)
+}
+
+pipeline test_the_text_only_budget_still_seals_the_run(harness: Harness, task: unknown) {
+  // THE DIRECTION CONTROL, and the reason this file exists rather than a single
+  // deletion. The text-only nudge budget counts against the same `max_nudges`
+  // knob and is a different mechanism: it breaks the loop with `stuck`. Nothing
+  // above may retire it.
+  const captured = with_llm_script(
+    harness.llm,
+    [{text: "a"}, {text: "b"}, {text: "c"}, {text: "d"}, {text: "e"}, {text: "f"}],
+    { ->
+      const session = "text-only-budget-" + harness.random.uuid()
+      const inner = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the requested change.",
+          nil,
+          __stall_spec(session, 6, 2),
+        ) },
+      )
+      return {events: inner.events, result: inner.result}
+    },
+  )
+  assert_eq(captured.result.status, "stuck")
+  assert_eq(captured.result.stop_reason, "max_nudges")
+}
