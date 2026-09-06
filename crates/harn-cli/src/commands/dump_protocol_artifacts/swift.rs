@@ -11,7 +11,6 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
-use super::external_action_types::append_swift_external_action_types;
 use super::prepared_session::append_swift_prepared_session_types;
 use super::session_recap::append_swift_session_recap_types;
 use super::session_update_payloads::append_swift_session_update_payloads;
@@ -151,50 +150,9 @@ pub(super) fn generate_swift_for_version(
     ));
     out.push_str("}\n\n");
 
-    out.push_str(&swift_enum(
-        "HarnExternalActionOutcome",
-        &external_actions.outcomes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionReceiptStatus",
-        &external_actions.receipt_statuses,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionNextAction",
-        &external_actions.next_actions,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionEnvironment",
-        &external_actions.environments,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionAuthorizationMethod",
-        &external_actions.authorization_methods,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionAuthenticationAssurance",
-        &external_actions.authentication_assurances,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionDisclosureSource",
-        &external_actions.disclosure_sources,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionErrorKind",
-        &external_actions.error_kinds,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionProtectedFieldClass",
-        &external_actions.protected_field_classes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionPassengerGender",
-        &external_actions.passenger_genders,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionActivityStatus",
-        &external_actions.activity_statuses,
-    ));
+    for (_, suffix, values) in external_actions.projections() {
+        out.push_str(&swift_enum(&format!("HarnExternalAction{suffix}"), values));
+    }
     out.push_str("public extension HarnExternalActionActivityStatus {\n");
     out.push_str(
         "    /// Whether this snapshot is a final outcome and may only replay identically.\n",
@@ -223,27 +181,9 @@ pub(super) fn generate_swift_for_version(
         out.push_str(&format!(": {index}\n"));
     }
     out.push_str("        default: Int.max\n        }\n    }\n}\n\n");
-    out.push_str(&swift_enum(
-        "HarnExternalActionPolicyLayer",
-        &external_actions.policy_layers,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionPolicyEvaluationOutcome",
-        &external_actions.policy_evaluation_outcomes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionDecisionOutcome",
-        &external_actions.decision_outcomes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionDecider",
-        &external_actions.deciders,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionReconciliationStatus",
-        &external_actions.reconciliation_statuses,
-    ));
-    append_swift_external_action_types(&mut out);
+    for record in &external_actions.records {
+        record.append(&mut out, super::records::Target::Swift);
+    }
     append_activity_types(&mut out, activity);
     out.push_str(&swift_enum(
         "HarnConnectorSetupStage",
@@ -265,23 +205,9 @@ pub(super) fn generate_swift_for_version(
         "HarnConnectorSetupErrorCode",
         &connector_setup.error_codes,
     ));
-    out.push_str(
-        "public struct HarnConnectorSetupEvent: Codable, Sendable, Equatable {\n\
-         \x20   public let schema: String\n\
-         \x20   public let sequence: Int\n\
-         \x20   public let connector: String\n\
-         \x20   public let stage: HarnConnectorSetupStage\n\
-         \x20   public let status: HarnConnectorSetupStatus\n\
-         \x20   public let interaction: HarnConnectorSetupInteraction\n\
-         \x20   public let message: String\n\
-         \x20   public let errorCode: HarnConnectorSetupErrorCode?\n\
-         \x20   public let recovery: String?\n\n\
-         \x20   enum CodingKeys: String, CodingKey {\n\
-         \x20       case schema, sequence, connector, stage, status, interaction, message, recovery\n\
-         \x20       case errorCode = \"error_code\"\n\
-         \x20   }\n\
-         }\n\n",
-    );
+    for record in &connector_setup.records {
+        record.append(&mut out, super::records::Target::Swift);
+    }
 
     for vocabulary in acp_method_vocabularies() {
         out.push_str(&swift_enum_with_deprecations(
@@ -853,74 +779,6 @@ public enum HarnPlanApprovalState: String, Codable, Sendable, Equatable {
     case rejected
 }
 
-public struct HarnPlanAuthor: Codable, Sendable, Equatable {
-    public var id: String
-    public var displayName: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case displayName = "display_name"
-    }
-}
-
-public struct HarnPlanSource: Codable, Sendable, Equatable {
-    public var kind: String
-    public var uri: String?
-}
-
-public struct HarnPlanStep: Codable, Sendable, Equatable {
-    public var id: String
-    public var content: String
-    public var status: String
-    public var priority: HarnACPValue?
-}
-
-public struct HarnPlanApproval: Codable, Sendable, Equatable {
-    public var state: HarnPlanApprovalState
-    public var requestId: String?
-    public var reviewer: String?
-    public var reviewers: [String]?
-    public var approvedAt: String?
-    public var reason: String?
-
-    enum CodingKeys: String, CodingKey {
-        case state
-        case requestId = "request_id"
-        case reviewer
-        case reviewers
-        case approvedAt = "approved_at"
-        case reason
-    }
-}
-
-public struct HarnPlanArtifact: Codable, Sendable, Equatable {
-    public var type: String
-    public var schemaVersion: String
-    public var id: String
-    public var tool: String
-    public var title: String
-    public var summary: String
-    public var steps: [HarnPlanStep]
-    public var assumptions: [String]
-    public var openQuestions: [String]
-    public var verificationCommands: [String]
-    public var approval: HarnPlanApproval
-
-    enum CodingKeys: String, CodingKey {
-        case type = "_type"
-        case schemaVersion = "schema_version"
-        case id
-        case tool
-        case title
-        case summary
-        case steps
-        case assumptions
-        case openQuestions = "open_questions"
-        case verificationCommands = "verification_commands"
-        case approval
-    }
-}
-
 public struct HarnPlanRevisionOperation: Codable, Sendable, Equatable {
     public var kind: String
     public var eventId: String
@@ -932,109 +790,6 @@ public struct HarnPlanRevisionOperation: Codable, Sendable, Equatable {
         case eventId = "event_id"
         case commentId = "comment_id"
         case state
-    }
-}
-
-public struct HarnPlanRevision: Codable, Sendable, Equatable {
-    public var revisionId: String
-    public var parentRevisionId: String?
-    public var markdown: String
-    public var plan: HarnPlanArtifact
-    public var author: HarnPlanAuthor
-    public var source: HarnPlanSource
-    public var createdAt: String
-    public var operation: HarnPlanRevisionOperation
-
-    enum CodingKeys: String, CodingKey {
-        case revisionId = "revision_id"
-        case parentRevisionId = "parent_revision_id"
-        case markdown
-        case plan
-        case author
-        case source
-        case createdAt = "created_at"
-        case operation
-    }
-}
-
-public struct HarnPlanTextRange: Codable, Sendable, Equatable {
-    public var start: Int
-    public var end: Int
-}
-
-public struct HarnPlanCommentAnchor: Codable, Sendable, Equatable {
-    public var stepId: String?
-    public var quotedText: String?
-    public var range: HarnPlanTextRange?
-
-    enum CodingKeys: String, CodingKey {
-        case stepId = "step_id"
-        case quotedText = "quoted_text"
-        case range
-    }
-}
-
-public struct HarnPlanComment: Codable, Sendable, Equatable {
-    public var commentId: String
-    public var anchor: HarnPlanCommentAnchor
-    public var body: String
-    public var state: HarnPlanCommentState
-    public var author: HarnPlanAuthor
-    public var createdAt: String
-    public var updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case commentId = "comment_id"
-        case anchor
-        case body
-        case state
-        case author
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
-public struct HarnPlanCommentResolutionReceipt: Codable, Sendable, Equatable {
-    public var receiptId: String
-    public var commentId: String
-    public var inputRevisionId: String
-    public var outputRevisionId: String
-    public var agentRunId: String
-    public var eventId: String
-    public var explanation: String?
-    public var createdAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case receiptId = "receipt_id"
-        case commentId = "comment_id"
-        case inputRevisionId = "input_revision_id"
-        case outputRevisionId = "output_revision_id"
-        case agentRunId = "agent_run_id"
-        case eventId = "event_id"
-        case explanation
-        case createdAt = "created_at"
-    }
-}
-
-public struct HarnPlanDocument: Codable, Sendable, Equatable {
-    public var type: String
-    public var schemaVersion: String
-    public var documentId: String
-    public var currentRevision: HarnPlanRevision
-    public var comments: [HarnPlanComment]
-    public var resolutionReceipts: [HarnPlanCommentResolutionReceipt]
-    public var createdAt: String
-    public var updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case type = "_type"
-        case schemaVersion = "schema_version"
-        case documentId = "document_id"
-        case currentRevision = "current_revision"
-        case comments
-        case resolutionReceipts = "resolution_receipts"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
     }
 }
 
@@ -1447,5 +1202,6 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     append_swift_session_update_payloads(&mut out);
     append_swift_prepared_session_types(&mut out);
     append_swift_session_recap_types(&mut out);
+    super::plan_records::append(&mut out, super::records::Target::Swift);
     out
 }

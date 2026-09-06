@@ -9,7 +9,6 @@
     "crates/harn-cli/src/package/extensions_tests.rs",
     "crates/harn-dap/src/debugger/tests.rs",
     "crates/harn-hostlib/src/code_index/rename.rs",
-    "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
     "crates/harn-parser/src/typechecker/inference/expressions.rs",
     "crates/harn-parser/src/typechecker/tests/narrowing.rs",
     "crates/harn-serve/src/adapters/acp/events/tests.rs",

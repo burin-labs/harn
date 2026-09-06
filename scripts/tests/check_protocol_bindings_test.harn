@@ -1,38 +1,6 @@
+import "std/schema"
 import { with_temp_dir } from "std/testing"
 import "../check_protocol_bindings.harn"
-
-const FAKE_PYTHON_BINDING = """
-HARN_PROTOCOL_ARTIFACT_VERSION = "{VERSION}"
-HARN_AGENT_EVENT_METHOD = "harn/agent_event"
-HARN_PROVIDER_CATALOG_METHOD = "harn/provider_catalog"
-HARN_STRICT_SESSION_RECAP_BINDING = False
-
-
-class _RoundTrip:
-    def __init__(self, payload):
-        self.payload = payload
-
-    @classmethod
-    def from_wire(cls, payload):
-        return cls(payload)
-
-    def to_wire(self):
-        return self.payload
-
-
-ACPRequest = _RoundTrip
-ACPResponse = _RoundTrip
-ACPSessionUpdateNotification = _RoundTrip
-HarnAgentEventNotification = _RoundTrip
-HarnToolAnnotations = _RoundTrip
-HarnSessionRecapAvailability = _RoundTrip
-A2ATask = _RoundTrip
-MCPTool = _RoundTrip
-MCPDiscoverResult = _RoundTrip
-MCPInputRequiredResult = _RoundTrip
-MCPUnsupportedProtocolVersionError = _RoundTrip
-ToolCallReceipt = _RoundTrip
-"""
 
 fn mkdirs(fs: HarnessFs, path: string) -> nil {
   const parts = split(path_normalize(path), "/")
@@ -64,51 +32,32 @@ fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
   return nil
 }
 
-fn fixture_payload(version: string) -> dict {
-  const envelopes = {
-    request: {jsonrpc: "2.0", id: 1, method: "session/new", params: {project: "demo"}},
-    response: {jsonrpc: "2.0", id: 1, result: {ok: true}},
-    errorResponse: {jsonrpc: "2.0", id: 2, error: {code: -1, message: "bad"}},
-    sessionUpdateNotification: {jsonrpc: "2.0", method: "session/update", params: {state: "ready"}},
-    agentEventNotification: {jsonrpc: "2.0", method: "harn/agent_event", params: {event: "tick"}},
-  }
-  return {
-    artifactVersion: version,
-    harnAgentEventMethod: "harn/agent_event",
-    harnProviderCatalogMethod: "harn/provider_catalog",
-    envelopes: envelopes,
-    harnToolAnnotations: {
-      kind: "execute",
-      side_effect_level: "read_only",
-      completion_evidence_role: "verification",
-    },
-    sessionRecapAvailability: {state: "unavailable", snapshot: nil},
-    a2aTask: {id: "task-1", state: "completed"},
-    mcpTool: {name: "read_file", description: "Read"},
-    mcpDiscoverResult: {tools: []},
-    mcpInputRequiredResult: {schema: {type: "object"}},
-    mcpUnsupportedProtocolVersionError: {supported: ["1.0"]},
-    toolCallReceipt: {id: "call-1", name: "read_file"},
-  }
-}
-
-fn write_fake_artifacts(
+fn write_fixture_artifacts(
   fs: HarnessFs,
   root: string,
   binding_version: string,
   fixture_version: string,
 ) -> nil {
+  const artifacts = path_join(fs.source_dir(), "../../spec/protocol-artifacts")
+  // Validated, not merely parsed: the fixture's stamped version is read below
+  // and the round-trip document is written back with every other key intact,
+  // so the shape is checked open rather than closed.
+  const fixture = schema_expect(
+    json_parse(fs.read_text(path_join(artifacts, "fixtures/round_trip.json"))),
+    schema_object({artifactVersion: schema_string()}),
+  )
+  const binding = fs.read_text(path_join(artifacts, "python/harn_protocol.py"))
   write_text(
     fs,
     root,
     "spec/protocol-artifacts/python/harn_protocol.py",
-    FAKE_PYTHON_BINDING.replace("{VERSION}", binding_version),
+    binding.replace(fixture.artifactVersion, binding_version),
   )
   write_text(
     fs,
     root,
     "spec/protocol-artifacts/fixtures/round_trip.json",
-    json_stringify_pretty(fixture_payload(fixture_version)) + "\n",
+    json_stringify_pretty(fixture + {artifactVersion: fixture_version}) + "\n",
   )
   return nil
 }
@@ -125,11 +74,11 @@ pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task: un
 }
 
 @test
-pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task: unknown) {
+pipeline test_supplied_artifact_root_round_trip_passes(harness: Harness, task: unknown) {
   with_temp_dir(
     harness.fs,
     { root ->
-      write_fake_artifacts(harness.fs, root, "test-version", "test-version")
+      write_fixture_artifacts(harness.fs, root, "test-version", "test-version")
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, true)
       assert_eq(report.stage, "ok")
@@ -143,7 +92,7 @@ pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, 
   with_temp_dir(
     harness.fs,
     { root ->
-      write_fake_artifacts(harness.fs, root, "binding-version", "fixture-version")
+      write_fixture_artifacts(harness.fs, root, "binding-version", "fixture-version")
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert_eq(report.ok, false)
       assert_eq(report.stage, "round_trip")

@@ -1,4 +1,17 @@
 import { decodeHarnSessionRecapAvailability } from "../../spec/protocol-artifacts/harn-protocol";
+import type { HarnPlanStep, HarnPlanApproval, HarnPlanCommentAnchor } from "../../spec/protocol-artifacts/harn-protocol";
+
+const step: HarnPlanStep = { id: "step", content: "Verify", status: "pending" };
+step.priority = null;
+step.priority = "high";
+const approval: HarnPlanApproval = { state: "unrequested" };
+approval.reviewers = ["reviewer"];
+// @ts-expect-error Omitted reviewers are supported; null is not a list.
+approval.reviewers = null;
+const anchor: HarnPlanCommentAnchor = { step_id: "step" };
+anchor.range = { start: 0, end: 1 };
+// @ts-expect-error Omitted range is supported; null is not a range.
+anchor.range = null;
 
 declare const process: { argv: string[] };
 declare function require(name: string): {

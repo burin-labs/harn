@@ -1,0 +1,150 @@
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { stall_checkpoint_fixture } from "./stall_checkpoint_fixture"
+
+fn fixture(harness: Harness, enabled: bool, cap: int = 3) {
+  const session = harness.agent.open()
+  let executions = 0
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify the task",
+    {
+      parameters: {diagnostics: {}, complete: {}, status: {}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { args ->
+        executions += 1
+        return agent_tool_handler_result(
+          "Compilation failed",
+          {
+            run_outcome: {command_status: args.status, exit_code: 1},
+            diagnostics: args.diagnostics == "missing" ? nil : args.diagnostics,
+            diagnostics_complete: args.complete,
+          },
+        )
+      },
+    },
+  )
+  const registry = tool_define(
+    tools,
+    "look",
+    "Inspect source",
+    {parameters: {}, annotations: {kind: "read"}, handler: { _ -> "source" }},
+  )
+  const step = stall_checkpoint_fixture(
+    harness,
+    session,
+    registry,
+    {shrinking_failure_set_resets_budget: enabled, no_net_progress_hard_cap_after: cap},
+  )
+  return {
+    session: session,
+    executions: fn() { return executions },
+    step: fn(diagnostics: any, complete: bool = true, status: string = "completed") {
+      const name = diagnostics == "look" ? "look" : "verify"
+      const args = name == "look" ? {} : {
+        diagnostics: diagnostics,
+        complete: complete,
+        status: status,
+      }
+      return step(name, args).stall_checkpoint.state
+    },
+  }
+}
+
+const THREE = [
+  {message: "first", severity: "error"},
+  {message: "second", severity: "error"},
+  {message: "third", severity: "error"},
+]
+
+const TWO = [{message: "first", severity: "error"}, {message: "second", severity: "error"}]
+
+pipeline test_complete_shrinking_failure_set_restarts_then_rearms_cap(harness: Harness) {
+  const run = fixture(harness, true)
+  run.step(THREE)
+  run.step(THREE)
+  run.step(TWO)
+  const progress = run.step("look")
+  assert_eq(run.executions(), 3, "the actual verifier handlers must reach the fold")
+  assert_eq(progress.last_completed_failure_count, 2)
+  assert_eq(
+    progress.failing_verify_turns,
+    0,
+    "strictly fewer completed failures restart the budget",
+  )
+  assert(!progress.hard_stop && !progress.verification_cap_deferred)
+  for _ in range(0, 3) {
+    run.step(TWO)
+  }
+  const stopped = run.step("look")
+  assert(stopped.hard_stop, "constant failures must reach the restarted cap")
+  assert_eq(stopped.failing_verify_turns, 3)
+  assert_eq(run.executions(), 6)
+  harness.agent.close(run.session)
+}
+
+pipeline test_partial_constant_growing_and_disabled_sets_do_not_earn_budget(harness: Harness) {
+  for control in [
+    {set: TWO, complete: true, status: "completed", enabled: false},
+    {set: THREE, complete: true, status: "completed", enabled: true},
+    {
+      set: THREE + [{message: "fourth", severity: "error"}],
+      complete: true,
+      status: "completed",
+      enabled: true,
+    },
+    {set: TWO, complete: false, status: "completed", enabled: true},
+    {set: TWO, complete: true, status: "timed_out", enabled: true},
+    {set: "missing", complete: true, status: "completed", enabled: true},
+  ] {
+    const run = fixture(harness, control.enabled)
+    run.step(THREE)
+    run.step(THREE)
+    run.step(control.set, control.complete, control.status)
+    const stopped = run.step("look")
+    assert_eq(
+      run.executions(),
+      3,
+      "every control must reach the real verifier handler: ${json_stringify(control)}; executions=${run.executions()}",
+    )
+    assert(stopped.hard_stop, "this control must not reset the cap: ${json_stringify(control)}")
+    assert_eq(stopped.failing_verify_turns, 3)
+    harness.agent.close(run.session)
+  }
+}
+
+pipeline test_incomplete_result_preserves_last_completed_failure_baseline(harness: Harness) {
+  for empty_or_partial in [
+    {diagnostics: [{message: "first", severity: "error"}], complete: false},
+    {diagnostics: [{message: "only a warning", severity: "warning"}], complete: true},
+    {diagnostics: [], complete: true},
+  ] {
+    const run = fixture(harness, true, 6)
+    run.step(THREE)
+    run.step(empty_or_partial.diagnostics, empty_or_partial.complete)
+    const partial = run.step(TWO)
+    assert_eq(
+      partial.last_completed_failure_count,
+      3,
+      "the partial set cannot replace completed evidence",
+    )
+    const progress = run.step("look")
+    assert_eq(progress.last_completed_failure_count, 2)
+    assert_eq(progress.failing_verify_turns, 0)
+    assert_eq(run.executions(), 3)
+    harness.agent.close(run.session)
+  }
+}
+
+pipeline test_warning_removal_is_not_failure_set_progress(harness: Harness) {
+  const run = fixture(harness, true)
+  const warnings = TWO + [{message: "warning only", severity: "warning"}]
+  run.step(warnings)
+  run.step(warnings)
+  run.step(TWO)
+  const stopped = run.step("look")
+  assert_eq(stopped.last_completed_failure_count, 2)
+  assert(stopped.hard_stop, "removing warnings must not restart a failing repair budget")
+  assert_eq(run.executions(), 3)
+  harness.agent.close(run.session)
+}

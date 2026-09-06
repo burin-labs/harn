@@ -8,6 +8,7 @@ pub(super) const ACTIVITY_VOCABULARY_SOURCE: &str =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ActivityVocabulary {
+    pub(super) records: Vec<super::records::Record>,
     pub(super) kinds: Vec<String>,
     pub(super) permission_outcomes: Vec<String>,
     pub(super) permission_deciders: Vec<String>,
@@ -18,9 +19,58 @@ pub(super) struct ActivityVocabulary {
 }
 
 impl ActivityVocabulary {
+    pub(super) fn projections(&self) -> [(&str, &str, &[String]); 7] {
+        [
+            ("activity_kinds", "HarnActivityKind", &self.kinds),
+            (
+                "tool_permission_outcomes",
+                "HarnToolPermissionOutcome",
+                &self.permission_outcomes,
+            ),
+            (
+                "tool_permission_deciders",
+                "HarnToolPermissionDecider",
+                &self.permission_deciders,
+            ),
+            (
+                "tool_permission_policy_layers",
+                "HarnToolPermissionPolicyLayer",
+                &self.permission_policy_layers,
+            ),
+            (
+                "tool_permission_policy_outcomes",
+                "HarnToolPermissionPolicyOutcome",
+                &self.permission_policy_outcomes,
+            ),
+            (
+                "tool_permission_grant_scopes",
+                "HarnToolPermissionGrantScope",
+                &self.permission_grant_scopes,
+            ),
+            (
+                "tool_permission_grant_expiries",
+                "HarnToolPermissionGrantExpiry",
+                &self.permission_grant_expiries,
+            ),
+        ]
+    }
+
     pub(super) fn load(source: &ProtocolArtifactSource) -> Result<Self, String> {
         let text = source.read_text(ACTIVITY_VOCABULARY_SOURCE)?;
-        Self::parse(&text)
+        let mut vocabulary = Self::parse(&text)?;
+        vocabulary.records = super::harn_records::load(
+            source,
+            &["activity/tool_permission"],
+            &[
+                "ToolPermissionScope",
+                "ToolPermissionPolicyEvidence",
+                "ToolPermissionDecisionMetadata",
+                "ToolPermissionGrantEvidence",
+                "ToolPermissionRequester",
+                "ToolPermissionActivityRecord",
+            ],
+        )?;
+        Ok(vocabulary)
     }
 
     fn parse(source: &str) -> Result<Self, String> {
@@ -28,6 +78,7 @@ impl ActivityVocabulary {
             .map_err(|error| format!("failed to parse {ACTIVITY_VOCABULARY_SOURCE}: {error}"))?;
         let union = |name| literal_union(&program, name, ACTIVITY_VOCABULARY_SOURCE);
         Ok(Self {
+            records: Vec::new(),
             kinds: union("ActivityKind")?,
             permission_outcomes: union("ToolPermissionOutcome")?,
             permission_deciders: union("ToolPermissionDecider")?,

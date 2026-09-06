@@ -734,18 +734,6 @@ type HarnSessionTimelineUpdate struct {
 	Node          HarnSessionTimelineNode   `json:"node"`
 }
 
-// HarnPlanAuthor identifies the author of a plan revision or comment.
-type HarnPlanAuthor struct {
-	ID          string  `json:"id"`
-	DisplayName *string `json:"display_name,omitempty"`
-}
-
-// HarnPlanSource records where a plan revision originated.
-type HarnPlanSource struct {
-	Kind string  `json:"kind"`
-	URI  *string `json:"uri,omitempty"`
-}
-
 // HarnPlanCommentState is the closed collaborative comment lifecycle.
 type HarnPlanCommentState string
 
@@ -766,105 +754,12 @@ const (
 	HarnPlanApprovalRejected    HarnPlanApprovalState = "rejected"
 )
 
-// HarnPlanStep is one normalized executable plan step.
-type HarnPlanStep struct {
-	ID       string          `json:"id"`
-	Content  string          `json:"content"`
-	Status   string          `json:"status"`
-	Priority json.RawMessage `json:"priority"`
-}
-
-// HarnPlanApproval carries the typed approval state for an executable plan.
-type HarnPlanApproval struct {
-	State      HarnPlanApprovalState `json:"state"`
-	RequestID  *string               `json:"request_id,omitempty"`
-	Reviewer   *string               `json:"reviewer,omitempty"`
-	Reviewers  []string              `json:"reviewers,omitempty"`
-	ApprovedAt *string               `json:"approved_at,omitempty"`
-	Reason     *string               `json:"reason,omitempty"`
-}
-
-// HarnPlanArtifact is the normalized executable plan within a document revision.
-type HarnPlanArtifact struct {
-	Type                 string           `json:"_type"`
-	SchemaVersion        string           `json:"schema_version"`
-	ID                   string           `json:"id"`
-	Tool                 string           `json:"tool"`
-	Title                string           `json:"title"`
-	Summary              string           `json:"summary"`
-	Steps                []HarnPlanStep   `json:"steps"`
-	Assumptions          []string         `json:"assumptions"`
-	OpenQuestions        []string         `json:"open_questions"`
-	VerificationCommands []string         `json:"verification_commands"`
-	Approval             HarnPlanApproval `json:"approval"`
-}
-
 // HarnPlanRevisionOperation is the typed mutation that produced a revision.
 type HarnPlanRevisionOperation struct {
 	Kind      string                `json:"kind"`
 	EventID   string                `json:"event_id"`
 	CommentID *string               `json:"comment_id,omitempty"`
 	State     *HarnPlanCommentState `json:"state,omitempty"`
-}
-
-// HarnPlanRevision is one immutable collaborative plan revision.
-type HarnPlanRevision struct {
-	RevisionID       string                    `json:"revision_id"`
-	ParentRevisionID *string                   `json:"parent_revision_id,omitempty"`
-	Markdown         string                    `json:"markdown"`
-	Plan             HarnPlanArtifact          `json:"plan"`
-	Author           HarnPlanAuthor            `json:"author"`
-	Source           HarnPlanSource            `json:"source"`
-	CreatedAt        string                    `json:"created_at"`
-	Operation        HarnPlanRevisionOperation `json:"operation"`
-}
-
-// HarnPlanTextRange is a UTF-8 byte range fallback for a comment anchor.
-type HarnPlanTextRange struct {
-	Start int `json:"start"`
-	End   int `json:"end"`
-}
-
-// HarnPlanCommentAnchor survives edits through step identity and text fallbacks.
-type HarnPlanCommentAnchor struct {
-	StepID     *string            `json:"step_id,omitempty"`
-	QuotedText *string            `json:"quoted_text,omitempty"`
-	Range      *HarnPlanTextRange `json:"range,omitempty"`
-}
-
-// HarnPlanComment is an anchored collaborative review comment.
-type HarnPlanComment struct {
-	CommentID string                `json:"comment_id"`
-	Anchor    HarnPlanCommentAnchor `json:"anchor"`
-	Body      string                `json:"body"`
-	State     HarnPlanCommentState  `json:"state"`
-	Author    HarnPlanAuthor        `json:"author"`
-	CreatedAt string                `json:"created_at"`
-	UpdatedAt string                `json:"updated_at"`
-}
-
-// HarnPlanCommentResolutionReceipt binds a comment transition to revisions and an agent event.
-type HarnPlanCommentResolutionReceipt struct {
-	ReceiptID        string  `json:"receipt_id"`
-	CommentID        string  `json:"comment_id"`
-	InputRevisionID  string  `json:"input_revision_id"`
-	OutputRevisionID string  `json:"output_revision_id"`
-	AgentRunID       string  `json:"agent_run_id"`
-	EventID          string  `json:"event_id"`
-	Explanation      *string `json:"explanation,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-}
-
-// HarnPlanDocument is Harn's canonical collaborative plan-document contract.
-type HarnPlanDocument struct {
-	Type               string                             `json:"_type"`
-	SchemaVersion      string                             `json:"schema_version"`
-	DocumentID         string                             `json:"document_id"`
-	CurrentRevision    HarnPlanRevision                   `json:"current_revision"`
-	Comments           []HarnPlanComment                  `json:"comments"`
-	ResolutionReceipts []HarnPlanCommentResolutionReceipt `json:"resolution_receipts"`
-	CreatedAt          string                             `json:"created_at"`
-	UpdatedAt          string                             `json:"updated_at"`
 }
 
 // JSONRPCID encodes a JSON-RPC id, which may be an integer, a string, or null.
@@ -1562,10 +1457,12 @@ type HarnSessionRecapQuery struct {
 	FromEventID *uint64 `json:"fromEventId"`
 	Limit       *uint64 `json:"limit"`
 }
+
 type HarnSessionRecapCursor struct {
 	LastEventID *uint64 `json:"lastEventId"`
 	NextEventID *uint64 `json:"nextEventId"`
 }
+
 type HarnSessionRecapCoverage struct {
 	Scanned    uint64 `json:"scanned"`
 	Matched    uint64 `json:"matched"`
@@ -1573,25 +1470,30 @@ type HarnSessionRecapCoverage struct {
 	Unassigned uint64 `json:"unassigned"`
 	Truncated  bool   `json:"truncated"`
 }
+
 type HarnSessionRecapSourceEvent struct {
 	EventID    uint64 `json:"eventId"`
 	RecordHash string `json:"recordHash"`
 }
+
 type HarnSessionRecapSource struct {
 	FirstEventID *uint64                       `json:"firstEventId"`
 	LastEventID  *uint64                       `json:"lastEventId"`
 	Events       []HarnSessionRecapSourceEvent `json:"events"`
 }
+
 type HarnSessionRecapTextFact struct {
 	Text          string `json:"text"`
 	SourceEventID uint64 `json:"sourceEventId"`
 }
+
 type HarnSessionRecapVerificationFact struct {
 	Schema        string                             `json:"schema"`
 	Status        HarnSessionRecapVerificationStatus `json:"status"`
 	VerifiedPaths []string                           `json:"verifiedPaths"`
 	SourceEventID uint64                             `json:"sourceEventId"`
 }
+
 type HarnSessionRecapToolExchange struct {
 	ToolCallID     string                            `json:"toolCallId"`
 	ToolName       *string                           `json:"toolName"`
@@ -1603,16 +1505,19 @@ type HarnSessionRecapToolExchange struct {
 	Verification   *HarnSessionRecapVerificationFact `json:"verification"`
 	SourceEventIDs []uint64                          `json:"sourceEventIds"`
 }
+
 type HarnSessionRecapPlanStep struct {
 	ID      string                         `json:"id"`
 	Content string                         `json:"content"`
 	Status  HarnSessionRecapPlanStepStatus `json:"status"`
 }
+
 type HarnSessionRecapPlanEventFact struct {
 	Kind            HarnSessionRecapPlanEventKind `json:"kind"`
 	EventID         string                        `json:"eventId"`
 	InputRevisionID *string                       `json:"inputRevisionId"`
 }
+
 type HarnSessionRecapPlanFact struct {
 	DocumentID    string                         `json:"documentId"`
 	RevisionID    string                         `json:"revisionId"`
@@ -1622,17 +1527,20 @@ type HarnSessionRecapPlanFact struct {
 	Event         *HarnSessionRecapPlanEventFact `json:"event"`
 	SourceEventID uint64                         `json:"sourceEventId"`
 }
+
 type HarnSessionRecapProgressEntry struct {
 	Content  string                            `json:"content"`
 	Status   HarnSessionRecapProgressStatus    `json:"status"`
 	Priority *HarnSessionRecapProgressPriority `json:"priority"`
 }
+
 type HarnSessionRecapProgressFact struct {
 	Message       *string                         `json:"message"`
 	Entries       []HarnSessionRecapProgressEntry `json:"entries"`
 	Replace       bool                            `json:"replace"`
 	SourceEventID uint64                          `json:"sourceEventId"`
 }
+
 type HarnSessionRecapTerminalFact struct {
 	State         HarnSessionRecapCompletionState `json:"state"`
 	FinalStatus   *string                         `json:"finalStatus"`
@@ -1642,6 +1550,7 @@ type HarnSessionRecapTerminalFact struct {
 	Reason        *string                         `json:"reason"`
 	SourceEventID uint64                          `json:"sourceEventId"`
 }
+
 type HarnSessionRecapIteration struct {
 	Iteration      *int64                          `json:"iteration"`
 	State          HarnSessionRecapCompletionState `json:"state"`
@@ -1651,6 +1560,7 @@ type HarnSessionRecapIteration struct {
 	Progress       []HarnSessionRecapProgressFact  `json:"progress"`
 	SourceEventIDs []uint64                        `json:"sourceEventIds"`
 }
+
 type HarnSessionPromptTurnRecap struct {
 	TurnID         string                          `json:"turnId"`
 	RunID          string                          `json:"runId"`
@@ -1660,6 +1570,7 @@ type HarnSessionPromptTurnRecap struct {
 	Terminal       *HarnSessionRecapTerminalFact   `json:"terminal"`
 	SourceEventIDs []uint64                        `json:"sourceEventIds"`
 }
+
 type HarnSessionRecapSnapshot struct {
 	SchemaVersion  uint32                       `json:"schemaVersion"`
 	SessionID      string                       `json:"sessionId"`
@@ -1860,4 +1771,98 @@ func (value *HarnSessionRecapAvailability) UnmarshalJSON(data []byte) error {
 	}
 	*value = HarnSessionRecapAvailability(decoded)
 	return nil
+}
+
+type HarnPlanAuthor struct {
+	ID          string  `json:"id"`
+	DisplayName *string `json:"display_name,omitempty"`
+}
+
+type HarnPlanSource struct {
+	Kind string  `json:"kind"`
+	Uri  *string `json:"uri,omitempty"`
+}
+
+type HarnPlanStep struct {
+	ID       string    `json:"id"`
+	Content  string    `json:"content"`
+	Status   string    `json:"status"`
+	Priority JSONValue `json:"priority"`
+}
+
+type HarnPlanApproval struct {
+	State      HarnPlanApprovalState `json:"state"`
+	ApprovedAt *string               `json:"approved_at,omitempty"`
+	Reason     *string               `json:"reason,omitempty"`
+	RequestID  *string               `json:"request_id,omitempty"`
+	Reviewer   *string               `json:"reviewer,omitempty"`
+	Reviewers  []string              `json:"reviewers,omitempty"`
+}
+
+type HarnPlanArtifact struct {
+	Type                 string           `json:"_type"`
+	SchemaVersion        string           `json:"schema_version"`
+	ID                   string           `json:"id"`
+	Tool                 string           `json:"tool"`
+	Title                string           `json:"title"`
+	Summary              string           `json:"summary"`
+	Steps                []HarnPlanStep   `json:"steps"`
+	Assumptions          []string         `json:"assumptions"`
+	OpenQuestions        []string         `json:"open_questions"`
+	VerificationCommands []string         `json:"verification_commands"`
+	Approval             HarnPlanApproval `json:"approval"`
+}
+
+type HarnPlanRevision struct {
+	RevisionID       string                    `json:"revision_id"`
+	Markdown         string                    `json:"markdown"`
+	Plan             HarnPlanArtifact          `json:"plan"`
+	Author           HarnPlanAuthor            `json:"author"`
+	Source           HarnPlanSource            `json:"source"`
+	CreatedAt        string                    `json:"created_at"`
+	Operation        HarnPlanRevisionOperation `json:"operation"`
+	ParentRevisionID *string                   `json:"parent_revision_id,omitempty"`
+}
+
+type HarnPlanTextRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+type HarnPlanCommentAnchor struct {
+	QuotedText *string            `json:"quoted_text,omitempty"`
+	Range      *HarnPlanTextRange `json:"range,omitempty"`
+	StepID     *string            `json:"step_id,omitempty"`
+}
+
+type HarnPlanComment struct {
+	CommentID string                `json:"comment_id"`
+	Anchor    HarnPlanCommentAnchor `json:"anchor"`
+	Body      string                `json:"body"`
+	State     HarnPlanCommentState  `json:"state"`
+	Author    HarnPlanAuthor        `json:"author"`
+	CreatedAt string                `json:"created_at"`
+	UpdatedAt string                `json:"updated_at"`
+}
+
+type HarnPlanCommentResolutionReceipt struct {
+	ReceiptID        string  `json:"receipt_id"`
+	CommentID        string  `json:"comment_id"`
+	InputRevisionID  string  `json:"input_revision_id"`
+	OutputRevisionID string  `json:"output_revision_id"`
+	AgentRunID       string  `json:"agent_run_id"`
+	EventID          string  `json:"event_id"`
+	CreatedAt        string  `json:"created_at"`
+	Explanation      *string `json:"explanation,omitempty"`
+}
+
+type HarnPlanDocument struct {
+	Type               string                             `json:"_type"`
+	SchemaVersion      string                             `json:"schema_version"`
+	DocumentID         string                             `json:"document_id"`
+	CurrentRevision    HarnPlanRevision                   `json:"current_revision"`
+	Comments           []HarnPlanComment                  `json:"comments"`
+	ResolutionReceipts []HarnPlanCommentResolutionReceipt `json:"resolution_receipts"`
+	CreatedAt          string                             `json:"created_at"`
+	UpdatedAt          string                             `json:"updated_at"`
 }

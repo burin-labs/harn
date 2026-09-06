@@ -1,0 +1,353 @@
+import { agent_loop } from "std/agent/loop"
+import { __agent_loop_project_terminal_result } from "std/agent/loop_finalize"
+import { AgentSpec } from "std/agent/options"
+import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { agent_stall_observe_tool_calls } from "std/agent/stall_observation"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+pipeline test_completed_text_turns_preserve_the_write_axis_stop(harness: Harness) {
+  const sid = harness.agent.open()
+  let writes = 0
+  let observations = 0
+  let empty_turns = 0
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify source",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { _args ->
+        agent_tool_handler_result(
+          "Opaque failure",
+          {run_outcome: {command_status: "failed", exit_code: 1}},
+        )
+      },
+    },
+  )
+  const registry = tool_define(
+    tools,
+    "edit",
+    "Apply source change",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { _args ->
+        writes = writes + 1
+        return "Applied source change"
+      },
+    },
+  )
+  const result = with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("verify", {path: "a.txt"}),
+      llm_tool_call("edit", {path: "a.txt"}),
+      llm_text("I am considering the failure."),
+      llm_text("I am still considering the failure."),
+      llm_tool_call("edit", {path: "must-not-execute.txt"}),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: sid,
+        tools: registry,
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "TASK_DONE",
+        max_nudges: 99,
+        iteration_budget: {
+          mode: "adaptive",
+          initial: 4,
+          max: 8,
+          extend_by: 4,
+          progress_window: 1,
+          expose_decisions: true,
+        },
+        stall_diagnostics: {
+          enabled: true,
+          no_verifier_progress_limit: 3,
+          repeat_same_error: 99,
+          repeat_same_observation: 99,
+          repeat_success: 99,
+          no_progress_messages: 99,
+          ping_pong_cycles: 99,
+          hard_stop_after_trips: 99,
+          progress_signal: { payload ->
+            observations = observations + 1
+            if len(payload.dispatch ?? []) == 0 {
+              empty_turns = empty_turns + 1
+            }
+            return if len(payload.verification_dispatch) > 0 {
+              0
+            } else {
+              nil
+            }
+          },
+        },
+      }
+      agent_loop(harness, "Repair source", nil, opts)
+    },
+  )
+  assert_eq(writes, 1, "the real first edit must execute and the post-cap edit must not")
+  assert(
+    observations == 4 && empty_turns == 2,
+    "both completed text turns must fold once without a fabricated initial turn",
+  )
+  assert(
+    result.stall_checkpoint.state.verify_turns_since_advance == 3
+      && result.stall_checkpoint.state.verify_wrote_since_advance,
+    "text-only turns must retain the real write and consume the flat-progress window",
+  )
+  assert_eq(
+    result.status,
+    "budget_exhausted",
+    "the real loop must refuse adaptive extension when verification stayed flat after a write",
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: Harness) {
+  const sid = harness.agent.open()
+  let handlers = []
+  let observed = []
+  let empty_observations = 0
+  let checkpoint: any = nil
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify source",
+    {
+      parameters: {failures: {type: "int"}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { args ->
+        handlers = handlers + [args.failures]
+        return agent_tool_handler_result(
+          "Opaque verification output",
+          {
+            failures: args.failures,
+            run_outcome: {
+              command_status: args.failures == 0 ? "completed" : "failed",
+              exit_code: args.failures == 0 ? 0 : 1,
+            },
+          },
+        )
+      },
+    },
+  )
+  const registry = tool_define(
+    tools,
+    "look",
+    "Read source",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "read"},
+      handler: { args ->
+        handlers = handlers + [args.path]
+        return "source"
+      },
+    },
+  )
+  const complete_registry = tool_define(
+    registry,
+    "edit",
+    "Apply source change",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "edit"},
+      handler: { _args ->
+        handlers = handlers + ["edit"]
+        return "Applied source change"
+      },
+    },
+  )
+  const progress = { payload ->
+    assert_eq(payload.session_id, sid, "the callback must belong to the executing session")
+    if payload.dispatch == nil {
+      empty_observations += 1
+    } else {
+      assert_eq(len(payload.dispatch), 1, "only one actual dispatch supplies progress")
+    }
+    const verifications = payload.verification_dispatch
+    const value = if len(verifications) == 0 {
+      nil
+    } else {
+      assert(verifications[0].data.failures != nil, "progress must come from the reached producer")
+      -verifications[0].data.failures
+    }
+    observed = observed + [value]
+    return value
+  }
+  for step in [
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
+    {name: "edit", args: {path: "a.txt"}, high: -3, flat: 1, failed: 1},
+    {name: "look", args: {path: "a.txt"}, high: -3, flat: 2, failed: 1},
+    {name: "verify", args: {failures: 1}, high: -1, flat: 0, failed: 2},
+    {name: "verify", args: {failures: 0}, high: 0, flat: 0, failed: 0},
+    {name: "edit", args: {path: "b.txt"}, high: 0, flat: 1, failed: 0},
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
+    {name: "verify", args: {failures: 2}, high: -2, flat: 0, failed: 2},
+    {name: "verify", args: {failures: 1}, high: -1, flat: 0, failed: 3},
+    {name: "done", args: {}, high: -1, flat: 1, failed: 0},
+    {name: "edit", args: {path: "c.txt"}, high: 0, flat: 1, failed: 0},
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
+  ] {
+    const before = len(observed)
+    const prior_checkpoint = checkpoint
+    const before_state = checkpoint == nil ? nil : agent_stall_checkpoint_state(
+      harness.agent,
+      checkpoint,
+    )
+    const result = with_llm_script(
+      harness.llm,
+      [step.name == "done" ? llm_text("Done") : llm_tool_call(step.name, step.args)],
+      { ->
+        const opts: AgentSpec = {
+          provider: "mock",
+          session_id: sid,
+          tools: complete_registry,
+          tool_format: "native",
+          max_iterations: 1,
+          stall_checkpoint: checkpoint,
+          post_turn_callback: { info ->
+            assert_eq(
+              len(observed),
+              len(handlers) + empty_observations,
+              "completed progress must be visible before product post-turn effects",
+            )
+            assert_eq(
+              info.stall_checkpoint.state.verify_state_high,
+              step.high,
+              "completed ${step.name} ${json_stringify(step.args)}: expected high ${step.high}, got ${info.stall_checkpoint.state.verify_state_high}; handlers=${json_stringify(handlers)}",
+            )
+            return nil
+          },
+          stall_diagnostics: {
+            enabled: true,
+            progress_signal: progress,
+            repeat_same_error: 99,
+            repeat_same_observation: 99,
+            repeat_success: 99,
+            hard_stop_after_trips: 99,
+            ping_pong_cycles: 99,
+          },
+        }
+        agent_loop(harness, "Continue", nil, opts)
+      },
+    )
+    checkpoint = result.stall_checkpoint
+    assert(
+      len(observed) == before + 1 && len(handlers) + empty_observations == len(observed),
+      "hydration and each real dispatch must invoke the callback exactly once",
+    )
+    assert_eq(
+      checkpoint.state.verify_state_high,
+      step.high,
+      "a final pending dispatch must expose its progress before another stage starts",
+    )
+    assert_eq(
+      checkpoint.state.verify_turns_since_advance,
+      step.flat,
+      "flat reads and improving verification must advance the canonical counter correctly",
+    )
+    const projected = agent_stall_checkpoint_state(harness.agent, checkpoint)
+    assert(
+      projected.verify_state_high == step.high && len(observed) == before + 1,
+      "checkpoint projection must preserve progress without invoking the callback again",
+    )
+    assert_eq(
+      projected.failing_verify_turns,
+      step.failed,
+      "progress folding must preserve pending diagnostic evidence and clean verification reset: ${step.name} expected=${step.failed} actual=${projected.failing_verify_turns} status=${result.status} reason=${projected.last_diagnostic_delta_reason}",
+    )
+    if step.name == "done" {
+      assert_eq(
+        projected.last_diagnostic_delta_reason,
+        "terminal_success",
+        "the actual successful terminal boundary must establish the clean episode",
+      )
+      const refused = __agent_loop_project_terminal_result(
+        harness,
+        {status: "done"},
+        "Continue",
+        {session_id: sid},
+        {
+          opts: {require_successful_tools: ["must_succeed"]},
+          final_status: "done",
+          stop_reason: "",
+          suspend_result: nil,
+          terminal_error: nil,
+          stall_state: before_state,
+          stall_checkpoint: prior_checkpoint,
+          stall_enabled_seen: true,
+          budget: {expose_decisions: false},
+          output_contract: nil,
+        },
+      )
+      assert_eq(refused.status, "failed")
+      assert_eq(refused.missing_required_tools, ["must_succeed"])
+      assert_eq(
+        refused.stall_checkpoint,
+        prior_checkpoint,
+        "required-tool refusal must preserve the actual failing checkpoint",
+      )
+      assert_eq(refused.current_failure.class, "fail")
+    }
+    if step.name == "edit" {
+      assert(before_state != nil, "an edit comparison must have a real prior checkpoint")
+      const direct = agent_stall_observe_tool_calls(
+        harness.agent,
+        sid,
+        [],
+        1,
+        {enabled: true, progress_signal: { _ -> nil }},
+        before_state,
+        false,
+        checkpoint.dispatch,
+        "",
+        false,
+        true,
+        "",
+        {},
+      )
+      assert_eq(
+        direct.state.verify_state_high,
+        checkpoint.state.verify_state_high,
+        "direct intake must use the same pre-diagnostic episode boundary",
+      )
+      assert_eq(
+        direct.state.verify_turns_since_advance,
+        checkpoint.state.verify_turns_since_advance,
+      )
+      const replay = agent_stall_observe_tool_calls(
+        harness.agent,
+        sid,
+        [],
+        1,
+        {enabled: true, progress_signal: { _ -> nil }},
+        before_state,
+        false,
+        checkpoint.dispatch,
+        "",
+        false,
+        true,
+        "",
+        {},
+        true,
+      )
+      assert_eq(
+        replay.state.verify_state_seen,
+        before_state.verify_state_seen,
+        "an already-consumed edit cannot start another progress episode",
+      )
+    }
+  }
+  assert(
+    handlers == [3, "edit", "a.txt", 1, 0, "edit", 3, 2, 1, "edit", 3]
+      && observed == [-3, nil, nil, -1, 0, nil, -3, -2, -1, nil, nil, -3]
+      && empty_observations == 1,
+    "every expected handler and supplied evidence must reach the canonical lifetime",
+  )
+  harness.agent.close(sid)
+}

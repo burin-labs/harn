@@ -339,40 +339,6 @@ public enum HarnExternalActionActivityStatus: String, Codable, Sendable, CaseIte
     ].map { Self(rawValue: $0)! }
 }
 
-public extension HarnExternalActionActivityStatus {
-    /// Whether this snapshot is a final outcome and may only replay identically.
-    var isTerminal: Bool {
-        switch self {
-        case .denied: true
-        case .cancelled: true
-        case .timedOut: true
-        case .confirmed: true
-        case .failedBeforeDispatch: true
-        case .rejected: true
-        default: false
-        }
-    }
-}
-
-public extension HarnExternalActionActivityStatus {
-    /// Whether a later snapshot may advance from this lifecycle status.
-    func canAdvance(to next: Self) -> Bool {
-        if isTerminal { return self == next }
-        if next.isTerminal { return true }
-        return progressRank <= next.progressRank
-    }
-
-    private var progressRank: Int {
-        switch self {
-        case .proposed: 0
-        case .approvalPending: 1
-        case .dispatchPending: 2
-        case .reconciliationRequired: 3
-        default: Int.max
-        }
-    }
-}
-
 public enum HarnExternalActionPolicyLayer: String, Codable, Sendable, CaseIterable {
     case userPolicy = "user_policy"
     case managedPolicy = "managed_policy"
@@ -449,6 +415,40 @@ public enum HarnExternalActionReconciliationStatus: String, Codable, Sendable, C
     ].map { Self(rawValue: $0)! }
 }
 
+public extension HarnExternalActionActivityStatus {
+    /// Whether this snapshot is a final outcome and may only replay identically.
+    var isTerminal: Bool {
+        switch self {
+        case .denied: true
+        case .cancelled: true
+        case .timedOut: true
+        case .confirmed: true
+        case .failedBeforeDispatch: true
+        case .rejected: true
+        default: false
+        }
+    }
+}
+
+public extension HarnExternalActionActivityStatus {
+    /// Whether a later snapshot may advance from this lifecycle status.
+    func canAdvance(to next: Self) -> Bool {
+        if isTerminal { return self == next }
+        if next.isTerminal { return true }
+        return progressRank <= next.progressRank
+    }
+
+    private var progressRank: Int {
+        switch self {
+        case .proposed: 0
+        case .approvalPending: 1
+        case .dispatchPending: 2
+        case .reconciliationRequired: 3
+        default: Int.max
+        }
+    }
+}
+
 public struct HarnExternalActionActor: Codable, Sendable, Equatable {
     public let kind: String
     public let id: String
@@ -472,8 +472,10 @@ public struct HarnExternalActionDisclosureReceipt: Codable, Sendable, Equatable 
     public let authenticationAssurance: HarnExternalActionAuthenticationAssurance
 
     enum CodingKeys: String, CodingKey {
-        case recipient, purpose, source
+        case recipient
+        case purpose
         case fieldClasses = "field_classes"
+        case source
         case authenticationAssurance = "authentication_assurance"
     }
 }
@@ -485,16 +487,6 @@ public struct HarnExternalActionError: Codable, Sendable, Equatable {
     public let retryable: Bool
 }
 
-public struct HarnExternalActionReceiptReconciliation: Codable, Sendable, Equatable {
-    public let attemptId: String
-    public let previousReceiptId: String
-
-    enum CodingKeys: String, CodingKey {
-        case attemptId = "attempt_id"
-        case previousReceiptId = "previous_receipt_id"
-    }
-}
-
 public struct HarnExternalActionRetryLink: Codable, Sendable, Equatable {
     public let schema: String
     public let previousActionId: String
@@ -503,6 +495,16 @@ public struct HarnExternalActionRetryLink: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schema
         case previousActionId = "previous_action_id"
+        case previousReceiptId = "previous_receipt_id"
+    }
+}
+
+public struct HarnExternalActionReceiptReconciliation: Codable, Sendable, Equatable {
+    public let attemptId: String
+    public let previousReceiptId: String
+
+    enum CodingKeys: String, CodingKey {
+        case attemptId = "attempt_id"
         case previousReceiptId = "previous_receipt_id"
     }
 }
@@ -532,18 +534,28 @@ public struct HarnExternalActionReceipt: Codable, Sendable, Equatable {
     public let retry: HarnExternalActionRetryLink?
 
     enum CodingKeys: String, CodingKey {
-        case schema, id, provider, capability, operation, environment, outcome, status, error
-        case reconciliation, disclosure, retry
+        case schema
+        case id
         case actionId = "action_id"
         case effectFingerprint = "effect_fingerprint"
         case intentFingerprint = "intent_fingerprint"
         case idempotencyKey = "idempotency_key"
+        case provider
+        case capability
+        case operation
+        case environment
         case adapterId = "adapter_id"
+        case outcome
+        case status
         case nextAction = "next_action"
         case dispatchAttempted = "dispatch_attempted"
         case recordedAtMs = "recorded_at_ms"
         case providerActionId = "provider_action_id"
         case evidenceRefs = "evidence_refs"
+        case error
+        case reconciliation
+        case disclosure
+        case retry
     }
 }
 
@@ -554,7 +566,8 @@ public struct HarnExternalActionPolicyEvaluation: Codable, Sendable, Equatable {
     public let policyId: String?
 
     enum CodingKeys: String, CodingKey {
-        case layer, outcome
+        case layer
+        case outcome
         case reasonCode = "reason_code"
         case policyId = "policy_id"
     }
@@ -568,9 +581,11 @@ public struct HarnExternalActionDecision: Codable, Sendable, Equatable {
     public let actor: HarnExternalActionActor?
 
     enum CodingKeys: String, CodingKey {
-        case outcome, decider, actor
+        case outcome
+        case decider
         case decidedAtMs = "decided_at_ms"
         case reasonCode = "reason_code"
+        case actor
     }
 }
 
@@ -623,7 +638,8 @@ public struct HarnExternalActionReconciliationRecord: Codable, Sendable, Equatab
     public let previousReceiptId: String?
 
     enum CodingKeys: String, CodingKey {
-        case attempted, status
+        case attempted
+        case status
         case attemptId = "attempt_id"
         case previousReceiptId = "previous_receipt_id"
     }
@@ -655,14 +671,29 @@ public struct HarnExternalActionActivityRecord: Codable, Sendable, Equatable {
     public let retry: HarnExternalActionRetryLink?
 
     enum CodingKeys: String, CodingKey {
-        case schema, kind, id, provider, capability, operation, environment, summary, status
-        case requester, decision, authorization, disclosure, dispatch, reconciliation, receipt, retry
+        case schema
+        case kind
+        case id
         case actionId = "action_id"
         case effectFingerprint = "effect_fingerprint"
         case intentFingerprint = "intent_fingerprint"
+        case provider
+        case capability
+        case operation
+        case environment
+        case summary
         case externalSpend = "external_spend"
+        case status
         case updatedAtMs = "updated_at_ms"
+        case requester
         case policyEvaluations = "policy_evaluations"
+        case decision
+        case authorization
+        case disclosure
+        case dispatch
+        case reconciliation
+        case receipt
+        case retry
     }
 }
 
@@ -764,9 +795,9 @@ public struct HarnToolPermissionScope: Codable, Sendable, Equatable {
     public let capabilities: [String]
 
     enum CodingKeys: String, CodingKey {
-        case capabilities
         case toolKind = "tool_kind"
         case sideEffect = "side_effect"
+        case capabilities
     }
 }
 
@@ -777,7 +808,8 @@ public struct HarnToolPermissionPolicyEvidence: Codable, Sendable, Equatable {
     public let riskLabels: [String]
 
     enum CodingKeys: String, CodingKey {
-        case layer, outcome
+        case layer
+        case outcome
         case ruleId = "rule_id"
         case riskLabels = "risk_labels"
     }
@@ -791,7 +823,9 @@ public struct HarnToolPermissionDecisionMetadata: Codable, Sendable, Equatable {
     public let grantScope: HarnToolPermissionGrantScope?
 
     enum CodingKeys: String, CodingKey {
-        case schema, outcome, decider
+        case schema
+        case outcome
+        case decider
         case policyEvaluations = "policy_evaluations"
         case grantScope = "grant_scope"
     }
@@ -832,10 +866,17 @@ public struct HarnToolPermissionActivityRecord: Codable, Sendable, Equatable {
     public let occurredAtMs: Int64
 
     enum CodingKeys: String, CodingKey {
-        case schema, kind, id, scope, outcome, decider, grant, requester
+        case schema
+        case kind
+        case id
         case requestId = "request_id"
         case toolName = "tool_name"
+        case scope
+        case outcome
+        case decider
         case policyEvaluations = "policy_evaluations"
+        case grant
+        case requester
         case occurredAtMs = "occurred_at_ms"
     }
 }
@@ -938,8 +979,15 @@ public struct HarnConnectorSetupEvent: Codable, Sendable, Equatable {
     public let recovery: String?
 
     enum CodingKeys: String, CodingKey {
-        case schema, sequence, connector, stage, status, interaction, message, recovery
+        case schema
+        case sequence
+        case connector
+        case stage
+        case status
+        case interaction
+        case message
         case errorCode = "error_code"
+        case recovery
     }
 }
 
@@ -2629,74 +2677,6 @@ public enum HarnPlanApprovalState: String, Codable, Sendable, Equatable {
     case rejected
 }
 
-public struct HarnPlanAuthor: Codable, Sendable, Equatable {
-    public var id: String
-    public var displayName: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case displayName = "display_name"
-    }
-}
-
-public struct HarnPlanSource: Codable, Sendable, Equatable {
-    public var kind: String
-    public var uri: String?
-}
-
-public struct HarnPlanStep: Codable, Sendable, Equatable {
-    public var id: String
-    public var content: String
-    public var status: String
-    public var priority: HarnACPValue?
-}
-
-public struct HarnPlanApproval: Codable, Sendable, Equatable {
-    public var state: HarnPlanApprovalState
-    public var requestId: String?
-    public var reviewer: String?
-    public var reviewers: [String]?
-    public var approvedAt: String?
-    public var reason: String?
-
-    enum CodingKeys: String, CodingKey {
-        case state
-        case requestId = "request_id"
-        case reviewer
-        case reviewers
-        case approvedAt = "approved_at"
-        case reason
-    }
-}
-
-public struct HarnPlanArtifact: Codable, Sendable, Equatable {
-    public var type: String
-    public var schemaVersion: String
-    public var id: String
-    public var tool: String
-    public var title: String
-    public var summary: String
-    public var steps: [HarnPlanStep]
-    public var assumptions: [String]
-    public var openQuestions: [String]
-    public var verificationCommands: [String]
-    public var approval: HarnPlanApproval
-
-    enum CodingKeys: String, CodingKey {
-        case type = "_type"
-        case schemaVersion = "schema_version"
-        case id
-        case tool
-        case title
-        case summary
-        case steps
-        case assumptions
-        case openQuestions = "open_questions"
-        case verificationCommands = "verification_commands"
-        case approval
-    }
-}
-
 public struct HarnPlanRevisionOperation: Codable, Sendable, Equatable {
     public var kind: String
     public var eventId: String
@@ -2708,109 +2688,6 @@ public struct HarnPlanRevisionOperation: Codable, Sendable, Equatable {
         case eventId = "event_id"
         case commentId = "comment_id"
         case state
-    }
-}
-
-public struct HarnPlanRevision: Codable, Sendable, Equatable {
-    public var revisionId: String
-    public var parentRevisionId: String?
-    public var markdown: String
-    public var plan: HarnPlanArtifact
-    public var author: HarnPlanAuthor
-    public var source: HarnPlanSource
-    public var createdAt: String
-    public var operation: HarnPlanRevisionOperation
-
-    enum CodingKeys: String, CodingKey {
-        case revisionId = "revision_id"
-        case parentRevisionId = "parent_revision_id"
-        case markdown
-        case plan
-        case author
-        case source
-        case createdAt = "created_at"
-        case operation
-    }
-}
-
-public struct HarnPlanTextRange: Codable, Sendable, Equatable {
-    public var start: Int
-    public var end: Int
-}
-
-public struct HarnPlanCommentAnchor: Codable, Sendable, Equatable {
-    public var stepId: String?
-    public var quotedText: String?
-    public var range: HarnPlanTextRange?
-
-    enum CodingKeys: String, CodingKey {
-        case stepId = "step_id"
-        case quotedText = "quoted_text"
-        case range
-    }
-}
-
-public struct HarnPlanComment: Codable, Sendable, Equatable {
-    public var commentId: String
-    public var anchor: HarnPlanCommentAnchor
-    public var body: String
-    public var state: HarnPlanCommentState
-    public var author: HarnPlanAuthor
-    public var createdAt: String
-    public var updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case commentId = "comment_id"
-        case anchor
-        case body
-        case state
-        case author
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
-public struct HarnPlanCommentResolutionReceipt: Codable, Sendable, Equatable {
-    public var receiptId: String
-    public var commentId: String
-    public var inputRevisionId: String
-    public var outputRevisionId: String
-    public var agentRunId: String
-    public var eventId: String
-    public var explanation: String?
-    public var createdAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case receiptId = "receipt_id"
-        case commentId = "comment_id"
-        case inputRevisionId = "input_revision_id"
-        case outputRevisionId = "output_revision_id"
-        case agentRunId = "agent_run_id"
-        case eventId = "event_id"
-        case explanation
-        case createdAt = "created_at"
-    }
-}
-
-public struct HarnPlanDocument: Codable, Sendable, Equatable {
-    public var type: String
-    public var schemaVersion: String
-    public var documentId: String
-    public var currentRevision: HarnPlanRevision
-    public var comments: [HarnPlanComment]
-    public var resolutionReceipts: [HarnPlanCommentResolutionReceipt]
-    public var createdAt: String
-    public var updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case type = "_type"
-        case schemaVersion = "schema_version"
-        case documentId = "document_id"
-        case currentRevision = "current_revision"
-        case comments
-        case resolutionReceipts = "resolution_receipts"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
     }
 }
 
@@ -3637,8 +3514,8 @@ public enum HarnSessionRecapProtocol {
     public static let queryMethod = "harn.session_recap.query"
     public static let schemaVersion = 1
 }
-public enum HarnSessionRecapCompletionState: String, Codable, Sendable, Equatable { case open, complete, incomplete, unassigned }
-public enum HarnSessionRecapToolState: String, Codable, Sendable, Equatable { case open, completed, failed, incomplete }
+public enum HarnSessionRecapCompletionState: String, Codable, Sendable, Equatable { case `open` = "open", complete, incomplete, unassigned }
+public enum HarnSessionRecapToolState: String, Codable, Sendable, Equatable { case `open` = "open", completed, failed, incomplete }
 public enum HarnSessionRecapPlanStepStatus: String, Codable, Sendable, Equatable { case pending, inProgress = "in_progress", completed, blocked, cancelled }
 public enum HarnSessionRecapPlanEventKind: String, Codable, Sendable, Equatable { case created, updated }
 public enum HarnSessionRecapProgressStatus: String, Codable, Sendable, Equatable { case pending, inProgress = "in_progress", completed }
@@ -3646,47 +3523,141 @@ public enum HarnSessionRecapProgressPriority: String, Codable, Sendable, Equatab
 public enum HarnSessionRecapVerificationStatus: String, Codable, Sendable, Equatable { case passed }
 public enum HarnSessionRecapUnavailableReason: String, Codable, Sendable, Equatable { case journalUnavailable = "journal_unavailable", sessionMissing = "session_missing", projectionFailed = "projection_failed", admissionTerminal = "admission_terminal" }
 public enum HarnSessionRecapAvailabilityState: String, Codable, Sendable, Equatable { case available, unavailable }
+public struct HarnSessionRecapQuery: Codable, Sendable, Equatable {
+    public var sessionId: String
+    public var runId: String?
+    public var turnId: String?
+    public var fromEventId: Int?
+    public var limit: Int?
+}
 
-public struct HarnSessionRecapQuery: Codable, Sendable, Equatable { public var sessionId: String; public var runId: String?; public var turnId: String?; public var fromEventId: Int?; public var limit: Int? }
-public struct HarnSessionRecapCursor: Codable, Sendable, Equatable { public var lastEventId: Int?; public var nextEventId: Int? }
-public struct HarnSessionRecapCoverage: Codable, Sendable, Equatable { public var scanned: Int; public var matched: Int; public var pending: Int; public var unassigned: Int; public var truncated: Bool }
-public struct HarnSessionRecapSourceEvent: Codable, Sendable, Equatable { public var eventId: Int; public var recordHash: String }
-public struct HarnSessionRecapSource: Codable, Sendable, Equatable { public var firstEventId: Int?; public var lastEventId: Int?; public var events: [HarnSessionRecapSourceEvent] }
-public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable { public var text: String; public var sourceEventId: Int }
-public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable { public var schema: String; public var status: HarnSessionRecapVerificationStatus; public var verifiedPaths: [String]; public var sourceEventId: Int }
+public struct HarnSessionRecapCursor: Codable, Sendable, Equatable {
+    public var lastEventId: Int?
+    public var nextEventId: Int?
+}
+
+public struct HarnSessionRecapCoverage: Codable, Sendable, Equatable {
+    public var scanned: Int
+    public var matched: Int
+    public var pending: Int
+    public var unassigned: Int
+    public var truncated: Bool
+}
+
+public struct HarnSessionRecapSourceEvent: Codable, Sendable, Equatable {
+    public var eventId: Int
+    public var recordHash: String
+}
+
+public struct HarnSessionRecapSource: Codable, Sendable, Equatable {
+    public var firstEventId: Int?
+    public var lastEventId: Int?
+    public var events: [HarnSessionRecapSourceEvent]
+}
+
+public struct HarnSessionRecapTextFact: Codable, Sendable, Equatable {
+    public var text: String
+    public var sourceEventId: Int
+}
+
+public struct HarnSessionRecapVerificationFact: Codable, Sendable, Equatable {
+    public var schema: String
+    public var status: HarnSessionRecapVerificationStatus
+    public var verifiedPaths: [String]
+    public var sourceEventId: Int
+}
+
 public struct HarnSessionRecapToolExchange: Codable, Sendable, Equatable {
-    public var toolCallId: String; public var toolName: String?; public var state: HarnSessionRecapToolState
-    public var callObserved: Bool; public var resultObserved: Bool; public var input: HarnACPValue?; public var output: HarnACPValue?
-    public var verification: HarnSessionRecapVerificationFact?; public var sourceEventIds: [Int]
+    public var toolCallId: String
+    public var toolName: String?
+    public var state: HarnSessionRecapToolState
+    public var callObserved: Bool
+    public var resultObserved: Bool
+    public var input: HarnACPValue?
+    public var output: HarnACPValue?
+    public var verification: HarnSessionRecapVerificationFact?
+    public var sourceEventIds: [Int]
 }
-public struct HarnSessionRecapPlanStep: Codable, Sendable, Equatable { public var id: String; public var content: String; public var status: HarnSessionRecapPlanStepStatus }
-public struct HarnSessionRecapPlanEventFact: Codable, Sendable, Equatable { public var kind: HarnSessionRecapPlanEventKind; public var eventId: String; public var inputRevisionId: String? }
+
+public struct HarnSessionRecapPlanStep: Codable, Sendable, Equatable {
+    public var id: String
+    public var content: String
+    public var status: HarnSessionRecapPlanStepStatus
+}
+
+public struct HarnSessionRecapPlanEventFact: Codable, Sendable, Equatable {
+    public var kind: HarnSessionRecapPlanEventKind
+    public var eventId: String
+    public var inputRevisionId: String?
+}
+
 public struct HarnSessionRecapPlanFact: Codable, Sendable, Equatable {
-    public var documentId: String; public var revisionId: String; public var title: String; public var summary: String
-    public var steps: [HarnSessionRecapPlanStep]; public var event: HarnSessionRecapPlanEventFact?; public var sourceEventId: Int
+    public var documentId: String
+    public var revisionId: String
+    public var title: String
+    public var summary: String
+    public var steps: [HarnSessionRecapPlanStep]
+    public var event: HarnSessionRecapPlanEventFact?
+    public var sourceEventId: Int
 }
-public struct HarnSessionRecapProgressEntry: Codable, Sendable, Equatable { public var content: String; public var status: HarnSessionRecapProgressStatus; public var priority: HarnSessionRecapProgressPriority? }
-public struct HarnSessionRecapProgressFact: Codable, Sendable, Equatable { public var message: String?; public var entries: [HarnSessionRecapProgressEntry]; public var replace: Bool; public var sourceEventId: Int }
+
+public struct HarnSessionRecapProgressEntry: Codable, Sendable, Equatable {
+    public var content: String
+    public var status: HarnSessionRecapProgressStatus
+    public var priority: HarnSessionRecapProgressPriority?
+}
+
+public struct HarnSessionRecapProgressFact: Codable, Sendable, Equatable {
+    public var message: String?
+    public var entries: [HarnSessionRecapProgressEntry]
+    public var replace: Bool
+    public var sourceEventId: Int
+}
+
 public struct HarnSessionRecapTerminalFact: Codable, Sendable, Equatable {
-    public var state: HarnSessionRecapCompletionState; public var finalStatus: String?; public var stopReason: String?
-    public var kind: String?; public var owner: String?; public var reason: String?; public var sourceEventId: Int
+    public var state: HarnSessionRecapCompletionState
+    public var finalStatus: String?
+    public var stopReason: String?
+    public var kind: String?
+    public var owner: String?
+    public var reason: String?
+    public var sourceEventId: Int
 }
+
 public struct HarnSessionRecapIteration: Codable, Sendable, Equatable {
-    public var iteration: Int?; public var state: HarnSessionRecapCompletionState
-    public var assistantText: [HarnSessionRecapTextFact]; public var tools: [HarnSessionRecapToolExchange]
-    public var plans: [HarnSessionRecapPlanFact]; public var progress: [HarnSessionRecapProgressFact]; public var sourceEventIds: [Int]
+    public var iteration: Int?
+    public var state: HarnSessionRecapCompletionState
+    public var assistantText: [HarnSessionRecapTextFact]
+    public var tools: [HarnSessionRecapToolExchange]
+    public var plans: [HarnSessionRecapPlanFact]
+    public var progress: [HarnSessionRecapProgressFact]
+    public var sourceEventIds: [Int]
 }
+
 public struct HarnSessionPromptTurnRecap: Codable, Sendable, Equatable {
-    public var turnId: String; public var runId: String; public var state: HarnSessionRecapCompletionState
-    public var prompts: [HarnSessionRecapTextFact]; public var iterations: [HarnSessionRecapIteration]
-    public var terminal: HarnSessionRecapTerminalFact?; public var sourceEventIds: [Int]
+    public var turnId: String
+    public var runId: String
+    public var state: HarnSessionRecapCompletionState
+    public var prompts: [HarnSessionRecapTextFact]
+    public var iterations: [HarnSessionRecapIteration]
+    public var terminal: HarnSessionRecapTerminalFact?
+    public var sourceEventIds: [Int]
 }
+
 public struct HarnSessionRecapSnapshot: Codable, Sendable, Equatable {
-    public var schemaVersion: Int; public var sessionId: String; public var query: HarnSessionRecapQuery
-    public var cursor: HarnSessionRecapCursor; public var coverage: HarnSessionRecapCoverage; public var source: HarnSessionRecapSource
-    public var contentHash: String; public var projectionHash: String; public var turns: [HarnSessionPromptTurnRecap]
+    public var schemaVersion: Int
+    public var sessionId: String
+    public var query: HarnSessionRecapQuery
+    public var cursor: HarnSessionRecapCursor
+    public var coverage: HarnSessionRecapCoverage
+    public var source: HarnSessionRecapSource
+    public var contentHash: String
+    public var projectionHash: String
+    public var turns: [HarnSessionPromptTurnRecap]
     public var extensions: [String: HarnACPValue]
 }
+
+
 public struct HarnSessionRecapAvailability: Codable, Sendable, Equatable {
     public var state: HarnSessionRecapAvailabilityState
     public var snapshot: HarnSessionRecapSnapshot?
@@ -3727,56 +3698,118 @@ private func harnSessionRecapArray(_ value: HarnACPValue?, label: String) throws
     return array
 }
 
-private func validateHarnSessionRecapSnapshot(_ value: HarnACPValue?) throws {
-    let snapshot = try harnSessionRecapObject(
-        value,
-        label: "Harn session recap snapshot",
-        keys: ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"]
-    )
-    _ = try harnSessionRecapObject(snapshot["query"], label: "Harn session recap query", keys: ["sessionId", "runId", "turnId", "fromEventId", "limit"])
-    _ = try harnSessionRecapObject(snapshot["cursor"], label: "Harn session recap cursor", keys: ["lastEventId", "nextEventId"])
-    _ = try harnSessionRecapObject(snapshot["coverage"], label: "Harn session recap coverage", keys: ["scanned", "matched", "pending", "unassigned", "truncated"])
-    let source = try harnSessionRecapObject(snapshot["source"], label: "Harn session recap source", keys: ["firstEventId", "lastEventId", "events"])
-    for event in try harnSessionRecapArray(source["events"], label: "Harn session recap source events") {
-        _ = try harnSessionRecapObject(event, label: "Harn session recap source event", keys: ["eventId", "recordHash"])
-    }
-    for turnValue in try harnSessionRecapArray(snapshot["turns"], label: "Harn session recap turns") {
-        let turn = try harnSessionRecapObject(turnValue, label: "Harn session recap turn", keys: ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"])
-        for prompt in try harnSessionRecapArray(turn["prompts"], label: "Harn session recap prompts") {
-            _ = try harnSessionRecapObject(prompt, label: "Harn session recap text", keys: ["text", "sourceEventId"])
-        }
-        if turn["terminal"] != .null {
-            _ = try harnSessionRecapObject(turn["terminal"], label: "Harn session recap terminal", keys: ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"])
-        }
-        for iterationValue in try harnSessionRecapArray(turn["iterations"], label: "Harn session recap iterations") {
-            let iteration = try harnSessionRecapObject(iterationValue, label: "Harn session recap iteration", keys: ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"])
-            for text in try harnSessionRecapArray(iteration["assistantText"], label: "Harn session recap assistant text") {
-                _ = try harnSessionRecapObject(text, label: "Harn session recap text", keys: ["text", "sourceEventId"])
-            }
-            for toolValue in try harnSessionRecapArray(iteration["tools"], label: "Harn session recap tools") {
-                let tool = try harnSessionRecapObject(toolValue, label: "Harn session recap tool", keys: ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"])
-                if tool["verification"] != .null {
-                    _ = try harnSessionRecapObject(tool["verification"], label: "Harn session recap verification", keys: ["schema", "status", "verifiedPaths", "sourceEventId"])
-                }
-            }
-            for planValue in try harnSessionRecapArray(iteration["plans"], label: "Harn session recap plans") {
-                let plan = try harnSessionRecapObject(planValue, label: "Harn session recap plan", keys: ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"])
-                for step in try harnSessionRecapArray(plan["steps"], label: "Harn session recap plan steps") {
-                    _ = try harnSessionRecapObject(step, label: "Harn session recap plan step", keys: ["id", "content", "status"])
-                }
-                if plan["event"] != .null {
-                    _ = try harnSessionRecapObject(plan["event"], label: "Harn session recap plan event", keys: ["kind", "eventId", "inputRevisionId"])
-                }
-            }
-            for progressValue in try harnSessionRecapArray(iteration["progress"], label: "Harn session recap progress") {
-                let progress = try harnSessionRecapObject(progressValue, label: "Harn session recap progress", keys: ["message", "entries", "replace", "sourceEventId"])
-                for entry in try harnSessionRecapArray(progress["entries"], label: "Harn session recap progress entries") {
-                    _ = try harnSessionRecapObject(entry, label: "Harn session recap progress entry", keys: ["content", "status", "priority"])
-                }
-            }
-        }
+private func validateHarnSessionRecapQuery(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapQuery", keys: ["sessionId", "runId", "turnId", "fromEventId", "limit"])
+}
+
+private func validateHarnSessionRecapCursor(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapCursor", keys: ["lastEventId", "nextEventId"])
+}
+
+private func validateHarnSessionRecapCoverage(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapCoverage", keys: ["scanned", "matched", "pending", "unassigned", "truncated"])
+}
+
+private func validateHarnSessionRecapSourceEvent(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapSourceEvent", keys: ["eventId", "recordHash"])
+}
+
+private func validateHarnSessionRecapSource(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionRecapSource", keys: ["firstEventId", "lastEventId", "events"])
+    for item in try harnSessionRecapArray(object["events"], label: "object[\"events\"]") {
+    try validateHarnSessionRecapSourceEvent(item)
     }
 }
+
+private func validateHarnSessionRecapTextFact(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapTextFact", keys: ["text", "sourceEventId"])
+}
+
+private func validateHarnSessionRecapVerificationFact(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapVerificationFact", keys: ["schema", "status", "verifiedPaths", "sourceEventId"])
+}
+
+private func validateHarnSessionRecapToolExchange(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionRecapToolExchange", keys: ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"])
+    if object["verification"] != .null {
+    try validateHarnSessionRecapVerificationFact(object["verification"])
+    }
+}
+
+private func validateHarnSessionRecapPlanStep(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapPlanStep", keys: ["id", "content", "status"])
+}
+
+private func validateHarnSessionRecapPlanEventFact(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapPlanEventFact", keys: ["kind", "eventId", "inputRevisionId"])
+}
+
+private func validateHarnSessionRecapPlanFact(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionRecapPlanFact", keys: ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"])
+    for item in try harnSessionRecapArray(object["steps"], label: "object[\"steps\"]") {
+    try validateHarnSessionRecapPlanStep(item)
+    }
+    if object["event"] != .null {
+    try validateHarnSessionRecapPlanEventFact(object["event"])
+    }
+}
+
+private func validateHarnSessionRecapProgressEntry(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapProgressEntry", keys: ["content", "status", "priority"])
+}
+
+private func validateHarnSessionRecapProgressFact(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionRecapProgressFact", keys: ["message", "entries", "replace", "sourceEventId"])
+    for item in try harnSessionRecapArray(object["entries"], label: "object[\"entries\"]") {
+    try validateHarnSessionRecapProgressEntry(item)
+    }
+}
+
+private func validateHarnSessionRecapTerminalFact(_ value: HarnACPValue?) throws {
+    _ = try harnSessionRecapObject(value, label: "HarnSessionRecapTerminalFact", keys: ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"])
+}
+
+private func validateHarnSessionRecapIteration(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionRecapIteration", keys: ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"])
+    for item in try harnSessionRecapArray(object["assistantText"], label: "object[\"assistantText\"]") {
+    try validateHarnSessionRecapTextFact(item)
+    }
+    for item in try harnSessionRecapArray(object["tools"], label: "object[\"tools\"]") {
+    try validateHarnSessionRecapToolExchange(item)
+    }
+    for item in try harnSessionRecapArray(object["plans"], label: "object[\"plans\"]") {
+    try validateHarnSessionRecapPlanFact(item)
+    }
+    for item in try harnSessionRecapArray(object["progress"], label: "object[\"progress\"]") {
+    try validateHarnSessionRecapProgressFact(item)
+    }
+}
+
+private func validateHarnSessionPromptTurnRecap(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionPromptTurnRecap", keys: ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"])
+    for item in try harnSessionRecapArray(object["prompts"], label: "object[\"prompts\"]") {
+    try validateHarnSessionRecapTextFact(item)
+    }
+    for item in try harnSessionRecapArray(object["iterations"], label: "object[\"iterations\"]") {
+    try validateHarnSessionRecapIteration(item)
+    }
+    if object["terminal"] != .null {
+    try validateHarnSessionRecapTerminalFact(object["terminal"])
+    }
+}
+
+private func validateHarnSessionRecapSnapshot(_ value: HarnACPValue?) throws {
+    let object = try harnSessionRecapObject(value, label: "HarnSessionRecapSnapshot", keys: ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"])
+    try validateHarnSessionRecapQuery(object["query"])
+    try validateHarnSessionRecapCursor(object["cursor"])
+    try validateHarnSessionRecapCoverage(object["coverage"])
+    try validateHarnSessionRecapSource(object["source"])
+    for item in try harnSessionRecapArray(object["turns"], label: "object[\"turns\"]") {
+    try validateHarnSessionPromptTurnRecap(item)
+    }
+}
+
+
 
 extension HarnSessionRecapAvailability {
     private enum CodingKeys: String, CodingKey { case state, snapshot, reason }
@@ -3854,5 +3887,175 @@ extension HarnSessionRecapSnapshot {
         try values.encode(projectionHash, forKey: .projectionHash)
         try values.encode(turns, forKey: .turns)
         try values.encode(extensions, forKey: .extensions)
+    }
+}
+public struct HarnPlanAuthor: Codable, Sendable, Equatable {
+    public var id: String
+    public var displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+    }
+}
+
+public struct HarnPlanSource: Codable, Sendable, Equatable {
+    public var kind: String
+    public var uri: String?
+}
+
+public struct HarnPlanStep: Codable, Sendable, Equatable {
+    public var id: String
+    public var content: String
+    public var status: String
+    public var priority: HarnACPValue?
+}
+
+public struct HarnPlanApproval: Codable, Sendable, Equatable {
+    public var state: HarnPlanApprovalState
+    public var approvedAt: String?
+    public var reason: String?
+    public var requestId: String?
+    public var reviewer: String?
+    public var reviewers: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case approvedAt = "approved_at"
+        case reason
+        case requestId = "request_id"
+        case reviewer
+        case reviewers
+    }
+}
+
+public struct HarnPlanArtifact: Codable, Sendable, Equatable {
+    public var type: String
+    public var schemaVersion: String
+    public var id: String
+    public var tool: String
+    public var title: String
+    public var summary: String
+    public var steps: [HarnPlanStep]
+    public var assumptions: [String]
+    public var openQuestions: [String]
+    public var verificationCommands: [String]
+    public var approval: HarnPlanApproval
+
+    enum CodingKeys: String, CodingKey {
+        case type = "_type"
+        case schemaVersion = "schema_version"
+        case id
+        case tool
+        case title
+        case summary
+        case steps
+        case assumptions
+        case openQuestions = "open_questions"
+        case verificationCommands = "verification_commands"
+        case approval
+    }
+}
+
+public struct HarnPlanRevision: Codable, Sendable, Equatable {
+    public var revisionId: String
+    public var markdown: String
+    public var plan: HarnPlanArtifact
+    public var author: HarnPlanAuthor
+    public var source: HarnPlanSource
+    public var createdAt: String
+    public var operation: HarnPlanRevisionOperation
+    public var parentRevisionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case revisionId = "revision_id"
+        case markdown
+        case plan
+        case author
+        case source
+        case createdAt = "created_at"
+        case operation
+        case parentRevisionId = "parent_revision_id"
+    }
+}
+
+public struct HarnPlanTextRange: Codable, Sendable, Equatable {
+    public var start: Int
+    public var end: Int
+}
+
+public struct HarnPlanCommentAnchor: Codable, Sendable, Equatable {
+    public var quotedText: String?
+    public var range: HarnPlanTextRange?
+    public var stepId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case quotedText = "quoted_text"
+        case range
+        case stepId = "step_id"
+    }
+}
+
+public struct HarnPlanComment: Codable, Sendable, Equatable {
+    public var commentId: String
+    public var anchor: HarnPlanCommentAnchor
+    public var body: String
+    public var state: HarnPlanCommentState
+    public var author: HarnPlanAuthor
+    public var createdAt: String
+    public var updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case commentId = "comment_id"
+        case anchor
+        case body
+        case state
+        case author
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public struct HarnPlanCommentResolutionReceipt: Codable, Sendable, Equatable {
+    public var receiptId: String
+    public var commentId: String
+    public var inputRevisionId: String
+    public var outputRevisionId: String
+    public var agentRunId: String
+    public var eventId: String
+    public var createdAt: String
+    public var explanation: String?
+
+    enum CodingKeys: String, CodingKey {
+        case receiptId = "receipt_id"
+        case commentId = "comment_id"
+        case inputRevisionId = "input_revision_id"
+        case outputRevisionId = "output_revision_id"
+        case agentRunId = "agent_run_id"
+        case eventId = "event_id"
+        case createdAt = "created_at"
+        case explanation
+    }
+}
+
+public struct HarnPlanDocument: Codable, Sendable, Equatable {
+    public var type: String
+    public var schemaVersion: String
+    public var documentId: String
+    public var currentRevision: HarnPlanRevision
+    public var comments: [HarnPlanComment]
+    public var resolutionReceipts: [HarnPlanCommentResolutionReceipt]
+    public var createdAt: String
+    public var updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case type = "_type"
+        case schemaVersion = "schema_version"
+        case documentId = "document_id"
+        case currentRevision = "current_revision"
+        case comments
+        case resolutionReceipts = "resolution_receipts"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 }

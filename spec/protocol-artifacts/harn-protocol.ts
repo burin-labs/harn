@@ -508,38 +508,6 @@ export const EXTERNAL_ACTION_ACTIVITY_STATUSES = [
 ] as const
 export type HarnExternalActionActivityStatus = (typeof EXTERNAL_ACTION_ACTIVITY_STATUSES)[number]
 
-export const EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES = [
-  "denied",
-  "cancelled",
-  "timed_out",
-  "confirmed",
-  "failed_before_dispatch",
-  "rejected",
-] as const satisfies readonly HarnExternalActionActivityStatus[]
-
-export function isExternalActionActivityStatusTerminal(
-  status: HarnExternalActionActivityStatus,
-): boolean {
-  return (EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES as readonly string[]).includes(status)
-}
-
-export const EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES = [
-  "proposed",
-  "approval_pending",
-  "dispatch_pending",
-  "reconciliation_required",
-] as const satisfies readonly HarnExternalActionActivityStatus[]
-
-export function canExternalActionActivityStatusAdvance(
-  current: HarnExternalActionActivityStatus,
-  next: HarnExternalActionActivityStatus,
-): boolean {
-  if (isExternalActionActivityStatusTerminal(current)) return current === next
-  if (isExternalActionActivityStatusTerminal(next)) return true
-  return EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(current as never)
-    <= EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(next as never)
-}
-
 export const EXTERNAL_ACTION_POLICY_LAYERS = [
   "user_policy",
   "managed_policy",
@@ -583,6 +551,38 @@ export const EXTERNAL_ACTION_RECONCILIATION_STATUSES = [
 ] as const
 export type HarnExternalActionReconciliationStatus = (typeof EXTERNAL_ACTION_RECONCILIATION_STATUSES)[number]
 
+export const EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES = [
+  "denied",
+  "cancelled",
+  "timed_out",
+  "confirmed",
+  "failed_before_dispatch",
+  "rejected",
+] as const satisfies readonly HarnExternalActionActivityStatus[]
+
+export function isExternalActionActivityStatusTerminal(
+  status: HarnExternalActionActivityStatus,
+): boolean {
+  return (EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES as readonly string[]).includes(status)
+}
+
+export const EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES = [
+  "proposed",
+  "approval_pending",
+  "dispatch_pending",
+  "reconciliation_required",
+] as const satisfies readonly HarnExternalActionActivityStatus[]
+
+export function canExternalActionActivityStatusAdvance(
+  current: HarnExternalActionActivityStatus,
+  next: HarnExternalActionActivityStatus,
+): boolean {
+  if (isExternalActionActivityStatusTerminal(current)) return current === next
+  if (isExternalActionActivityStatusTerminal(next)) return true
+  return EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(current as never)
+    <= EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(next as never)
+}
+
 export interface HarnExternalActionActor {
   kind: string
   id: string
@@ -608,14 +608,14 @@ export interface HarnExternalActionError {
   retryable: boolean
 }
 
-export interface HarnExternalActionReceiptReconciliation {
-  attempt_id: string
-  previous_receipt_id: string
-}
-
 export interface HarnExternalActionRetryLink {
   schema: "harn.external_action_retry_link.v1"
   previous_action_id: string
+  previous_receipt_id: string
+}
+
+export interface HarnExternalActionReceiptReconciliation {
+  attempt_id: string
   previous_receipt_id: string
 }
 
@@ -1007,97 +1007,10 @@ export type HarnPlanStepStatus = "pending" | "in_progress" | "completed" | "bloc
 export type HarnPlanApprovalState = "unrequested" | "requested" | "approved" | "rejected"
 export type HarnPlanCommentState = "open" | "addressed" | "resolved" | "reopened"
 
-export interface HarnPlanAuthor {
-  id: string
-  display_name?: string
-}
-
-export interface HarnPlanSource {
-  kind: string
-  uri?: string
-}
-
-export interface HarnPlanStep {
-  id: string
-  content: string
-  status: HarnPlanStepStatus
-  priority?: ACPValue
-}
-
-export interface HarnPlanApproval {
-  state: HarnPlanApprovalState
-  request_id?: string
-  reviewer?: string
-  reviewers?: string[]
-  approved_at?: string
-  reason?: string
-}
-
-export interface HarnPlanArtifact {
-  _type: "plan_artifact"
-  schema_version: "harn.plan.v1"
-  id: string
-  tool: string
-  title: string
-  summary: string
-  steps: HarnPlanStep[]
-  assumptions: string[]
-  open_questions: string[]
-  verification_commands: string[]
-  approval: HarnPlanApproval
-}
-
-export interface HarnPlanRevision {
-  revision_id: string
-  parent_revision_id?: string
-  markdown: string
-  plan: HarnPlanArtifact
-  author: HarnPlanAuthor
-  source: HarnPlanSource
-  created_at: string
-  operation:
-    | { kind: "create" | "edit"; event_id: string }
-    | { kind: "comment"; event_id: string; comment_id: string }
-    | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
-}
-
-export interface HarnPlanCommentAnchor {
-  step_id?: string
-  quoted_text?: string
-  range?: { start: number; end: number }
-}
-
-export interface HarnPlanComment {
-  comment_id: string
-  anchor: HarnPlanCommentAnchor
-  body: string
-  state: HarnPlanCommentState
-  author: HarnPlanAuthor
-  created_at: string
-  updated_at: string
-}
-
-export interface HarnPlanCommentResolutionReceipt {
-  receipt_id: string
-  comment_id: string
-  input_revision_id: string
-  output_revision_id: string
-  agent_run_id: string
-  event_id: string
-  explanation?: string
-  created_at: string
-}
-
-export interface HarnPlanDocument {
-  _type: "plan_document"
-  schema_version: "harn.plan_document.v1"
-  document_id: string
-  current_revision: HarnPlanRevision
-  comments: HarnPlanComment[]
-  resolution_receipts: HarnPlanCommentResolutionReceipt[]
-  created_at: string
-  updated_at: string
-}
+export type HarnPlanRevisionOperation =
+  | { kind: "create" | "edit"; event_id: string }
+  | { kind: "comment"; event_id: string; comment_id: string }
+  | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
 
 export interface ACPRequest {
   jsonrpc: "2.0"
@@ -1921,7 +1834,6 @@ export type HarnSessionRecapProgressStatus = "pending" | "in_progress" | "comple
 export type HarnSessionRecapProgressPriority = "high" | "medium" | "low"
 export type HarnSessionRecapVerificationStatus = "passed"
 export type HarnSessionRecapUnavailableReason = "journal_unavailable" | "session_missing" | "projection_failed" | "admission_terminal"
-
 export interface HarnSessionRecapQuery {
   sessionId: string
   runId: string | null
@@ -1929,12 +1841,43 @@ export interface HarnSessionRecapQuery {
   fromEventId: number | null
   limit: number | null
 }
-export interface HarnSessionRecapCursor { lastEventId: number | null; nextEventId: number | null }
-export interface HarnSessionRecapCoverage { scanned: number; matched: number; pending: number; unassigned: number; truncated: boolean }
-export interface HarnSessionRecapSourceEvent { eventId: number; recordHash: string }
-export interface HarnSessionRecapSource { firstEventId: number | null; lastEventId: number | null; events: HarnSessionRecapSourceEvent[] }
-export interface HarnSessionRecapTextFact { text: string; sourceEventId: number }
-export interface HarnSessionRecapVerificationFact { schema: string; status: HarnSessionRecapVerificationStatus; verifiedPaths: string[]; sourceEventId: number }
+
+export interface HarnSessionRecapCursor {
+  lastEventId: number | null
+  nextEventId: number | null
+}
+
+export interface HarnSessionRecapCoverage {
+  scanned: number
+  matched: number
+  pending: number
+  unassigned: number
+  truncated: boolean
+}
+
+export interface HarnSessionRecapSourceEvent {
+  eventId: number
+  recordHash: string
+}
+
+export interface HarnSessionRecapSource {
+  firstEventId: number | null
+  lastEventId: number | null
+  events: HarnSessionRecapSourceEvent[]
+}
+
+export interface HarnSessionRecapTextFact {
+  text: string
+  sourceEventId: number
+}
+
+export interface HarnSessionRecapVerificationFact {
+  schema: string
+  status: HarnSessionRecapVerificationStatus
+  verifiedPaths: string[]
+  sourceEventId: number
+}
+
 export interface HarnSessionRecapToolExchange {
   toolCallId: string
   toolName: string | null
@@ -1946,57 +1889,89 @@ export interface HarnSessionRecapToolExchange {
   verification: HarnSessionRecapVerificationFact | null
   sourceEventIds: number[]
 }
-export interface HarnSessionRecapPlanStep { id: string; content: string; status: HarnSessionRecapPlanStepStatus }
-export interface HarnSessionRecapPlanEventFact { kind: HarnSessionRecapPlanEventKind; eventId: string; inputRevisionId: string | null }
+
+export interface HarnSessionRecapPlanStep {
+  id: string
+  content: string
+  status: HarnSessionRecapPlanStepStatus
+}
+
+export interface HarnSessionRecapPlanEventFact {
+  kind: HarnSessionRecapPlanEventKind
+  eventId: string
+  inputRevisionId: string | null
+}
+
 export interface HarnSessionRecapPlanFact {
-  documentId: string; revisionId: string; title: string; summary: string
-  steps: HarnSessionRecapPlanStep[]; event: HarnSessionRecapPlanEventFact | null; sourceEventId: number
+  documentId: string
+  revisionId: string
+  title: string
+  summary: string
+  steps: HarnSessionRecapPlanStep[]
+  event: HarnSessionRecapPlanEventFact | null
+  sourceEventId: number
 }
-export interface HarnSessionRecapProgressEntry { content: string; status: HarnSessionRecapProgressStatus; priority: HarnSessionRecapProgressPriority | null }
-export interface HarnSessionRecapProgressFact { message: string | null; entries: HarnSessionRecapProgressEntry[]; replace: boolean; sourceEventId: number }
+
+export interface HarnSessionRecapProgressEntry {
+  content: string
+  status: HarnSessionRecapProgressStatus
+  priority: HarnSessionRecapProgressPriority | null
+}
+
+export interface HarnSessionRecapProgressFact {
+  message: string | null
+  entries: HarnSessionRecapProgressEntry[]
+  replace: boolean
+  sourceEventId: number
+}
+
 export interface HarnSessionRecapTerminalFact {
-  state: HarnSessionRecapCompletionState; finalStatus: string | null; stopReason: string | null
-  kind: string | null; owner: string | null; reason: string | null; sourceEventId: number
+  state: HarnSessionRecapCompletionState
+  finalStatus: string | null
+  stopReason: string | null
+  kind: string | null
+  owner: string | null
+  reason: string | null
+  sourceEventId: number
 }
+
 export interface HarnSessionRecapIteration {
-  iteration: number | null; state: HarnSessionRecapCompletionState
-  assistantText: HarnSessionRecapTextFact[]; tools: HarnSessionRecapToolExchange[]
-  plans: HarnSessionRecapPlanFact[]; progress: HarnSessionRecapProgressFact[]; sourceEventIds: number[]
+  iteration: number | null
+  state: HarnSessionRecapCompletionState
+  assistantText: HarnSessionRecapTextFact[]
+  tools: HarnSessionRecapToolExchange[]
+  plans: HarnSessionRecapPlanFact[]
+  progress: HarnSessionRecapProgressFact[]
+  sourceEventIds: number[]
 }
+
 export interface HarnSessionPromptTurnRecap {
-  turnId: string; runId: string; state: HarnSessionRecapCompletionState
-  prompts: HarnSessionRecapTextFact[]; iterations: HarnSessionRecapIteration[]
-  terminal: HarnSessionRecapTerminalFact | null; sourceEventIds: number[]
+  turnId: string
+  runId: string
+  state: HarnSessionRecapCompletionState
+  prompts: HarnSessionRecapTextFact[]
+  iterations: HarnSessionRecapIteration[]
+  terminal: HarnSessionRecapTerminalFact | null
+  sourceEventIds: number[]
 }
+
 export interface HarnSessionRecapSnapshot {
-  schemaVersion: number; sessionId: string; query: HarnSessionRecapQuery
-  cursor: HarnSessionRecapCursor; coverage: HarnSessionRecapCoverage; source: HarnSessionRecapSource
-  contentHash: string; projectionHash: string; turns: HarnSessionPromptTurnRecap[]
+  schemaVersion: number
+  sessionId: string
+  query: HarnSessionRecapQuery
+  cursor: HarnSessionRecapCursor
+  coverage: HarnSessionRecapCoverage
+  source: HarnSessionRecapSource
+  contentHash: string
+  projectionHash: string
+  turns: HarnSessionPromptTurnRecap[]
   extensions: Record<string, ACPValue>
 }
+
+
 export type HarnSessionRecapAvailability =
   | { state: "available"; snapshot: HarnSessionRecapSnapshot }
   | { state: "unavailable"; reason: HarnSessionRecapUnavailableReason }
-
-const HARN_SESSION_RECAP_KEYS = {
-  snapshot: ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"],
-  query: ["sessionId", "runId", "turnId", "fromEventId", "limit"],
-  cursor: ["lastEventId", "nextEventId"],
-  coverage: ["scanned", "matched", "pending", "unassigned", "truncated"],
-  source: ["firstEventId", "lastEventId", "events"],
-  sourceEvent: ["eventId", "recordHash"],
-  text: ["text", "sourceEventId"],
-  verification: ["schema", "status", "verifiedPaths", "sourceEventId"],
-  tool: ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"],
-  planStep: ["id", "content", "status"],
-  planEvent: ["kind", "eventId", "inputRevisionId"],
-  plan: ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"],
-  progressEntry: ["content", "status", "priority"],
-  progress: ["message", "entries", "replace", "sourceEventId"],
-  terminal: ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"],
-  iteration: ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"],
-  turn: ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"],
-} as const
 
 function harnSessionRecapObject(value: unknown, label: string, keys: readonly string[]): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -2015,49 +1990,119 @@ function harnSessionRecapArray(value: unknown, label: string): unknown[] {
   return value
 }
 
-function validateHarnSessionRecapSnapshot(value: unknown): void {
-  const snapshot = harnSessionRecapObject(value, "Harn session recap snapshot", HARN_SESSION_RECAP_KEYS.snapshot)
-  harnSessionRecapObject(snapshot.query, "Harn session recap query", HARN_SESSION_RECAP_KEYS.query)
-  harnSessionRecapObject(snapshot.cursor, "Harn session recap cursor", HARN_SESSION_RECAP_KEYS.cursor)
-  harnSessionRecapObject(snapshot.coverage, "Harn session recap coverage", HARN_SESSION_RECAP_KEYS.coverage)
-  const source = harnSessionRecapObject(snapshot.source, "Harn session recap source", HARN_SESSION_RECAP_KEYS.source)
-  for (const event of harnSessionRecapArray(source.events, "Harn session recap source events")) {
-    harnSessionRecapObject(event, "Harn session recap source event", HARN_SESSION_RECAP_KEYS.sourceEvent)
-  }
-  for (const turnValue of harnSessionRecapArray(snapshot.turns, "Harn session recap turns")) {
-    const turn = harnSessionRecapObject(turnValue, "Harn session recap turn", HARN_SESSION_RECAP_KEYS.turn)
-    for (const prompt of harnSessionRecapArray(turn.prompts, "Harn session recap prompts")) {
-      harnSessionRecapObject(prompt, "Harn session recap text", HARN_SESSION_RECAP_KEYS.text)
-    }
-    if (turn.terminal !== null) harnSessionRecapObject(turn.terminal, "Harn session recap terminal", HARN_SESSION_RECAP_KEYS.terminal)
-    for (const iterationValue of harnSessionRecapArray(turn.iterations, "Harn session recap iterations")) {
-      const iteration = harnSessionRecapObject(iterationValue, "Harn session recap iteration", HARN_SESSION_RECAP_KEYS.iteration)
-      for (const text of harnSessionRecapArray(iteration.assistantText, "Harn session recap assistant text")) {
-        harnSessionRecapObject(text, "Harn session recap text", HARN_SESSION_RECAP_KEYS.text)
-      }
-      for (const toolValue of harnSessionRecapArray(iteration.tools, "Harn session recap tools")) {
-        const tool = harnSessionRecapObject(toolValue, "Harn session recap tool", HARN_SESSION_RECAP_KEYS.tool)
-        if (tool.verification !== null) {
-          const verification = harnSessionRecapObject(tool.verification, "Harn session recap verification", HARN_SESSION_RECAP_KEYS.verification)
-          if (verification.status !== "passed") throw new TypeError("Harn session recap verification status must be passed")
-        }
-      }
-      for (const planValue of harnSessionRecapArray(iteration.plans, "Harn session recap plans")) {
-        const plan = harnSessionRecapObject(planValue, "Harn session recap plan", HARN_SESSION_RECAP_KEYS.plan)
-        for (const step of harnSessionRecapArray(plan.steps, "Harn session recap plan steps")) {
-          harnSessionRecapObject(step, "Harn session recap plan step", HARN_SESSION_RECAP_KEYS.planStep)
-        }
-        if (plan.event !== null) harnSessionRecapObject(plan.event, "Harn session recap plan event", HARN_SESSION_RECAP_KEYS.planEvent)
-      }
-      for (const progressValue of harnSessionRecapArray(iteration.progress, "Harn session recap progress")) {
-        const progress = harnSessionRecapObject(progressValue, "Harn session recap progress", HARN_SESSION_RECAP_KEYS.progress)
-        for (const entry of harnSessionRecapArray(progress.entries, "Harn session recap progress entries")) {
-          harnSessionRecapObject(entry, "Harn session recap progress entry", HARN_SESSION_RECAP_KEYS.progressEntry)
-        }
-      }
-    }
+function validateHarnSessionRecapQuery(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapQuery", ["sessionId", "runId", "turnId", "fromEventId", "limit"])
+}
+
+function validateHarnSessionRecapCursor(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapCursor", ["lastEventId", "nextEventId"])
+}
+
+function validateHarnSessionRecapCoverage(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapCoverage", ["scanned", "matched", "pending", "unassigned", "truncated"])
+}
+
+function validateHarnSessionRecapSourceEvent(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapSourceEvent", ["eventId", "recordHash"])
+}
+
+function validateHarnSessionRecapSource(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapSource", ["firstEventId", "lastEventId", "events"])
+  for (const item of harnSessionRecapArray(object["events"], "object[\"events\"]")) {
+  validateHarnSessionRecapSourceEvent(item)
   }
 }
+
+function validateHarnSessionRecapTextFact(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapTextFact", ["text", "sourceEventId"])
+}
+
+function validateHarnSessionRecapVerificationFact(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapVerificationFact", ["schema", "status", "verifiedPaths", "sourceEventId"])
+  if (object.status !== "passed") throw new TypeError("Harn session recap verification status must be passed")
+}
+
+function validateHarnSessionRecapToolExchange(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapToolExchange", ["toolCallId", "toolName", "state", "callObserved", "resultObserved", "input", "output", "verification", "sourceEventIds"])
+  if (object["verification"] !== null) {
+  validateHarnSessionRecapVerificationFact(object["verification"])
+  }
+}
+
+function validateHarnSessionRecapPlanStep(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapPlanStep", ["id", "content", "status"])
+}
+
+function validateHarnSessionRecapPlanEventFact(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapPlanEventFact", ["kind", "eventId", "inputRevisionId"])
+}
+
+function validateHarnSessionRecapPlanFact(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapPlanFact", ["documentId", "revisionId", "title", "summary", "steps", "event", "sourceEventId"])
+  for (const item of harnSessionRecapArray(object["steps"], "object[\"steps\"]")) {
+  validateHarnSessionRecapPlanStep(item)
+  }
+  if (object["event"] !== null) {
+  validateHarnSessionRecapPlanEventFact(object["event"])
+  }
+}
+
+function validateHarnSessionRecapProgressEntry(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapProgressEntry", ["content", "status", "priority"])
+}
+
+function validateHarnSessionRecapProgressFact(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapProgressFact", ["message", "entries", "replace", "sourceEventId"])
+  for (const item of harnSessionRecapArray(object["entries"], "object[\"entries\"]")) {
+  validateHarnSessionRecapProgressEntry(item)
+  }
+}
+
+function validateHarnSessionRecapTerminalFact(value: unknown): void {
+  harnSessionRecapObject(value, "HarnSessionRecapTerminalFact", ["state", "finalStatus", "stopReason", "kind", "owner", "reason", "sourceEventId"])
+}
+
+function validateHarnSessionRecapIteration(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapIteration", ["iteration", "state", "assistantText", "tools", "plans", "progress", "sourceEventIds"])
+  for (const item of harnSessionRecapArray(object["assistantText"], "object[\"assistantText\"]")) {
+  validateHarnSessionRecapTextFact(item)
+  }
+  for (const item of harnSessionRecapArray(object["tools"], "object[\"tools\"]")) {
+  validateHarnSessionRecapToolExchange(item)
+  }
+  for (const item of harnSessionRecapArray(object["plans"], "object[\"plans\"]")) {
+  validateHarnSessionRecapPlanFact(item)
+  }
+  for (const item of harnSessionRecapArray(object["progress"], "object[\"progress\"]")) {
+  validateHarnSessionRecapProgressFact(item)
+  }
+}
+
+function validateHarnSessionPromptTurnRecap(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionPromptTurnRecap", ["turnId", "runId", "state", "prompts", "iterations", "terminal", "sourceEventIds"])
+  for (const item of harnSessionRecapArray(object["prompts"], "object[\"prompts\"]")) {
+  validateHarnSessionRecapTextFact(item)
+  }
+  for (const item of harnSessionRecapArray(object["iterations"], "object[\"iterations\"]")) {
+  validateHarnSessionRecapIteration(item)
+  }
+  if (object["terminal"] !== null) {
+  validateHarnSessionRecapTerminalFact(object["terminal"])
+  }
+}
+
+function validateHarnSessionRecapSnapshot(value: unknown): void {
+  const object = harnSessionRecapObject(value, "HarnSessionRecapSnapshot", ["schemaVersion", "sessionId", "query", "cursor", "coverage", "source", "contentHash", "projectionHash", "turns", "extensions"])
+  validateHarnSessionRecapQuery(object["query"])
+  validateHarnSessionRecapCursor(object["cursor"])
+  validateHarnSessionRecapCoverage(object["coverage"])
+  validateHarnSessionRecapSource(object["source"])
+  for (const item of harnSessionRecapArray(object["turns"], "object[\"turns\"]")) {
+  validateHarnSessionPromptTurnRecap(item)
+  }
+}
+
+
 
 /** Decode the closed recap envelope without silently dropping future fields. */
 export function decodeHarnSessionRecapAvailability(value: unknown): HarnSessionRecapAvailability {
@@ -2073,4 +2118,97 @@ export function decodeHarnSessionRecapAvailability(value: unknown): HarnSessionR
   harnSessionRecapObject(value, "Harn session recap availability", ["state", "snapshot"])
   validateHarnSessionRecapSnapshot(availability.snapshot)
   return value as HarnSessionRecapAvailability
+}
+export interface HarnPlanAuthor {
+  id: string
+  display_name?: string
+}
+
+export interface HarnPlanSource {
+  kind: string
+  uri?: string
+}
+
+export interface HarnPlanStep {
+  id: string
+  content: string
+  status: HarnPlanStepStatus
+  priority?: ACPValue
+}
+
+export interface HarnPlanApproval {
+  state: HarnPlanApprovalState
+  approved_at?: string
+  reason?: string
+  request_id?: string
+  reviewer?: string
+  reviewers?: string[]
+}
+
+export interface HarnPlanArtifact {
+  _type: "plan_artifact"
+  schema_version: "harn.plan.v1"
+  id: string
+  tool: string
+  title: string
+  summary: string
+  steps: HarnPlanStep[]
+  assumptions: string[]
+  open_questions: string[]
+  verification_commands: string[]
+  approval: HarnPlanApproval
+}
+
+export interface HarnPlanRevision {
+  revision_id: string
+  markdown: string
+  plan: HarnPlanArtifact
+  author: HarnPlanAuthor
+  source: HarnPlanSource
+  created_at: string
+  operation: HarnPlanRevisionOperation
+  parent_revision_id?: string
+}
+
+export interface HarnPlanTextRange {
+  start: number
+  end: number
+}
+
+export interface HarnPlanCommentAnchor {
+  quoted_text?: string
+  range?: HarnPlanTextRange
+  step_id?: string
+}
+
+export interface HarnPlanComment {
+  comment_id: string
+  anchor: HarnPlanCommentAnchor
+  body: string
+  state: HarnPlanCommentState
+  author: HarnPlanAuthor
+  created_at: string
+  updated_at: string
+}
+
+export interface HarnPlanCommentResolutionReceipt {
+  receipt_id: string
+  comment_id: string
+  input_revision_id: string
+  output_revision_id: string
+  agent_run_id: string
+  event_id: string
+  created_at: string
+  explanation?: string
+}
+
+export interface HarnPlanDocument {
+  _type: "plan_document"
+  schema_version: "harn.plan_document.v1"
+  document_id: string
+  current_revision: HarnPlanRevision
+  comments: HarnPlanComment[]
+  resolution_receipts: HarnPlanCommentResolutionReceipt[]
+  created_at: string
+  updated_at: string
 }

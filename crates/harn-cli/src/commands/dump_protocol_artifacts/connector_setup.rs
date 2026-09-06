@@ -8,6 +8,7 @@ pub(super) const CONNECTOR_SETUP_VOCABULARY_SOURCE: &str =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ConnectorSetupVocabulary {
+    pub(super) records: Vec<super::records::Record>,
     pub(super) stages: Vec<String>,
     pub(super) statuses: Vec<String>,
     pub(super) interactions: Vec<String>,
@@ -18,7 +19,10 @@ pub(super) struct ConnectorSetupVocabulary {
 impl ConnectorSetupVocabulary {
     pub(super) fn load(source: &ProtocolArtifactSource) -> Result<Self, String> {
         let text = source.read_text(CONNECTOR_SETUP_VOCABULARY_SOURCE)?;
-        Self::parse(&text)
+        let mut vocabulary = Self::parse(&text)?;
+        vocabulary.records =
+            super::harn_records::load(source, &["connectors/setup"], &["ConnectorSetupEvent"])?;
+        Ok(vocabulary)
     }
 
     fn parse(source: &str) -> Result<Self, String> {
@@ -26,6 +30,7 @@ impl ConnectorSetupVocabulary {
             format!("failed to parse {CONNECTOR_SETUP_VOCABULARY_SOURCE}: {error}")
         })?;
         Ok(Self {
+            records: Vec::new(),
             stages: literal_union(
                 &program,
                 "ConnectorSetupStage",
