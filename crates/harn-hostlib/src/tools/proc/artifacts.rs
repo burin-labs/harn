@@ -1208,7 +1208,7 @@ mod tests {
 
         let mut store = ArtifactRegistry::default();
         store.by_id.insert("command-first".into(), first.clone());
-        store.by_id.insert("handle-first".into(), first.clone());
+        store.by_id.insert("handle-first".into(), first);
         store.by_id.insert("command-second".into(), second.clone());
         store.by_id.insert("handle-second".into(), second.clone());
         store.completed.push_back(CompletedArtifact {
