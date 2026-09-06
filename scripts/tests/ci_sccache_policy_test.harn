@@ -84,11 +84,25 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
   return lane
 }
 
+fn elastic_lane(cache_key: string) {
+  return {
+    "runs-on": gha_expression(
+      "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'",
+    ),
+    env: {
+      HARN_RUNNER_TIER: gha_expression(
+        "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted'",
+      ),
+    },
+    steps: [{uses: "./.github/actions/rust-cache", with: {"shared-key": cache_key, "cache-workspace-crates": "true"}}],
+  }
+}
+
 fn workflow() {
   const host_bound_filter =
     "test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)"
   const package_audit = hosted_lane("package-audit", true)
-  const lint = hosted_lane("workspace-tests")
+  const lint = elastic_lane("workspace-tests")
   const producer = persistent_lane(
     "blacksmith-8vcpu-ubuntu-2404",
     "workspace-tests",
@@ -771,6 +785,21 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task: unknown) {
   assert(errors.contains("ci.yml:package-audit must run on ubuntu-latest"))
   assert(
     errors.contains("ci.yml:rust-checks must remain one fixed lint lane, not a compile matrix"),
+  )
+}
+
+@test
+pipeline test_rejects_rust_lint_runner_switch_removal(harness: Harness, task: unknown) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  const invalid = {
+    ...valid,
+    jobs: {...valid.jobs, "rust-checks": {...rust_job, "runs-on": "ubuntu-latest"}},
+  }
+  assert(
+    ci_linux_lane_policy_errors(invalid).contains(
+      "ci.yml:rust-checks must route trusted PR and merge-group work through the shared Blacksmith switch",
+    ),
   )
 }
 

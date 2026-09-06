@@ -532,7 +532,7 @@ jobs:
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -549,7 +549,7 @@ jobs:
       # link-arg appended. Linux-only: the windows/macos jobs never see this and
       # keep the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      HARN_RUNNER_TIER: github-hosted
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted' }}
     outputs:
       lint_ok: ${{ steps.lint-ok.outputs.ok }}
     steps:
@@ -1091,7 +1091,7 @@ jobs:
     # verifies the exact-commit binary only at the last responsible moment.
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # The immutable CLI producer is shared, but conformance and the independent
     # source/grammar/generated audits use separate free hosted workers. Putting
     # both four-way pools on one four-core runner starved conformance and kept

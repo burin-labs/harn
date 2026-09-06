@@ -149,6 +149,13 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
       "publish-release.yml must not trigger on branch pushes",
     ),
   )
+  let unrouted_source_checks = ci
+  unrouted_source_checks.jobs["harn-audit"]["runs-on"] = "ubuntu-latest"
+  assert(
+    minimal_pr_capacity_errors(unrouted_source_checks, publish).contains(
+      "ci.yml:harn-audit must use the shared elastic Linux runner switch",
+    ),
+  )
 }
 
 @test

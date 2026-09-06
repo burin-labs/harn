@@ -1426,9 +1426,15 @@ pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
 pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   let errors: list<string> = []
   const jobs = ci?.jobs ?? {}
+  const elastic_runner = "$" + "{{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
   for name in [ARTIFACT_READY_JOB, SECURITY_READY_JOB] {
     if trim(jobs[name]?.["runs-on"] ?? "") != "ubuntu-latest" {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ubuntu-latest"]
+    }
+  }
+  for name in ["rust-checks", "rust-check-inputs", "harn-audit"] {
+    if trim(jobs[name]?.["runs-on"] ?? "") != elastic_runner {
+      errors = errors + ["ci.yml:${name} must use the shared elastic Linux runner switch"]
     }
   }
   if trim(jobs["audit-scripts"]?.if ?? "") != MAIN_ONLY_POLICY_IF {

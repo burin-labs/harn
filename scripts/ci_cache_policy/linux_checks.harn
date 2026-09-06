@@ -185,6 +185,37 @@ fn hosted_compile_lane_errors(
   return errors
 }
 
+/** Keep a compile lane switchable between elastic and GitHub-hosted capacity. */
+fn elastic_compile_lane_errors(
+  workflow: dict,
+  job_name: string,
+  rust_cache_key: string,
+) -> list<string> {
+  const job = workflow?.jobs?.[job_name]
+  if job == nil {
+    return ["ci.yml:${job_name} must define the elastic Linux compile lane"]
+  }
+  let errors: list<string> = []
+  if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(BLACKSMITH_8CPU_RUNNER) {
+    errors = errors
+      + ["ci.yml:${job_name} must route trusted PR and merge-group work through the shared Blacksmith switch"]
+  }
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != blacksmith_tier_expression() {
+    errors = errors + ["ci.yml:${job_name} must mirror its Blacksmith/hosted runner tier"]
+  }
+  if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
+    errors = errors + ["ci.yml:${job_name} must not claim the producer's persistent sccache"]
+  }
+  const caches = matching_steps(job, RUST_CACHE_ACTION)
+  if len(caches) != 1 || trim(caches[0]?.if ?? "") != "" {
+    errors = errors + ["ci.yml:${job_name} must restore its portable rust-cache on both runner tiers"]
+  } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
+    || trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? "")) != "true" {
+    errors = errors + ["ci.yml:${job_name} must keep complete portable cache ${rust_cache_key}"]
+  }
+  return errors
+}
+
 /** Hold a compile lane to one Blacksmith tier with a cold-safe hosted fallback. */
 fn persistent_compile_lane_errors(
   workflow: dict,
@@ -776,7 +807,7 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
 /** Keep one persistent producer, one lint lane, and one package lane. */
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
-    + hosted_compile_lane_errors(workflow, "rust-checks", "workspace-tests")
+    + elastic_compile_lane_errors(workflow, "rust-checks", "workspace-tests")
     + persistent_compile_lane_errors(
       workflow,
       "rust-check-inputs",
