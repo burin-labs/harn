@@ -2503,6 +2503,9 @@ jobs:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+          RUST_SELECTED: ${{ needs.changes.outputs.rust }}
         run: |
           # A skipped job is valid only when its owning condition permits it.
           # Missing, pending, failed, and cancelled results always fail closed.
@@ -2664,7 +2667,7 @@ jobs:
           echo "Repository policy checks: $audit_scripts_result"
           require_result "$audit_scripts_result" \
             "Repository policy checks failed or skipped on a Rust-changing main push." \
-            test "${{ github.event_name }}:${{ github.ref }}:${{ needs.changes.outputs.rust }}" != "push:refs/heads/main:true"
+            test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
 
           # Native Windows runs once on a Windows-sensitive merge-group
           # candidate. Its exact successful proof suppresses the identical
@@ -2680,7 +2683,7 @@ jobs:
           echo "Windows cross-compile check: $windows_cross_result"
           require_result "$windows_cross_result" \
             "Windows cross-compile check failed or skipped on a Rust-changing main push." \
-            test "${{ github.event_name }}:${{ github.ref }}:${{ needs.changes.outputs.rust }}" != "push:refs/heads/main:true"
+            test "${EVENT_NAME}:${GIT_REF}:${RUST_SELECTED}" != "push:refs/heads/main:true"
 
           # The macOS job runs on `push` to main and on pull requests whose
           # diff touches macOS-gated process/sandbox/secret-store/CLI paths. It
