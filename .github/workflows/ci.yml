@@ -726,7 +726,7 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
-          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root))'
+          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root) or test(a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling) or test(a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read))'
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1005,7 +1005,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root))'
+          -E 'not (test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root) or test(a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling) or test(a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read))'
 
   rust-security:
     name: Run Linux sandbox tests
@@ -1025,6 +1025,12 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      # This job is the one runner class the workflow relies on for a real
+      # Landlock boundary, so it declares that. The shared guard in the Linux
+      # sandbox tests then FAILS here if the kernel cannot enforce, rather than
+      # standing down and leaving a boundary proof that measures nothing.
+      # Nowhere else sets this: a class without Landlock skips and says so.
+      HARN_REQUIRE_LANDLOCK_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold linker
@@ -1059,12 +1065,22 @@ jobs:
         # No --locked: nextest rejects it alongside --archive-file. This step
         # replays prebuilt binaries and never resolves dependencies, so there is
         # no lock for the flag to hold.
+        #
+        # `--success-output immediate` is load-bearing, not verbosity. The
+        # Landlock guard reports the host's enforcement state on stderr, and a
+        # guard that STANDS DOWN returns early, so its test PASSES and the
+        # default runner discards the one line saying the boundary was never
+        # exercised. Without this, a skip and a real proof read identically in
+        # the log. Affordable here and nowhere else: this job runs a handful of
+        # tests, the producer runs thirteen thousand.
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
+          --success-output immediate
+          --no-tests fail
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root)'
+          -E 'test(process_filesystem_sandbox_report_matches_live_escape) or test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline) or test(sandboxed_tar_extracts_symlinks_without_widening_the_write_root) or test(a_live_landlock_child_is_refused_a_denied_file_and_allowed_its_sibling) or test(a_confined_child_still_spawns_when_a_preset_root_exists_but_cannot_be_read)'
       - name: Report process filesystem confinement
         env:
           HARN_SANDBOX_ENFORCEMENT_RECEIPT: ${{ runner.temp }}/harn-sandbox-enforcement.txt
