@@ -6,7 +6,7 @@ import {
 } from "std/agent/state"
 
 fn __skills_registry(opts: dict) {
-  const registry = opts?.skill_registry ?? opts?.skills
+  const registry = opts?.skills
   if type_of(registry) == "list" {
     return {_type: "skill_registry", skills: registry}
   }
@@ -320,7 +320,7 @@ fn __match_sticky(opts: dict) {
 }
 
 fn __skill_catalog_limit(opts: dict) {
-  const value = __match_config(opts)?.catalog_limit ?? opts?.skill_catalog_limit ?? 12
+  const value = __match_config(opts)?.catalog_limit ?? 12
   if type_of(value) == "int" && value > 0 {
     return value
   }
@@ -328,7 +328,7 @@ fn __skill_catalog_limit(opts: dict) {
 }
 
 fn __skill_catalog_budget(opts: dict) {
-  const value = __match_config(opts)?.catalog_budget ?? opts?.skill_catalog_budget ?? 2000
+  const value = __match_config(opts)?.catalog_budget ?? 2000
   if type_of(value) == "int" && value > 0 {
     return value
   }
@@ -336,7 +336,7 @@ fn __skill_catalog_budget(opts: dict) {
 }
 
 fn __skill_catalog_always(opts: dict) {
-  const value = __match_config(opts)?.catalog_always ?? opts?.skill_catalog_always
+  const value = __match_config(opts)?.catalog_always
   if type_of(value) == "bool" {
     return value
   }

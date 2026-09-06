@@ -515,7 +515,6 @@ fn initial_user_content(
     fallback_message: &str,
 ) -> serde_json::Value {
     opt_json(opts_map, "initial_user_content")
-        .or_else(|| opt_json(opts_map, "initial_message_content"))
         .unwrap_or_else(|| serde_json::Value::String(fallback_message.to_string()))
 }
 

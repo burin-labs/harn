@@ -1,22 +1,5 @@
 [
   {
-    "default": "absent; when present it takes precedence over skills",
-    "evidence": "skills.__skills_registry reads skill_registry before the declared AgentContextSpec.skills input.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.skill_registry",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
-        "line": 9,
-        "reader": "__skills_registry"
-      }
-    ],
-    "reason": "Use the declared skills field as the single registry input.",
-    "verdict": "DELETE"
-  },
-  {
     "default": "catalog",
     "evidence": "skills.__match_strategy supplies catalog when the normalized skill_match object omits strategy.",
     "expiry": "2026-09-13",
@@ -76,8 +59,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "skill_catalog_limit, then 12",
-    "evidence": "skills.__skill_catalog_limit accepts a positive nested or flat override and otherwise uses twelve entries.",
+    "default": "12",
+    "evidence": "skills.__skill_catalog_limit accepts a positive catalog_limit under skill_match and otherwise uses twelve entries.",
     "expiry": "2026-09-13",
     "kind": "limit",
     "layer": "runner",
@@ -94,8 +77,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "skill_catalog_budget, then 2000",
-    "evidence": "skills.__skill_catalog_budget accepts a positive nested or flat override and otherwise uses two thousand.",
+    "default": "2000",
+    "evidence": "skills.__skill_catalog_budget accepts a positive catalog_budget under skill_match and otherwise uses two thousand.",
     "expiry": "2026-09-13",
     "kind": "limit",
     "layer": "runner",
@@ -112,8 +95,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "skill_catalog_always, then false",
-    "evidence": "skills.__skill_catalog_always supplies false when neither nested nor flat configuration supplies a boolean.",
+    "default": "false",
+    "evidence": "skills.__skill_catalog_always supplies false when skill_match.catalog_always is not a boolean.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
@@ -128,56 +111,5 @@
     ],
     "reason": "Review repeated catalog presentation with the skill matcher.",
     "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "absent; fallback after skill_match.catalog_limit",
-    "evidence": "skills.__skill_catalog_limit reads this flat spelling only after the nested catalog limit.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.skill_catalog_limit",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
-        "line": 323,
-        "reader": "__skill_catalog_limit"
-      }
-    ],
-    "reason": "Use skill_match.catalog_limit as the single selection bound.",
-    "verdict": "DELETE"
-  },
-  {
-    "default": "absent; fallback after skill_match.catalog_budget",
-    "evidence": "skills.__skill_catalog_budget reads this flat spelling only after the nested catalog budget.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.skill_catalog_budget",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
-        "line": 331,
-        "reader": "__skill_catalog_budget"
-      }
-    ],
-    "reason": "Use skill_match.catalog_budget as the single catalog budget.",
-    "verdict": "DELETE"
-  },
-  {
-    "default": "absent; fallback after skill_match.catalog_always",
-    "evidence": "skills.__skill_catalog_always reads this flat spelling only after the nested setting.",
-    "kind": "compatibility alias",
-    "layer": "runner",
-    "name": "AgentSpec.skill_catalog_always",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
-        "line": 339,
-        "reader": "__skill_catalog_always"
-      }
-    ],
-    "reason": "Use skill_match.catalog_always as the single catalog presentation setting.",
-    "verdict": "DELETE"
   }
 ]

@@ -78,10 +78,10 @@ pub fn agent_scratchpad_options(opts: dict? = nil) {
   const enabled = __scratchpad_bool("scratchpad.enabled", raw?.enabled, true)
   return {
     enabled: enabled,
-    recite: __scratchpad_bool("scratchpad.recite", raw?.recite ?? raw?.recitation, true),
+    recite: __scratchpad_bool("scratchpad.recite", raw?.recite, true),
     reorganize_every: __scratchpad_nonnegative_int(
       "scratchpad.reorganize_every",
-      raw?.reorganize_every ?? raw?.reorg_every ?? raw?.periodic_reorg_every,
+      raw?.reorganize_every,
       3,
     ),
     max_recent_messages: __scratchpad_nonnegative_int(
@@ -91,15 +91,11 @@ pub fn agent_scratchpad_options(opts: dict? = nil) {
     ),
     schema_retries: __scratchpad_nonnegative_int(
       "scratchpad.schema_retries",
-      raw?.schema_retries ?? raw?.retries,
+      raw?.schema_retries,
       1,
     ),
     initial: raw?.initial,
-    reorganizer: __scratchpad_dict(
-      "scratchpad.reorganizer",
-      raw?.reorganizer ?? raw?.reorganizer_options ?? raw?.llm_options,
-      {},
-    ),
+    reorganizer: __scratchpad_dict("scratchpad.reorganizer", raw?.reorganizer, {}),
   }
 }
 

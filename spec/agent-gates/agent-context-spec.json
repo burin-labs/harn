@@ -239,7 +239,7 @@
   },
   {
     "default": "absent; no fallback skill registry",
-    "evidence": "skills.__skills_registry reads skill_registry before skills; __skills_entries returns an empty list for absent registry. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "skills.__skills_registry reads skills; __skills_entries returns an empty list for absent registry. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",

@@ -1,0 +1,45 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn assert_initial_content(harness: Harness, extra: dict, expected: string) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Finished.")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Original task.",
+        nil,
+        {provider: "mock", max_iterations: 1} + extra,
+      )
+      const calls = harness.llm.mock_calls()
+      assert_eq(result.llm.iterations, 1)
+      assert_eq(len(calls), 1)
+      const user_messages = calls[0].messages.filter(fn(message) { message.role == "user" })
+        .to_list()
+      assert(len(user_messages) > 0)
+      assert_eq(user_messages[0].content, expected)
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  assert_initial_content(
+    harness,
+    {initial_user_content: "Canonical initial content."},
+    "Canonical initial content.",
+  )
+  let refused = false
+  try {
+    agent_loop(
+      harness,
+      "Original task.",
+      nil,
+      {provider: "mock", max_iterations: 1, initial_message_content: "Retired initial content."},
+    )
+  } catch (err) {
+    refused = contains(to_string(err), "initial_message_content")
+  }
+  assert(refused, "The retired spelling must be refused at the option boundary")
+  harness.stdio.println("agent initial content spelling passed")
+}

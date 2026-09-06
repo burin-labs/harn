@@ -5,7 +5,7 @@ fn __compaction_strategy_label(value: unknown) {
     return value
   }
   if type_of(value) == "dict" {
-    const label = value?.strategy ?? value?.kind ?? value?.type
+    const label = value?.strategy
     if type_of(label) == "string" && label != "" {
       return label
     }
@@ -150,7 +150,7 @@ fn __compaction_policy_event_fields(policy: dict?) {
 fn __compaction_keep_last(opts: dict) {
   const cfg = opts?.compaction
   if type_of(cfg) == "dict" {
-    const keep = cfg?.keep_last_n ?? cfg?.keep_last
+    const keep = cfg?.keep_last_n
     if type_of(keep) == "int" {
       return keep
     }
@@ -191,8 +191,6 @@ fn __compact_options(opts: dict, engine_strategy: string, keep_last: any) {
     compact_opts = compact_opts + {model: opts.model}
   }
   const policy = __compaction_policy_from_options(compact_opts)
-    ?? __compaction_policy_from_options({policy: opts?.compaction_policy})
-    ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})
   if policy != nil && !contains(compact_opts.keys(), "policy") {
     compact_opts = compact_opts + {policy: policy}
   }
@@ -294,7 +292,7 @@ fn __compaction_enabled(opts: dict) {
     return false
   }
   if type_of(policy_cfg) == "dict" {
-    const label = policy_cfg?.strategy ?? policy_cfg?.kind ?? policy_cfg?.type
+    const label = policy_cfg?.strategy
     if type_of(label) == "string" && label == "none" {
       return false
     }
