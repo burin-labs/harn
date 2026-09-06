@@ -110,8 +110,10 @@ fn collect_wrapper_path_operands(
         {
             operands.push(path.to_string());
         } else if wrapper == "env" {
-            if let Some(offset) = option.strip_prefix('-').and_then(|flags| flags.find('C')) {
-                let path = &option[offset + 2..];
+            if let Some((_, path)) = option
+                .strip_prefix('-')
+                .and_then(|flags| flags.split_once('C'))
+            {
                 if !path.is_empty() {
                     operands.push(path.to_string());
                 }
