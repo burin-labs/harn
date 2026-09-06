@@ -227,13 +227,22 @@ pub(crate) fn read_output(
 ) -> Result<Option<CommandArtifactRead>, HostlibError> {
     let explicit = path
         .map(|path| {
-            command_artifact_namespace(path)
-                .map(|namespace| (path.to_path_buf(), namespace))
-                .ok_or_else(|| HostlibError::InvalidParameter {
-                    builtin: READ_COMMAND_OUTPUT_BUILTIN,
-                    param: "path",
-                    message: "path must point at a harn-command artifact file".to_string(),
-                })
+            let namespace = command_artifact_namespace(path).ok_or_else(invalid_artifact_path)?;
+            let artifact_dir = path.parent().ok_or_else(invalid_artifact_path)?;
+            let file_is_regular = std::fs::symlink_metadata(path)
+                .map(|metadata| metadata.file_type().is_file())
+                .unwrap_or(false);
+            let directory_is_real = std::fs::symlink_metadata(artifact_dir)
+                .map(|metadata| metadata.file_type().is_dir())
+                .unwrap_or(false);
+            let namespace_is_established =
+                std::fs::symlink_metadata(artifact_namespace_lease_path(&namespace))
+                    .map(|metadata| metadata.file_type().is_file())
+                    .unwrap_or(false);
+            if !file_is_regular || !directory_is_real || !namespace_is_established {
+                return Err(invalid_artifact_path());
+            }
+            Ok((path.to_path_buf(), namespace))
         })
         .transpose()?;
     let candidate = explicit
@@ -255,6 +264,7 @@ pub(crate) fn read_output(
         &namespace,
         ACTIVE_LEASE_LOCK_TIMEOUT,
         READ_COMMAND_OUTPUT_BUILTIN,
+        NamespaceLockCreation::ExistingOnly,
         || {
             let path = if explicit.is_some() {
                 candidate.clone()
@@ -307,6 +317,14 @@ pub(crate) fn read_output(
             }))
         },
     )
+}
+
+fn invalid_artifact_path() -> HostlibError {
+    HostlibError::InvalidParameter {
+        builtin: READ_COMMAND_OUTPUT_BUILTIN,
+        param: "path",
+        message: "path must point at an existing harn-command artifact file".to_string(),
+    }
 }
 
 fn command_artifact_namespace(path: &Path) -> Option<PathBuf> {
@@ -443,18 +461,24 @@ fn register_completed_artifacts_with_options(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, timeout, RUN_COMMAND_BUILTIN, || {
-        let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
-        register_completed_artifacts_in_store(
-            &mut store,
-            command_id,
-            handle_id,
-            artifacts,
-            max_dirs,
-            ArtifactLeaseCleanup::NamespaceHeld,
-        );
-        Ok(())
-    })
+    with_artifact_namespace_lock(
+        temp_dir,
+        timeout,
+        RUN_COMMAND_BUILTIN,
+        NamespaceLockCreation::Create,
+        || {
+            let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
+            register_completed_artifacts_in_store(
+                &mut store,
+                command_id,
+                handle_id,
+                artifacts,
+                max_dirs,
+                ArtifactLeaseCleanup::NamespaceHeld,
+            );
+            Ok(())
+        },
+    )
 }
 
 fn retire_completed_artifacts_under_namespace(
@@ -520,18 +544,24 @@ fn create_and_mark_artifacts_active_with_timeout(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, timeout, RUN_COMMAND_BUILTIN, || {
-        std::fs::create_dir_all(&dir).map_err(|error| HostlibError::Backend {
-            builtin: "hostlib_tools_run_command",
-            message: format!("failed to create command artifact dir: {error}"),
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-        }
-        mark_artifacts_active_under_namespace(artifacts, timeout)
-    })
+    with_artifact_namespace_lock(
+        temp_dir,
+        timeout,
+        RUN_COMMAND_BUILTIN,
+        NamespaceLockCreation::Create,
+        || {
+            std::fs::create_dir_all(&dir).map_err(|error| HostlibError::Backend {
+                builtin: "hostlib_tools_run_command",
+                message: format!("failed to create command artifact dir: {error}"),
+            })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            }
+            mark_artifacts_active_under_namespace(artifacts, timeout)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -548,9 +578,13 @@ fn mark_artifacts_active_with_timeout(
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, timeout, RUN_COMMAND_BUILTIN, || {
-        mark_artifacts_active_under_namespace(artifacts, timeout)
-    })
+    with_artifact_namespace_lock(
+        temp_dir,
+        timeout,
+        RUN_COMMAND_BUILTIN,
+        NamespaceLockCreation::Create,
+        || mark_artifacts_active_under_namespace(artifacts, timeout),
+    )
 }
 
 fn mark_artifacts_active_under_namespace(
@@ -599,6 +633,7 @@ fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
             temp_dir,
             ACTIVE_LEASE_LOCK_TIMEOUT,
             RUN_COMMAND_BUILTIN,
+            NamespaceLockCreation::Create,
             || {
                 mark_artifact_dir_inactive_under_namespace(&dir);
                 Ok(())
@@ -626,11 +661,15 @@ fn with_artifact_namespace_lock<T>(
     temp_dir: &Path,
     timeout: Duration,
     builtin: &'static str,
+    creation: NamespaceLockCreation,
     operation: impl FnOnce() -> Result<T, HostlibError>,
 ) -> Result<T, HostlibError> {
     let lease_path = artifact_namespace_lease_path(temp_dir);
     let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
+    options.read(true).write(true).truncate(false);
+    if matches!(creation, NamespaceLockCreation::Create) {
+        options.create(true);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -670,6 +709,12 @@ fn with_artifact_namespace_lock<T>(
     let result = operation();
     let _ = lease.unlock();
     result
+}
+
+#[derive(Clone, Copy)]
+enum NamespaceLockCreation {
+    Create,
+    ExistingOnly,
 }
 
 fn artifact_namespace_lease_path(temp_dir: &Path) -> PathBuf {
@@ -712,6 +757,7 @@ fn maybe_sweep_stale_artifacts(current_dir: Option<&Path>) {
         &temp_dir,
         ACTIVE_LEASE_LOCK_TIMEOUT,
         RUN_COMMAND_BUILTIN,
+        NamespaceLockCreation::Create,
         || {
             let expired_before = SystemTime::now().checked_sub(retention);
             retire_completed_artifacts_under_namespace(

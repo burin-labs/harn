@@ -173,16 +173,20 @@ fn command_id_read_uses_the_registered_artifact_namespace_not_ambient_tmpdir() {
 }
 
 #[test]
-fn explicit_path_is_validated_before_namespace_lock_mutation_even_with_an_id() {
+fn explicit_path_cannot_create_an_absent_artifact_namespace_even_with_an_id() {
     let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
     let temp = tempdir().unwrap();
-    let invalid_path = temp
+    let artifact_path = temp
         .path()
-        .join("harn-command-not-a-canonical-id")
+        .join("harn-command-cmd_123_456_1")
         .join("combined.txt");
+    let entries_before = std::fs::read_dir(temp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
     let mut read_req = dict();
     read_req.insert("command_id".into(), vstr("ignored-command-id"));
-    read_req.insert("path".into(), vstr(&invalid_path.to_string_lossy()));
+    read_req.insert("path".into(), vstr(&artifact_path.to_string_lossy()));
 
     let error = call("hostlib_tools_read_command_output", read_req).unwrap_err();
 
@@ -194,7 +198,11 @@ fn explicit_path_is_validated_before_namespace_lock_mutation_even_with_an_id() {
             ..
         }
     ));
-    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+    let entries_after = std::fs::read_dir(temp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(entries_after, entries_before);
 }
 
 #[test]
