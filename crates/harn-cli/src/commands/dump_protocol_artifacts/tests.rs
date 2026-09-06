@@ -40,6 +40,7 @@ mod generated_rust_binding;
 mod external_action_roundtrip;
 mod llm_outcome_vocabulary;
 mod open_vocabulary_projection;
+mod plan;
 mod prepared_session;
 mod session_recap;
 mod session_update_payloads;
@@ -49,38 +50,79 @@ fn protocol_source() -> ProtocolArtifactSource {
         .expect("harn-cli is compiled from the Harn workspace")
 }
 
-/// Shift-left guard: every `ACP`/`Harn`/`A2A`/`MCP`-prefixed *type* name
-/// referenced in the emitted TypeScript bindings must be declared in the
-/// same artifact. The TS section once used the Python-only name
-/// `HarnExtensionMeta` for a `_meta` field; it compiled here (it's just a
-/// Rust string) but broke `tsc` downstream in an IDE host, where the
-/// failure surfaced far from its cause. This test fails harn's own
-/// `cargo test` on any dangling protocol-type reference, so the class of
-/// bug can't escape the harn build again.
+// Exported names are guarded by check_protocol_symbol_removals.harn; the owning
+// check-bindings targets compile and exercise the published language artifacts.
+// Keep wire-value coverage here, where the canonical runtime registries are
+// available, instead of repeating declaration spelling checks per language.
 #[test]
-fn typescript_artifact_has_no_dangling_type_references() {
-    let ts = generate_typescript_for_tests();
-    let declared: std::collections::HashSet<&str> = regex::Regex::new(
-            r"(?m)^\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?(?:interface|type|enum|class)\s+([A-Za-z_][A-Za-z0-9_]*)",
-        )
-        .unwrap()
-        .captures_iter(&ts)
-        .map(|c| c.get(1).unwrap().as_str())
+fn runtime_wire_values_reach_generated_bindings() {
+    let common: BTreeSet<String> = ACP_AGENT_METHODS
+        .iter()
+        .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter())
+        .chain(HARN_AGENT_EVENT_KINDS.iter())
+        .map(|value| (*value).to_owned())
+        .chain([HARN_PROVIDER_CATALOG_METHOD.to_owned()])
         .collect();
-    let mut dangling: Vec<&str> = regex::Regex::new(r"\b((?:ACP|Harn|A2A|MCP)[A-Za-z0-9]+)\b")
-        .unwrap()
-        .captures_iter(&ts)
-        .map(|c| c.get(1).unwrap().as_str())
-        .filter(|name| !declared.contains(name))
-        .collect();
-    dangling.sort_unstable();
-    dangling.dedup();
-    assert!(
-        dangling.is_empty(),
-        "emitted TypeScript references undeclared protocol type(s): {dangling:?}. Every \
-             ACP/Harn/A2A/MCP-prefixed type used in the bindings must be declared in the same \
-             artifact; this guard shift-lefts the downstream `tsc` failure into harn's build."
-    );
+    assert!(!common.is_empty());
+    for (language, artifact) in [
+        ("Rust", generate_rust_for_tests()),
+        ("Swift", generate_swift_for_tests()),
+        ("TypeScript", generate_typescript_for_tests()),
+        ("Python", generate_python()),
+        ("Go", generate_go()),
+    ] {
+        let mut values = common.clone();
+        if matches!(language, "Swift" | "Python" | "Go") {
+            values.extend(worker_status_values());
+        }
+        if language == "Rust" {
+            values.extend(
+                ACP_DISPATCHED_METHODS
+                    .iter()
+                    .chain(ACP_TRANSPORT_CONTROL_METHODS.iter())
+                    .chain(HARN_SESSION_TIMELINE_METHODS.iter())
+                    .chain(ACP_CLIENT_METHODS.iter())
+                    .chain(HARN_CONTENT_EXTENSION_FIELDS.iter())
+                    .chain(HARN_PROMPT_RESULT_EXTENSION_FIELDS.iter())
+                    .map(|value| (*value).to_owned()),
+            );
+            values.extend(all_acp_session_updates());
+        }
+        if matches!(language, "Rust" | "TypeScript") {
+            values.extend(
+                HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS
+                    .iter()
+                    .map(|value| (*value).to_owned()),
+            );
+        }
+        if language == "Swift" {
+            values.extend(
+                tool_kind_values()
+                    .into_iter()
+                    .chain(tool_call_status_values())
+                    .chain(tool_call_error_category_values())
+                    .chain(tool_mutation_status_values())
+                    .chain(
+                        TOOL_CALL_RECEIPT_STATUSES
+                            .iter()
+                            .map(|value| (*value).to_owned()),
+                    ),
+            );
+        }
+        if matches!(language, "Swift" | "TypeScript") {
+            values.extend(
+                agent_terminal_class_values()
+                    .into_iter()
+                    .chain(agent_terminal_kind_values()),
+            );
+        }
+        for value in &values {
+            assert!(
+                artifact.contains(value),
+                "{language} omitted wire value {value}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -136,18 +178,11 @@ fn tool_annotations_project_typed_completion_evidence_roles_to_every_binding() {
 }
 
 #[test]
-fn generated_types_include_harn_wire_vocabularies() {
+fn generated_bindings_preserve_compatibility_annotations() {
     let ts = generate_typescript_for_tests();
     assert!(ts.contains("export type JsonRpcId = number | string | null"));
     assert!(ts.contains("export const MCP_PROTOCOL_VERSION = \"2026-07-28\""));
-    assert!(ts.contains("export interface MCPRequestMeta"));
-    assert!(ts.contains("export interface MCPDiscoverResult"));
-    assert!(ts.contains("export interface MCPInputRequiredResult"));
-    assert!(ts.contains("export interface MCPOAuthDiscoveryResult"));
-    assert!(ts.contains("MCP_OAUTH_CLIENT_REGISTRATION_MODES"));
-    assert!(ts.contains("MCP_OAUTH_AUTH_MODES"));
     assert!(ts.contains("application_type: MCPOAuthApplicationType"));
-    assert!(ts.contains("MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR"));
     assert!(ts.contains("server/discover"));
     assert!(ts.contains("io.modelcontextprotocol/protocolVersion"));
     assert!(ts.contains("MCP-Protocol-Version"));
@@ -155,79 +190,21 @@ fn generated_types_include_harn_wire_vocabularies() {
     assert!(ts.contains("cacheScope"));
     assert!(ts.contains("sessionClose: \"session/close\""));
     assert!(ts.contains("@deprecated Use session/close; session/stop will be removed"));
-    for value in HARN_SESSION_UPDATE_EXTENSIONS
-        .iter()
-        .chain(HARN_AGENT_EVENT_KINDS.iter())
-        .chain(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS.iter())
-    {
-        assert!(ts.contains(value), "TypeScript artifact missing {value}");
-    }
     let swift = generate_swift_for_tests();
-    assert!(swift.contains("public enum HarnACPAgentMethod"));
-    assert!(swift.contains("public enum HarnACPDispatchedMethod"));
-    assert!(swift.contains("public enum HarnACPTransportControlMethod"));
-    assert!(swift.contains("public enum HarnACPHandledMethod"));
     assert!(swift.contains("mcpProtocolVersion = \"2026-07-28\""));
-    assert!(swift.contains("public struct HarnMCPRequestMeta"));
-    assert!(swift.contains("public struct HarnMCPDiscoverResult"));
-    assert!(swift.contains("public struct HarnMCPInputRequiredResult"));
-    assert!(swift.contains("public struct HarnMCPOAuthDiscoveryResult"));
-    assert!(swift.contains("public enum HarnMCPOAuthClientRegistrationMode"));
-    assert!(swift.contains("public enum HarnMCPOAuthAuthMode"));
     assert!(swift.contains("case applicationType = \"application_type\""));
-    assert!(swift.contains("HarnMCPUnsupportedProtocolVersionError"));
     assert!(swift.contains("case protocolVersion = \"io.modelcontextprotocol/protocolVersion\""));
     assert!(swift.contains("case protocolVersion = \"MCP-Protocol-Version\""));
     assert!(swift.contains("case sessionClose = \"session/close\""));
     assert!(swift.contains("@available(*, deprecated"));
     assert!(swift.contains("public static let allCases: [Self]"));
-    assert!(swift.contains("public enum HarnACPClientMethod"));
-    assert!(swift.contains("public enum HarnACPAgentNotification"));
-    assert!(swift.contains("public enum HarnJsonRpcId"));
     assert!(swift.contains("public var id: HarnJsonRpcId"));
     assert!(swift.contains("public init?(jsonObject: Any)"));
     assert!(swift.contains("case let value as NSNumber: return jsonNumber(value)"));
     assert!(swift.contains("CFGetTypeID(value) == CFBooleanGetTypeID()"));
     assert!(swift.contains("public static func success(id: HarnJsonRpcId"));
-    assert!(swift.contains("public struct HarnToolCallReceipt"));
-    for value in tool_kind_values()
-        .into_iter()
-        .chain(tool_call_status_values())
-        .chain(tool_call_error_category_values())
-        .chain(tool_mutation_status_values())
-        .chain(worker_status_values())
-        .chain(
-            TOOL_CALL_RECEIPT_STATUSES
-                .iter()
-                .map(|value| (*value).to_string()),
-        )
-    {
-        assert!(swift.contains(&value), "Swift artifact missing {value}");
-    }
-    assert!(swift.contains("public enum HarnWorkerStatus"));
-    assert!(ts.contains("export type HarnWorkerStatus"));
-    assert!(ts.contains("HARN_WORKER_STATUSES"));
-    assert!(ts.contains("export interface ToolCallReceipt"));
-    assert!(ts.contains("HARN_TOOL_CALL_RECEIPT_STATUSES"));
-    assert!(ts.contains("export interface HarnACPPromptErrorData"));
-    assert!(ts.contains("export interface HarnACPPromptResult"));
-    assert!(ts.contains("export interface HarnAgentTerminalOutcome"));
-    assert!(ts.contains("export interface HarnPlanDocument"));
     assert!(ts.contains("harnPlanDocument?: HarnPlanDocument"));
-    assert!(ts.contains("export interface ACPToolCallDiff"));
     assert!(ts.contains("content?: ACPToolCallContent[]"));
-    assert!(swift.contains("public struct HarnACPPromptErrorData"));
-    assert!(swift.contains("public struct HarnACPPromptResult"));
-    assert!(swift.contains("public struct HarnAgentTerminalOutcome"));
-    assert!(swift.contains("public struct HarnPlanDocument"));
-    for value in agent_terminal_class_values() {
-        assert!(ts.contains(&value), "TypeScript artifact missing {value}");
-        assert!(swift.contains(&value), "Swift artifact missing {value}");
-    }
-    for value in agent_terminal_kind_values() {
-        assert!(ts.contains(&value), "TypeScript artifact missing {value}");
-        assert!(swift.contains(&value), "Swift artifact missing {value}");
-    }
 }
 
 #[test]
@@ -292,41 +269,17 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     let swift = generate_swift(&vocabulary, &setup, &activity);
     let rust = generate_rust(&vocabulary, &setup, &activity);
 
-    assert!(ts.contains("export type HarnExternalActionOutcome"));
-    assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
-    assert!(ts.contains("export type HarnExternalActionNextAction"));
-    assert!(ts.contains("export type HarnExternalActionProtectedFieldClass"));
-    assert!(ts.contains("export type HarnExternalActionActivityStatus"));
     assert!(ts.contains("isExternalActionActivityStatusTerminal"));
     assert!(ts.contains("canExternalActionActivityStatusAdvance"));
-    assert!(swift.contains("public enum HarnExternalActionOutcome"));
-    assert!(swift.contains("public enum HarnExternalActionReceiptStatus"));
-    assert!(swift.contains("public enum HarnExternalActionNextAction"));
-    assert!(swift.contains("public enum HarnExternalActionProtectedFieldClass"));
-    assert!(swift.contains("public enum HarnExternalActionActivityStatus"));
     assert!(swift.contains("var isTerminal: Bool"));
     assert!(swift.contains("func canAdvance(to next: Self) -> Bool"));
-    assert!(rust.contains("pub enum HarnExternalActionOutcome"));
-    assert!(rust.contains("pub enum HarnExternalActionReceiptStatus"));
-    assert!(rust.contains("pub enum HarnExternalActionNextAction"));
-    assert!(rust.contains("pub enum HarnExternalActionProtectedFieldClass"));
-    assert!(rust.contains("pub enum HarnExternalActionActivityStatus"));
     assert!(rust.contains("pub const fn is_terminal(self) -> bool"));
     assert!(rust.contains("pub const fn can_advance_to(self, next: Self) -> bool"));
 
     for value in vocabulary
-        .outcomes
+        .projections()
         .iter()
-        .chain(&vocabulary.receipt_statuses)
-        .chain(&vocabulary.next_actions)
-        .chain(&vocabulary.protected_field_classes)
-        .chain(&vocabulary.passenger_genders)
-        .chain(&vocabulary.activity_statuses)
-        .chain(&vocabulary.policy_layers)
-        .chain(&vocabulary.policy_evaluation_outcomes)
-        .chain(&vocabulary.decision_outcomes)
-        .chain(&vocabulary.deciders)
-        .chain(&vocabulary.reconciliation_statuses)
+        .flat_map(|(_, _, values)| *values)
     {
         for (host, generated) in [("TypeScript", &ts), ("Swift", &swift), ("Rust", &rust)] {
             assert!(
@@ -369,8 +322,6 @@ fn generic_permission_activity_projects_to_every_supported_host() {
         }
     }
     for (_, artifact) in &generated {
-        assert!(artifact.contains("HarnToolPermissionDecisionMetadata"));
-        assert!(artifact.contains("HarnToolPermissionActivityRecord"));
         assert!(artifact.contains("harn.tool_permission_decision.v1"));
         assert!(artifact.contains("policy_evaluations"));
     }
@@ -379,6 +330,7 @@ fn generic_permission_activity_projects_to_every_supported_host() {
 #[test]
 fn adding_external_action_values_updates_all_host_projections() {
     let vocabulary = ExternalActionVocabulary {
+        records: ExternalActionVocabulary::load_for_tests().records,
         outcomes: vec!["confirmed".into(), "future_outcome".into()],
         receipt_statuses: vec!["confirmed".into(), "future_status".into()],
         next_actions: vec!["none".into(), "future_action".into()],
@@ -439,12 +391,6 @@ fn complete_external_action_activity_projects_without_sensitive_values() {
         generate_rust(&actions, &setup, &activity),
     ] {
         for required in [
-            "HarnExternalActionActivityRecord",
-            "HarnExternalActionReceipt",
-            "HarnExternalActionDisclosureReceipt",
-            "HarnExternalActionPolicyEvaluation",
-            "HarnExternalActionAuthorizationRecord",
-            "HarnExternalActionReconciliationRecord",
             "harn.external_action_activity.v1",
             "harn.external_action_receipt.v1",
         ] {
@@ -516,12 +462,6 @@ fn connector_setup_vocabulary_projects_to_every_supported_host() {
             );
         }
     }
-    assert!(generated[0].1.contains("HarnConnectorSetupStage"));
-    assert!(generated[0].1.contains("interface HarnConnectorSetupEvent"));
-    assert!(generated[1].1.contains("HarnConnectorSetupStatus"));
-    assert!(generated[1].1.contains("struct HarnConnectorSetupEvent"));
-    assert!(generated[2].1.contains("HarnConnectorSetupErrorCode"));
-    assert!(generated[2].1.contains("struct HarnConnectorSetupEvent"));
 }
 
 #[test]
@@ -588,7 +528,7 @@ fn swift_case_name_emits_valid_identifiers() {
 }
 
 #[test]
-fn generated_rust_includes_harn_wire_vocabularies() {
+fn generated_rust_preserves_wire_constants_and_provenance() {
     let rust = generate_rust_for_tests();
     assert!(
         rust.ends_with('\n'),
@@ -602,72 +542,33 @@ fn generated_rust_includes_harn_wire_vocabularies() {
         rust.starts_with("// GENERATED by `harn dump-protocol-artifacts` - do not edit by hand."),
         "Rust artifact missing provenance header"
     );
-    assert!(rust.contains("pub struct HarnPlanDocument"));
-    assert!(rust.contains("pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str ="));
-    assert!(rust.contains("pub const AGENT_TERMINAL_CLASSES: &[&str] = &["));
-    assert!(rust.contains("pub const AGENT_TERMINAL_KINDS: &[&str] = &["));
-    assert!(rust.contains("pub const AGENT_TERMINAL_OWNERS: &[&str] = &["));
-    assert!(rust.contains(&format!(
-        "pub const HARN_AGENT_EVENT_METHOD: &str = {};",
-        json_string_literal(HARN_AGENT_EVENT_METHOD)
-    )));
-    assert!(rust.contains(&format!(
-        "pub const HARN_PROVIDER_CATALOG_METHOD: &str = {};",
-        json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
-    )));
-    // Method-name constants, both the stable and the full dispatched surface.
-    assert!(rust.contains("pub const ACP_AGENT_METHOD_SESSION_PROMPT: &str = \"session/prompt\""));
-    assert!(rust.contains("pub const ACP_AGENT_METHODS: &[&str] = &["));
-    assert!(rust.contains("pub const ACP_DISPATCHED_METHODS: &[&str] = &["));
-    assert!(rust.contains("pub const ACP_TRANSPORT_CONTROL_METHODS: &[&str] = &["));
-    assert!(rust.contains("pub const ACP_HANDLED_METHODS: &[&str] = &["));
-    assert!(rust.contains("pub const ACP_TRANSPORT_CONTROL_METHOD_SESSION_SET_BUDGET"));
-    assert!(rust.contains("pub const ACP_CLIENT_METHODS: &[&str] = &["));
-    assert!(rust.contains("pub const HARN_SESSION_TIMELINE_METHODS: &[&str] = &["));
-    // Session-update discriminators (base + Harn extensions).
-    assert!(rust.contains("pub const ACP_SESSION_UPDATES: &[&str] = &["));
-    assert!(rust.contains("pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &["));
-    // `_meta.harn` content extension keys.
-    assert!(rust.contains(
-        "pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = \"permission_preview\""
-    ));
-    assert!(rust
-        .contains("pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT: &str = \"visible_text\""));
-    assert!(rust.contains(
-        "pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = \"visible_delta\""
-    ));
-    assert!(rust.contains("pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["));
-    assert!(rust.contains("pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["));
-    assert!(rust.contains("pub enum ACPPermissionOptionKind"));
-    assert!(rust.contains("pub struct ACPSessionRequestPermissionParams"));
-    assert!(rust.contains("pub enum ACPPermissionOutcome"));
-    assert!(rust.contains("pub struct HarnAgentEventParams"));
-    assert!(rust.contains("pub enum HarnAgentEventKind"));
-    assert!(rust.contains("pub struct HarnSessionTimelineNode"));
-    assert!(rust.contains("pub struct HarnSessionTimelineCoverage"));
-    assert!(rust.contains("pub struct HarnSessionTimelineSnapshot"));
-    // Dotted / slashed wire names must collapse to valid const identifiers.
-    assert!(rust.contains(
-        "pub const ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND: &str = \"harn.hitl.respond\""
-    ));
-    assert!(rust.contains("pub const ACP_DISPATCHED_METHOD_AGENT_RESUME: &str = \"agent/resume\""));
-    // Every published wire value must appear somewhere in the artifact.
-    for value in ACP_AGENT_METHODS
-        .iter()
-        .chain(ACP_DISPATCHED_METHODS.iter())
-        .chain(ACP_TRANSPORT_CONTROL_METHODS.iter())
-        .chain(HARN_SESSION_TIMELINE_METHODS.iter())
-        .chain(ACP_CLIENT_METHODS.iter())
-        .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter())
-        .chain(HARN_AGENT_EVENT_KINDS.iter())
-        .chain(HARN_CONTENT_EXTENSION_FIELDS.iter())
-        .chain(HARN_PROMPT_RESULT_EXTENSION_FIELDS.iter())
-        .chain(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS.iter())
-    {
-        assert!(rust.contains(value), "Rust artifact missing {value}");
-    }
-    for value in all_acp_session_updates() {
-        assert!(rust.contains(&value), "Rust artifact missing {value}");
+    use generated_rust_binding as binding;
+    for (actual, expected) in [
+        (binding::HARN_AGENT_EVENT_METHOD, HARN_AGENT_EVENT_METHOD),
+        (
+            binding::HARN_PROVIDER_CATALOG_METHOD,
+            HARN_PROVIDER_CATALOG_METHOD,
+        ),
+        (binding::ACP_AGENT_METHOD_SESSION_PROMPT, "session/prompt"),
+        (
+            binding::HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW,
+            "permission_preview",
+        ),
+        (
+            binding::HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT,
+            "visible_text",
+        ),
+        (
+            binding::HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA,
+            "visible_delta",
+        ),
+        (
+            binding::ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND,
+            "harn.hitl.respond",
+        ),
+        (binding::ACP_DISPATCHED_METHOD_AGENT_RESUME, "agent/resume"),
+    ] {
+        assert_eq!(actual, expected);
     }
 }
 
@@ -945,20 +846,6 @@ fn generated_python_includes_harn_wire_vocabularies() {
     assert!(py.contains("class HarnAgentTerminalOutcome(_HarnDataclass):"));
     assert!(py.contains("class AgentTerminalClass(str, Enum):"));
     assert!(py.contains("class AgentTerminalKind(str, Enum):"));
-    for value in HARN_SESSION_UPDATE_EXTENSIONS
-        .iter()
-        .chain(HARN_AGENT_EVENT_KINDS.iter())
-        .chain(ACP_AGENT_METHODS.iter())
-    {
-        assert!(py.contains(value), "Python artifact missing {value}");
-    }
-    assert!(
-        py.contains(HARN_PROVIDER_CATALOG_METHOD),
-        "Python artifact missing {HARN_PROVIDER_CATALOG_METHOD}"
-    );
-    for value in worker_status_values() {
-        assert!(py.contains(&value), "Python artifact missing {value}");
-    }
 }
 
 #[test]
@@ -986,20 +873,6 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("type HarnAgentTerminalOutcome struct"));
     assert!(go.contains("var AgentTerminalClasses = []AgentTerminalClass"));
     assert!(go.contains("var AgentTerminalKinds = []AgentTerminalKind"));
-    for value in HARN_SESSION_UPDATE_EXTENSIONS
-        .iter()
-        .chain(HARN_AGENT_EVENT_KINDS.iter())
-        .chain(ACP_AGENT_METHODS.iter())
-    {
-        assert!(go.contains(value), "Go artifact missing {value}");
-    }
-    assert!(
-        go.contains(HARN_PROVIDER_CATALOG_METHOD),
-        "Go artifact missing {HARN_PROVIDER_CATALOG_METHOD}"
-    );
-    for value in worker_status_values() {
-        assert!(go.contains(&value), "Go artifact missing {value}");
-    }
 }
 
 #[test]

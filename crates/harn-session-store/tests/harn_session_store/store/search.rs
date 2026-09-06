@@ -634,8 +634,53 @@ async fn soft_delete_marks_session_and_hard_delete_removes_it() {
 }
 
 #[tokio::test]
+async fn sweep_retention_removes_dormant_resumable_and_closed_history() {
+    run_retention_with_hooks(StoreHooks::default(), |store| async move {
+        let open = store
+            .create(CreateSession {
+                id: Some("still-open".to_string()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create open session");
+        let closed = store
+            .create(CreateSession {
+                id: Some("explicitly-closed".to_string()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create closed session");
+        store.close(&closed.id).await.expect("close session");
+
+        let policy = RetentionPolicy {
+            max_age_seconds: Some(60),
+            ..RetentionPolicy::default()
+        };
+        let report = store
+            .sweep_retention(&policy, open.created_at_ms + 61_000)
+            .await
+            .expect("sweep");
+
+        assert_eq!(report.soft_deleted, 2);
+        assert_eq!(
+            store.describe(&open.id).await.expect("open session").status,
+            SessionStatus::SoftDeleted
+        );
+        assert_eq!(
+            store
+                .describe(&closed.id)
+                .await
+                .expect("closed session tombstone")
+                .status,
+            SessionStatus::SoftDeleted
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn sweep_retention_hard_deletes_after_grace_window() {
-    run_with_hooks(StoreHooks::default(), |store| async move {
+    run_retention_with_hooks(StoreHooks::default(), |store| async move {
         let meta = store
             .create(CreateSession::default())
             .await

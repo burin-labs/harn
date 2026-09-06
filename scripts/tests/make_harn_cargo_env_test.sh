@@ -686,7 +686,7 @@ for expected in \
   './scripts/cargo_with_worktree_build_dir.sh clippy --workspace --all-targets -- -D warnings' \
   './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace' \
   './scripts/cargo_with_worktree_build_dir.sh test --workspace' \
-  './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e --run-ignored all' \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-cli --tests --profile e2e --run-ignored all' \
   './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-compat --tests' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_compat_tests'

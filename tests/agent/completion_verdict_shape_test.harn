@@ -1,0 +1,285 @@
+// Run: harn test tests/agent/completion_verdict_shape_test.harn
+//
+// Which shapes a completion-judge reply may take depends on WHICH VERDICT it
+// carries. An approval names no gap; a refusal names at least one. Both rules
+// are real, and neither can live in the reply schema, because a JSON validator
+// is handed the object without the question and cannot tell the two apart.
+//
+// One of them used to live there anyway, as `minItems: 1` on `gaps`. Enforcing
+// a rule about refusals inside a validator that sees every reply meant every
+// approval was refused. Measured over an eval archive of 62 judge calls: not
+// one `done` reply reached the pipeline carrying no gap. All 22 were rejected
+// for `gaps: []`, and the repair turn — which hands the model its own text back
+// and asks it to correct the JSON — can satisfy a one-item minimum only by
+// inventing a gap. The models did, lifting a sentence out of their own
+// `detail`. The self-contradiction check then fired on the invented gap, the
+// re-ask flipped the verdict, the invented sentence could not be grounded, a
+// second re-ask fired, and the gate converted the reply back to `done`. Three
+// judge calls and two re-asks to land on the first answer.
+//
+// The same archive showed the second half: `gap_class` had no member meaning
+// "no gap". An approval was told to omit the field, and models sent `other`
+// instead, the nearest thing the enum offered. `other` read as a declared gap,
+// so those approvals were self-contradictions too.
+//
+// These cases pin both rules where they can see the verdict, and pin the two
+// escapes that must NOT reopen: an explicit `other` on a `done` is still the
+// laundered gap of harn#7910, and a refusal that names nothing is still named.
+import { agent_capture_events } from "std/agent/events"
+import {
+  __judge_completion_verdict_contradicts_itself,
+  __judge_completion_verdict_read,
+  __judge_completion_verdict_refuses_without_a_gap,
+  __judge_completion_verdict_schema,
+} from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { llm_done, with_llm_script } from "std/testing"
+
+/** One well-formed gap, so a case exercises the array rather than the reader's drop path. */
+fn a_gap() -> dict {
+  return {
+    criterion: "The exact verifier must pass.",
+    gap_class: "failed_verification",
+    detail: "Rerun the verifier and include its output.",
+  }
+}
+
+pipeline test_the_schema_states_no_minimum_gap_count(harness: Harness, task: unknown) {
+  const schema = __judge_completion_verdict_schema()
+  // The direct revert target. Restoring `minItems: 1` fails this case and the
+  // two scripted cases at the end of this file. It does NOT fail the decoder
+  // cases in between, and that is not an oversight: `__judge_completion_verdict_read`
+  // decodes, it does not validate, so no assertion about it can move with a
+  // schema constraint. Measured on the revert: 3 of 12 red, and the two that
+  // carry the defect are the ones that run a reply through the checkpoint.
+  assert_eq(schema.properties.gaps?.minItems, nil)
+  // `gaps` stays optional, so the two encodings of "no gaps" — an absent field
+  // and an empty array — are both legal. They mean the same thing, and the
+  // schema previously accepted one and refused the other.
+  assert_eq(schema?.required.contains("gaps"), false)
+}
+
+pipeline test_the_gap_class_enum_offers_an_approval_a_value(harness: Harness, task: unknown) {
+  const schema = __judge_completion_verdict_schema()
+  assert_eq(schema.properties.gap_class.enum.contains("none"), true)
+  // `other` stays, and stays meaningful: a refusal whose class is unclear.
+  assert_eq(schema.properties.gap_class.enum.contains("other"), true)
+}
+
+pipeline test_an_approval_with_an_empty_gap_array_is_accepted(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "done", detail: "The verifier passed and every required file is present.", gaps: []},
+  )
+  assert_eq(decoded.verdict, "done")
+  assert_eq(__judge_completion_verdict_contradicts_itself(decoded), false)
+  assert_eq(__judge_completion_verdict_refuses_without_a_gap(decoded), false)
+}
+
+pipeline test_an_approval_that_omits_gaps_entirely_is_accepted(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "done", detail: "The verifier passed and every required file is present."},
+  )
+  assert_eq(decoded.verdict, "done")
+  assert_eq(__judge_completion_verdict_contradicts_itself(decoded), false)
+}
+
+pipeline test_an_approval_may_say_none_out_loud(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {
+      verdict: "done",
+      detail: "The verifier passed and every required file is present.",
+      gap_class: "none",
+      gaps: [],
+    },
+  )
+  assert_eq(decoded.gap_class, "none")
+  assert_eq(__judge_completion_verdict_contradicts_itself(decoded), false)
+}
+
+pipeline test_an_approval_naming_other_is_still_the_laundered_gap(harness: Harness, task: unknown) {
+  // harn#7910's escape, and the reason this check keys on raw presence rather
+  // than on the four named classes. Now that `none` exists, a `done` still
+  // sending `other` is choosing the catch-all over the approval value, which is
+  // a gap it declined to classify.
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "done", detail: "Everything looks fine.", gap_class: "other", gaps: []},
+  )
+  assert_eq(__judge_completion_verdict_contradicts_itself(decoded), true)
+}
+
+pipeline test_an_approval_carrying_a_gap_is_still_a_contradiction(harness: Harness, task: unknown) {
+  // The array half. A reply can name a gap here while leaving the class unsent,
+  // so keying on the enum alone would miss it.
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "done", detail: "Done, though the verifier never ran.", gaps: [a_gap()]},
+  )
+  assert_eq(len(decoded.gaps), 1)
+  assert_eq(__judge_completion_verdict_contradicts_itself(decoded), true)
+}
+
+pipeline test_a_refusal_that_names_nothing_is_named(harness: Harness, task: unknown) {
+  // The rule that used to be `minItems: 1`. It is real, and it survives — it
+  // just applies to the verdict it was always about.
+  const decoded = __judge_completion_verdict_read(
+    {verdict: "continue", detail: "Not finished.", gaps: []},
+  )
+  assert_eq(__judge_completion_verdict_refuses_without_a_gap(decoded), true)
+  // The verdict is untouched. A shape defect must never turn a refusal into an
+  // approval; that is the one direction that can end a run that should not end.
+  assert_eq(decoded.verdict, "continue")
+}
+
+pipeline test_a_refusal_that_names_a_gap_is_ordinary(harness: Harness, task: unknown) {
+  const decoded = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "Rerun the verifier.",
+      gap_class: "failed_verification",
+      gaps: [a_gap()],
+    },
+  )
+  assert_eq(__judge_completion_verdict_refuses_without_a_gap(decoded), false)
+  assert_eq(__judge_completion_verdict_contradicts_itself(decoded), false)
+}
+
+pipeline test_a_refusal_naming_only_a_class_is_not_shapeless(harness: Harness, task: unknown) {
+  // A refusal that classified its gap but sent no array still said something.
+  // Reporting it as shapeless would name a defect that is not there.
+  const decoded = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "The authorization is still outstanding.",
+      gap_class: "unresolved_authorization",
+      gaps: [],
+    },
+  )
+  assert_eq(__judge_completion_verdict_refuses_without_a_gap(decoded), false)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The same two rules through the real checkpoint, where the schema is actually
+// applied. The cases above pin the typed contract; the decoder never validates,
+// so restoring `minItems` moves only the one assertion that reads the schema.
+// These cases move with the defect itself: they script a judge reply and count
+// what the checkpoint did to it.
+
+// -------------------------------------------------------------------------------------------------
+
+/** Judge checkpoints the validator had to send back. */
+fn __repaired_judge_calls(events: unknown) -> int {
+  return len(
+    events.filter(
+      { event ->
+        event.type == "typed_checkpoint"
+          && event?.checkpoint?.name == "agent.completion_judge"
+          && event?.checkpoint?.repaired == true
+      },
+    )
+      .to_list(),
+  )
+}
+
+/** Re-asks, by their own receipt rather than by judge-call arithmetic. */
+fn __reasks(events: unknown) -> int {
+  return len(
+    events.filter(
+      { event ->
+        event.type == "typed_checkpoint"
+          && event?.checkpoint?.schema == "harn.completion_judge_contradiction_retry.v1"
+      },
+    )
+      .to_list(),
+  )
+}
+
+/** A gate that reports a passing verifier, so nothing but the judge decides. */
+fn __passing_gate() {
+  return { _payload ->
+    {
+      confirm: true,
+      message: "checked",
+      reason: "verified",
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: "passed",
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+fn __run(harness: Harness, label: string, script: list) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the requested change.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 6,
+            verify_completion_judge: {provider: "mock", max_invocations: 3},
+            verify_completion: __passing_gate(),
+          },
+        ) },
+      )
+      return {events: captured.events, result: captured.result}
+    },
+  )
+}
+
+/** The clean approval the archive shows the judge actually writing. */
+fn __approval_naming_no_gap() -> dict {
+  return {
+    text: json_stringify(
+      {
+        verdict: "done",
+        detail: "Median is implemented across lexer, AST, parser, and aggregation logic, "
+          + "and the required verifier passed.",
+        gaps: [],
+      },
+    ),
+  }
+}
+
+pipeline test_an_approval_is_not_sent_back_to_be_repaired(harness: Harness, task: unknown) {
+  const captured = __run(harness, "approval-no-gap", [llm_done(), __approval_naming_no_gap()])
+  // The load-bearing pair. Restoring `minItems: 1` makes the validator refuse
+  // this reply, the repair turn invents a gap, and both of these go non-zero.
+  assert_eq(__repaired_judge_calls(captured.events), 0)
+  assert_eq(__reasks(captured.events), 0)
+  // And the answer the judge gave is the answer the run ends on, which is the
+  // outcome the whole chain used to lose.
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_the_measured_judge_call_count_is_one(harness: Harness, task: unknown) {
+  // The archived cell spent three judge calls to land on its first answer. A
+  // clean approval must cost exactly one.
+  const captured = __run(harness, "approval-one-call", [llm_done(), __approval_naming_no_gap()])
+  const calls = events_of_judge(captured.events)
+  assert_eq(calls, 1)
+}
+
+/** Judge checkpoints, repaired or not. */
+fn events_of_judge(events: unknown) -> int {
+  return len(
+    events.filter(
+      { event ->
+        event.type == "typed_checkpoint" && event?.checkpoint?.name == "agent.completion_judge"
+      },
+    )
+      .to_list(),
+  )
+}

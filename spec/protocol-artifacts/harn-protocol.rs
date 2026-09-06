@@ -31,7 +31,7 @@ pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
 /// Schema discriminator for typed `session/prompt` JSON-RPC error data.
 pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = "harn.acp.prompt_error.v1";
 
-/// Closed external-action receipt outcomes owned by `std/external_action/vocabulary`.
+/// Closed external-action outcomes owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionOutcome {
     #[serde(rename = "confirmed")]
@@ -101,7 +101,7 @@ impl HarnExternalActionReceiptStatus {
     }
 }
 
-/// Closed external-action follow-up actions owned by `std/external_action/vocabulary`.
+/// Closed external-action next actions owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionNextAction {
     #[serde(rename = "none")]
@@ -280,7 +280,7 @@ impl HarnExternalActionErrorKind {
     }
 }
 
-/// Closed protected-profile field classes owned by `std/external_action/vocabulary`.
+/// Closed external-action protected field classes owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionProtectedFieldClass {
     #[serde(rename = "legal_identity")]
@@ -319,7 +319,7 @@ impl HarnExternalActionProtectedFieldClass {
     }
 }
 
-/// Closed passenger gender markers owned by `std/external_action/vocabulary`.
+/// Closed external-action passenger genders owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionPassengerGender {
     #[serde(rename = "m")]
@@ -394,44 +394,6 @@ impl HarnExternalActionActivityStatus {
     }
 }
 
-impl HarnExternalActionActivityStatus {
-    /// Whether this snapshot is a final outcome and may only replay identically.
-    pub const fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Denied
-                | Self::Cancelled
-                | Self::TimedOut
-                | Self::Confirmed
-                | Self::FailedBeforeDispatch
-                | Self::Rejected
-        )
-    }
-}
-
-impl HarnExternalActionActivityStatus {
-    /// Whether a later snapshot may advance from this lifecycle status.
-    pub const fn can_advance_to(self, next: Self) -> bool {
-        if self.is_terminal() {
-            return self as u8 == next as u8;
-        }
-        if next.is_terminal() {
-            return true;
-        }
-        self.progress_rank() <= next.progress_rank()
-    }
-
-    const fn progress_rank(self) -> u8 {
-        match self {
-            Self::Proposed => 0,
-            Self::ApprovalPending => 1,
-            Self::DispatchPending => 2,
-            Self::ReconciliationRequired => 3,
-            _ => u8::MAX,
-        }
-    }
-}
-
 /// Closed external-action policy layers owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionPolicyLayer {
@@ -463,7 +425,7 @@ impl HarnExternalActionPolicyLayer {
     }
 }
 
-/// Closed policy evaluation outcomes owned by `std/external_action/vocabulary`.
+/// Closed external-action policy evaluation outcomes owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionPolicyEvaluationOutcome {
     #[serde(rename = "allowed")]
@@ -525,7 +487,7 @@ impl HarnExternalActionDecisionOutcome {
     }
 }
 
-/// Closed external-action decider kinds owned by `std/external_action/vocabulary`.
+/// Closed external-action deciders owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionDecider {
     #[serde(rename = "person")]
@@ -599,6 +561,44 @@ impl HarnExternalActionReconciliationStatus {
     }
 }
 
+impl HarnExternalActionActivityStatus {
+    /// Whether this snapshot is a final outcome and may only replay identically.
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Denied
+                | Self::Cancelled
+                | Self::TimedOut
+                | Self::Confirmed
+                | Self::FailedBeforeDispatch
+                | Self::Rejected
+        )
+    }
+}
+
+impl HarnExternalActionActivityStatus {
+    /// Whether a later snapshot may advance from this lifecycle status.
+    pub const fn can_advance_to(self, next: Self) -> bool {
+        if self.is_terminal() {
+            return self as u8 == next as u8;
+        }
+        if next.is_terminal() {
+            return true;
+        }
+        self.progress_rank() <= next.progress_rank()
+    }
+
+    const fn progress_rank(self) -> u8 {
+        match self {
+            Self::Proposed => 0,
+            Self::ApprovalPending => 1,
+            Self::DispatchPending => 2,
+            Self::ReconciliationRequired => 3,
+            _ => u8::MAX,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnExternalActionActor {
     pub kind: String,
@@ -629,15 +629,15 @@ pub struct HarnExternalActionError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnExternalActionReceiptReconciliation {
-    pub attempt_id: String,
+pub struct HarnExternalActionRetryLink {
+    pub schema: String,
+    pub previous_action_id: String,
     pub previous_receipt_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnExternalActionRetryLink {
-    pub schema: String,
-    pub previous_action_id: String,
+pub struct HarnExternalActionReceiptReconciliation {
+    pub attempt_id: String,
     pub previous_receipt_id: String,
 }
 
@@ -767,7 +767,7 @@ pub struct HarnExternalActionActivityRecord {
     pub retry: Option<HarnExternalActionRetryLink>,
 }
 
-/// Closed portable activity kinds owned by `std/activity/vocabulary`.
+/// Closed activity kinds owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnActivityKind {
     #[serde(rename = "external_action")]
@@ -787,7 +787,7 @@ impl HarnActivityKind {
     }
 }
 
-/// Closed generic tool permission outcomes owned by `std/activity/vocabulary`.
+/// Closed tool permission outcomes owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnToolPermissionOutcome {
     #[serde(rename = "approved")]
@@ -818,7 +818,7 @@ impl HarnToolPermissionOutcome {
     }
 }
 
-/// Closed generic tool permission deciders owned by `std/activity/vocabulary`.
+/// Closed tool permission deciders owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnToolPermissionDecider {
     #[serde(rename = "person")]
@@ -861,7 +861,7 @@ impl HarnToolPermissionDecider {
     }
 }
 
-/// Closed generic tool permission policy layers owned by `std/activity/vocabulary`.
+/// Closed tool permission policy layers owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnToolPermissionPolicyLayer {
     #[serde(rename = "user_policy")]
@@ -892,7 +892,7 @@ impl HarnToolPermissionPolicyLayer {
     }
 }
 
-/// Closed generic tool permission policy outcomes owned by `std/activity/vocabulary`.
+/// Closed tool permission policy outcomes owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnToolPermissionPolicyOutcome {
     #[serde(rename = "allowed")]
@@ -923,7 +923,7 @@ impl HarnToolPermissionPolicyOutcome {
     }
 }
 
-/// Closed generic tool permission grant scopes owned by `std/activity/vocabulary`.
+/// Closed tool permission grant scopes owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnToolPermissionGrantScope {
     #[serde(rename = "once")]
@@ -943,7 +943,7 @@ impl HarnToolPermissionGrantScope {
     }
 }
 
-/// Closed generic tool permission grant expiries owned by `std/activity/vocabulary`.
+/// Closed tool permission grant expiries owned by `std/activity/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnToolPermissionGrantExpiry {
     #[serde(rename = "after_dispatch")]
@@ -1340,7 +1340,7 @@ impl HarnConnectorSetupErrorCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnConnectorSetupEvent {
     pub schema: String,
     pub sequence: u64,
@@ -1353,22 +1353,6 @@ pub struct HarnConnectorSetupEvent {
     pub error_code: Option<HarnConnectorSetupErrorCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<String>,
-}
-
-/// Author identity on a collaborative plan revision or comment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanAuthor {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-}
-
-/// Source identity for an immutable plan revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanSource {
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub uri: Option<String>,
 }
 
 /// Closed collaborative plan-comment lifecycle.
@@ -1391,48 +1375,6 @@ pub enum HarnPlanApprovalState {
     Rejected,
 }
 
-/// One normalized executable plan step.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanStep {
-    pub id: String,
-    pub content: String,
-    pub status: String,
-    pub priority: Option<Value>,
-}
-
-/// Typed approval state for an executable plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanApproval {
-    pub state: HarnPlanApprovalState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewer: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reviewers: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-/// Normalized executable plan embedded in a collaborative revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanArtifact {
-    #[serde(rename = "_type")]
-    pub type_name: String,
-    pub schema_version: String,
-    pub id: String,
-    pub tool: String,
-    pub title: String,
-    pub summary: String,
-    pub steps: Vec<HarnPlanStep>,
-    pub assumptions: Vec<String>,
-    pub open_questions: Vec<String>,
-    pub verification_commands: Vec<String>,
-    pub approval: HarnPlanApproval,
-}
-
 /// Typed mutation that produced an immutable plan revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -1452,78 +1394,6 @@ pub enum HarnPlanRevisionOperation {
         comment_id: String,
         state: HarnPlanCommentState,
     },
-}
-
-/// Immutable collaborative plan revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanRevision {
-    pub revision_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_revision_id: Option<String>,
-    pub markdown: String,
-    pub plan: HarnPlanArtifact,
-    pub author: HarnPlanAuthor,
-    pub source: HarnPlanSource,
-    pub created_at: String,
-    pub operation: HarnPlanRevisionOperation,
-}
-
-/// UTF-8 byte range fallback for a plan-comment anchor.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanTextRange {
-    pub start: usize,
-    pub end: usize,
-}
-
-/// Stable-step and quoted-text/range anchor for a plan comment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanCommentAnchor {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quoted_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub range: Option<HarnPlanTextRange>,
-}
-
-/// Anchored collaborative plan comment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanComment {
-    pub comment_id: String,
-    pub anchor: HarnPlanCommentAnchor,
-    pub body: String,
-    pub state: HarnPlanCommentState,
-    pub author: HarnPlanAuthor,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-/// Receipt binding a comment resolution to input/output revisions and an agent event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanCommentResolutionReceipt {
-    pub receipt_id: String,
-    pub comment_id: String,
-    pub input_revision_id: String,
-    pub output_revision_id: String,
-    pub agent_run_id: String,
-    pub event_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub explanation: Option<String>,
-    pub created_at: String,
-}
-
-/// Harn's canonical collaborative plan-document contract.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanDocument {
-    #[serde(rename = "_type")]
-    pub type_name: String,
-    pub schema_version: String,
-    pub document_id: String,
-    pub current_revision: HarnPlanRevision,
-    pub comments: Vec<HarnPlanComment>,
-    pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 /// Closed ACP permission-option vocabulary.
@@ -3640,7 +3510,6 @@ pub enum HarnSessionRecapUnavailableReason {
     ProjectionFailed,
     AdmissionTerminal,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapQuery {
@@ -3650,12 +3519,14 @@ pub struct HarnSessionRecapQuery {
     pub from_event_id: Option<u64>,
     pub limit: Option<usize>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapCursor {
     pub last_event_id: Option<u64>,
     pub next_event_id: Option<u64>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapCoverage {
@@ -3665,12 +3536,14 @@ pub struct HarnSessionRecapCoverage {
     pub unassigned: usize,
     pub truncated: bool,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSourceEvent {
     pub event_id: u64,
     pub record_hash: String,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSource {
@@ -3678,12 +3551,14 @@ pub struct HarnSessionRecapSource {
     pub last_event_id: Option<u64>,
     pub events: Vec<HarnSessionRecapSourceEvent>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapTextFact {
     pub text: String,
     pub source_event_id: u64,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapVerificationFact {
@@ -3692,6 +3567,7 @@ pub struct HarnSessionRecapVerificationFact {
     pub verified_paths: Vec<String>,
     pub source_event_id: u64,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapToolExchange {
@@ -3705,6 +3581,7 @@ pub struct HarnSessionRecapToolExchange {
     pub verification: Option<HarnSessionRecapVerificationFact>,
     pub source_event_ids: Vec<u64>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanStep {
@@ -3712,6 +3589,7 @@ pub struct HarnSessionRecapPlanStep {
     pub content: String,
     pub status: HarnSessionRecapPlanStepStatus,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanEventFact {
@@ -3719,6 +3597,7 @@ pub struct HarnSessionRecapPlanEventFact {
     pub event_id: String,
     pub input_revision_id: Option<String>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapPlanFact {
@@ -3730,6 +3609,7 @@ pub struct HarnSessionRecapPlanFact {
     pub event: Option<HarnSessionRecapPlanEventFact>,
     pub source_event_id: u64,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapProgressEntry {
@@ -3737,6 +3617,7 @@ pub struct HarnSessionRecapProgressEntry {
     pub status: HarnSessionRecapProgressStatus,
     pub priority: Option<HarnSessionRecapProgressPriority>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapProgressFact {
@@ -3745,6 +3626,7 @@ pub struct HarnSessionRecapProgressFact {
     pub replace: bool,
     pub source_event_id: u64,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapTerminalFact {
@@ -3756,6 +3638,7 @@ pub struct HarnSessionRecapTerminalFact {
     pub reason: Option<String>,
     pub source_event_id: u64,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapIteration {
@@ -3767,6 +3650,7 @@ pub struct HarnSessionRecapIteration {
     pub progress: Vec<HarnSessionRecapProgressFact>,
     pub source_event_ids: Vec<u64>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionPromptTurnRecap {
@@ -3778,6 +3662,7 @@ pub struct HarnSessionPromptTurnRecap {
     pub terminal: Option<HarnSessionRecapTerminalFact>,
     pub source_event_ids: Vec<u64>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnSessionRecapSnapshot {
@@ -3793,6 +3678,7 @@ pub struct HarnSessionRecapSnapshot {
     #[serde(default)]
     pub extensions: std::collections::BTreeMap<String, Value>,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HarnSessionRecapAvailability {
@@ -3802,4 +3688,122 @@ pub enum HarnSessionRecapAvailability {
     Unavailable {
         reason: HarnSessionRecapUnavailableReason,
     },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanAuthor {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanSource {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanStep {
+    pub id: String,
+    pub content: String,
+    pub status: String,
+    pub priority: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanApproval {
+    pub state: HarnPlanApprovalState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanArtifact {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: String,
+    pub id: String,
+    pub tool: String,
+    pub title: String,
+    pub summary: String,
+    pub steps: Vec<HarnPlanStep>,
+    pub assumptions: Vec<String>,
+    pub open_questions: Vec<String>,
+    pub verification_commands: Vec<String>,
+    pub approval: HarnPlanApproval,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanRevision {
+    pub revision_id: String,
+    pub markdown: String,
+    pub plan: HarnPlanArtifact,
+    pub author: HarnPlanAuthor,
+    pub source: HarnPlanSource,
+    pub created_at: String,
+    pub operation: HarnPlanRevisionOperation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_revision_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanTextRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanCommentAnchor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quoted_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<HarnPlanTextRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanComment {
+    pub comment_id: String,
+    pub anchor: HarnPlanCommentAnchor,
+    pub body: String,
+    pub state: HarnPlanCommentState,
+    pub author: HarnPlanAuthor,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanCommentResolutionReceipt {
+    pub receipt_id: String,
+    pub comment_id: String,
+    pub input_revision_id: String,
+    pub output_revision_id: String,
+    pub agent_run_id: String,
+    pub event_id: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnPlanDocument {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub schema_version: String,
+    pub document_id: String,
+    pub current_revision: HarnPlanRevision,
+    pub comments: Vec<HarnPlanComment>,
+    pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
+    pub created_at: String,
+    pub updated_at: String,
 }

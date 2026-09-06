@@ -12,6 +12,7 @@
 //!
 //! - [`event`] - event taxonomy and canonical JSON encoder
 //! - [`identity`] - typed producer identity over canonical signed headers
+//! - [`lease`] - process-owned writer/maintenance exclusion
 //! - [`redaction`] - dependency-inverted event redaction contract
 //! - [`signing`] - Ed25519 chain hashes and receipt signatures
 //! - [`store`] - public `SessionStore` trait and shared types
@@ -24,6 +25,7 @@ pub mod change;
 pub mod control;
 pub mod event;
 pub mod identity;
+pub mod lease;
 pub mod memory;
 pub(crate) mod memory_helpers;
 pub mod redaction;
@@ -43,6 +45,10 @@ pub use event::{
     SessionEventKind, StoredEvent,
 };
 pub use identity::{EventIdentity, EventIdentityError, EventIdentityField};
+pub use lease::{
+    session_lease_directory, session_write_lease_path, SessionLeaseError, SessionMaintenanceLease,
+    SessionWriteLease,
+};
 pub use memory::MemorySessionStore;
 pub use redaction::{EventRedactor, SharedEventRedactor};
 pub use retention::{ArchiveSink, RetentionPolicy, SharedArchiveSink, Tombstone};

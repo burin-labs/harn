@@ -71,9 +71,9 @@ duplicates the other:
   `provider_error` event (not silent, the #3543 fix), degrade back to the
   primary — are pinned by
   `../agents/agent_loop_escalation_provider_error.harn`;
-- **negative clause** — the terminator must **not** fire while the failing
-  error set strictly **shrinks** and budget remains (the `swift-feat`
-  premature-cut regression) — is pinned by
-  `escalation_progress_credit.contract.harn` here.
+- **repair budget** — complete shrinking failures restart the budget;
+  constant, partial, and disabled controls do not. Fresh-failure grace expires
+  with its deferred cap still enforceable. Actual declared verifier dispatches
+  pin these clauses in `escalation_progress_credit.contract.harn` here.
 
 Together they state the full {trigger, effect, negative} for escalation.

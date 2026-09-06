@@ -162,7 +162,7 @@ fn stop_and_join(state: WatchState) {
 /// module now holds is about the watcher set, so a case should assert on that
 /// set rather than on the SQLite sidecars it happens to leave behind.
 #[cfg(test)]
-fn watcher_count_for(path: &Path) -> usize {
+pub(super) fn watcher_count_for(path: &Path) -> usize {
     watchers().iter().filter(|(seen, _)| seen == path).count()
 }
 

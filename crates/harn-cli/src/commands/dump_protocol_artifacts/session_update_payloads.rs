@@ -10,24 +10,8 @@
 #[cfg(test)]
 use harn_serve::adapters::acp::HARN_SESSION_UPDATE_EXTENSIONS;
 
-#[derive(Clone, Copy)]
-pub(super) enum PayloadFieldKind {
-    NonEmptyString,
-    String,
-    U64,
-    Bool,
-    StringList,
-    Json,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct PayloadField {
-    pub wire_name: &'static str,
-    pub rust_name: &'static str,
-    pub kind: PayloadFieldKind,
-    pub required: bool,
-    pub identity: bool,
-}
+use super::records::{Field as PayloadField, FieldKind as PayloadFieldKind, Integer, Target};
+use std::borrow::Cow;
 
 #[derive(Clone, Copy)]
 pub(super) struct SessionUpdatePayload {
@@ -44,8 +28,8 @@ const fn field(
     identity: bool,
 ) -> PayloadField {
     PayloadField {
-        wire_name,
-        rust_name,
+        wire_name: Cow::Borrowed(wire_name),
+        rust_name: Cow::Borrowed(rust_name),
         kind,
         required,
         identity,
@@ -167,8 +151,16 @@ pub(super) const TYPED_SESSION_UPDATE_PAYLOADS: &[SessionUpdatePayload] = &[
         fields: &[
             req_id("message", "message", PayloadFieldKind::NonEmptyString),
             opt("phase", "phase", PayloadFieldKind::String),
-            opt("progress", "progress", PayloadFieldKind::U64),
-            opt("total", "total", PayloadFieldKind::U64),
+            opt(
+                "progress",
+                "progress",
+                PayloadFieldKind::Integer(Integer::HostCount),
+            ),
+            opt(
+                "total",
+                "total",
+                PayloadFieldKind::Integer(Integer::HostCount),
+            ),
             opt("data", "data", PayloadFieldKind::Json),
         ],
     },
@@ -189,7 +181,11 @@ pub(super) const TYPED_SESSION_UPDATE_PAYLOADS: &[SessionUpdatePayload] = &[
         type_stem: "SkillActivated",
         fields: &[
             req_id("skillName", "skill_name", PayloadFieldKind::NonEmptyString),
-            opt("iteration", "iteration", PayloadFieldKind::U64),
+            opt(
+                "iteration",
+                "iteration",
+                PayloadFieldKind::Integer(Integer::HostCount),
+            ),
             opt("reason", "reason", PayloadFieldKind::String),
         ],
     },
@@ -198,7 +194,11 @@ pub(super) const TYPED_SESSION_UPDATE_PAYLOADS: &[SessionUpdatePayload] = &[
         type_stem: "SkillDeactivated",
         fields: &[
             req_id("skillName", "skill_name", PayloadFieldKind::NonEmptyString),
-            opt("iteration", "iteration", PayloadFieldKind::U64),
+            opt(
+                "iteration",
+                "iteration",
+                PayloadFieldKind::Integer(Integer::HostCount),
+            ),
         ],
     },
     SessionUpdatePayload {
@@ -456,13 +456,7 @@ pub(super) fn append_typescript_session_update_payloads(out: &mut String) {
             payload.discriminator
         ));
         for field in payload.fields {
-            let ts_type = match field.kind {
-                PayloadFieldKind::NonEmptyString | PayloadFieldKind::String => "string",
-                PayloadFieldKind::U64 => "number",
-                PayloadFieldKind::Bool => "boolean",
-                PayloadFieldKind::StringList => "string[]",
-                PayloadFieldKind::Json => "ACPValue",
-            };
+            let ts_type = field.kind.type_name(Target::Typescript);
             if field.required {
                 out.push_str(&format!("  {}: {}\n", field.wire_name, ts_type));
             } else {
@@ -529,14 +523,8 @@ pub(super) fn append_rust_session_update_payloads(out: &mut String) {
     }
 }
 
-fn rust_field_type(field: &PayloadField) -> &'static str {
-    match field.kind {
-        PayloadFieldKind::NonEmptyString | PayloadFieldKind::String => "String",
-        PayloadFieldKind::U64 => "u64",
-        PayloadFieldKind::Bool => "bool",
-        PayloadFieldKind::StringList => "Vec<String>",
-        PayloadFieldKind::Json => "Value",
-    }
+fn rust_field_type(field: &PayloadField) -> String {
+    field.kind.type_name(Target::Rust)
 }
 
 pub(super) fn append_swift_session_update_payloads(out: &mut String) {
@@ -550,13 +538,7 @@ pub(super) fn append_swift_session_update_payloads(out: &mut String) {
             swift_payload_type_name(payload)
         ));
         for field in payload.fields {
-            let swift_type = match field.kind {
-                PayloadFieldKind::NonEmptyString | PayloadFieldKind::String => "String",
-                PayloadFieldKind::U64 => "Int",
-                PayloadFieldKind::Bool => "Bool",
-                PayloadFieldKind::StringList => "[String]",
-                PayloadFieldKind::Json => "HarnACPValue",
-            };
+            let swift_type = field.kind.type_name(Target::Swift);
             if field.required {
                 out.push_str(&format!(
                     "    public var {}: {swift_type}\n",
@@ -590,32 +572,17 @@ pub(super) fn append_python_session_update_payloads(out: &mut String) {
             out.push_str(&format!(
                 "    {}: {}\n",
                 field.wire_name,
-                python_field_type(field.kind, true)
+                field.kind.optional_type(Target::Python, true)
             ));
         }
         for field in optional {
             out.push_str(&format!(
                 "    {}: {} = None\n",
                 field.wire_name,
-                python_field_type(field.kind, false)
+                field.kind.optional_type(Target::Python, false)
             ));
         }
         out.push_str("    _meta: Optional[HarnExtensionMeta] = None\n");
-    }
-}
-
-fn python_field_type(kind: PayloadFieldKind, required: bool) -> String {
-    let inner = match kind {
-        PayloadFieldKind::NonEmptyString | PayloadFieldKind::String => "str",
-        PayloadFieldKind::U64 => "int",
-        PayloadFieldKind::Bool => "bool",
-        PayloadFieldKind::StringList => "List[str]",
-        PayloadFieldKind::Json => "JsonValue",
-    };
-    if required {
-        inner.to_string()
-    } else {
-        format!("Optional[{inner}]")
     }
 }
 
@@ -628,37 +595,10 @@ pub(super) fn append_go_session_update_payloads(out: &mut String) {
             go_payload_type_name(payload)
         ));
         for field in payload.fields {
-            let go_name = pascal_ident(field.wire_name);
-            let (go_type, tag) = match (field.kind, field.required) {
-                (PayloadFieldKind::NonEmptyString | PayloadFieldKind::String, true) => {
-                    ("string", format!("json:\"{}\"", field.wire_name))
-                }
-                (PayloadFieldKind::NonEmptyString | PayloadFieldKind::String, false) => {
-                    ("*string", format!("json:\"{},omitempty\"", field.wire_name))
-                }
-                (PayloadFieldKind::U64, true) => ("int", format!("json:\"{}\"", field.wire_name)),
-                (PayloadFieldKind::U64, false) => {
-                    ("*int", format!("json:\"{},omitempty\"", field.wire_name))
-                }
-                (PayloadFieldKind::Bool, true) => ("bool", format!("json:\"{}\"", field.wire_name)),
-                (PayloadFieldKind::Bool, false) => {
-                    ("*bool", format!("json:\"{},omitempty\"", field.wire_name))
-                }
-                (PayloadFieldKind::StringList, true) => {
-                    ("[]string", format!("json:\"{}\"", field.wire_name))
-                }
-                (PayloadFieldKind::StringList, false) => (
-                    "[]string",
-                    format!("json:\"{},omitempty\"", field.wire_name),
-                ),
-                (PayloadFieldKind::Json, true) => {
-                    ("json.RawMessage", format!("json:\"{}\"", field.wire_name))
-                }
-                (PayloadFieldKind::Json, false) => (
-                    "json.RawMessage",
-                    format!("json:\"{},omitempty\"", field.wire_name),
-                ),
-            };
+            let go_name = pascal_ident(&field.wire_name);
+            let go_type = field.kind.optional_type(Target::Go, field.required);
+            let omit = if field.required { "" } else { ",omitempty" };
+            let tag = format!("json:\"{}{omit}\"", field.wire_name);
             out.push_str(&format!("\t{go_name} {go_type} `{tag}`\n"));
         }
         out.push_str("\tMeta *HarnExtensionMeta `json:\"_meta,omitempty\"`\n}\n");

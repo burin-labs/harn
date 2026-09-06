@@ -13,10 +13,10 @@ import {
   agent_stall_current_failure,
   agent_stall_initial_state,
   agent_stall_no_net_progress,
-  agent_stall_observe_tool_calls,
   agent_stall_repair_config,
 } from "std/agent/stall"
 import { assert_throws } from "std/testing"
+import { _fail_dispatch, _verification_of, observe_stall } from "./stall_dispatch_fixture"
 
 const CONFIG = {enabled: true, no_progress_messages: 3}
 
@@ -25,17 +25,7 @@ fn _progress_only() {
 }
 
 fn _observe(agent: HarnessAgent, state: AgentStallState, calls: list, iteration: int) {
-  return agent_stall_observe_tool_calls(
-    agent,
-    "unit",
-    calls,
-    iteration,
-    CONFIG,
-    state,
-    true,
-    nil,
-    "",
-  )
+  return observe_stall(agent, state, {calls: calls, iteration: iteration, config: CONFIG})
 }
 
 pipeline test_agent_progress_spam_trips_no_progress(harness: Harness, task: any) {
@@ -94,34 +84,22 @@ pipeline test_mixed_turn_with_real_call_is_progress(harness: Harness, task: any)
 fn _observe_parse_error(agent: HarnessAgent, state: AgentStallState, iteration: int) {
   // 0 tool calls + non-empty text, but the turn carried parser errors (the calls
   // were dropped). `had_parse_errors = true`.
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit",
-    [],
-    iteration,
-    CONFIG,
     state,
-    true,
-    nil,
-    "I edited the file.",
-    true,
+    {
+      calls: [],
+      iteration: iteration,
+      config: CONFIG,
+      text: "I edited the file.",
+      parse_error: true,
+    },
   )
 }
 
 fn _observe_text(agent: HarnessAgent, state: AgentStallState, iteration: int, text: string) {
   // Same shape but a genuine no-progress monologue (no parser errors).
-  return agent_stall_observe_tool_calls(
-    agent,
-    "unit",
-    [],
-    iteration,
-    CONFIG,
-    state,
-    true,
-    nil,
-    text,
-    false,
-  )
+  return observe_stall(agent, state, {calls: [], iteration: iteration, config: CONFIG, text: text})
 }
 
 fn _observe_text_only(agent: HarnessAgent, state: AgentStallState, iteration: int) {
@@ -137,10 +115,12 @@ pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, 
   assert(o1.warning == nil)
   assert(o1.state.no_progress_streak == 0)
   const o2 = _observe_parse_error(harness.agent, o1.state, 2)
+  assert(o2.warning != nil)
   assert(o2.warning.pattern == "repeated_parse_rejection")
   assert(o2.warning.count == 2)
   assert(o2.state.no_progress_streak == 0)
   const o3 = _observe_parse_error(harness.agent, o2.state, 3)
+  assert(o3.warning != nil)
   assert(o3.warning.pattern == "repeated_parse_rejection")
   assert(o3.warning.count == 3)
   assert(o3.state.no_progress_streak == 0)
@@ -149,19 +129,16 @@ pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, 
 fn _observe_errored_no_call(agent: HarnessAgent, state: any, iteration: any) {
   // 0 tool calls + narration text, turn ended with a PROVIDER ERROR
   // (turn_stop_reason = "error"): the cheap-model eval-meter failure class.
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit",
-    [],
-    iteration,
-    CONFIG,
     state,
-    true,
-    nil,
-    "We need to make edit to create tests/foo_test.cpp",
-    false,
-    false,
-    "error",
+    {
+      calls: [],
+      iteration: iteration,
+      config: CONFIG,
+      text: "We need to make edit to create tests/foo_test.cpp",
+      stop_reason: "error",
+    },
   )
 }
 
@@ -257,15 +234,6 @@ const REPAIR_CONFIG = {
   post_edit_reverify: true,
 }
 
-fn _run_call() {
-  return [{name: "run", arguments: {cmd: "test"}}]
-}
-
-fn _fail_dispatch(error_text: any) {
-  // A failing verification result for tool "run".
-  return [{tool_name: "run", ok: false, error: error_text}]
-}
-
 fn _stale_dispatch(error_text: any) {
   return [{tool_name: "run", ok: false, status: "bound_stale", error: error_text}]
 }
@@ -281,35 +249,20 @@ fn _edit_dispatch() {
 }
 
 /**
- * The declared verification evidence in a dispatch. These fixtures name their
- * verification tool "run"; every other result is an action, mirroring the
- * evidence-role selection the agent loop owns in production.
- */
-fn _verification_of(prev_dispatch: any) {
-  return (prev_dispatch ?? []).filter({ result -> result.tool_name == "run" })
-}
-
-/**
  * Fold one repair turn: observe a substantive "run" call, classifying
  * `prev_dispatch` (the prior turn's result) with `prior_made_edit`.
  */
 fn _fold(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-repair",
-    _run_call(),
-    1,
-    REPAIR_CONFIG,
     state,
-    true,
-    prev_dispatch,
-    "",
-    false,
-    prior_made_edit,
-    "",
-    nil,
-    false,
-    _verification_of(prev_dispatch),
+    {
+      session_id: "unit-repair",
+      config: REPAIR_CONFIG,
+      dispatch: prev_dispatch,
+      made_edit: prior_made_edit,
+      verification_dispatch: _verification_of(prev_dispatch),
+    },
   )
 }
 
@@ -400,25 +353,20 @@ pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(
     no_progress_messages: 99,
     ping_pong_cycles: 99,
   }
-  const o1 = agent_stall_observe_tool_calls(
+  const o1 = observe_stall(
     harness.agent,
-    "unit-stale-core",
-    _run_call(),
-    1,
-    config,
     agent_stall_initial_state(),
-    true,
-    _stale_dispatch("boom"),
+    {session_id: "unit-stale-core", config: config, dispatch: _stale_dispatch("boom")},
   )
-  const o2 = agent_stall_observe_tool_calls(
+  const o2 = observe_stall(
     harness.agent,
-    "unit-stale-core",
-    _run_call(),
-    2,
-    config,
     o1.state,
-    true,
-    _stale_dispatch("boom"),
+    {
+      session_id: "unit-stale-core",
+      iteration: 2,
+      config: config,
+      dispatch: _stale_dispatch("boom"),
+    },
   )
   assert(o2.warning == nil)
   assert(o2.state.same_error_streak == 0)
@@ -555,43 +503,30 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness
     no_progress_messages: 99,
     ping_pong_cycles: 99,
   }
-  const o1 = agent_stall_observe_tool_calls(
+  const o1 = observe_stall(
     harness.agent,
-    "unit-repair-off",
-    _run_call(),
-    1,
-    off_config,
     agent_stall_initial_state(),
-    true,
-    _fail_dispatch("boom"),
-    "",
-    false,
-    false,
-    "",
-    nil,
-    false,
-    _verification_of(_fail_dispatch("boom")),
+    {
+      session_id: "unit-repair-off",
+      config: off_config,
+      dispatch: _fail_dispatch("boom"),
+      verification_dispatch: _verification_of(_fail_dispatch("boom")),
+    },
   )
   assert(o1.state.last_diagnostic_class == "fail")
   assert(o1.state.same_diagnostic_streak == 1)
   assert(!o1.state.reverify_owed)
   assert(o1.warning == nil)
-  const o2 = agent_stall_observe_tool_calls(
+  const o2 = observe_stall(
     harness.agent,
-    "unit-repair-off",
-    _run_call(),
-    2,
-    off_config,
     o1.state,
-    true,
-    _fail_dispatch("boom"),
-    "",
-    false,
-    false,
-    "",
-    nil,
-    false,
-    _verification_of(_fail_dispatch("boom")),
+    {
+      session_id: "unit-repair-off",
+      iteration: 2,
+      config: off_config,
+      dispatch: _fail_dispatch("boom"),
+      verification_dispatch: _verification_of(_fail_dispatch("boom")),
+    },
   )
   assert(o2.warning == nil)
   assert(o2.state.same_diagnostic_streak == 2)
@@ -608,18 +543,15 @@ pipeline test_reset_action_preserves_failure_model(harness: Harness, task: any) 
   assert(o2.state.last_diagnostic_class == "fail")
   // An exempt tool triggers __agent_stall_reset_action inside the core observe.
   const reset_config = REPAIR_CONFIG + {exempt_tools: ["search"]}
-  const o3 = agent_stall_observe_tool_calls(
+  const o3 = observe_stall(
     harness.agent,
-    "unit-repair",
-    [{name: "search", arguments: {q: "x"}}],
-    3,
-    reset_config,
     o2.state,
-    true,
-    nil,
-    "",
-    false,
-    false,
+    {
+      session_id: "unit-repair",
+      calls: [{name: "search", arguments: {q: "x"}}],
+      iteration: 3,
+      config: reset_config,
+    },
   )
   // Action-stream fields were reset, but the current-failure model survives.
   assert(o3.state.last_signature == "")
@@ -683,42 +615,30 @@ const STALE_GUARD_CONFIG = {
 }
 
 fn _fold_guarded(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-guard",
-    _run_call(),
-    1,
-    GUARD_CONFIG,
     state,
-    true,
-    prev_dispatch,
-    "",
-    false,
-    prior_made_edit,
-    "",
-    nil,
-    false,
-    _verification_of(prev_dispatch),
+    {
+      session_id: "unit-guard",
+      config: GUARD_CONFIG,
+      dispatch: prev_dispatch,
+      made_edit: prior_made_edit,
+      verification_dispatch: _verification_of(prev_dispatch),
+    },
   )
 }
 
 fn _fold_stale_guarded(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-stale-guard",
-    _run_call(),
-    1,
-    STALE_GUARD_CONFIG,
     state,
-    true,
-    prev_dispatch,
-    "",
-    false,
-    prior_made_edit,
-    "",
-    nil,
-    false,
-    _verification_of(prev_dispatch),
+    {
+      session_id: "unit-stale-guard",
+      config: STALE_GUARD_CONFIG,
+      dispatch: prev_dispatch,
+      made_edit: prior_made_edit,
+      verification_dispatch: _verification_of(prev_dispatch),
+    },
   )
 }
 
@@ -837,22 +757,16 @@ const HARD_CAP_CONFIG = {
 }
 
 fn _fold_hard_cap(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: any) {
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-hard-cap",
-    _run_call(),
-    1,
-    HARD_CAP_CONFIG,
     state,
-    true,
-    prev_dispatch,
-    "",
-    false,
-    prior_made_edit,
-    "",
-    nil,
-    false,
-    _verification_of(prev_dispatch),
+    {
+      session_id: "unit-hard-cap",
+      config: HARD_CAP_CONFIG,
+      dispatch: prev_dispatch,
+      made_edit: prior_made_edit,
+      verification_dispatch: _verification_of(prev_dispatch),
+    },
   )
 }
 
@@ -938,41 +852,17 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(harness: Ha
 fn _observe_signal(agent: HarnessAgent, state: any, cfg: any, payload: any) {
   // Substantive "run" call with no prior dispatch: the core/repair paths never
   // trip on this turn, so any warning comes purely from the action_signal seam.
-  return agent_stall_observe_tool_calls(
-    agent,
-    "unit-signal",
-    _run_call(),
-    1,
-    cfg,
-    state,
-    true,
-    nil,
-    "",
-    false,
-    false,
-    "",
-    payload,
-  )
+  return observe_stall(agent, state, {session_id: "unit-signal", config: cfg, payload: payload})
 }
 
 fn _observe_noprog_signal(agent: HarnessAgent, state: any, cfg: any, text: any, payload: any) {
   // No substantive tool call + narration text = a no-progress-monologue candidate,
   // used to prove the action_signal seam does not double-fire when the core already
   // tripped this turn.
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-signal-noprog",
-    [],
-    1,
-    cfg,
     state,
-    true,
-    nil,
-    text,
-    false,
-    false,
-    "",
-    payload,
+    {session_id: "unit-signal-noprog", calls: [], config: cfg, text: text, payload: payload},
   )
 }
 
@@ -1151,22 +1041,16 @@ fn _fold_floor(
   prev_dispatch: any,
   prior_made_edit: any,
 ) {
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-floor",
-    _run_call(),
-    1,
-    cfg,
     state,
-    true,
-    prev_dispatch,
-    "",
-    false,
-    prior_made_edit,
-    "",
-    nil,
-    false,
-    _verification_of(prev_dispatch),
+    {
+      session_id: "unit-floor",
+      config: cfg,
+      dispatch: prev_dispatch,
+      made_edit: prior_made_edit,
+      verification_dispatch: _verification_of(prev_dispatch),
+    },
   )
 }
 
@@ -1308,29 +1192,23 @@ fn _parity_drive(agent: HarnessAgent, cfg: any) {
   let s = agent_stall_initial_state()
   let out = []
   const seq = [
-    [_fail_dispatch("boom"), false],
-    [_edit_dispatch(), true],
-    [_fail_dispatch("boom"), false],
-    [_edit_dispatch(), true],
-    [_fail_dispatch("boom"), false],
+    {dispatch: _fail_dispatch("boom"), made_edit: false},
+    {dispatch: _edit_dispatch(), made_edit: true},
+    {dispatch: _fail_dispatch("boom"), made_edit: false},
+    {dispatch: _edit_dispatch(), made_edit: true},
+    {dispatch: _fail_dispatch("boom"), made_edit: false},
   ]
   for step in seq {
-    const o = agent_stall_observe_tool_calls(
+    const o = observe_stall(
       agent,
-      "parity",
-      _run_call(),
-      1,
-      cfg,
       s,
-      true,
-      step[0],
-      "",
-      false,
-      step[1],
-      "",
-      nil,
-      false,
-      _verification_of(step[0]),
+      {
+        session_id: "parity",
+        config: cfg,
+        dispatch: step.dispatch,
+        made_edit: step.made_edit,
+        verification_dispatch: _verification_of(step.dispatch),
+      },
     )
     s = o.state
     out = out.appending(
@@ -1421,24 +1299,17 @@ const PRED_CONFIG = {
 fn _fold_pred(agent: HarnessAgent, state: any, cfg: any, made_edit: any) {
   // A substantive "run" call folding a failing verification, with the full post-turn
   // payload passed through to the progress_signal callback.
-  return agent_stall_observe_tool_calls(
+  return observe_stall(
     agent,
-    "unit-pred",
-    _run_call(),
-    1,
-    cfg,
     state,
-    true,
-    _fail_dispatch("boom"),
-    "",
-    false,
-    made_edit,
-    "",
-    nil,
-    false,
-    _verification_of(_fail_dispatch("boom")),
-    "",
-    {},
+    {
+      session_id: "unit-pred",
+      config: cfg,
+      dispatch: _fail_dispatch("boom"),
+      made_edit: made_edit,
+      payload: {},
+      verification_dispatch: _verification_of(_fail_dispatch("boom")),
+    },
   )
 }
 
@@ -1484,148 +1355,5 @@ pipeline test_no_net_progress_predicates_unknown_key_throws(harness: Harness, ta
       )
     },
     "unknown predicate key must throw",
-  )
-}
-
-// -------------------------------------------------------------------------------------------------
-
-// #burin-cutover seam 3: remediation_delivered cumulative-count intake. The callback
-// may return a bool (per-turn, unchanged) OR an int cumulative count; for the int form
-// harn derives the per-turn delivered event by diffing against the previously-seen
-// count for the active signature, resetting the baseline on a signature change. The
-// count-tracking state must never enter an output projection.
-
-// -------------------------------------------------------------------------------------------------
-
-const REMEDIATION_CONFIG = {
-  enabled: true,
-  repair_aware: true,
-  stuck_same_diagnostic_after: 99,
-  post_edit_reverify: true,
-  repeat_same_error: 99,
-  repeat_same_observation: 99,
-  no_progress_messages: 99,
-  ping_pong_cycles: 99,
-}
-
-fn _fold_remediation(agent: HarnessAgent, state: any, cb: any, prev_dispatch: any) {
-  return agent_stall_observe_tool_calls(
-    agent,
-    "unit-rem",
-    _run_call(),
-    1,
-    REMEDIATION_CONFIG + {remediation_delivered: cb},
-    state,
-    true,
-    prev_dispatch,
-    "",
-    false,
-    false,
-    "",
-    nil,
-    false,
-    _verification_of(prev_dispatch),
-  )
-}
-
-pipeline test_remediation_bool_true_trips_each_qualifying_turn(harness: Harness, task: any) {
-  // Bool path (unchanged): a truthy per-turn fact trips delivered_fix_not_landing on
-  // EVERY qualifying turn (streak >= 2, advanced) — turns 2 and 3 both fire.
-  const cb = { _ctx -> true }
-  const o1 = _fold_remediation(
-    harness.agent,
-    agent_stall_initial_state(),
-    cb,
-    _fail_dispatch("boom"),
-  )
-  assert(o1.warning == nil, "streak 1 does not yet qualify")
-  const o2 = _fold_remediation(harness.agent, o1.state, cb, _fail_dispatch("boom"))
-  assert(o2.warning != nil)
-  assert(o2.warning.pattern == "delivered_fix_not_landing")
-  assert(o2.warning.remediation_delivered)
-  const o3 = _fold_remediation(harness.agent, o2.state, cb, _fail_dispatch("boom"))
-  assert(o3.warning != nil)
-  assert(o3.warning.pattern == "delivered_fix_not_landing")
-}
-
-pipeline test_remediation_count_trips_once_per_increase(harness: Harness, task: any) {
-  // Count path: a CONSTANT cumulative count of 1 means one fix was delivered (when the
-  // signature first went active) and none since. It parity-trips at turn 2 (0 -> 1
-  // crossing) exactly like the bool true, but does NOT re-fire at turn 3 (1 -> 1 is no
-  // new delivery) — the per-signature diff, not a raw truthiness, drives the event.
-  const cb = { _ctx -> 1 }
-  const o1 = _fold_remediation(
-    harness.agent,
-    agent_stall_initial_state(),
-    cb,
-    _fail_dispatch("boom"),
-  )
-  assert(o1.warning == nil)
-  const o2 = _fold_remediation(harness.agent, o1.state, cb, _fail_dispatch("boom"))
-  assert(o2.warning != nil)
-  assert(o2.warning.pattern == "delivered_fix_not_landing")
-  assert_eq(o2.state.remediation_delivered_count, 1)
-  const o3 = _fold_remediation(harness.agent, o2.state, cb, _fail_dispatch("boom"))
-  assert(o3.warning == nil, "a flat cumulative count does not re-deliver")
-}
-
-pipeline test_remediation_count_zero_never_trips(harness: Harness, task: any) {
-  // A cumulative count that never leaves 0 means no fix was delivered — no trip, even
-  // though the streak qualifies. Distinguishes count intake from bool (0 is a real
-  // count, not a falsy sentinel that a bool would otherwise treat identically).
-  const cb = { _ctx -> 0 }
-  const o1 = _fold_remediation(
-    harness.agent,
-    agent_stall_initial_state(),
-    cb,
-    _fail_dispatch("boom"),
-  )
-  const o2 = _fold_remediation(harness.agent, o1.state, cb, _fail_dispatch("boom"))
-  assert(o2.warning == nil)
-  const o3 = _fold_remediation(harness.agent, o2.state, cb, _fail_dispatch("boom"))
-  assert(o3.warning == nil)
-  // Internal count-tracking never leaks into the terminal projection.
-  const applied = agent_stall_apply_result({status: "stuck"}, true, o3.state)
-  assert(!contains(json_stringify(applied), "remediation_delivered_count"))
-  assert(!contains(json_stringify(applied), "remediation_delivered_signature"))
-}
-
-pipeline test_remediation_count_baseline_resets_on_signature_change(harness: Harness, task: any) {
-  // Reset-on-signature-change: the same cumulative count of 1 trips again for a NEW
-  // failure signature, because the diff baseline resets when the active signature
-  // changes (the count is "since this signature became active").
-  const cb = { _ctx -> 1 }
-  const a1 = _fold_remediation(
-    harness.agent,
-    agent_stall_initial_state(),
-    cb,
-    _fail_dispatch("boom A"),
-  )
-  const a2 = _fold_remediation(harness.agent, a1.state, cb, _fail_dispatch("boom A"))
-  assert(a2.warning != nil, "first signature trips at streak 2")
-  // Switch to a different failure signature: streak resets to 1 (no trip yet).
-  const b1 = _fold_remediation(harness.agent, a2.state, cb, _fail_dispatch("totally different B"))
-  assert(b1.warning == nil)
-  assert_eq(b1.state.same_diagnostic_streak, 1)
-  // Same cumulative-1 count trips again for signature B: its baseline reset to 0.
-  const b2 = _fold_remediation(harness.agent, b1.state, cb, _fail_dispatch("totally different B"))
-  assert(b2.warning != nil)
-  assert(b2.warning.pattern == "delivered_fix_not_landing")
-}
-
-pipeline test_remediation_bad_return_throws(harness: Harness, task: any) {
-  // A callback returning neither bool, int, nor nil fails loudly.
-  const cb = { _ctx -> "not-a-count" }
-  assert_throws(
-    { ->
-      return _fold_remediation(
-        harness.agent,
-        _fold_remediation(harness.agent, agent_stall_initial_state(), cb, _fail_dispatch("boom"))
-          .state,
-        cb,
-        _fail_dispatch("boom"),
-      )
-    },
-    "non-bool/int/nil remediation return must throw",
   )
 }

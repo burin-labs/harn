@@ -110,6 +110,28 @@ to `false` to suppress the advisory for identical read results recurring across
 interleaved calls. Consecutive-repeat safeguards remain enabled, and repeated
 observations still count as no information gain for the iteration budget.
 
+`stall_diagnostics.fresh_failure_grace` defaults to `false`. When enabled, a
+previously unseen verification failure defers the failing-verification cap for
+that turn and the following turn. Revisiting an older failure does not renew
+grace. A deferred cap remains due until it fires or verification passes; this
+setting does not defer other stop conditions.
+
+`stall_diagnostics.shrinking_failure_set_resets_budget` defaults to `false`.
+When enabled, a strictly smaller positive count of distinct verification errors
+resets the failing-verification budget. The producer must attest
+`diagnostics_complete: true` alongside structured diagnostics and a completed
+command outcome. `harness.tools.run_build_command` supplies this evidence for
+fully captured terminal output. Timeouts, partial output, warnings, and empty
+failed diagnostic sets cannot earn credit or replace the last completed failure
+baseline. Passing verification clears that baseline; later unchanged failures
+can exhaust the restarted budget.
+
+The optional `progress_signal` callback reports a scalar whose high-water mark
+is monotone within a repair episode. The first successful workspace mutation
+after clean verification or successful terminal completion starts a new episode.
+Edits during an unresolved failure preserve the existing high-water mark and
+flat-progress counter, so repeated edits cannot manufacture progress.
+
 ```harn,ignore
 import { with_governance } from "std/agent/governors"
 

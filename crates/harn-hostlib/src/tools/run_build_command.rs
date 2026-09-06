@@ -95,6 +95,17 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     })?;
 
     let diagnostics = parse_diagnostics(source, &outcome.stdout, &outcome.stderr);
+    // Each stream is clipped independently. Artifact sizes retain the original
+    // byte counts even when the inline prefix ends inside a UTF-8 codepoint.
+    let diagnostics_complete = outcome.status == proc::CommandStatus::Completed
+        && !outcome.timed_out
+        && [&outcome.stdout_path, &outcome.stderr_path]
+            .iter()
+            .all(|path| {
+                std::fs::metadata(path).is_ok_and(|metadata| {
+                    metadata.len() <= CaptureConfig::default().max_inline_bytes as u64
+                })
+            });
     let diagnostic_values: Vec<VmValue> = diagnostics
         .into_iter()
         .map(|d| {
@@ -121,6 +132,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     Ok(ResponseBuilder::new()
         .int("exit_code", outcome.exit_code as i64)
+        .str("status", outcome.status.as_str())
+        .bool("timed_out", outcome.timed_out)
+        .bool("diagnostics_complete", diagnostics_complete)
         .str("stdout", outcome.stdout)
         .str("stderr", outcome.stderr)
         .int("duration_ms", outcome.duration.as_millis() as i64)

@@ -274,6 +274,7 @@ pub(super) fn generate_go() -> String {
     append_go_session_update_payloads(&mut out);
     append_go_prepared_session_types(&mut out);
     append_go_session_recap_types(&mut out);
+    super::plan_records::append(&mut out, super::records::Target::Go);
     out
 }
 
@@ -360,18 +361,6 @@ type HarnSessionTimelineUpdate struct {
 	Node          HarnSessionTimelineNode   `json:"node"`
 }
 
-// HarnPlanAuthor identifies the author of a plan revision or comment.
-type HarnPlanAuthor struct {
-	ID          string  `json:"id"`
-	DisplayName *string `json:"display_name,omitempty"`
-}
-
-// HarnPlanSource records where a plan revision originated.
-type HarnPlanSource struct {
-	Kind string  `json:"kind"`
-	URI  *string `json:"uri,omitempty"`
-}
-
 // HarnPlanCommentState is the closed collaborative comment lifecycle.
 type HarnPlanCommentState string
 
@@ -392,105 +381,12 @@ const (
 	HarnPlanApprovalRejected    HarnPlanApprovalState = "rejected"
 )
 
-// HarnPlanStep is one normalized executable plan step.
-type HarnPlanStep struct {
-	ID       string          `json:"id"`
-	Content  string          `json:"content"`
-	Status   string          `json:"status"`
-	Priority json.RawMessage `json:"priority"`
-}
-
-// HarnPlanApproval carries the typed approval state for an executable plan.
-type HarnPlanApproval struct {
-	State      HarnPlanApprovalState `json:"state"`
-	RequestID  *string  `json:"request_id,omitempty"`
-	Reviewer   *string  `json:"reviewer,omitempty"`
-	Reviewers  []string `json:"reviewers,omitempty"`
-	ApprovedAt *string  `json:"approved_at,omitempty"`
-	Reason     *string  `json:"reason,omitempty"`
-}
-
-// HarnPlanArtifact is the normalized executable plan within a document revision.
-type HarnPlanArtifact struct {
-	Type                 string           `json:"_type"`
-	SchemaVersion        string           `json:"schema_version"`
-	ID                   string           `json:"id"`
-	Tool                 string           `json:"tool"`
-	Title                string           `json:"title"`
-	Summary              string           `json:"summary"`
-	Steps                []HarnPlanStep   `json:"steps"`
-	Assumptions          []string         `json:"assumptions"`
-	OpenQuestions        []string         `json:"open_questions"`
-	VerificationCommands []string         `json:"verification_commands"`
-	Approval             HarnPlanApproval `json:"approval"`
-}
-
 // HarnPlanRevisionOperation is the typed mutation that produced a revision.
 type HarnPlanRevisionOperation struct {
 	Kind      string                `json:"kind"`
 	EventID   string                `json:"event_id"`
 	CommentID *string               `json:"comment_id,omitempty"`
 	State     *HarnPlanCommentState `json:"state,omitempty"`
-}
-
-// HarnPlanRevision is one immutable collaborative plan revision.
-type HarnPlanRevision struct {
-	RevisionID       string          `json:"revision_id"`
-	ParentRevisionID *string         `json:"parent_revision_id,omitempty"`
-	Markdown         string          `json:"markdown"`
-	Plan             HarnPlanArtifact `json:"plan"`
-	Author           HarnPlanAuthor  `json:"author"`
-	Source           HarnPlanSource  `json:"source"`
-	CreatedAt        string          `json:"created_at"`
-	Operation        HarnPlanRevisionOperation `json:"operation"`
-}
-
-// HarnPlanTextRange is a UTF-8 byte range fallback for a comment anchor.
-type HarnPlanTextRange struct {
-	Start int `json:"start"`
-	End   int `json:"end"`
-}
-
-// HarnPlanCommentAnchor survives edits through step identity and text fallbacks.
-type HarnPlanCommentAnchor struct {
-	StepID     *string        `json:"step_id,omitempty"`
-	QuotedText *string        `json:"quoted_text,omitempty"`
-	Range      *HarnPlanTextRange `json:"range,omitempty"`
-}
-
-// HarnPlanComment is an anchored collaborative review comment.
-type HarnPlanComment struct {
-	CommentID string                `json:"comment_id"`
-	Anchor    HarnPlanCommentAnchor `json:"anchor"`
-	Body      string                `json:"body"`
-	State     HarnPlanCommentState  `json:"state"`
-	Author    HarnPlanAuthor        `json:"author"`
-	CreatedAt string                `json:"created_at"`
-	UpdatedAt string                `json:"updated_at"`
-}
-
-// HarnPlanCommentResolutionReceipt binds a comment transition to revisions and an agent event.
-type HarnPlanCommentResolutionReceipt struct {
-	ReceiptID        string  `json:"receipt_id"`
-	CommentID        string  `json:"comment_id"`
-	InputRevisionID  string  `json:"input_revision_id"`
-	OutputRevisionID string  `json:"output_revision_id"`
-	AgentRunID       string  `json:"agent_run_id"`
-	EventID          string  `json:"event_id"`
-	Explanation      *string `json:"explanation,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-}
-
-// HarnPlanDocument is Harn's canonical collaborative plan-document contract.
-type HarnPlanDocument struct {
-	Type               string                             `json:"_type"`
-	SchemaVersion      string                             `json:"schema_version"`
-	DocumentID         string                             `json:"document_id"`
-	CurrentRevision    HarnPlanRevision                   `json:"current_revision"`
-	Comments           []HarnPlanComment                  `json:"comments"`
-	ResolutionReceipts []HarnPlanCommentResolutionReceipt `json:"resolution_receipts"`
-	CreatedAt          string                             `json:"created_at"`
-	UpdatedAt          string                             `json:"updated_at"`
 }
 
 // JSONRPCID encodes a JSON-RPC id, which may be an integer, a string, or null.

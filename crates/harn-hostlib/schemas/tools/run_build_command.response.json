@@ -5,6 +5,9 @@
   "type": "object",
   "properties": {
     "exit_code": { "type": "integer" },
+    "status": { "type": "string", "enum": ["completed", "running", "timed_out", "killed"] },
+    "timed_out": { "type": "boolean" },
+    "diagnostics_complete": { "type": "boolean" },
     "stdout": { "type": "string" },
     "stderr": { "type": "string" },
     "duration_ms": { "type": "integer", "minimum": 0 },

@@ -254,6 +254,7 @@ pub(super) fn generate_python() -> String {
     append_python_session_update_payloads(&mut out);
     append_python_prepared_session_types(&mut out);
     append_python_session_recap_types(&mut out);
+    super::plan_records::append(&mut out, super::records::Target::Python);
     out
 }
 
@@ -369,18 +370,6 @@ def _strip_none(value: Any) -> Any:
     return value
 
 
-@dataclass
-class HarnPlanAuthor(_HarnDataclass):
-    id: str
-    display_name: Optional[str] = None
-
-
-@dataclass
-class HarnPlanSource(_HarnDataclass):
-    kind: str
-    uri: Optional[str] = None
-
-
 class HarnPlanCommentState(str, Enum):
     OPEN = "open"
     ADDRESSED = "addressed"
@@ -396,104 +385,11 @@ class HarnPlanApprovalState(str, Enum):
 
 
 @dataclass
-class HarnPlanStep(_HarnDataclass):
-    id: str
-    content: str
-    status: str
-    priority: Optional[JsonValue] = None
-
-
-@dataclass
-class HarnPlanApproval(_HarnDataclass):
-    state: HarnPlanApprovalState
-    request_id: Optional[str] = None
-    reviewer: Optional[str] = None
-    reviewers: Optional[List[str]] = None
-    approved_at: Optional[str] = None
-    reason: Optional[str] = None
-
-
-@dataclass
-class HarnPlanArtifact(_HarnDataclass):
-    _type: str
-    schema_version: str
-    id: str
-    tool: str
-    title: str
-    summary: str
-    steps: List[HarnPlanStep]
-    assumptions: List[str]
-    open_questions: List[str]
-    verification_commands: List[str]
-    approval: HarnPlanApproval
-
-
-@dataclass
 class HarnPlanRevisionOperation(_HarnDataclass):
     kind: str
     event_id: str
     comment_id: Optional[str] = None
     state: Optional[HarnPlanCommentState] = None
-
-
-@dataclass
-class HarnPlanRevision(_HarnDataclass):
-    revision_id: str
-    markdown: str
-    plan: HarnPlanArtifact
-    author: HarnPlanAuthor
-    source: HarnPlanSource
-    created_at: str
-    operation: HarnPlanRevisionOperation
-    parent_revision_id: Optional[str] = None
-
-
-@dataclass
-class HarnPlanTextRange(_HarnDataclass):
-    start: int
-    end: int
-
-
-@dataclass
-class HarnPlanCommentAnchor(_HarnDataclass):
-    step_id: Optional[str] = None
-    quoted_text: Optional[str] = None
-    range: Optional[HarnPlanTextRange] = None
-
-
-@dataclass
-class HarnPlanComment(_HarnDataclass):
-    comment_id: str
-    anchor: HarnPlanCommentAnchor
-    body: str
-    state: HarnPlanCommentState
-    author: HarnPlanAuthor
-    created_at: str
-    updated_at: str
-
-
-@dataclass
-class HarnPlanCommentResolutionReceipt(_HarnDataclass):
-    receipt_id: str
-    comment_id: str
-    input_revision_id: str
-    output_revision_id: str
-    agent_run_id: str
-    event_id: str
-    created_at: str
-    explanation: Optional[str] = None
-
-
-@dataclass
-class HarnPlanDocument(_HarnDataclass):
-    _type: str
-    schema_version: str
-    document_id: str
-    current_revision: HarnPlanRevision
-    comments: List[HarnPlanComment]
-    resolution_receipts: List[HarnPlanCommentResolutionReceipt]
-    created_at: str
-    updated_at: str
 
 
 @dataclass

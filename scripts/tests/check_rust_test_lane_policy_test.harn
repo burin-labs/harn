@@ -1,3 +1,4 @@
+import { read_toml, read_yaml } from "std/fs"
 // Tests for scripts/check_rust_test_lane_policy.harn — which shell commands
 // count as running Rust tests, and which of the three ways to satisfy the
 // 16 MiB stack contract a step is allowed to use.
@@ -6,6 +7,45 @@ import "../check_rust_test_lane_policy.harn"
 const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace"
 
 const RAW = "cargo nextest run --workspace --test-threads=8"
+
+@test
+pipeline test_e2e_compile_budget_is_independent_of_test_workers(harness: Harness, task: unknown) {
+  const nextest = read_toml(harness.fs, "../../.config/nextest.toml", nil)
+  assert_eq(nextest?.profile?.e2e?.["default-filter"], "package(harn-cli) and kind(test)")
+  const document = read_yaml(harness.fs, "../../.github/workflows/e2e.yml", nil)
+  assert(document != nil, "E2E workflow was not measured")
+  assert_eq(len(workflow_violations("e2e.yml", document)), 0)
+  const steps = document?.jobs?.e2e?.steps ?? []
+  let measured = 0
+  for step in steps {
+    if to_string(step?.run ?? "") == "make test-e2e" {
+      measured = measured + 1
+      for budget in ["", "2", "6", "$" + "{{ env.HARN_E2E_JOBS }}"] {
+        const broken = step + {env: {CARGO_BUILD_JOBS: budget}}
+        const errors = step_violations("e2e.yml", "e2e", broken, {}, {})
+        assert_eq(len(errors), 1)
+        assert_eq(errors[0]?.job, "e2e")
+        assert(contains(errors[0]?.reason ?? "", "E2E_BUILD_MEMORY_BUDGET"))
+      }
+    }
+  }
+  assert_eq(measured, 1, "canonical E2E invocation was not measured exactly once")
+  let without_owner: list<dict> = []
+  let owner: dict = {}
+  for step in steps {
+    if step?.id == "resource-budget" {
+      owner = step
+    } else {
+      without_owner = without_owner + [step]
+    }
+  }
+  assert_eq(owner?.id, "resource-budget")
+  for broken in [without_owner, steps + [owner]] {
+    const errors = workflow_violations("e2e.yml", {jobs: {e2e: {steps: broken}}})
+    assert_eq(len(errors), 1)
+    assert(contains(errors[0]?.reason ?? "", "E2E_RESOURCE_BUDGET_UNMEASURED"))
+  }
+}
 
 fn no_env() -> dict {
   return {}

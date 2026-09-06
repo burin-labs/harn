@@ -1,16 +1,14 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
 
 use harn_session_store::{CreateSession, ListFilter, SessionStore, SqliteSessionStore};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use wait_timeout::ChildExt;
+
+use super::process_test_support::ProcessTestChild;
 
 const PROCESS_TEST_DATABASE: &str = "HARN_SESSION_STORE_PROCESS_TEST_DATABASE";
 const PROCESS_TEST_SESSION_ID: &str = "HARN_SESSION_STORE_PROCESS_TEST_SESSION_ID";
-const CHILD_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[test]
 fn sqlite_store_process_child() {
@@ -182,125 +180,47 @@ fn initialization_lock_path(database: &Path) -> PathBuf {
 }
 
 fn durable_file_digests(root: &Path) -> Vec<(PathBuf, String)> {
-    let mut inventory = std::fs::read_dir(root)
-        .expect("read inventory root")
-        .map(|entry| {
+    fn collect(root: &Path, directory: &Path, inventory: &mut Vec<(PathBuf, String)>) {
+        for entry in std::fs::read_dir(directory).expect("read inventory directory") {
             let entry = entry.expect("read inventory entry");
             let path = entry.path();
-            assert!(
-                entry.file_type().expect("inventory file type").is_file(),
-                "fixture inventory contains only files"
-            );
+            if entry.file_type().expect("inventory file type").is_dir() {
+                collect(root, &path, inventory);
+                continue;
+            }
             let bytes = std::fs::read(&path).expect("read inventory bytes");
-            (
+            inventory.push((
                 path.strip_prefix(root)
                     .expect("relative inventory path")
                     .to_path_buf(),
                 hex::encode(Sha256::digest(bytes)),
-            )
-        })
-        .collect::<Vec<_>>();
+            ));
+        }
+    }
+
+    let mut inventory = Vec::new();
+    collect(root, root, &mut inventory);
     inventory.sort_by(|left, right| left.0.cmp(&right.0));
     inventory
 }
 
-struct StoreTestChild {
-    child: Child,
-    stdout: Option<BufReader<std::process::ChildStdout>>,
+fn spawn_store_child(database: &Path, session_id: &str) -> ProcessTestChild {
+    ProcessTestChild::spawn("sqlite_store_process_child", |command| {
+        command
+            .env(PROCESS_TEST_DATABASE, database)
+            .env(PROCESS_TEST_SESSION_ID, session_id);
+    })
 }
 
-fn spawn_store_child(database: &Path, session_id: &str) -> StoreTestChild {
-    let mut child = Command::new(std::env::current_exe().expect("current test executable"))
-        .arg("sqlite_store_process_child")
-        .arg("--nocapture")
-        .env(PROCESS_TEST_DATABASE, database)
-        .env(PROCESS_TEST_SESSION_ID, session_id)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("spawn session-store child process");
-    let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
-    StoreTestChild {
-        child,
-        stdout: Some(stdout),
-    }
-}
-
-fn run_store_children(children: &mut [StoreTestChild]) {
+fn run_store_children(children: &mut [ProcessTestChild]) {
     for child in children.iter_mut() {
-        read_store_child_until(child, "READY");
+        child.wait_for("READY");
     }
     for child in children.iter_mut() {
-        child
-            .child
-            .stdin
-            .as_mut()
-            .expect("child stdin")
-            .write_all(b"initialize\n")
-            .expect("release child initializer");
+        child.send(b"initialize\n");
     }
     for child in children.iter_mut() {
-        read_store_child_until(child, "DONE");
-        let Some(status) = child
-            .child
-            .wait_timeout(CHILD_TIMEOUT)
-            .expect("wait for session-store child")
-        else {
-            kill_and_reap(&mut child.child);
-            panic!("session-store child did not exit within {CHILD_TIMEOUT:?}");
-        };
-        assert_eq!(status.code(), Some(0), "session-store child status");
+        child.wait_for("DONE");
+        child.wait_success();
     }
-}
-
-fn read_store_child_until(child: &mut StoreTestChild, marker: &str) {
-    let mut reader = child.stdout.take().expect("session-store child stdout");
-    let expected_marker = marker.to_string();
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    let reader_thread = std::thread::spawn(move || {
-        let result = loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    break Err(format!(
-                        "session-store child exited before emitting {expected_marker}"
-                    ))
-                }
-                Ok(_) if line.split_whitespace().last() == Some(expected_marker.as_str()) => {
-                    break Ok(());
-                }
-                Ok(_) => {}
-                Err(error) => break Err(format!("could not read session-store child: {error}")),
-            }
-        };
-        let _ = sender.send((reader, result));
-    });
-    match receiver.recv_timeout(CHILD_TIMEOUT) {
-        Ok((reader, result)) => {
-            child.stdout = Some(reader);
-            reader_thread
-                .join()
-                .expect("join session-store output reader");
-            result.unwrap_or_else(|error| panic!("{error}"));
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            kill_and_reap(&mut child.child);
-            reader_thread
-                .join()
-                .expect("join timed-out session-store output reader");
-            panic!("session-store child did not emit {marker} within {CHILD_TIMEOUT:?}");
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            reader_thread
-                .join()
-                .expect("join failed session-store output reader");
-            panic!("session-store output reader disconnected before emitting {marker}");
-        }
-    }
-}
-
-fn kill_and_reap(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }

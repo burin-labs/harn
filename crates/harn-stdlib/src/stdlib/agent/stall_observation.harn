@@ -1,10 +1,6 @@
 import { agent_feedback_emit } from "std/agent/feedback"
-import { AgentToolDispatch, __dispatch_results_list } from "std/agent/loop_result_status"
-import {
-  agent_monologue_actuation_config,
-  agent_monologue_actuation_initial_state,
-  agent_monologue_actuation_observe,
-} from "std/agent/monologue_actuation"
+import { AgentToolDispatch } from "std/agent/loop_result_status"
+import { agent_monologue_actuation_observe } from "std/agent/monologue_actuation"
 import {
   __agent_stall_completed_result,
   __agent_stall_delta_signature,
@@ -27,7 +23,7 @@ import {
   AgentStallWarning,
 } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
-import { agent_emit_event, agent_session_totals } from "std/agent/state"
+import { agent_emit_event } from "std/agent/state"
 import { agent_tool_calls_are_read_only } from "std/agent/tool_annotations"
 
 /**
@@ -198,6 +194,7 @@ pub fn __agent_stall_fold_diagnostic(
         write_epoch: new_write_epoch,
         same_diagnostic_streak: 0,
         failing_verify_turns: 0,
+        last_completed_failure_count: 0,
         turns_since_clean_verify: 0,
         edit_since_failure: false,
         reverify_owed: false,
@@ -240,6 +237,11 @@ pub fn __agent_stall_fold_diagnostic(
       write_epoch: new_write_epoch,
       same_diagnostic_streak: new_streak,
       failing_verify_turns: failing_turns,
+      last_completed_failure_count: if delta.current.complete && delta.current.failure_count > 0 {
+        delta.current.failure_count
+      } else {
+        state.last_completed_failure_count
+      },
       turns_since_clean_verify: new_turns_since_clean_verify,
       edit_since_failure: false,
       reverify_owed: false,
@@ -1020,22 +1022,45 @@ pub fn __agent_stall_apply_repair(
   // independently gated on its own config, so folding here changes nothing when only
   // the knob is set beyond maintaining the counter and arming its floor.
   const clean_verify_floor_active = config.turns_since_clean_verify != nil
-  const folded = __agent_stall_fold_diagnostic(
+  let folded = __agent_stall_fold_diagnostic(
     agent,
     observation.state,
     prev_dispatch,
     turn_made_edit,
   )
-  if !should_fold_current_failure && !clean_verify_floor_active {
+  // Only an attested complete collection can restart the failure budget.
+  // Incomplete observations retain the prior completed baseline in the fold.
+  const shrank = config.shrinking_failure_set_resets_budget
+    && folded.failing_verify_turns > observation.state.failing_verify_turns
+    && folded.last_diagnostic_delta_current.complete
+    && folded.last_completed_failure_count > 0
+    && observation.state.last_completed_failure_count > folded.last_completed_failure_count
+  if shrank {
+    folded = folded + {failing_verify_turns: 0, verification_cap_deferred: false}
+  }
+  if !should_fold_current_failure && !clean_verify_floor_active
+    && !config.no_net_progress_extend_guard {
     return observation + {state: folded}
   }
-  const hard_cap_due = config.no_net_progress_extend_guard
+  const fresh_failure = config.fresh_failure_grace
+    && folded.failing_verify_turns > observation.state.failing_verify_turns
+    && folded.verify_signature_counts[folded.last_diagnostic_signature] == 1
+  const grace_active = config.fresh_failure_grace
+    && (fresh_failure || (observation.state.fresh_failure_grace_pending ?? false))
+  const cap_pending = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
     && folded.failing_verify_turns
       >= config.no_net_progress_hard_cap_after
-    && observation.state.failing_verify_turns
-      < config.no_net_progress_hard_cap_after
-  if hard_cap_due {
+    && (observation.state.failing_verify_turns < config.no_net_progress_hard_cap_after
+      || (observation.state.verification_cap_deferred ?? false))
+  // Retain a deferred crossing until it fires or verification passes. Testing
+  // only the crossing loses the stop; testing >= alone re-arms it after recovery.
+  folded = folded
+    + {
+      fresh_failure_grace_pending: fresh_failure,
+      verification_cap_deferred: cap_pending && grace_active,
+    }
+  if cap_pending && !grace_active {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
       agent,
@@ -1259,6 +1284,8 @@ pub fn __agent_stall_observe_monologue_actuation(
  * in execution order. Its empty default supplies no verification evidence;
  * raw `prev_dispatch` remains the action/repetition input, never a passing check.
  * `diagnostic_consumed` prevents committing the same dispatch twice on resume.
+ * The canonical loop sets `observe_progress` false because completed-dispatch
+ * intake already folded that callback before exposing its checkpoint.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -1280,6 +1307,7 @@ pub fn agent_stall_observe_tool_calls(
   payload: any = nil,
   diagnostic_consumed: bool = false,
   verification_dispatch: list = [],
+  observe_progress: bool = true,
 ) -> AgentStallObservation {
   const observation = __agent_stall_observe_core(
     agent,
@@ -1330,14 +1358,15 @@ pub fn agent_stall_observe_tool_calls(
     defer_feedback,
   )
   let resolved = signaled
-  if observation.config.progress_signal != nil {
+  if observe_progress && observation.config.progress_signal != nil {
     resolved = resolved
       + {
         state: __agent_stall_fold_verify_state(
           resolved.state,
           observation.config,
           payload,
-          turn_made_edit,
+          turn_made_edit && !diagnostic_consumed,
+          state,
         ),
       }
   }

@@ -45,6 +45,11 @@ pub const SEARCH_SEMANTIC_BUILTIN: &str = "hostlib_search_semantic";
 pub const SEARCH_HYBRID_BUILTIN: &str = "hostlib_search_hybrid";
 
 /// Thin in-process projection over [`harn_session_store::SessionStore`].
+///
+/// This is a CRUD adapter, not an execution-lifetime session handle. `open`
+/// returns durable metadata and retains no writer lease after the call. An
+/// execution owner that intends to append again, such as the VM transcript
+/// journal, owns that longer-lived claim explicitly.
 #[derive(Clone)]
 pub struct SessionCapability {
     embedder: Arc<dyn Embedder>,

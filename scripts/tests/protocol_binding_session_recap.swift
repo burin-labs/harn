@@ -5,6 +5,24 @@ private enum RecapBindingProbeError: Error {
     case expectedUnknownSnapshotFieldRejection
     case expectedUnknownNestedFieldRejection
     case expectedUnknownVerificationStatusRejection
+    case wireMismatch
+}
+
+private func roundTrip<T: Codable>(_ type: T.Type, _ input: [String: Any], _ expected: [String: Any]) throws {
+    let data = try JSONSerialization.data(withJSONObject: input)
+    let decoded = try JSONDecoder().decode(type, from: data)
+    let encoded = try JSONEncoder().encode(decoded)
+    let actual = try JSONSerialization.jsonObject(with: encoded) as! NSDictionary
+    guard actual.isEqual(to: expected) else { throw RecapBindingProbeError.wireMismatch }
+}
+
+private func optionalField<T: Codable>(_ type: T.Type, _ base: [String: Any], _ field: String, _ present: Any) throws {
+    try roundTrip(type, base, base)
+    var input = base
+    input[field] = NSNull()
+    try roundTrip(type, input, base)
+    input[field] = present
+    try roundTrip(type, input, input)
 }
 
 @main
@@ -17,6 +35,11 @@ private struct RecapBindingProbe {
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         ) as! [String: Any]
         let recap = fixture["sessionRecapAvailability"] as! [String: Any]
+        let plan = fixture["planDocument"] as! [String: Any]
+        try roundTrip(HarnPlanDocument.self, plan, plan)
+        try optionalField(HarnPlanStep.self, ["id": "step", "content": "Verify", "status": "pending"], "priority", "high")
+        try optionalField(HarnPlanApproval.self, ["state": "unrequested"], "reviewers", ["reviewer"])
+        try optionalField(HarnPlanCommentAnchor.self, ["step_id": "step"], "range", ["start": 0, "end": 1])
         let recapData = try JSONSerialization.data(withJSONObject: recap)
         let decoded = try JSONDecoder().decode(HarnSessionRecapAvailability.self, from: recapData)
         guard decoded.state == .available, decoded.snapshot?.turns.count == 1 else {

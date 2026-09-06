@@ -172,6 +172,12 @@ pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
 pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
+/** The step that names where the slow E2E suite is about to land. */
+pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
+
+/** The input that carries the evacuation switch into that decision. */
+pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
+
 pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
 // Blacksmith's Ubuntu image does not expose Landlock. Keep the complete set of
@@ -224,12 +230,27 @@ pub const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 pub const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
+/**
+ * Every main push gets its own key; pull requests and merge groups keep theirs.
+ *
+ * Keying main by the branch shares one key across every merge, so a later push
+ * evicts an older pending proof before any job starts. Merges land closer
+ * together than a run takes, so under that key most main commits never finish
+ * being proved, and a head commit with no executed result reads the same as a
+ * passing one.
+ */
 pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
   + "{{ github.workflow }}-$"
-  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}"
+  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}"
 
-pub const CI_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}"
+/**
+ * Pull-request runs supersede; nothing supersedes a main push.
+ *
+ * This is the second half of the per-commit key above. The key stops a later
+ * merge from evicting a pending run, and this stops a push from cancelling one
+ * already executing. Either alone leaves main commits without proof.
+ */
+pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
 
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
@@ -1414,18 +1435,20 @@ pub fn ci_cache_policy_errors(
   return errors
 }
 
-/** Keep one current pull-request proof and one current main proof. */
+/** Keep one current pull-request proof and an executed result per main head. */
 pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "ci.yml concurrency.group must share one main lane while preserving PR, merge-group, and ref keys",
+        "ci.yml concurrency.group must give each main push its own key while preserving PR, merge-group, and ref keys",
       ]
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + ["ci.yml must cancel superseded pull-request and main-push runs only"]
+      + [
+        "ci.yml must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
+      ]
   }
   return errors
 }
@@ -1481,18 +1504,48 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   return errors
 }
 
-/** Keep the slow suite evacuable through the same paid-capacity switch. */
+/**
+ * Keep the slow suite evacuable through the same paid-capacity switch.
+ *
+ * The switch has to reach two places, and only one of them is the routing
+ * expression. The capacity job names where this suite is about to land, and a
+ * name that reads the owned census while the switch sends the job to elastic
+ * paid capacity is worse than no name at all: it attributes the run to a rung
+ * it never touched. So the switch is required on `runs-on` and on the input
+ * the capacity script actually measures the route from.
+ *
+ * This checks that seam rather than a specific environment variable on the
+ * job. The suite derives its own compiler and thread budget on the runner it
+ * lands on, so there is no longer a static budget variable to name, and a
+ * rule that named one would pass by matching a string while the switch failed
+ * to reach the route.
+ */
 pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   const job = e2e?.jobs?.e2e ?? {}
+  const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
+  const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
   let errors: list<string> = []
-  for field in [job?.["runs-on"], job?.env?.HARN_E2E_JOBS] {
-    if !contains(to_string(field ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
-      errors = errors
-        + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
-    }
+  if !contains(to_string(job?.["runs-on"] ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
+    errors = errors
+      + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
   }
   if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
     errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
+  }
+  if capacity_step == nil {
+    errors = errors
+      + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
+    return errors
+  }
+  if !contains(
+    to_string(capacity_step?.env?.[E2E_EVACUATION_INPUT] ?? ""),
+    "vars.${BLACKSMITH_ENABLE_VAR} == 'true'",
+  ) {
+    errors = errors
+      + [
+        "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
+          + "as ${E2E_EVACUATION_INPUT}",
+      ]
   }
   return errors
 }

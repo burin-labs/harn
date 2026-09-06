@@ -1105,7 +1105,7 @@ pub fn __intra_turn_result_mutation_status(result: any) -> string {
 
 pub fn __intra_turn_result_mutated(result: any) {
   const status = __intra_turn_result_mutation_status(result)
-  if status == "not_applied" {
+  if status == "not_applied" || status == "unchanged" {
     return false
   }
   if status == "applied" {

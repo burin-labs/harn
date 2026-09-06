@@ -6,12 +6,10 @@
 //! observability-only: a filtered or failed sink can never alter durability.
 
 use std::collections::VecDeque;
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use harn_session_store::{
     AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore, SessionType,
+    SessionWriteLease,
 };
 
 use crate::stdlib::session_store;
@@ -58,7 +56,7 @@ pub(crate) struct JournalState {
     task_id: Option<String>,
     owns_session: bool,
     lifecycle_reservation: Option<crate::agent_lifecycle_cleanup::LifecycleReservation>,
-    _writer_lease: RunWriterLease,
+    _writer_lease: SessionWriteLease,
 }
 
 impl JournalState {
@@ -142,63 +140,6 @@ impl JournalState {
     }
 }
 
-/// Process-owned proof that one durable session still has a writer.
-///
-/// The file handle holds an OS advisory lock for exactly the journal lifetime.
-/// A reader in another process can try the same lock: contention proves a live
-/// writer, while an unlocked file proves only that no writer is observable.
-struct RunWriterLease {
-    _file: File,
-}
-
-impl RunWriterLease {
-    fn acquire(store_dir: &Path, session_id: &str) -> Result<Self, VmError> {
-        let path = run_writer_lease_path(store_dir, session_id);
-        let lease_dir = path
-            .parent()
-            .expect("run writer lease path always has a parent");
-        std::fs::create_dir_all(lease_dir).map_err(|error| {
-            VmError::Runtime(format!(
-                "agent transcript journal: cannot create writer lease directory {}: {error}",
-                lease_dir.display()
-            ))
-        })?;
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .map_err(|error| {
-                VmError::Runtime(format!(
-                    "agent transcript journal: cannot open writer lease {}: {error}",
-                    path.display()
-                ))
-            })?;
-        harn_flock::lock_with_deadline(
-            &file,
-            &path,
-            harn_flock::LockMode::Exclusive,
-            Duration::ZERO,
-        )
-        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
-        Ok(Self { _file: file })
-    }
-}
-
-/// Stable lease location for one durable session.
-///
-/// The session, rather than the invocation, is the lock key because two
-/// processes must never write different invocations into the same transcript
-/// concurrently. Lease files remain after normal exit so unlocking and
-/// unlinking cannot race a successor that has already acquired the same path.
-pub(crate) fn run_writer_lease_path(store_dir: &Path, session_id: &str) -> PathBuf {
-    let identity = blake3::hash(session_id.as_bytes()).to_hex();
-    store_dir
-        .join("agent-run-writers")
-        .join(format!("{identity}.lock"))
-}
-
 #[derive(Default)]
 pub(crate) struct HydratedTranscript {
     pub messages: Vec<serde_json::Value>,
@@ -241,6 +182,11 @@ pub(crate) async fn prepare(
         _ => SessionType::User,
     };
     let workflow_learning_eligibility = workflow_learning_eligibility(options)?;
+    // Claim the writer slot before opening or creating the session. Maintenance
+    // owns the project lease exclusively, so acquiring in this order closes
+    // the window where cleanup could delete a session during preparation.
+    let writer_lease = SessionWriteLease::try_acquire(state_dir.as_path(), session_id)
+        .map_err(|error| session_store::session_lease_error("agent transcript journal", error))?;
     let store = session_store::open_canonical_agent_session(
         &state_dir,
         session_id,
@@ -248,7 +194,6 @@ pub(crate) async fn prepare(
         session_type,
     )
     .await?;
-    let writer_lease = RunWriterLease::acquire(state_dir.as_path(), session_id)?;
     let events = session_store::read_all_events(&store, session_id).await?;
     Ok(PreparedJournal {
         transcript: hydrate_events(events),
@@ -997,6 +942,64 @@ mod tests {
         )
         .await
         .expect("the next invocation can acquire the released session lease");
+    }
+
+    #[tokio::test]
+    async fn maintenance_open_is_contended_by_a_live_vm_writer() {
+        crate::agent_sessions::reset_session_store();
+        let root = tempfile::tempdir().expect("temp root");
+        let options = options(root.path());
+        let state_dir = session_store::canonical_store_state_dir(Some(&options))
+            .expect("resolve session store directory");
+        let writer = prepare(
+            "live-maintenance-race",
+            &options,
+            "run-live".to_string(),
+            "turn-live".to_string(),
+        )
+        .await
+        .expect("prepare live VM writer");
+
+        let database = state_dir.as_path().join("session-store.sqlite");
+        let error = match harn_session_store::SqliteSessionStore::open_for_maintenance(&database) {
+            Ok(_) => panic!("live VM writer must exclude maintenance open"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            harn_session_store::StoreError::Contention {
+                kind: harn_session_store::StoreContention::ProjectLeaseHeld,
+                ..
+            }
+        ));
+
+        drop(writer);
+        let maintenance = harn_session_store::SqliteSessionStore::open_for_maintenance(&database)
+            .expect("maintenance enters after live VM writer drops");
+        let dormant = maintenance
+            .describe("live-maintenance-race")
+            .await
+            .expect("resumable session remains after writer exits");
+        assert_eq!(dormant.status, harn_session_store::SessionStatus::Open);
+        let report = maintenance
+            .sweep_retention(
+                &harn_session_store::RetentionPolicy {
+                    max_age_seconds: Some(60),
+                    ..Default::default()
+                },
+                dormant.created_at_ms + 61_000,
+            )
+            .await
+            .expect("age dormant canonical history under maintenance ownership");
+        assert_eq!(report.soft_deleted, 1);
+        assert_eq!(
+            maintenance
+                .describe(&dormant.id)
+                .await
+                .expect("retained tombstone")
+                .status,
+            harn_session_store::SessionStatus::SoftDeleted
+        );
     }
 
     #[test]

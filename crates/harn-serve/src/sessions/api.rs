@@ -121,6 +121,9 @@ fn map_error(error: StoreError) -> (StatusCode, Json<ErrorBody>) {
         StoreError::InvalidInput(_) => (StatusCode::BAD_REQUEST, "invalid_input"),
         StoreError::Tenant(_) => (StatusCode::FORBIDDEN, "tenant"),
         StoreError::Contention { .. } => (StatusCode::SERVICE_UNAVAILABLE, "resource_busy"),
+        StoreError::MaintenanceRequired { .. } => {
+            (StatusCode::INTERNAL_SERVER_ERROR, "maintenance_required")
+        }
         StoreError::SchemaIncompatible { .. } => {
             (StatusCode::INTERNAL_SERVER_ERROR, "schema_incompatible")
         }

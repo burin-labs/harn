@@ -58,6 +58,7 @@ pub import {
   __judge_clamp_completion_detail,
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
+  __judge_completion_verdict_refuses_without_a_gap,
   __judge_completion_verdict_schema,
   __judge_contradiction_feedback,
   __judge_gaps_unattributed_count,
@@ -559,6 +560,15 @@ fn __judge_invoke_structured(
   // same self-contradiction wearing the one label this check used to let
   // through (harn#7910). The gap is the half backed by evidence, so it wins.
   const gap_contradicts_done = __judge_completion_verdict_contradicts_itself(decoded)
+  // The converse shape — a `continue` that itemizes nothing, newly reachable
+  // now that the reply schema no longer carries a one-item minimum on `gaps` —
+  // is deliberately NOT named here. `reason` falls through to the judge's own
+  // words when the gate has nothing to say, and the actor needs those words: a
+  // refusal that hands back a policy code instead of the condition it found
+  // unmet cannot be acted on. The receipt already carries `gap_count`, so a
+  // `continue` with zero is legible as the malformed reply it is, in a field
+  // that costs the actor nothing. See
+  // `__judge_completion_verdict_refuses_without_a_gap` for the typed rule.
   const verdict = requirements_pending || gap_contradicts_done ? "continue" : decoded.verdict
   const detail = if unassessed {
     completion_requirement_unassessed_feedback(requirement_report)
