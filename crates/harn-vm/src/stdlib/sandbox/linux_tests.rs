@@ -349,6 +349,15 @@ fn sandboxed_tar_extracts_symlinks_without_widening_the_write_root() {
         Path::new("harn"),
     );
 
+    // The refusal below is produced by Landlock and by nothing else. A kernel
+    // without it reports filesystem isolation as disabled and cannot refuse
+    // the write, so asserting there blames the backend for the runner. Skip
+    // the boundary half the same way the other live-Landlock cases do; the
+    // extraction assertions above still ran.
+    if landlock_abi_version() == 0 {
+        eprintln!("[fchmodat2-boundary] SKIPPED: no Landlock on this kernel");
+        return;
+    }
     let outside = tempfile::tempdir().expect("outside workspace");
     let refused = run_tar(outside.path());
     assert!(
