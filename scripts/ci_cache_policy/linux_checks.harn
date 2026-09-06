@@ -1,3 +1,4 @@
+import "./host_bound_rust_test_filter.harn"
 import "./policy_core.harn"
 
 fn blacksmith_runner_expression(runner: string) -> string {
@@ -472,6 +473,7 @@ fn archived_workspace_test_consumer_errors(workflow: dict, job_name: string) -> 
   if !contains(test_command, "--archive-file")
     || !contains(test_command, "harn-tests.tar.zst")
     || !contains(test_command, "--workspace-remap")
+    || !contains(test_command, HOST_BOUND_RUST_TEST_FILTER_SETUP)
     || !contains(test_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
     || regex_match("(^|[ ])--workspace(harness, [ ]|$)", test_command)
       != nil {
@@ -696,6 +698,7 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
     || trim(colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "")
       != "1"
     || !contains(colocated_command, "cargo nextest run --locked --workspace --profile ci")
+    || !contains(colocated_command, HOST_BOUND_RUST_TEST_FILTER_SETUP)
     || !contains(colocated_command, NEUTRAL_RUST_TEST_FILTER_FLAG)
     || contains(colocated_command, "--archive-file") {
     errors = errors
@@ -708,6 +711,7 @@ fn colocated_rust_proof_errors(workflow: dict) -> list<string> {
     || trim(security_step?.id ?? "")
       != "release-audit-rust-security"
     || !contains(security_command, "--archive-file")
+    || !contains(security_command, HOST_BOUND_RUST_TEST_FILTER_SETUP)
     || !contains(security_command, HOST_BOUND_RUST_TEST_FILTER_FLAG) {
     errors = errors
       + ["ci.yml:rust-security must own every host-bound Linux sandbox proof on GitHub Ubuntu"]

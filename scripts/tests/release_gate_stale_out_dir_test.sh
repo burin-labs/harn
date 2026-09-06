@@ -25,7 +25,9 @@ version = "1.2.3"
 members = []
 EOF
 mkdir -p "$release_root/docs/src" "$release_root/crates/harn-vm" "$release_root/crates/harn-cli" "$release_root/.github"
-mkdir -p "$release_root/scripts/ci"
+mkdir -p "$release_root/scripts/ci" "$release_root/scripts/config"
+cp "$repo_root/scripts/ci/host_bound_rust_test_filter.sh" "$release_root/scripts/ci/"
+cp "$repo_root/scripts/config/host-bound-rust-tests.txt" "$release_root/scripts/config/"
 touch "$release_root/README.md" "$release_root/CLAUDE.md"
 git -C "$release_root" init -q
 git -C "$release_root" config user.email test@example.com
