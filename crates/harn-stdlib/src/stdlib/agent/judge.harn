@@ -13,6 +13,8 @@ import {
   completion_requirement_assessments_schema,
   completion_requirement_contract,
   completion_requirement_contract_prompt,
+  completion_requirement_ledger_empty,
+  completion_requirement_ledger_unassessed,
   completion_requirement_pending_feedback,
   completion_requirement_report,
   completion_requirement_report_omitted,
@@ -724,6 +726,7 @@ fn __judge_directive(
   feedback_composition: any,
   feedback_history: dict,
   defer_feedback: bool,
+  ledger: CompletionRequirementReport,
 ) -> CompletionDirective {
   const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
   // A cap is a statement about the JUDGE running out of turns, not about the
@@ -736,10 +739,18 @@ fn __judge_directive(
   // a clean stop, which is the worse defect. An explicit
   // `terminal_judge_reason` is untouched — that is the judge naming a terminal,
   // not the loop running out of room.
+  //
+  // The ledger is the second half of that reading, and for the same reason the
+  // typed-green skip needs it: the verifier answers "did the declared command
+  // pass", never "was each thing the task asked for delivered". A cap reached
+  // over outstanding acceptance rows has a judge that spent its budget SAYING
+  // SO, so converting it to a verified stop seals a done its own transcript
+  // refuses. See harn#8110.
   const cap_reached = completion_judge_cap_reached || turn_end_judge_cap_reached
   const verified_at_cap = cap_reached
     && terminal_reason == ""
     && to_string(payload?.verification?.observed ?? "") == "passed"
+    && ledger.pending_count == 0
   const action = if verified_at_cap {
     "stop_verified"
   } else if terminal_reason != "" || cap_reached {
@@ -796,7 +807,22 @@ fn __judge_directive(
     verification: payload.verification,
     admission: verdict?.admission,
     checkpoint: verdict?.typed_checkpoint,
-    requirements: verdict?.requirement_report,
+    // Never `nil` ON A SEALED DONE. Absent, this field reads the same for "no
+    // rows were declared" and "rows were declared and nobody assessed them",
+    // and only the second is a false completion. The verdict's own report wins
+    // when a judge produced one; the boundary reading stands in when none ran.
+    //
+    // Scoped to the two actions that seal a done, deliberately. A `continue`
+    // and a `stop_unverified` both say in the action itself that the run did
+    // not complete, so there is no completion to read the ledger against, and
+    // filling the field there would only make "the judge assessed this
+    // boundary" unreadable.
+    requirements: verdict?.requirement_report
+      ?? if action == "accept" || action == "stop_verified" {
+        ledger
+      } else {
+        nil
+      },
     completion_claim: payload?.completion_claim,
   }
   return {
@@ -884,6 +910,7 @@ pub fn agent_completion_adjudicator_declared(opts: dict, stop_reason: string) ->
 
 fn __completion_policy_initial_evaluation(
   payload: CompletionEvidenceSnapshot,
+  ledger: CompletionRequirementReport,
 ) -> CompletionPolicyEvaluation {
   return {
     verdict: {vetoed: false},
@@ -892,7 +919,39 @@ fn __completion_policy_initial_evaluation(
     completion_judge_cap_reached: false,
     payload: payload,
     deterministic_reason: "",
+    ledger: ledger,
   }
+}
+
+/**
+ * This boundary's acceptance ledger, across both judge slots.
+ *
+ * Either slot may declare a contract, and the three decisions that read this —
+ * the typed-green skip, the catalog light-scrutiny skip, and the judge cap — are
+ * decisions about the boundary rather than about one stage. Computing it once
+ * here is what keeps them from disagreeing.
+ *
+ * When both slots declare rows, the outstanding set wins: the safe direction and
+ * the tolerant direction are the same direction here. There is deliberately no
+ * "prefer the one that declared rows" tie-break after that. With no assessment
+ * in hand a declared row is always pending, so a ledger with rows always has
+ * `pending_count > 0`; reaching the last line means neither slot declared
+ * anything, and a tie-break there would be a branch no reachable input can take.
+ */
+fn __completion_boundary_ledger(opts: dict) -> CompletionRequirementReport {
+  const verification = completion_requirement_ledger_unassessed(
+    completion_requirement_contract(opts?.verify_completion_judge?.requirement_contract),
+  )
+  if verification.pending_count > 0 {
+    return verification
+  }
+  const completion = completion_requirement_ledger_unassessed(
+    completion_requirement_contract(opts?.turn_end_condition?.requirement_contract),
+  )
+  if completion.pending_count > 0 {
+    return completion
+  }
+  return completion_requirement_ledger_empty()
 }
 
 fn __completion_policy_can_advance(evaluation: CompletionPolicyEvaluation) -> bool {
@@ -961,6 +1020,13 @@ fn __completion_policy_run_stage(
       // return before the headless wall — and all three have been observed. One
       // predicate, read by both callers, so the rule cannot be half-applied.
       // See harn#8110.
+      //
+      // The acceptance ledger is read here too, BEFORE the judge, because the
+      // pending-requirements check that turns a done into a continue lives
+      // inside the structured invocation. A skip blind to it would take the
+      // ledger with the judge. Computed once for the boundary, so this skip,
+      // the catalog skip below, and the cap conversion cannot disagree.
+      const ledger = evaluation.ledger
       if __completion_typed_green_terminal(
         {
           deterministic_invoked: evaluation.invoked.deterministic,
@@ -970,6 +1036,7 @@ fn __completion_policy_run_stage(
           stop_reason: payload.stop_reason,
           final_text: payload.text,
           pending_tool_batch_effect_count: payload.pending_tool_batch_effect_count,
+          ledger_pending_count: ledger.pending_count,
         },
       ) {
         const verified_terminal = {
@@ -980,6 +1047,10 @@ fn __completion_policy_run_stage(
           reason: COMPLETION_VERIFIED_AFTER_WRITE_REASON,
           judge_duration_ms: 0,
           trigger: trigger,
+          // Explicitly empty, never absent. This done was sealed without a
+          // judge, and a `nil` here would read the same as a ledger that was
+          // declared and never assessed.
+          requirement_report: ledger,
         }
         __judge_emit_decision(harness.agent, payload.session_id, iteration, verified_terminal)
         return evaluation + {verdict: verified_terminal}
@@ -993,11 +1064,16 @@ fn __completion_policy_run_stage(
           // by a model's catalog row — a question the oracle had answered. It now
           // only decides what the verification did not, and its own receipt
           // (`source: "catalog"`) still says which rule fired.
-          if agent_completion_review_should_skip_llm(
-            agent_completion_review(harness.llm, opts),
-            evaluation,
-            payload,
-          ) {
+          //
+          // The ledger clause applies to this skip for the same reason it
+          // applies above: a skipped judge is a skipped pending-requirements
+          // check, whichever rule did the skipping.
+          if ledger.pending_count == 0
+            && agent_completion_review_should_skip_llm(
+              agent_completion_review(harness.llm, opts),
+              evaluation,
+              payload,
+            ) {
             const skipped = {
               vetoed: false,
               verdict: "done",
@@ -1005,6 +1081,7 @@ fn __completion_policy_run_stage(
               judge_outcome: "skipped_light_scrutiny",
               judge_duration_ms: 0,
               trigger: trigger,
+              requirement_report: ledger,
             }
             __judge_emit_decision(harness.agent, payload.session_id, iteration, skipped)
             return evaluation + {verdict: skipped}
@@ -1039,8 +1116,9 @@ fn __completion_policy_evaluate(
   payload: CompletionEvidenceSnapshot,
   iteration: int,
   stages: list<CompletionPolicyStage>,
+  ledger: CompletionRequirementReport,
 ) -> CompletionPolicyEvaluation {
-  let evaluation = __completion_policy_initial_evaluation(payload)
+  let evaluation = __completion_policy_initial_evaluation(payload, ledger)
   for stage in stages {
     if !__completion_policy_can_advance(evaluation) {
       break
@@ -1086,7 +1164,14 @@ pub fn agent_evaluate_completion(
     stop_reason,
     agent_completion_review(harness.llm, opts),
   )
-  const evaluation = __completion_policy_evaluate(harness, opts, payload, iteration, stages)
+  const evaluation = __completion_policy_evaluate(
+    harness,
+    opts,
+    payload,
+    iteration,
+    stages,
+    __completion_boundary_ledger(opts),
+  )
   const verdict = evaluation.verdict
   // The evaluated snapshot, not the one built before any stage ran: it is the
   // one carrying whatever the deterministic gate observed.
@@ -1121,6 +1206,7 @@ pub fn agent_evaluate_completion(
     feedback_composition,
     feedback_composition?.history ?? opts?._feedback_history ?? {},
     opts?._defer_judge_feedback ?? false,
+    evaluation.ledger,
   )
   agent_emit_event(harness.agent, session.session_id, "typed_checkpoint", directive.receipt)
   return directive
