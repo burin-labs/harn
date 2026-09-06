@@ -1241,8 +1241,15 @@ jobs:
           "$GITHUB_ENV"
       - name: Check source file lengths
         env:
-          HARN_EXT_SOURCE_LENGTH_COMPARISON: ${{ github.event_name == 'pull_request' && 'merge-base' || 'first-parent' }}
-          HARN_EXT_SOURCE_LENGTH_BASE_REF: ${{ github.event.pull_request.base.sha || '' }}
+          # First parent, on every event. On a pull request this job checks out
+          # `refs/pull/N/merge`, whose first parent is the base branch tip, so
+          # HEAD^1..HEAD is exactly what the pull request contributes. The
+          # recorded `pull_request.base.sha` is the base tip from when the event
+          # fired, which goes stale the moment main moves: everything main
+          # landed since then lands inside the change set and gets blamed on
+          # whoever is open. That staleness is the same misattribution this job
+          # exists to remove.
+          HARN_EXT_SOURCE_LENGTH_COMPARISON: first-parent
         # The rendered report names every file and its line count, so it is the
         # summary. `tee` would report its own exit status, so capture first and
         # re-raise the ratchet's.
