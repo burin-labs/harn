@@ -105,6 +105,11 @@ no-progress, and stuck rows lower onto the native `stall_diagnostics` config;
 token-runaway is added as a `post_turn_callback` overlay that emits the same
 `agent_loop_stall_warning` event.
 
+`stall_diagnostics.observation_recurrence_advisory` defaults to `true`. Set it
+to `false` to suppress the advisory for identical read results recurring across
+interleaved calls. Consecutive-repeat safeguards remain enabled, and repeated
+observations still count as no information gain for the iteration budget.
+
 ```harn,ignore
 import { with_governance } from "std/agent/governors"
 

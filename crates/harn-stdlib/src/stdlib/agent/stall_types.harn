@@ -12,6 +12,7 @@ pub type AgentStallConfig = {
   exempt_tools: list,
   include_arguments: bool,
   repeat_same_observation: int,
+  observation_recurrence_advisory: bool,
   repeat_success: int,
   repeat_same_error: int,
   no_progress_messages: int,
