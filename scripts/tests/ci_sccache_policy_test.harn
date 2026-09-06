@@ -10,14 +10,69 @@ fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
 
+const E2E_SWITCH_ROUTE =
+  "vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest'"
+
+fn e2e_workflow(runs_on: string, evacuation_input: string) -> dict {
+  return {
+    jobs: {
+      e2e: {"runs-on": runs_on},
+      "e2e-capacity": {
+        steps: [
+          {
+            name: "Decide where the slow E2E suite lands",
+            run: "bash scripts/ci/e2e_runner_capacity.sh",
+            env: {FLEET_EVACUATION: evacuation_input},
+          },
+        ],
+      },
+    },
+  }
+}
+
 @test
 pipeline test_e2e_paid_override_fails_when_runner_route_drops_switch(
   harness: Harness,
   task: unknown,
 ) {
-  const invalid = {jobs: {e2e: {"runs-on": "ubuntu-latest", env: {HARN_E2E_JOBS: "4"}}}}
+  const invalid = e2e_workflow(
+    "ubuntu-latest",
+    gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
+  )
   const errors = e2e_elastic_capacity_errors(invalid)
   assert(errors.any(fn(error) { contains(error, "HARN_CI_ENABLE_BLACKSMITH_LINUX") }))
+}
+
+@test
+pipeline test_e2e_paid_override_fails_when_the_switch_never_reaches_the_measured_route(
+  harness: Harness,
+  task: unknown,
+) {
+  // The switch on `runs-on` alone is the case the old rule could not see. The
+  // job evacuates while the capacity step still names the owned census, so the
+  // run is attributed to a rung it never touched.
+  const invalid = e2e_workflow(gha_expression(E2E_SWITCH_ROUTE), "")
+  const errors = e2e_elastic_capacity_errors(invalid)
+  assert(errors.any(fn(error) { contains(error, "FLEET_EVACUATION") }))
+}
+
+@test
+pipeline test_e2e_paid_override_fails_when_the_capacity_step_is_gone(
+  harness: Harness,
+  task: unknown,
+) {
+  const invalid = {jobs: {e2e: {"runs-on": gha_expression(E2E_SWITCH_ROUTE)}}}
+  const errors = e2e_elastic_capacity_errors(invalid)
+  assert(errors.any(fn(error) { contains(error, "Decide where the slow E2E suite lands") }))
+}
+
+@test
+pipeline test_e2e_paid_override_accepts_the_switch_on_both_seams(harness: Harness, task: unknown) {
+  const valid = e2e_workflow(
+    gha_expression(E2E_SWITCH_ROUTE),
+    gha_expression("vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true'"),
+  )
+  assert_eq(e2e_elastic_capacity_errors(valid), [])
 }
 
 fn persistent_lane(

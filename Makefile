@@ -354,7 +354,7 @@ test-affected:
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
 	$(HARN_REQUIRE_NEXTEST)
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(if $(strip $(ARGS)),$(ARGS),--workspace) --profile e2e --run-ignored all
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(if $(strip $(ARGS)),$(ARGS),-p harn-cli --tests) --profile e2e --run-ignored all
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:
@@ -1394,6 +1394,8 @@ check-vm-exposures:
 check-rust-test-lane-policy:
 	@echo "=== Checking Rust test lane stack contract ==="
 	@$(HARN_CMD) run scripts/check_rust_test_lane_policy.harn
+	@bash scripts/tests/e2e_resource_budget_test.sh
+	@bash scripts/tests/e2e_runner_capacity_test.sh
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="
