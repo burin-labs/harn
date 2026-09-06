@@ -172,7 +172,11 @@ fi
       ./.githooks/pre-push origin "$origin" >/dev/null
 )
 
+# The source file-length ratchet runs first: it is a fast-validation gate, and
+# the Rust compile gate is phase 2. Both lines are the contract — a change that
+# drops either one fails here rather than quietly shrinking what pre-push proves.
 cat > "$tmp_root/expected-targeted-pre-push.txt" <<'EOF'
+harn run scripts/check_source_file_lengths.harn
 cargo clippy -p harn-lint --tests -- -D warnings
 EOF
 if ! diff -u "$tmp_root/expected-targeted-pre-push.txt" "$record"; then
@@ -196,6 +200,7 @@ fi
 )
 
 cat > "$tmp_root/expected-full-pre-push.txt" <<'EOF'
+harn run scripts/check_source_file_lengths.harn
 cargo clippy -p harn-lint --tests -- -D warnings
 make test
 EOF
@@ -293,6 +298,7 @@ rename_sha=$(git -C "$work" rev-parse HEAD)
 )
 
 cat > "$tmp_root/expected-rename-pre-push.txt" <<'EOF'
+harn run scripts/check_source_file_lengths.harn
 cargo clippy -p harn-lint -p harn-other --tests -- -D warnings
 EOF
 if ! diff -u "$tmp_root/expected-rename-pre-push.txt" "$record"; then

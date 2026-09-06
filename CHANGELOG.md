@@ -9,6 +9,358 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.131
+
+### Added
+
+- Agent loops can opt into a typed `task_complete` tool whose completion claim
+  names each requirement and cites recorded tool calls. Harn rejects fabricated,
+  self-referential, incomplete, and ambiguous claims before invoking a completion
+  judge, while the default tool-free completion path remains unchanged.
+- Each gap a completion judge itemizes can now name the acceptance row it is
+  against, by id rather than by prose. When the requirement ledger has rows, the
+  verdict schema offers exactly those ids and nothing else, and an id the ledger
+  never issued is recorded as unattributed rather than repaired to the nearest
+  row. The directive receipt carries how many gaps named no row, so a refusal set
+  that attributes nothing is visible instead of silently absent.
+
+  The acceptance assessment schema is constrained to the same ids. Reporting a row
+  against an id the ledger never issued already blocked the completion; now the
+  judge is never offered the chance to write one.
+- **OpenAI GPT-6 Astra is in the provider catalog.** `gpt-6-astra` is
+  selectable directly or through the `gpt-6` and `astra` aliases, with a
+  1,050,000-token context window, the 128,000-token output ceiling, and pricing
+  that carries the same over-272k input band as the GPT-5.6 family (2x input,
+  1.5x output applied to the whole request). Its capability row was probed
+  against the live API rather than transcribed from the model page, which
+  matters in two places: the effort ladder is only `low`/`medium`/`high`/
+  `xhigh`, so both `none` and the `max` that OpenAI's own docs advertise are
+  rejected, and `temperature` and `top_p` are refused outright. Function tools
+  are unusable on `/v1/chat/completions` for this model at any effort, so the
+  row carries `reasoning_tools_require_responses` and Harn routes tool-bearing
+  turns to the Responses API automatically. Without a model-specific row
+  `gpt-6-astra` parses as generation (6, 0) and inherits the generic GPT-5.4+
+  rule, which advertises `none` and leaves sampling unconstrained; every agent
+  turn under that row would have cost a provider 400.
+
+### Changed
+
+- The shared Codex and Claude shell guard now requires Fleet worktrees to use the
+  durable admission command instead of raw `git worktree add`. The same change
+  restores piped-build enforcement under the hook's restricted builtin policy.
+- Scheduled GitHub Actions now have claim-based names and a checked cadence registry. The five-minute development-cutover
+  and speculative-run controllers share one workflow, reducing idle scheduled starts without changing their checks.
+- Provider catalog records are available through `harn-provider-catalog` without linking the VM.
+  Existing VM imports continue to work.
+
+### Fixed
+
+- The completion judge no longer reads its own veto back as evidence. When a
+  rejected turn left an undispatched tool call, the harness closed that call by
+  writing its own feedback in as the call's result, under the tool's own name and
+  with a failure outcome. The next judge call then saw its previous rejection in
+  the slot reserved for what the workspace actually did, and cited it as proof of
+  the gap. Harness-written results are now tagged at the point they are written
+  and kept out of the evidence a completion authority weighs, with a count so
+  their absence is visible rather than silent.
+- **Reading the code index no longer rebuilds it (#7973).** `code_index.rebuild`
+  called the full walk-read-parse pass on every invocation, and the `force`
+  parameter that was supposed to distinguish a rebuild from a refresh was
+  parsed and discarded, so every index read re-parsed the whole workspace. An
+  index already anchored at the requested root is now reconciled against disk:
+  the directory walk already stats every candidate for its size and symlink
+  filters, so a file whose mtime and size both match is never opened, and only
+  files whose content hash moved are re-parsed. On a 7,038-file workspace the
+  second read of an unchanged tree went from 318,325 ms to 135 ms, and a read
+  after one changed file costs 1,149 ms with one file re-read. `force: true`
+  keeps the wholesale path and is the escape hatch for a change that left both
+  mtime and size untouched. The response now carries `mode` plus per-file
+  reconciliation counters on both paths, so a caller can see which path ran
+  rather than inferring it.
+- Report the process filesystem-confinement mechanism and its runtime availability in `harn doctor`.
+  Linux CI now publishes a binding escape receipt instead of implying sandbox coverage from an absent write.
+- Bound provider catalog refreshes, report timeouts as a distinct terminal outcome,
+  and keep fixture-only refreshes outside the process-network grant.
+- Model-job output paths now report filesystem policy denials and inspection
+  failures distinctly instead of blaming the backend for a missing output.
+- A run whose declared verifier had already passed can no longer be failed by the
+  completion-judge cap. The cap is a statement about the judge running out of
+  invocations, not about the work, but the terminal was taken from the judge
+  verdict alone: the verifier reading sat on the same evidence payload and was
+  already written to the completion receipt, and nothing consulted it. A cap
+  reached over a verifier observed to pass now ends the run as verified, under its
+  own stop reason so it is no longer the same wire value as a run that never
+  converged, and the judge's dissent is kept on the receipt rather than deciding
+  the outcome. A cap over a failed or unrun verifier is unchanged, because an
+  unrun verifier also covers the gate being unable to read facts.
+- **A completion judge that accepts while naming a gap is now re-asked once,
+  instead of vetoing the run to its cap (#8060).** `verdict: "done"` beside a
+  populated `gap_class` is a self-contradiction and is rewritten to `continue`.
+  Nothing re-asked it, though, and the prompt is unchanged between invocations,
+  so a judge whose reply is stable returned the identical contradiction on every
+  call. Each rewrite fed the actor the judge's own "the work is finished" text as
+  its next step, which no turn can answer, and the run spent its entire
+  invocation budget and died at the judge cap with `completion_unverified` having
+  never actually been refused by anyone. Two hosted coding cells measured it: ten
+  of ten judge invocations returned `done` with `gap_class: "other"` and a detail
+  citing a passing verifier, ten of ten were inverted, and both runs ended failed
+  over a declared verifier that had passed and a clean-checkout re-execution that
+  had passed. The contradiction is now resolved the way an unitemized approval
+  already is: the judge is asked again, exactly once, with the contradiction
+  named and both exits spelled out, on the user turn so the cached system prefix
+  stays byte-identical. If it survives that re-ask, names nothing, and the
+  deterministic completion gate watched the verifier pass, the refusal is
+  overruled and the receipt records what overruled it. A refusal naming any of
+  the four real gap classes is never overruled, at either step, so a run that was
+  genuinely blocked from doing its work still cannot launder itself to `done`.
+- Provider catalog matrix and support generation read current catalog and capability source fragments
+  without requiring another CLI rebuild. Installed binaries outside a source checkout retain the embedded
+  fallback; invalid source fragments now fail explicitly.
+- **`make build` compiles the Harn CLI once instead of twice (#8064).**
+  `workspace.default-members` is exactly `crates/harn-cli`, so the plain
+  `cargo build` that opened the recipe compiled that package and the binary
+  probe that followed compiled it again under a second Cargo fingerprint: the
+  probe adds the `internal-freshness-checker` feature and puts
+  `HARN_BUILD_FRESHNESS_ID` in the environment, and either one alone forces the
+  rebuild. The probe then deleted the first step's binary for want of a
+  freshness receipt, so that compile produced nothing. On an already warm tree
+  the removed step cost 2m37s and one extra rust-heavy lease acquisition.
+- **A worktree configured by `dev_setup.sh` can now read another worktree's
+  sccache entries (#8064).** The generated `.cargo/config.toml` set
+  `rustc-wrapper = "sccache"`, and sccache 0.17 folds every `CARGO_*` variable
+  into its Rust cache key, including the absolute per-worktree `CARGO_TARGET_DIR`
+  written on the next line. Two worktrees compiling a byte-identical registry
+  dependency produced different keys, and a cold build measured 1 Rust cache hit
+  against 638 misses. Setup now points the wrapper at
+  `scripts/sccache_rustc_wrapper.sh`, which drops that one variable for rustc
+  only. Building one crate in a second worktree went from 0 hits to 6 of 9
+  compilations served from cache. Windows keeps bare `sccache`, because Cargo
+  runs `rustc-wrapper` directly and cannot execute a shell script there.
+- **`harn precompile` now reuses an artifact whose stored key already matches,
+  instead of recompiling every source it walks (#8071).** Precompiling was not
+  incremental at all, so callers compensated with a stamp over a whole tree and
+  one edited file rebuilt every artifact beside it. Nothing new identifies an
+  artifact: `CacheKey` already folds a source hash with a hash of the transitive
+  imports, the harn version, the codegen fingerprint, the compiler options tag,
+  and the module provenance, and the precompiler simply never consulted it. It
+  now derives both keys before any compile work and returns early when the
+  artifacts on disk carry them, through the same header comparison a cache load
+  uses, so a reuse cannot accept an artifact a load would reject. The summary
+  line reports compiled and reused as separate counts, because "the tree is up
+  to date" and "the tree was rebuilt" are the two states a caller of an
+  incremental compiler needs told apart. On a 549-source tree with nothing
+  changed the second run recompiles nothing; editing one module nothing imports
+  recompiles exactly that module, and editing a shared dependency recompiles it
+  and its dependents and nothing else.
+- **`make setup` no longer deletes another live worktree's Cargo target cache
+  (#8073).** The target-cache GC ranked warm entries by the modification time of
+  the target directory itself, which cannot answer when the tree was last built
+  in: Cargo writes into `debug/`, so the entry's own mtime records when the
+  directory was created and never advances. A restored target seed made that
+  reading actively wrong, because the seed carries its own timestamps, so a tree
+  laid down minutes ago reported an mtime weeks old and was retired as a cold
+  cache while its worktree was mid-build. One such removal took 7.5 GB of warm
+  build output from a live lane. Ranking now takes the newest of the entry and
+  its `debug` and `release` directories. The retention policy itself is
+  unchanged; only the measurement it acts on is.
+- Completion judge feedback is no longer truncated mid-instruction.
+
+  The judge's `detail` was clamped to 240 characters at the decode boundary, and
+  that same clamped string is what reaches the actor as feedback. A judge detail
+  is written complaint-first and remedy-last, so the clamp systematically removed
+  the half the actor needed to act on and kept the half it could not. Measured on
+  a live run, four of five refusals arrived amputated mid-word, the objection
+  raised on the first call was raised again on the fourth, and the run exhausted
+  its judge invocation budget without the actor ever being told what to change.
+
+  The schema could not prevent the overrun. It documents the limit in prose, but
+  `maxLength` is stripped for both OpenAI-strict and Anthropic-strict structured
+  outputs, so the judge never saw a length constraint.
+
+  The bound still exists, so a replayed or older-transport reply cannot carry an
+  unbounded string into feedback and telemetry. It is now large enough for one
+  actionable instruction, cuts on a word boundary, and marks what it cut, so a
+  truncated instruction can no longer be mistaken for a complete one.
+- **The symbol graph no longer points reference edges at call sites (#8081).**
+  The `REFS` name heuristic treated every node sharing an identifier as a
+  reference target, including `CallSite` nodes, which are uses rather than
+  declarations. A name like `assert` with 32,343 call sites and seven real
+  declarations therefore drew an edge from every module mentioning the word to
+  all 32,343 of them. REFS now targets only what a bare identifier in another
+  file could actually be naming: functions, types, macros, and modules. Fields
+  and enum cases are excluded with them, being scoped to their container. On a
+  7,038-file workspace this takes the graph from 88,706,547 edges to 2,920,143
+  and REFS from 86,974,990 to 1,188,586, which is roughly 2 GB less resident
+  adjacency and makes `REFERENCED_BY` traversals return references instead of
+  tens of thousands of unrelated call sites.
+- **A freshly restored Cargo target seed is no longer deleted as a cold cache
+  (#8084).** Both production clone paths preserve the seed's timestamps, which
+  is right for the artifacts and wrong for the tree's own age, so a target
+  restored seconds ago reported an mtime from whenever the seed was published
+  and the target-cache GC retired it before its first build started. The restore
+  now stamps the directories the GC reads, while the artifacts keep the seed's
+  mtimes so Cargo's freshness reuse is untouched. This completes the class
+  #8073 began: that change fixed a tree already built into, and this one fixes a
+  tree restored but not yet built into. The seed suite's test copy mode also now
+  preserves timestamps, matching production, so it can exercise the property at
+  all.
+- **The completion judge now sees every file the actor touched, not just the
+  last one (#8090).** The evidence packet retained one action per role, so it
+  could hold exactly one mutation. On the ordinary shape of "change the source,
+  then add the test that proves it", the test edit displaced the source edit,
+  and every later judge call was handed the test file's content and the source
+  file's name. The judge was then asked whether the source now behaves a certain
+  way, given only that name, a placeholder read digest, and the actor's prose
+  claim that it does. It declined to take the claim on trust, which is the
+  behaviour we want, and refused work that was present, correct and verified,
+  until the run died at the judge cap. The packet now keys retained mutations by
+  path and carries the latest edit for each, bounded to the most recently
+  touched paths, with the remainder still counted in `omitted_older_action_count`
+  so the window never under-reports itself. The verifier and problem slots are
+  unchanged: state first, narrative second.
+- **`harn precompile <dir> --out <outdir>` no longer silently collapses the
+  output mirror when the target is a relative path (#8096).** The driver walks
+  with absolute paths but was handed the root exactly as the caller typed it, so
+  relativizing one against the other produced nothing and every source fell
+  back to its bare filename directly under the output root. Equally named
+  modules in different subdirectories then wrote to a single destination and
+  all but the last were lost, with nothing at the paths the caller was promised
+  and an exit status of zero. On a 549-source tree that produced 521 artifacts,
+  all at the top level. The root is now read back out of the same walk that
+  produced the files, so there is one spelling of it, and a source under a
+  directory walk that will not relativize is a hard error naming the file
+  rather than a filename that quietly overwrites a sibling.
+- The active-skills system-prompt block now substitutes `${HARN_SESSION_ID}` and
+  the other skill placeholders, instead of serving a skill's prompt verbatim.
+- The completion judge can now state every gap it holds in one verdict, instead of
+  one at a time. It was told to use its single `detail` field for "the single most
+  important gap", so a judge holding three objections named one, the actor fixed
+  it, and the next invocation named the next; with a default cap of three
+  invocations a task with three real gaps could not be finished inside its own
+  budget, having received correct feedback every time. A refusal now carries a
+  `gaps` list, each row naming the criterion it is against.
+
+  A refusal that sources itself to the evidence is also checked against the
+  evidence. When a gap quotes a line that does not appear in the packet the judge
+  was handed, the judge is re-asked once with the offending quote named, rather
+  than the actor being sent a complaint whose stated basis is not in the file view.
+
+  The prompt also states that a labelled current-state file view in the evidence
+  is the file's state now and supersedes anything said about that file in an
+  earlier round, including the judge's own previous verdict. The observed
+  refusals read as a judge restating its previous position rather than re-reading
+  the view it had been handed.
+- Project the bundled approval-review policy into every reviewer so narrow overrides
+  cannot silently drop the safety floor or verdict thresholds.
+- **Import resolution now answers with a typed module target instead of one
+  optional file, and a language with no resolver says so (#8114).**
+  The dep graph resolved an import to at most a single file id, and every
+  language without a rule was configured as `noop`, which produced an empty
+  result indistinguishable from "resolved to nothing". Resolution now returns a
+  module target carrying the set of files an import names plus the strategy that
+  produced it, and `noop` is replaced by an explicit `unresolved-by-design`
+  verdict that is reported rather than silently empty. This slice adds the two
+  strategies covering most of a typical workspace: Rust module paths, which
+  anchor `crate` at the nearest `src` root and follow the `mod.rs`/`main.rs`/
+  `lib.rs` rule for which file owns a directory, so `super` names the parent
+  module rather than the parent directory; and Harn's relative `import`
+  statements, which had no rule at all. On a 7,038-file workspace the files
+  whose imports resolve go from 239 to 1,901: Harn 0 to 1,364 of 2,029 and Rust
+  0 to 298 of 569. Swift and Go now report `unresolved-by-design` rather than an
+  empty set, so the census distinguishes them from Python, which attempts a
+  dotted resolution and finds nothing here.
+- `harn lint --fix` now keeps each import's public or private visibility attached
+  to that import when reordering an import block.
+- Bare calls through local callable values now resolve that lexical binding before
+  same-named module functions during type checking.
+- Restore self-contained provenance tooling so release finalization retains its
+  release contract after checking out the tag.
+- Release-related pull requests and every main CI run now rehearse release-tool
+  staging, archive provenance, publication policy, and development cutover offline.
+  Parsed workflow checks reject missing or duplicated canonical staging calls.
+- Reject stale Cargo lease supervisors on every discovery path, so setup fails
+  clearly instead of spinning before compilation or bypassing machine capacity.
+- A run whose declared verifier passed over a source write no longer pays for a
+  completion judge that has nothing left to decide. When the deterministic
+  completion gate reports `verified_after_write`, the reading it summarized agrees,
+  and the turn is the sealed final answer with no deferred effect outstanding, the
+  completion judge is not called: the directive seals as accepted with outcome
+  `skipped_verified_after_write` and the run terminates naturally. Previously the
+  judge was invoked on every such boundary, which cost a provider call and its
+  latency on the agreeing case, could overwrite proven success with a refusal
+  naming no gap class, and on one measured headless run never returned before the
+  wall clock. Every other boundary is unchanged: an unverified path, a red or
+  unrun verifier, a green verifier with no source write behind it, and a run with
+  no gate at all all call the judge exactly as before.
+- The verification-judge seam now reads the same typed green terminal the
+  completion-judge seam already reads. When the deterministic gate reports
+  `verified_after_write`, the verification reading agrees, the turn is the sealed
+  final answer with a non-empty response and no deferred effect outstanding,
+  neither judge is called: one predicate answers for both slots, so the rule
+  cannot be half-applied. Previously the verification judge always ran there, and
+  a run that had already been proven green paid its call, its latency, and the
+  risk that it would not return. The catalog-declared `completion_review` light
+  scrutiny skip is now subordinate to that reading rather than deciding beside it;
+  it still decides every boundary the verification does not, and its receipt still
+  names itself. Every other boundary is unchanged: an unverified path, a red or
+  unrun verifier, a green verifier with no source write behind it, and a run with
+  no gate all call both judges exactly as before.
+- **Swift imports resolve to build targets, and same-target files see each
+  other without one (#8114).**
+  Swift declared no import resolver, so the dep graph answered nothing for
+  every Swift file in a workspace. It now resolves `import Core` to every file
+  in the `Core` target, reading target membership from the SwiftPM layout: the
+  directory immediately below the nearest `Sources` or `Tests` ancestor. The
+  `@testable import` spelling a test target uses to name the target under test
+  is recognised too, as are `import Core.Net` and `import struct Core.Box`.
+  Files inside one target are also visible to each other with no import
+  statement at all, which is what Swift actually means by a module, so they are
+  part of the answer.
+  Neither half is stored as a dependency edge per pair of files. A target of N
+  files named by M importers costs N plus M rows rather than N times M, which
+  is the cross-product shape removed from the symbol graph in #8081. On a
+  7,038-file workspace 6,185 stored rows expand to 1,546,696 dependency
+  answers. Swift files whose import statements resolve go from 0 to 1,089, and
+  1,868 of them additionally see their target's other files.
+  The census reports those two counts separately, because a language with
+  implicit module membership would otherwise report every file as resolved
+  while its import-path resolver did nothing at all.
+- **Capability migrations now respect lexical callback bindings.** `harn fix`
+  no longer mistakes local `call` or `git` callbacks for retired ambient
+  builtins, including callbacks unpacked from imported enum variants. `harn
+  check` uses the same resolution, so unattended runtime upgrades do not invent
+  LLM or tool authority or leave false ambient-call diagnostics behind.
+- Allow sandboxed Linux processes to preserve symlink metadata with
+  `fchmodat2`. GNU tar can now extract archives containing symlinks inside a
+  writable root without weakening the filesystem boundary.
+- An MCP tool that reaches an unsupported host operation now names the operation
+  it could not run. The refusal was raised as a thrown value, and a thrown value
+  is redacted to "tool threw an undeclared value" on the way out to the caller,
+  which hid whether the manifest had reached runtime dispatch at all.
+- **The catalog no longer reports OpenAI routes as uncached.** Every OpenAI
+  model exported `prompt_cache: false`, including rows whose own `capabilities`
+  list said `prompt_caching`, because the catalog projects that field from the
+  capability rule rather than from the model row and no OpenAI rule set it.
+  Anthropic, Gemini, Mistral, Together, Moonshot, NVIDIA and Meta all did, so
+  OpenAI was the sole omission. Consumers reading `prompt_cache` to decide
+  whether a route can amortize a long prefix were told no while the provider was
+  already caching and billing accordingly; one real run measured 4,104,868
+  cache-read tokens on a route the catalog called uncached. The 22 OpenAI rules
+  covering GPT-4o and later, the codex tunes, and the o-series now declare
+  `prompt_caching`. The two catch-all rules that backstop pre-4o models still do
+  not, and a direction control asserts that stays true.
+- An agent run's opening user turn is recorded in its own LLM transcript again.
+  The turn was injected before the run's transcript directory became current, so
+  it was written nowhere, and a training example projected from that transcript
+  lost its `user` message.
+- Release contract checks identify the exact candidate in a pull-request checkout
+  even when retained release attempts have identical notes.
+- The development cutover monitor reports an untagged next release as publication pending
+  instead of requesting the previous development version.
+- `harn usage` now distinguishes measured zero spend and tokens from missing
+  accounting, reports physical provider-call counts, and labels known versus
+  unpriced cost across JSON, CSV, and terminal output.
+
 ## v0.10.130
 
 ### Added

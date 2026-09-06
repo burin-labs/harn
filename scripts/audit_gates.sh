@@ -130,7 +130,6 @@ GATES=(
   check-session-bundle-schema
   check-provider-catalog-drift
   check-ported-handler-loc
-  check-source-file-lengths
   check-test-target-coverage
   check-gate-path-visibility
   check-python-boundary

@@ -170,6 +170,24 @@ pub struct UpdateSession {
     pub usage_output: Option<u64>,
     #[serde(default)]
     pub usage_cost_usd_micros: Option<u64>,
+    /// Durable session attributes to MERGE into the ones already stored.
+    ///
+    /// Keys present here are written; keys absent are left alone. That is the
+    /// same "omitted fields are preserved" rule the rest of this struct
+    /// follows, applied one level down, so a caller that knows one fact does
+    /// not have to read the others back and rewrite them to avoid erasing
+    /// them. An empty map is therefore not a request to clear attributes; it
+    /// is no attribute change at all, and clearing stays outside this
+    /// contract exactly as it does for the typed fields above.
+    ///
+    /// Attributes existed only on `CreateSession` before, which made every
+    /// attribute a create-time-only fact. A writer that learned one after the
+    /// session existed had no way to record it, and silently did not: the
+    /// value simply never appeared. That is why this is a merge rather than a
+    /// replace — the caller who knows the provider is rarely the caller who
+    /// knows the build provenance.
+    #[serde(default)]
+    pub attributes: BTreeMap<String, serde_json::Value>,
 }
 
 /// One atomic, idempotent import into a new canonical session.

@@ -478,7 +478,7 @@ jobs:
       # deliberate change to which release semantics this repository is
       # checked against.
       ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 79354cb7dad80c7776bb57a78c80785b6592a3eb
+      ORCHESTRATOR_REF: 0eb9ccd5efdd2f94b0037999a8a70f97c5ea0c5e
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -514,6 +514,7 @@ jobs:
       - name: Evaluate the release contract
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           harn run --no-sandbox \
             .release-orchestrator/check_release_contract.harn \
@@ -1190,6 +1191,82 @@ jobs:
           path: ${{ runner.temp }}/harn-source-gate-${{ matrix.kind }}.json
           if-no-files-found: error
           retention-days: 14
+
+  # The source file-length ratchet, as its own check-run.
+  #
+  # It used to be one of ~30 gates inside "Check Harn sources and generated
+  # files". On the #8179 main push that job was red for four unrelated reasons
+  # and the ratchet's own refusal was the fourth line down a 400-second log, so
+  # nothing in the check list said a file was over the cap. A gate whose red
+  # does not name the file it is about is a gate people route around.
+  #
+  # This job answers one question and puts the answer in its check summary:
+  # which file, how many lines, and whether this change introduced it. It reads
+  # only git and the working tree, so it needs the shared CLI artifact and
+  # nothing else.
+  source-length-ratchet:
+    name: Check source file lengths
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The ratchet resolves its comparison base locally and never fetches.
+          fetch-depth: 0
+          # Persisted credentials leave an `include.path` in .git/config that
+          # the Harn sandbox cannot read, and git refuses to parse an
+          # unreadable include. The ratchet reconciles its walk against
+          # `git ls-files`, so it would lose that cross-check and still pass.
+          persist-credentials: false
+      - name: Wait for shared Harn binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Check source file lengths
+        env:
+          # First parent, on every event. On a pull request this job checks out
+          # `refs/pull/N/merge`, whose first parent is the base branch tip, so
+          # HEAD^1..HEAD is exactly what the pull request contributes. The
+          # recorded `pull_request.base.sha` is the base tip from when the event
+          # fired, which goes stale the moment main moves: everything main
+          # landed since then lands inside the change set and gets blamed on
+          # whoever is open. That staleness is the same misattribution this job
+          # exists to remove.
+          HARN_EXT_SOURCE_LENGTH_COMPARISON: first-parent
+        # The rendered report names every file and its line count, so it is the
+        # summary. `tee` would report its own exit status, so capture first and
+        # re-raise the ratchet's.
+        run: |
+          set -uo pipefail
+          make check-source-file-lengths > "$RUNNER_TEMP/ratchet.txt" 2>&1
+          status=$?
+          {
+            echo '### Source file-length ratchet'
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/ratchet.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/ratchet.txt"
+          exit "$status"
 
   # The pull-request binary-growth signal.
   #
@@ -2487,6 +2564,7 @@ jobs:
         rust-security,
         stack-frames,
         harn-audit,
+        source-length-ratchet,
         ci-walltime-report,
         audit-scripts,
         windows-plan,
@@ -2658,6 +2736,11 @@ jobs:
           echo "Harn proof workers: $harn_audit_result"
           require_result "$harn_audit_result" \
             "Harn proof workers failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+
+          source_length_result="${{ needs['source-length-ratchet'].result }}"
+          echo "Source file lengths: $source_length_result"
+          require_result "$source_length_result" \
+            "Source file-length ratchet failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           ci_walltime_report_result="${{ needs['ci-walltime-report'].result }}"
           echo "CI timing report: $ci_walltime_report_result"
