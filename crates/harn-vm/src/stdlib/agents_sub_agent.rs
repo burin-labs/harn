@@ -1545,18 +1545,15 @@ mod tests {
         let mut vm = crate::Vm::new();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-        let error = execute_sub_agent(&ctx, spec)
-            .await
-            .expect_err("a child loop error must remain visible to parent control flow");
+        let error = match execute_sub_agent(&ctx, spec).await {
+            Err(error) => error,
+            Ok(_) => panic!("a child loop error must remain visible to parent control flow"),
+        };
 
-        assert_eq!(
-            crate::value::error_to_category(&error),
-            crate::value::ErrorCategory::Runtime
-        );
-        assert!(
-            error.to_string().contains("`persistent` was removed"),
-            "{error}"
-        );
+        let VmError::Thrown(VmValue::String(message)) = &error else {
+            panic!("expected the child configuration refusal, got {error}");
+        };
+        assert!(message.contains("`persistent` was removed"), "{message}");
         assert!(
             stop_emitted.load(std::sync::atomic::Ordering::Acquire),
             "the failing child must still emit its terminal lifecycle event"
