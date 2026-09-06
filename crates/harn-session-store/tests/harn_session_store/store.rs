@@ -172,6 +172,14 @@ fn fresh_sqlite(hooks: StoreHooks, dir: &TempDir) -> Arc<dyn SessionImporter> {
     Arc::new(SqliteSessionStore::open_with_hooks(path, hooks).expect("open sqlite"))
 }
 
+fn fresh_sqlite_for_maintenance(hooks: StoreHooks, dir: &TempDir) -> Arc<dyn SessionImporter> {
+    let path = dir.path().join("sessions.sqlite");
+    Arc::new(
+        SqliteSessionStore::open_for_maintenance_with_hooks(path, hooks)
+            .expect("open sqlite for maintenance"),
+    )
+}
+
 async fn run_with_hooks<F, Fut>(hooks: StoreHooks, body: F)
 where
     F: Fn(Arc<dyn SessionImporter>) -> Fut,
@@ -180,6 +188,16 @@ where
     body(fresh_memory(hooks.clone())).await;
     let dir = TempDir::new().expect("tempdir");
     body(fresh_sqlite(hooks, &dir)).await;
+}
+
+async fn run_retention_with_hooks<F, Fut>(hooks: StoreHooks, body: F)
+where
+    F: Fn(Arc<dyn SessionImporter>) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    body(fresh_memory(hooks.clone())).await;
+    let dir = TempDir::new().expect("tempdir");
+    body(fresh_sqlite_for_maintenance(hooks, &dir)).await;
 }
 
 mod core;

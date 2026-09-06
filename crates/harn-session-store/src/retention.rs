@@ -16,8 +16,11 @@ use super::store::{SessionMeta, SessionStatus};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetentionPolicy {
-    /// Max wall-clock age for any session. Past this point the session
-    /// is hard-deleted (subject to `grace_seconds` after soft-delete).
+    /// Max wall-clock age for a session. Past this point the session
+    /// is soft-deleted, then hard-deleted after `grace_seconds`.
+    ///
+    /// Open sessions can remain resumable after their writer exits. The
+    /// maintenance lease, rather than persisted status, excludes live writers.
     #[serde(default)]
     pub max_age_seconds: Option<u64>,
     /// Min age before a closed/idle session is archived. When archiving
@@ -178,14 +181,17 @@ mod tests {
     }
 
     #[test]
-    fn soft_delete_triggers_when_open_session_exceeds_max_age() {
+    fn max_age_applies_to_resumable_and_closed_history() {
         let policy = RetentionPolicy {
             max_age_seconds: Some(60),
             ..RetentionPolicy::default()
         };
-        let session = meta(SessionStatus::Open, 0, None);
-        assert!(policy.should_soft_delete(&session, 61_000));
-        assert!(!policy.should_soft_delete(&session, 59_000));
+        let open = meta(SessionStatus::Open, 0, None);
+        let closed = meta(SessionStatus::Closed, 0, None);
+        assert!(!policy.should_soft_delete(&open, 59_000));
+        assert!(policy.should_soft_delete(&open, 61_000));
+        assert!(!policy.should_soft_delete(&closed, 59_000));
+        assert!(policy.should_soft_delete(&closed, 61_000));
     }
 
     #[test]

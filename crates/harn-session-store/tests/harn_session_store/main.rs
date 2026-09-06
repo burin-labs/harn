@@ -7,6 +7,8 @@
 //! target named `harn_session_store`; files under `tests/harn_session_store/` are not built as separate
 //! binaries. Fixtures resolve via `CARGO_MANIFEST_DIR`, unaffected by the move.
 
+mod lease;
+mod process_test_support;
 mod sqlite_concurrency;
 mod sqlite_initialization;
 mod store;

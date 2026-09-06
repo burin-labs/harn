@@ -177,8 +177,7 @@ async fn a_durable_writer_lease_distinguishes_a_live_writer_from_an_abandoned_ru
         .create(CreateSession::default())
         .await
         .expect("create session");
-    let lease_path =
-        crate::agent_session_journal::run_writer_lease_path(state_dir.as_path(), &meta.id);
+    let lease_path = harn_session_store::session_write_lease_path(state_dir.as_path(), &meta.id);
     std::fs::create_dir_all(lease_path.parent().expect("lease parent")).expect("create lease dir");
     let writer = std::fs::File::create(&lease_path).expect("create writer lease");
     writer.lock().expect("hold writer lease");
