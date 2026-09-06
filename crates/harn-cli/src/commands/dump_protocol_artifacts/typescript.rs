@@ -243,86 +243,12 @@ pub(super) fn generate_typescript_for_version(
     for record in &external_actions.records {
         record.append(&mut out, super::records::Target::Typescript);
     }
-    out.push_str(&ts_array_owned(
-        "ACTIVITY_KINDS",
-        &activity.kinds,
-        "HarnActivityKind",
-    ));
-    out.push_str(&ts_array_owned(
-        "TOOL_PERMISSION_OUTCOMES",
-        &activity.permission_outcomes,
-        "HarnToolPermissionOutcome",
-    ));
-    out.push_str(&ts_array_owned(
-        "TOOL_PERMISSION_DECIDERS",
-        &activity.permission_deciders,
-        "HarnToolPermissionDecider",
-    ));
-    out.push_str(&ts_array_owned(
-        "TOOL_PERMISSION_POLICY_LAYERS",
-        &activity.permission_policy_layers,
-        "HarnToolPermissionPolicyLayer",
-    ));
-    out.push_str(&ts_array_owned(
-        "TOOL_PERMISSION_POLICY_OUTCOMES",
-        &activity.permission_policy_outcomes,
-        "HarnToolPermissionPolicyOutcome",
-    ));
-    out.push_str(&ts_array_owned(
-        "TOOL_PERMISSION_GRANT_SCOPES",
-        &activity.permission_grant_scopes,
-        "HarnToolPermissionGrantScope",
-    ));
-    out.push_str(&ts_array_owned(
-        "TOOL_PERMISSION_GRANT_EXPIRIES",
-        &activity.permission_grant_expiries,
-        "HarnToolPermissionGrantExpiry",
-    ));
-    out.push_str(
-        "export interface HarnToolPermissionScope {\n\
-         \x20 tool_kind: ACPToolKind\n\
-         \x20 side_effect: HarnSideEffectLevel\n\
-         \x20 capabilities: string[]\n\
-         }\n\n\
-         export interface HarnToolPermissionPolicyEvidence {\n\
-         \x20 layer: HarnToolPermissionPolicyLayer\n\
-         \x20 outcome: HarnToolPermissionPolicyOutcome\n\
-         \x20 rule_id?: string\n\
-         \x20 risk_labels: string[]\n\
-         }\n\n\
-         export interface HarnToolPermissionDecisionMetadata {\n\
-         \x20 schema: \"harn.tool_permission_decision.v1\"\n\
-         \x20 outcome: HarnToolPermissionOutcome\n\
-         \x20 decider: HarnToolPermissionDecider\n\
-         \x20 policy_evaluations: HarnToolPermissionPolicyEvidence[]\n\
-         \x20 grant_scope?: HarnToolPermissionGrantScope\n\
-         }\n\n\
-         export interface HarnToolPermissionGrantEvidence {\n\
-         \x20 scope: HarnToolPermissionGrantScope\n\
-         \x20 expires: HarnToolPermissionGrantExpiry\n\
-         \x20 reusable: false\n\
-         }\n\n\
-         export interface HarnToolPermissionRequester {\n\
-         \x20 session_id: string\n\
-         \x20 agent_id?: string\n\
-         \x20 model_provider?: string\n\
-         \x20 model_id?: string\n\
-         }\n\n\
-         export interface HarnToolPermissionActivityRecord {\n\
-         \x20 schema: \"harn.tool_permission_activity.v1\"\n\
-         \x20 kind: \"tool_permission\"\n\
-         \x20 id: string\n\
-         \x20 request_id: string\n\
-         \x20 tool_name: string\n\
-         \x20 scope: HarnToolPermissionScope\n\
-         \x20 outcome: HarnToolPermissionOutcome\n\
-         \x20 decider: HarnToolPermissionDecider\n\
-         \x20 policy_evaluations: HarnToolPermissionPolicyEvidence[]\n\
-         \x20 grant?: HarnToolPermissionGrantEvidence\n\
-         \x20 requester: HarnToolPermissionRequester\n\
-         \x20 occurred_at_ms: number\n\
-         }\n\n",
-    );
+    for (key, name, values) in activity.projections() {
+        out.push_str(&ts_array_owned(&key.to_uppercase(), values, name));
+    }
+    for record in &activity.records {
+        record.append(&mut out, super::records::Target::Typescript);
+    }
     out.push_str(&ts_array_owned(
         "CONNECTOR_SETUP_STAGES",
         &connector_setup.stages,
@@ -348,19 +274,9 @@ pub(super) fn generate_typescript_for_version(
         &connector_setup.error_codes,
         "HarnConnectorSetupErrorCode",
     ));
-    out.push_str(
-        "export interface HarnConnectorSetupEvent {\n\
-         \x20 schema: \"harn.connector_setup.event.v1\"\n\
-         \x20 sequence: number\n\
-         \x20 connector: string\n\
-         \x20 stage: HarnConnectorSetupStage\n\
-         \x20 status: HarnConnectorSetupStatus\n\
-         \x20 interaction: HarnConnectorSetupInteraction\n\
-         \x20 message: string\n\
-         \x20 error_code?: HarnConnectorSetupErrorCode\n\
-         \x20 recovery?: string\n\
-         }\n\n",
-    );
+    for record in &connector_setup.records {
+        record.append(&mut out, super::records::Target::Typescript);
+    }
     out.push_str(&ts_array(
         "A2A_TASK_STATES",
         A2A_TASK_STATES,
@@ -438,97 +354,10 @@ export type HarnPlanStepStatus = "pending" | "in_progress" | "completed" | "bloc
 export type HarnPlanApprovalState = "unrequested" | "requested" | "approved" | "rejected"
 export type HarnPlanCommentState = "open" | "addressed" | "resolved" | "reopened"
 
-export interface HarnPlanAuthor {
-  id: string
-  display_name?: string
-}
-
-export interface HarnPlanSource {
-  kind: string
-  uri?: string
-}
-
-export interface HarnPlanStep {
-  id: string
-  content: string
-  status: HarnPlanStepStatus
-  priority?: ACPValue
-}
-
-export interface HarnPlanApproval {
-  state: HarnPlanApprovalState
-  request_id?: string
-  reviewer?: string
-  reviewers?: string[]
-  approved_at?: string
-  reason?: string
-}
-
-export interface HarnPlanArtifact {
-  _type: "plan_artifact"
-  schema_version: "harn.plan.v1"
-  id: string
-  tool: string
-  title: string
-  summary: string
-  steps: HarnPlanStep[]
-  assumptions: string[]
-  open_questions: string[]
-  verification_commands: string[]
-  approval: HarnPlanApproval
-}
-
-export interface HarnPlanRevision {
-  revision_id: string
-  parent_revision_id?: string
-  markdown: string
-  plan: HarnPlanArtifact
-  author: HarnPlanAuthor
-  source: HarnPlanSource
-  created_at: string
-  operation:
-    | { kind: "create" | "edit"; event_id: string }
-    | { kind: "comment"; event_id: string; comment_id: string }
-    | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
-}
-
-export interface HarnPlanCommentAnchor {
-  step_id?: string
-  quoted_text?: string
-  range?: { start: number; end: number }
-}
-
-export interface HarnPlanComment {
-  comment_id: string
-  anchor: HarnPlanCommentAnchor
-  body: string
-  state: HarnPlanCommentState
-  author: HarnPlanAuthor
-  created_at: string
-  updated_at: string
-}
-
-export interface HarnPlanCommentResolutionReceipt {
-  receipt_id: string
-  comment_id: string
-  input_revision_id: string
-  output_revision_id: string
-  agent_run_id: string
-  event_id: string
-  explanation?: string
-  created_at: string
-}
-
-export interface HarnPlanDocument {
-  _type: "plan_document"
-  schema_version: "harn.plan_document.v1"
-  document_id: string
-  current_revision: HarnPlanRevision
-  comments: HarnPlanComment[]
-  resolution_receipts: HarnPlanCommentResolutionReceipt[]
-  created_at: string
-  updated_at: string
-}
+export type HarnPlanRevisionOperation =
+  | { kind: "create" | "edit"; event_id: string }
+  | { kind: "comment"; event_id: string; comment_id: string }
+  | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
 
 export interface ACPRequest {
   jsonrpc: "2.0"
@@ -1130,6 +959,7 @@ export interface HarnSessionTimelineUpdate {
     );
     append_typescript_prepared_session_types(&mut out);
     append_typescript_session_recap_types(&mut out);
+    super::plan_records::append(&mut out, super::records::Target::Typescript);
     out
 }
 

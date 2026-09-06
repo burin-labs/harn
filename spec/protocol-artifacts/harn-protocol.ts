@@ -1007,97 +1007,10 @@ export type HarnPlanStepStatus = "pending" | "in_progress" | "completed" | "bloc
 export type HarnPlanApprovalState = "unrequested" | "requested" | "approved" | "rejected"
 export type HarnPlanCommentState = "open" | "addressed" | "resolved" | "reopened"
 
-export interface HarnPlanAuthor {
-  id: string
-  display_name?: string
-}
-
-export interface HarnPlanSource {
-  kind: string
-  uri?: string
-}
-
-export interface HarnPlanStep {
-  id: string
-  content: string
-  status: HarnPlanStepStatus
-  priority?: ACPValue
-}
-
-export interface HarnPlanApproval {
-  state: HarnPlanApprovalState
-  request_id?: string
-  reviewer?: string
-  reviewers?: string[]
-  approved_at?: string
-  reason?: string
-}
-
-export interface HarnPlanArtifact {
-  _type: "plan_artifact"
-  schema_version: "harn.plan.v1"
-  id: string
-  tool: string
-  title: string
-  summary: string
-  steps: HarnPlanStep[]
-  assumptions: string[]
-  open_questions: string[]
-  verification_commands: string[]
-  approval: HarnPlanApproval
-}
-
-export interface HarnPlanRevision {
-  revision_id: string
-  parent_revision_id?: string
-  markdown: string
-  plan: HarnPlanArtifact
-  author: HarnPlanAuthor
-  source: HarnPlanSource
-  created_at: string
-  operation:
-    | { kind: "create" | "edit"; event_id: string }
-    | { kind: "comment"; event_id: string; comment_id: string }
-    | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
-}
-
-export interface HarnPlanCommentAnchor {
-  step_id?: string
-  quoted_text?: string
-  range?: { start: number; end: number }
-}
-
-export interface HarnPlanComment {
-  comment_id: string
-  anchor: HarnPlanCommentAnchor
-  body: string
-  state: HarnPlanCommentState
-  author: HarnPlanAuthor
-  created_at: string
-  updated_at: string
-}
-
-export interface HarnPlanCommentResolutionReceipt {
-  receipt_id: string
-  comment_id: string
-  input_revision_id: string
-  output_revision_id: string
-  agent_run_id: string
-  event_id: string
-  explanation?: string
-  created_at: string
-}
-
-export interface HarnPlanDocument {
-  _type: "plan_document"
-  schema_version: "harn.plan_document.v1"
-  document_id: string
-  current_revision: HarnPlanRevision
-  comments: HarnPlanComment[]
-  resolution_receipts: HarnPlanCommentResolutionReceipt[]
-  created_at: string
-  updated_at: string
-}
+export type HarnPlanRevisionOperation =
+  | { kind: "create" | "edit"; event_id: string }
+  | { kind: "comment"; event_id: string; comment_id: string }
+  | { kind: "comment_state"; event_id: string; comment_id: string; state: HarnPlanCommentState }
 
 export interface ACPRequest {
   jsonrpc: "2.0"
@@ -2205,4 +2118,97 @@ export function decodeHarnSessionRecapAvailability(value: unknown): HarnSessionR
   harnSessionRecapObject(value, "Harn session recap availability", ["state", "snapshot"])
   validateHarnSessionRecapSnapshot(availability.snapshot)
   return value as HarnSessionRecapAvailability
+}
+export interface HarnPlanAuthor {
+  id: string
+  display_name?: string
+}
+
+export interface HarnPlanSource {
+  kind: string
+  uri?: string
+}
+
+export interface HarnPlanStep {
+  id: string
+  content: string
+  status: HarnPlanStepStatus
+  priority?: ACPValue
+}
+
+export interface HarnPlanApproval {
+  state: HarnPlanApprovalState
+  approved_at?: string
+  reason?: string
+  request_id?: string
+  reviewer?: string
+  reviewers?: string[]
+}
+
+export interface HarnPlanArtifact {
+  _type: "plan_artifact"
+  schema_version: "harn.plan.v1"
+  id: string
+  tool: string
+  title: string
+  summary: string
+  steps: HarnPlanStep[]
+  assumptions: string[]
+  open_questions: string[]
+  verification_commands: string[]
+  approval: HarnPlanApproval
+}
+
+export interface HarnPlanRevision {
+  revision_id: string
+  markdown: string
+  plan: HarnPlanArtifact
+  author: HarnPlanAuthor
+  source: HarnPlanSource
+  created_at: string
+  operation: HarnPlanRevisionOperation
+  parent_revision_id?: string
+}
+
+export interface HarnPlanTextRange {
+  start: number
+  end: number
+}
+
+export interface HarnPlanCommentAnchor {
+  quoted_text?: string
+  range?: HarnPlanTextRange
+  step_id?: string
+}
+
+export interface HarnPlanComment {
+  comment_id: string
+  anchor: HarnPlanCommentAnchor
+  body: string
+  state: HarnPlanCommentState
+  author: HarnPlanAuthor
+  created_at: string
+  updated_at: string
+}
+
+export interface HarnPlanCommentResolutionReceipt {
+  receipt_id: string
+  comment_id: string
+  input_revision_id: string
+  output_revision_id: string
+  agent_run_id: string
+  event_id: string
+  created_at: string
+  explanation?: string
+}
+
+export interface HarnPlanDocument {
+  _type: "plan_document"
+  schema_version: "harn.plan_document.v1"
+  document_id: string
+  current_revision: HarnPlanRevision
+  comments: HarnPlanComment[]
+  resolution_receipts: HarnPlanCommentResolutionReceipt[]
+  created_at: string
+  updated_at: string
 }

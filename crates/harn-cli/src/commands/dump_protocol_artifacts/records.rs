@@ -8,10 +8,13 @@ pub(super) enum FieldKind {
     String,
     Integer(Integer),
     Bool,
+    LiteralBool(bool),
     StringList,
     Json,
     Named(String),
     List(Box<Self>),
+    /// An optional list whose Rust projection defaults to an empty vector.
+    DefaultList(Box<Self>),
     Nullable(Box<Self>),
     JsonObject,
     Literal {
@@ -24,8 +27,12 @@ pub(super) enum FieldKind {
 pub(super) enum Integer {
     /// Existing session-update counters use Go's machine-sized int.
     HostCount,
+    /// Existing plan ranges use Rust usize and Go's machine-sized int.
+    HostIndex,
     /// Harn's signed integer projects to Swift Int64.
     Harn,
+    /// Existing permission timestamps retain Rust u64 and Swift Int64.
+    UnsignedHarn,
     U64,
     U32,
     Usize,
@@ -47,18 +54,18 @@ impl FieldKind {
         match self {
             Self::Integer(integer) => match target {
                 Rust => match integer {
-                    Integer::U64 | Integer::HostCount => "u64",
+                    Integer::U64 | Integer::HostCount | Integer::UnsignedHarn => "u64",
                     Integer::U32 => "u32",
-                    Integer::Usize => "usize",
+                    Integer::Usize | Integer::HostIndex => "usize",
                     Integer::I64 | Integer::Harn => "i64",
                 },
                 Go => match integer {
                     Integer::U32 => "uint32",
                     Integer::I64 | Integer::Harn => "int64",
-                    Integer::HostCount => "int",
+                    Integer::HostCount | Integer::HostIndex => "int",
                     _ => "uint64",
                 },
-                Swift if matches!(integer, Integer::Harn) => "Int64",
+                Swift if matches!(integer, Integer::Harn | Integer::UnsignedHarn) => "Int64",
                 Swift => "Int",
                 Typescript => "number",
                 Python => "int",
@@ -77,14 +84,21 @@ impl FieldKind {
                 Go => "JSONObject",
             }
             .into(),
+            Self::Named(name) if name == "HarnACPToolKind" && matches!(target, Typescript) => {
+                "ACPToolKind".into()
+            }
             Self::Named(name) => name.clone(),
+            Self::LiteralBool(value) => match target {
+                Typescript => value.to_string(),
+                _ => Self::Bool.type_name(target),
+            },
             Self::Literal { value, wire_type } => match target {
                 Typescript => super::support::json_string_literal(value),
                 _ => wire_type
                     .clone()
                     .unwrap_or_else(|| Self::String.type_name(target)),
             },
-            Self::List(inner) => {
+            Self::List(inner) | Self::DefaultList(inner) => {
                 let item = inner.type_name(target);
                 match target {
                     Rust => format!("Vec<{item}>"),
@@ -119,14 +133,19 @@ impl FieldKind {
 
     pub(super) fn optional_type(&self, target: Target, required: bool) -> String {
         let inner = self.type_name(target);
-        if required {
+        if required || (matches!(target, Target::Rust) && matches!(self, Self::DefaultList(_))) {
             return inner;
         }
         match target {
             Target::Rust => format!("Option<{inner}>"),
             Target::Swift => format!("{inner}?"),
             Target::Python => format!("Optional[{inner}]"),
-            Target::Go if !matches!(self, Self::StringList | Self::List(_) | Self::Json) => {
+            Target::Go
+                if !matches!(
+                    self,
+                    Self::StringList | Self::List(_) | Self::DefaultList(_) | Self::Json
+                ) =>
+            {
                 format!("*{inner}")
             }
             _ => inner,
@@ -151,21 +170,25 @@ pub(super) struct Record {
 
 impl Record {
     pub(super) fn append(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, false);
+        self.append_record(out, target, false, false);
     }
 
     pub(super) fn append_closed(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, true);
+        self.append_record(out, target, true, true);
     }
 
-    fn append_record(&self, out: &mut String, target: Target, closed: bool) {
+    pub(super) fn append_mutable(&self, out: &mut String, target: Target) {
+        self.append_record(out, target, false, true);
+    }
+
+    fn append_record(&self, out: &mut String, target: Target, closed: bool, mutable: bool) {
         let name = &self.name;
         match target {
             Target::Rust if closed => out.push_str(&format!("#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = \"camelCase\", deny_unknown_fields)]\npub struct {name} {{\n")),
             Target::Rust => out.push_str(&format!("#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\npub struct {name} {{\n")),
             Target::Swift => out.push_str(&format!("public struct {name}: Codable, Sendable, Equatable {{\n")),
             Target::Typescript => out.push_str(&format!("export interface {name} {{\n")),
-            Target::Python => out.push_str(&format!("@dataclass\nclass {name}(_HarnStrictRecapDataclass):\n")),
+            Target::Python => out.push_str(&format!("@dataclass\nclass {name}({}):\n", if closed { "_HarnStrictRecapDataclass" } else { "_HarnDataclass" })),
             Target::Go => out.push_str(&format!("type {name} struct {{\n")),
         }
         for field in &self.fields {
@@ -177,9 +200,14 @@ impl Record {
                         out.push_str("    #[serde(default)]\n");
                     }
                     if !field.required {
-                        out.push_str(
-                            "    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n",
-                        );
+                        let predicate = if matches!(field.kind, FieldKind::DefaultList(_)) {
+                            "Vec::is_empty"
+                        } else {
+                            "Option::is_none"
+                        };
+                        out.push_str(&format!(
+                            "    #[serde(default, skip_serializing_if = {predicate:?})]\n"
+                        ));
                     }
                     if !closed && field.rust_name != field.wire_name {
                         out.push_str(&format!("    #[serde(rename = {:?})]\n", field.wire_name));
@@ -188,17 +216,26 @@ impl Record {
                 }
                 Target::Swift => out.push_str(&format!(
                     "    public {} {}: {kind}\n",
-                    if closed { "var" } else { "let" },
+                    if mutable { "var" } else { "let" },
                     camel_ident(&field.wire_name)
                 )),
                 Target::Typescript => {
                     out.push_str(&format!("  {}{optional}: {kind}\n", field.wire_name))
                 }
-                Target::Python => out.push_str(&format!("    {}: {kind}\n", field.wire_name)),
+                Target::Python => out.push_str(&format!(
+                    "    {}: {kind}{}\n",
+                    field.wire_name,
+                    if !closed && !field.required {
+                        " = None"
+                    } else {
+                        ""
+                    }
+                )),
                 Target::Go => out.push_str(&format!(
-                    "    {} {kind} `json:\"{}\"`\n",
+                    "    {} {kind} `json:\"{}{}\"`\n",
                     go_ident(&field.wire_name),
-                    field.wire_name
+                    field.wire_name,
+                    if field.required { "" } else { ",omitempty" },
                 )),
             }
         }
@@ -228,7 +265,7 @@ impl Record {
 }
 
 fn camel_ident(value: &str) -> String {
-    let mut parts = value.split('_');
+    let mut parts = value.trim_start_matches('_').split('_');
     let mut out = parts.next().unwrap_or_default().to_owned();
     for part in parts {
         let mut chars = part.chars();

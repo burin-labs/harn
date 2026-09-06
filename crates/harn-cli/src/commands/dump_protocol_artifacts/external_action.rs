@@ -92,7 +92,29 @@ impl ExternalActionVocabulary {
     pub(super) fn load(source: &ProtocolArtifactSource) -> Result<Self, String> {
         let text = source.read_text(EXTERNAL_ACTION_VOCABULARY_SOURCE)?;
         let mut vocabulary = Self::parse(&text)?;
-        vocabulary.records = super::external_action_types::load(source)?;
+        vocabulary.records = super::harn_records::load(
+            source,
+            &[
+                "external_action/contracts",
+                "external_action/disclosure",
+                "external_action/activity",
+            ],
+            &[
+                "ExternalActionActor",
+                "ExternalActionMoney",
+                "ExternalActionDisclosureReceipt",
+                "ExternalActionError",
+                "ExternalActionRetryLink",
+                "ExternalActionReceipt",
+                "ExternalActionPolicyEvaluation",
+                "ExternalActionDecision",
+                "ExternalActionAuthorizationRecord",
+                "ExternalActionRequester",
+                "ExternalActionDispatchRecord",
+                "ExternalActionReconciliationRecord",
+                "ExternalActionActivityRecord",
+            ],
+        )?;
         Ok(vocabulary)
     }
 

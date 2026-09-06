@@ -1,8 +1,7 @@
 //! Recap write-schema fields projected into the shared host record model.
 
-use super::records::{snake_ident, Field, FieldKind, Integer, Record, Target};
+use super::records::{FieldKind, Integer, Record, Target};
 use serde_json::Value;
-use std::collections::BTreeSet;
 
 const RECORDS: &[(&str, &str)] = &[
     ("query", "Query"),
@@ -114,104 +113,21 @@ pub(super) fn load() -> Result<Vec<Record>, String> {
 }
 
 fn from_schema(schema: &Value) -> Result<Vec<Record>, String> {
-    let definitions = &schema["$defs"];
-    RECORDS
+    let names = RECORDS
         .iter()
-        .map(|(key, _)| {
-            let object = &definitions[key];
-            if object["additionalProperties"] != false {
-                return Err(format!("recap {key} must be closed"));
-            }
-            let properties = object["properties"]
-                .as_object()
-                .ok_or_else(|| format!("missing recap {key} properties"))?;
-            let required = object["required"]
-                .as_array()
-                .ok_or_else(|| format!("missing recap {key} required fields"))?;
-            let names = required
-                .iter()
-                .map(|name| name.as_str().ok_or("recap field name must be a string"))
-                .collect::<Result<BTreeSet<_>, _>>()?;
-            if names.len() != required.len() {
-                return Err(format!("recap {key} repeats a required field"));
-            }
-            if names != properties.keys().map(String::as_str).collect() {
-                return Err(format!(
-                    "recap {key} requires explicit presence for every field"
-                ));
-            }
-            let fields = required
-                .iter()
-                .map(|field| {
-                    let name = field.as_str().ok_or("recap field name must be a string")?;
-                    let shape = properties
-                        .get(name)
-                        .ok_or_else(|| format!("missing recap {key}.{name}"))?;
-                    Ok(Field {
-                        wire_name: name.to_owned().into(),
-                        rust_name: snake_ident(name).into(),
-                        kind: kind(definitions, key, name, shape, &mut BTreeSet::new())?,
-                        required: true,
-                        identity: false,
-                    })
-                })
-                .collect::<Result<_, String>>()?;
-            Ok(Record {
-                name: record_name(key).expect("registered recap record"),
-                fields,
-            })
-        })
-        .collect()
+        .map(|(key, _)| (*key, record_name(key).expect("registered recap record")))
+        .collect::<Vec<_>>();
+    super::schema_records::SchemaRecords {
+        schema,
+        names: &names,
+        label: "recap",
+        require_all: true,
+        metadata,
+    }
+    .load()
 }
 
-fn kind(
-    definitions: &Value,
-    owner: &str,
-    field: &str,
-    schema: &Value,
-    references: &mut BTreeSet<String>,
-) -> Result<FieldKind, String> {
-    if let Some(reference) = schema["$ref"].as_str() {
-        let key = reference
-            .strip_prefix("#/$defs/")
-            .ok_or_else(|| format!("unsupported recap reference {reference}"))?;
-        if let Some(name) = record_name(key) {
-            return Ok(FieldKind::Named(name));
-        }
-        let definition = definitions
-            .get(key)
-            .ok_or_else(|| format!("missing recap reference {reference}"))?;
-        if !references.insert(key.to_owned()) {
-            return Err(format!("cyclic recap reference {reference}"));
-        }
-        let result = kind(definitions, owner, field, definition, references);
-        references.remove(key);
-        return result;
-    }
-    if let Some(variants) = schema["oneOf"].as_array() {
-        if variants.len() == 2 && variants[1]["type"] == "null" {
-            return Ok(FieldKind::Nullable(Box::new(kind(
-                definitions,
-                owner,
-                field,
-                &variants[0],
-                references,
-            )?)));
-        }
-    }
-    if let Some(types) = schema["type"].as_array() {
-        if types.len() == 2 && types[1] == "null" {
-            let mut inner = schema.clone();
-            inner["type"] = types[0].clone();
-            return Ok(FieldKind::Nullable(Box::new(kind(
-                definitions,
-                owner,
-                field,
-                &inner,
-                references,
-            )?)));
-        }
-    }
+fn metadata(owner: &str, field: &str, schema: &Value) -> Result<Option<FieldKind>, String> {
     if schema.get("enum").is_some() || schema["const"].is_string() {
         let suffix = match (owner, field) {
             ("toolExchange", "state") => "ToolState",
@@ -223,32 +139,18 @@ fn kind(
             (_, "state") => "CompletionState",
             _ => return Err(format!("unmapped recap enum {owner}.{field}")),
         };
-        return Ok(FieldKind::Named(format!("HarnSessionRecap{suffix}")));
+        return Ok(Some(FieldKind::Named(format!("HarnSessionRecap{suffix}"))));
     }
-    Ok(match schema["type"].as_str() {
-        Some("string") => FieldKind::String,
-        Some("boolean") => FieldKind::Bool,
-        Some("integer") | None if schema["type"] == "integer" || schema["const"].is_u64() => {
-            FieldKind::Integer(match (owner, field) {
-                ("snapshot", "schemaVersion") => Integer::U32,
-                ("coverage", _) | ("query", "limit") => Integer::Usize,
-                ("iteration", "iteration") => Integer::I64,
-                _ => Integer::U64,
-            })
-        }
-        Some("array") => FieldKind::List(Box::new(kind(
-            definitions,
-            owner,
-            field,
-            &schema["items"],
-            references,
-        )?)),
-        Some("object") if schema["additionalProperties"] == true => FieldKind::JsonObject,
-        None if schema.as_object().is_some_and(|object| object.is_empty()) => {
-            FieldKind::Nullable(Box::new(FieldKind::Json))
-        }
-        _ => return Err(format!("unsupported recap shape {owner}.{field}: {schema}")),
-    })
+    if schema["type"] == "integer" || schema["const"].is_u64() {
+        Ok(Some(FieldKind::Integer(match (owner, field) {
+            ("snapshot", "schemaVersion") => Integer::U32,
+            ("coverage", _) | ("query", "limit") => Integer::Usize,
+            ("iteration", "iteration") => Integer::I64,
+            _ => Integer::U64,
+        })))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(super) fn append(out: &mut String, target: Target) {

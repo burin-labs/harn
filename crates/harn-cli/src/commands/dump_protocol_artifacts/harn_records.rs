@@ -1,4 +1,4 @@
-//! Project external-action records from their owning Harn declarations.
+//! Project host records from their owning Harn declarations.
 
 use super::{
     records::{Field, FieldKind, Integer, Record},
@@ -7,40 +7,29 @@ use super::{
 use harn_parser::{parse_source, Node, ShapeField, TypeExpr};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) fn load(source: &ProtocolArtifactSource) -> Result<Vec<Record>, String> {
+pub(super) fn load(
+    source: &ProtocolArtifactSource,
+    modules: &[&str],
+    names: &[&str],
+) -> Result<Vec<Record>, String> {
     let mut declarations = BTreeMap::new();
-    for module in ["contracts", "disclosure", "activity"] {
-        let path = format!("crates/harn-stdlib/src/stdlib/external_action/{module}.harn");
+    for module in modules {
+        let path = format!("crates/harn-stdlib/src/stdlib/{module}.harn");
         for node in parse_source(&source.read_text(&path)?).map_err(|error| error.to_string())? {
             if let Node::TypeDecl {
                 name, type_expr, ..
             } = node.node
             {
                 if declarations.insert(name.clone(), type_expr).is_some() {
-                    return Err(format!("duplicate external-action type {name}"));
+                    return Err(format!("duplicate protocol type {name}"));
                 }
             }
         }
     }
     let mut records = Vec::new();
-    for name in [
-        "Actor",
-        "Money",
-        "DisclosureReceipt",
-        "Error",
-        "RetryLink",
-        "Receipt",
-        "PolicyEvaluation",
-        "Decision",
-        "AuthorizationRecord",
-        "Requester",
-        "DispatchRecord",
-        "ReconciliationRecord",
-        "ActivityRecord",
-    ] {
-        let name = format!("ExternalAction{name}");
-        let Some(TypeExpr::Shape(fields)) = declarations.get(&name) else {
-            return Err(format!("external-action projection requires record {name}"));
+    for name in names {
+        let Some(TypeExpr::Shape(fields)) = declarations.get(*name) else {
+            return Err(format!("protocol projection requires record {name}"));
         };
         let record = record(&format!("Harn{name}"), fields, &mut records)?;
         records.push(record);
@@ -57,11 +46,27 @@ fn record(name: &str, fields: &[ShapeField], records: &mut Vec<Record>) -> Resul
                 return Err(format!("duplicate protocol field {name}.{}", field.name));
             }
             let mut kind = field_kind(&field.type_expr, name, &field.name, records)?;
-            if name == "HarnExternalActionActivityRecord" && field.name == "kind" {
+            if name.ends_with("ActivityRecord") && field.name == "kind" {
                 if let FieldKind::Literal { wire_type, .. } = &mut kind {
                     *wire_type = Some("HarnActivityKind".into());
                 }
             }
+            // Target metadata preserves the existing host API where Harn's
+            // broader primitive type does not express that projection detail.
+            kind = match (name, field.name.as_str()) {
+                ("HarnToolPermissionScope", "tool_kind") => {
+                    FieldKind::Named("HarnACPToolKind".into())
+                }
+                ("HarnToolPermissionScope", "side_effect") => {
+                    FieldKind::Named("HarnSideEffectLevel".into())
+                }
+                ("HarnToolPermissionGrantEvidence", "reusable") => FieldKind::LiteralBool(false),
+                ("HarnToolPermissionActivityRecord", "occurred_at_ms") => {
+                    FieldKind::Integer(Integer::UnsignedHarn)
+                }
+                ("HarnConnectorSetupEvent", "sequence") => FieldKind::Integer(Integer::U64),
+                _ => kind,
+            };
             Ok(Field {
                 wire_name: field.name.clone().into(),
                 rust_name: field.name.clone().into(),
@@ -88,7 +93,12 @@ fn field_kind(
             "string" => FieldKind::String,
             "int" => FieldKind::Integer(Integer::Harn),
             "bool" => FieldKind::Bool,
-            name if name.starts_with("ExternalAction") => FieldKind::Named(format!("Harn{name}")),
+            name if ["ExternalAction", "ToolPermission", "ConnectorSetup"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix)) =>
+            {
+                FieldKind::Named(format!("Harn{name}"))
+            }
             _ => return Err(format!("unsupported {owner}.{field} type {value:?}")),
         },
         TypeExpr::LitString(value) => FieldKind::Literal {

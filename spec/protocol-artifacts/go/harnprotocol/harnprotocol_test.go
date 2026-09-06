@@ -114,6 +114,46 @@ func assertRoundTrip(t *testing.T, label string, original, replayed []byte) {
 	}
 }
 
+func TestPlanRecordPresence(t *testing.T) {
+	check := func(input string, target any, expected string) {
+		t.Helper()
+		if err := json.Unmarshal([]byte(input), target); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertRoundTrip(t, "plan record", []byte(expected), encoded)
+	}
+	fixture := loadFixture(t)["planDocument"]
+	check(string(fixture), &HarnPlanDocument{}, string(fixture))
+	for _, value := range []string{"", `,"priority":null`, `,"priority":"high"`} {
+		input := `{"id":"step","content":"Verify","status":"pending"` + value + `}`
+		expected := input
+		if value == "" {
+			expected = `{"id":"step","content":"Verify","status":"pending","priority":null}`
+		}
+		check(input, &HarnPlanStep{}, expected)
+	}
+	for _, value := range []string{"", `,"reviewers":null`, `,"reviewers":["reviewer"]`} {
+		input := `{"state":"unrequested"` + value + `}`
+		expected := input
+		if value == `,"reviewers":null` {
+			expected = `{"state":"unrequested"}`
+		}
+		check(input, &HarnPlanApproval{}, expected)
+	}
+	for _, value := range []string{"", `,"range":null`, `,"range":{"start":0,"end":1}`} {
+		input := `{"step_id":"step"` + value + `}`
+		expected := input
+		if value == `,"range":null` {
+			expected = `{"step_id":"step"}`
+		}
+		check(input, &HarnPlanCommentAnchor{}, expected)
+	}
+}
+
 func TestRoundTripFixture(t *testing.T) {
 	fixture := loadFixture(t)
 
@@ -141,201 +181,69 @@ func TestRoundTripFixture(t *testing.T) {
 		t.Fatalf("decode envelopes: %v", err)
 	}
 
-	t.Run("ACPRequest", func(t *testing.T) {
-		var request ACPRequest
-		if err := json.Unmarshal(envelopes["request"], &request); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		out, err := json.Marshal(request)
-		if err != nil {
-			t.Fatalf("encode request: %v", err)
-		}
-		assertRoundTrip(t, "ACPRequest", envelopes["request"], out)
-	})
-
-	t.Run("ACPResponse", func(t *testing.T) {
-		var response ACPResponse
-		if err := json.Unmarshal(envelopes["response"], &response); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		out, err := json.Marshal(response)
-		if err != nil {
-			t.Fatalf("encode response: %v", err)
-		}
-		assertRoundTrip(t, "ACPResponse", envelopes["response"], out)
-	})
-
-	t.Run("ACPResponseError", func(t *testing.T) {
-		var response ACPResponse
-		if err := json.Unmarshal(envelopes["errorResponse"], &response); err != nil {
-			t.Fatalf("decode error response: %v", err)
-		}
-		if response.Error == nil {
-			t.Fatal("expected error sub-envelope to decode")
-		}
-		out, err := json.Marshal(response)
-		if err != nil {
-			t.Fatalf("encode error response: %v", err)
-		}
-		assertRoundTrip(t, "ACPResponse(error)", envelopes["errorResponse"], out)
-	})
-
-	t.Run("SessionUpdateNotification", func(t *testing.T) {
-		var notification ACPSessionUpdateNotification
-		if err := json.Unmarshal(envelopes["sessionUpdateNotification"], &notification); err != nil {
-			t.Fatalf("decode session update: %v", err)
-		}
-		if notification.Params.Update.SessionUpdate != "tool_call" {
-			t.Fatalf("expected sessionUpdate=tool_call, got %q", notification.Params.Update.SessionUpdate)
-		}
-		out, err := json.Marshal(notification)
-		if err != nil {
-			t.Fatalf("encode session update: %v", err)
-		}
-		assertRoundTrip(t, "ACPSessionUpdateNotification", envelopes["sessionUpdateNotification"], out)
-	})
-
-	t.Run("AgentEventNotification", func(t *testing.T) {
-		var notification HarnAgentEventNotification
-		if err := json.Unmarshal(envelopes["agentEventNotification"], &notification); err != nil {
-			t.Fatalf("decode agent event: %v", err)
-		}
-		if notification.Method != HarnAgentEventMethod {
-			t.Fatalf("expected method=%s, got %q", HarnAgentEventMethod, notification.Method)
-		}
-		out, err := json.Marshal(notification)
-		if err != nil {
-			t.Fatalf("encode agent event: %v", err)
-		}
-		assertRoundTrip(t, "HarnAgentEventNotification", envelopes["agentEventNotification"], out)
-	})
-
-	t.Run("HarnToolAnnotations", func(t *testing.T) {
-		raw, ok := fixture["harnToolAnnotations"]
-		if !ok {
-			t.Fatal("fixture missing harnToolAnnotations")
-		}
-		var annotations HarnToolAnnotations
-		if err := json.Unmarshal(raw, &annotations); err != nil {
-			t.Fatalf("decode Harn tool annotations: %v", err)
-		}
-		if annotations.CompletionEvidenceRole == nil || *annotations.CompletionEvidenceRole != HarnCompletionEvidenceRole("verification") {
-			t.Fatalf("expected completion evidence role verification, got %#v", annotations.CompletionEvidenceRole)
-		}
-		out, err := json.Marshal(annotations)
-		if err != nil {
-			t.Fatalf("encode Harn tool annotations: %v", err)
-		}
-		assertRoundTrip(t, "HarnToolAnnotations", raw, out)
-	})
-
-	t.Run("A2ATask", func(t *testing.T) {
-		raw, ok := fixture["a2aTask"]
-		if !ok {
-			t.Fatal("fixture missing a2aTask")
-		}
-		var task A2ATask
-		if err := json.Unmarshal(raw, &task); err != nil {
-			t.Fatalf("decode a2a task: %v", err)
-		}
-		out, err := json.Marshal(task)
-		if err != nil {
-			t.Fatalf("encode a2a task: %v", err)
-		}
-		assertRoundTrip(t, "A2ATask", raw, out)
-	})
-
-	t.Run("MCPTool", func(t *testing.T) {
-		raw, ok := fixture["mcpTool"]
-		if !ok {
-			t.Fatal("fixture missing mcpTool")
-		}
-		var tool MCPTool
-		if err := json.Unmarshal(raw, &tool); err != nil {
-			t.Fatalf("decode mcp tool: %v", err)
-		}
-		out, err := json.Marshal(tool)
-		if err != nil {
-			t.Fatalf("encode mcp tool: %v", err)
-		}
-		assertRoundTrip(t, "MCPTool", raw, out)
-	})
-
-	t.Run("MCPDiscoverResult", func(t *testing.T) {
-		raw, ok := fixture["mcpDiscoverResult"]
-		if !ok {
-			t.Fatal("fixture missing mcpDiscoverResult")
-		}
-		var result MCPDiscoverResult
-		if err := json.Unmarshal(raw, &result); err != nil {
-			t.Fatalf("decode mcp discover result: %v", err)
-		}
-		if len(result.SupportedVersions) == 0 || result.SupportedVersions[0] != MCPProtocolVersion {
-			t.Fatalf("expected first supported version %q, got %#v", MCPProtocolVersion, result.SupportedVersions)
-		}
-		out, err := json.Marshal(result)
-		if err != nil {
-			t.Fatalf("encode mcp discover result: %v", err)
-		}
-		assertRoundTrip(t, "MCPDiscoverResult", raw, out)
-	})
-
-	t.Run("MCPInputRequiredResult", func(t *testing.T) {
-		raw, ok := fixture["mcpInputRequiredResult"]
-		if !ok {
-			t.Fatal("fixture missing mcpInputRequiredResult")
-		}
-		var result MCPInputRequiredResult
-		if err := json.Unmarshal(raw, &result); err != nil {
-			t.Fatalf("decode mcp input-required result: %v", err)
-		}
-		if result.ResultType != MCPInputRequiredResultType {
-			t.Fatalf("expected resultType=%q, got %q", MCPInputRequiredResultType, result.ResultType)
-		}
-		out, err := json.Marshal(result)
-		if err != nil {
-			t.Fatalf("encode mcp input-required result: %v", err)
-		}
-		assertRoundTrip(t, "MCPInputRequiredResult", raw, out)
-	})
-
-	t.Run("MCPUnsupportedProtocolVersionError", func(t *testing.T) {
-		raw, ok := fixture["mcpUnsupportedProtocolVersionError"]
-		if !ok {
-			t.Fatal("fixture missing mcpUnsupportedProtocolVersionError")
-		}
-		var response MCPUnsupportedProtocolVersionError
-		if err := json.Unmarshal(raw, &response); err != nil {
-			t.Fatalf("decode mcp unsupported-version error: %v", err)
-		}
-		if response.Error.Code != MCPUnsupportedProtocolVersionErrorCode {
-			t.Fatalf("expected code=%d, got %d", MCPUnsupportedProtocolVersionErrorCode, response.Error.Code)
-		}
-		out, err := json.Marshal(response)
-		if err != nil {
-			t.Fatalf("encode mcp unsupported-version error: %v", err)
-		}
-		assertRoundTrip(t, "MCPUnsupportedProtocolVersionError", raw, out)
-	})
-
-	t.Run("ToolCallReceipt", func(t *testing.T) {
-		raw, ok := fixture["toolCallReceipt"]
-		if !ok {
-			t.Fatal("fixture missing toolCallReceipt")
-		}
-		var receipt ToolCallReceipt
-		if err := json.Unmarshal(raw, &receipt); err != nil {
-			t.Fatalf("decode tool call receipt: %v", err)
-		}
-		if receipt.SchemaVersion != 1 {
-			t.Fatalf("expected schema_version=1, got %d", receipt.SchemaVersion)
-		}
-		out, err := json.Marshal(receipt)
-		if err != nil {
-			t.Fatalf("encode tool call receipt: %v", err)
-		}
-		assertRoundTrip(t, "ToolCallReceipt", raw, out)
-	})
+	for _, item := range []struct {
+		name   string
+		raw    json.RawMessage
+		target any
+	}{
+		{"ACPRequest", envelopes["request"], &ACPRequest{}},
+		{"ACPResponse", envelopes["response"], &ACPResponse{}},
+		{"ACPResponseError", envelopes["errorResponse"], &ACPResponse{}},
+		{"SessionUpdateNotification", envelopes["sessionUpdateNotification"], &ACPSessionUpdateNotification{}},
+		{"AgentEventNotification", envelopes["agentEventNotification"], &HarnAgentEventNotification{}},
+		{"HarnToolAnnotations", fixture["harnToolAnnotations"], &HarnToolAnnotations{}},
+		{"A2ATask", fixture["a2aTask"], &A2ATask{}},
+		{"MCPTool", fixture["mcpTool"], &MCPTool{}},
+		{"MCPDiscoverResult", fixture["mcpDiscoverResult"], &MCPDiscoverResult{}},
+		{"MCPInputRequiredResult", fixture["mcpInputRequiredResult"], &MCPInputRequiredResult{}},
+		{"MCPUnsupportedProtocolVersionError", fixture["mcpUnsupportedProtocolVersionError"], &MCPUnsupportedProtocolVersionError{}},
+		{"ToolCallReceipt", fixture["toolCallReceipt"], &ToolCallReceipt{}},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			if err := json.Unmarshal(item.raw, item.target); err != nil {
+				t.Fatal(err)
+			}
+			out, err := json.Marshal(item.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertRoundTrip(t, item.name, item.raw, out)
+			switch value := item.target.(type) {
+			case *ACPResponse:
+				if item.name == "ACPResponseError" && value.Error == nil {
+					t.Fatal("expected error sub-envelope")
+				}
+			case *ACPSessionUpdateNotification:
+				if value.Params.Update.SessionUpdate != "tool_call" {
+					t.Fatal("expected tool_call update")
+				}
+			case *HarnAgentEventNotification:
+				if value.Method != HarnAgentEventMethod {
+					t.Fatal("agent event method drift")
+				}
+			case *HarnToolAnnotations:
+				if value.CompletionEvidenceRole == nil || *value.CompletionEvidenceRole != HarnCompletionEvidenceRole("verification") {
+					t.Fatal("expected verification role")
+				}
+			case *MCPDiscoverResult:
+				if len(value.SupportedVersions) == 0 || value.SupportedVersions[0] != MCPProtocolVersion {
+					t.Fatal("supported version drift")
+				}
+			case *MCPInputRequiredResult:
+				if value.ResultType != MCPInputRequiredResultType {
+					t.Fatal("result type drift")
+				}
+			case *MCPUnsupportedProtocolVersionError:
+				if value.Error.Code != MCPUnsupportedProtocolVersionErrorCode {
+					t.Fatal("error code drift")
+				}
+			case *ToolCallReceipt:
+				if value.SchemaVersion != 1 {
+					t.Fatal("receipt schema version drift")
+				}
+			}
+		})
+	}
 
 	t.Run("HarnSessionRecapAvailability", func(t *testing.T) {
 		raw, ok := fixture["sessionRecapAvailability"]

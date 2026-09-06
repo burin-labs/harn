@@ -101,41 +101,16 @@ pub(super) fn generate_rust_for_version(
     for record in &external_actions.records {
         record.append(&mut out, super::records::Target::Rust);
     }
-    out.push_str(&rust_string_enum(
-        "HarnActivityKind",
-        "Closed portable activity kinds owned by `std/activity/vocabulary`.",
-        &activity.kinds,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnToolPermissionOutcome",
-        "Closed generic tool permission outcomes owned by `std/activity/vocabulary`.",
-        &activity.permission_outcomes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnToolPermissionDecider",
-        "Closed generic tool permission deciders owned by `std/activity/vocabulary`.",
-        &activity.permission_deciders,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnToolPermissionPolicyLayer",
-        "Closed generic tool permission policy layers owned by `std/activity/vocabulary`.",
-        &activity.permission_policy_layers,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnToolPermissionPolicyOutcome",
-        "Closed generic tool permission policy outcomes owned by `std/activity/vocabulary`.",
-        &activity.permission_policy_outcomes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnToolPermissionGrantScope",
-        "Closed generic tool permission grant scopes owned by `std/activity/vocabulary`.",
-        &activity.permission_grant_scopes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnToolPermissionGrantExpiry",
-        "Closed generic tool permission grant expiries owned by `std/activity/vocabulary`.",
-        &activity.permission_grant_expiries,
-    ));
+    for (key, name, values) in activity.projections() {
+        out.push_str(&rust_string_enum(
+            name,
+            &format!(
+                "Closed {} owned by `std/activity/vocabulary`.",
+                key.replace('_', " ")
+            ),
+            values,
+        ));
+    }
     out.push_str(&rust_string_enum(
         "HarnACPToolKind",
         "Closed ACP tool kinds owned by Harn's tool annotation registry.",
@@ -173,63 +148,9 @@ pub(super) fn generate_rust_for_version(
          \x20   pub inline_result: bool,\n\
          }\n\n",
     );
-    out.push_str(
-        "#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolPermissionScope {\n\
-         \x20   pub tool_kind: HarnACPToolKind,\n\
-         \x20   pub side_effect: HarnSideEffectLevel,\n\
-         \x20   pub capabilities: Vec<String>,\n\
-         }\n\n\
-         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolPermissionPolicyEvidence {\n\
-         \x20   pub layer: HarnToolPermissionPolicyLayer,\n\
-         \x20   pub outcome: HarnToolPermissionPolicyOutcome,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub rule_id: Option<String>,\n\
-         \x20   pub risk_labels: Vec<String>,\n\
-         }\n\n\
-         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolPermissionDecisionMetadata {\n\
-         \x20   pub schema: String,\n\
-         \x20   pub outcome: HarnToolPermissionOutcome,\n\
-         \x20   pub decider: HarnToolPermissionDecider,\n\
-         \x20   pub policy_evaluations: Vec<HarnToolPermissionPolicyEvidence>,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub grant_scope: Option<HarnToolPermissionGrantScope>,\n\
-         }\n\n\
-         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolPermissionGrantEvidence {\n\
-         \x20   pub scope: HarnToolPermissionGrantScope,\n\
-         \x20   pub expires: HarnToolPermissionGrantExpiry,\n\
-         \x20   pub reusable: bool,\n\
-         }\n\n\
-         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolPermissionRequester {\n\
-         \x20   pub session_id: String,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub agent_id: Option<String>,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub model_provider: Option<String>,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub model_id: Option<String>,\n\
-         }\n\n\
-         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolPermissionActivityRecord {\n\
-         \x20   pub schema: String,\n\
-         \x20   pub kind: HarnActivityKind,\n\
-         \x20   pub id: String,\n\
-         \x20   pub request_id: String,\n\
-         \x20   pub tool_name: String,\n\
-         \x20   pub scope: HarnToolPermissionScope,\n\
-         \x20   pub outcome: HarnToolPermissionOutcome,\n\
-         \x20   pub decider: HarnToolPermissionDecider,\n\
-         \x20   pub policy_evaluations: Vec<HarnToolPermissionPolicyEvidence>,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub grant: Option<HarnToolPermissionGrantEvidence>,\n\
-         \x20   pub requester: HarnToolPermissionRequester,\n\
-         \x20   pub occurred_at_ms: u64,\n\
-         }\n\n",
-    );
+    for record in &activity.records {
+        record.append(&mut out, super::records::Target::Rust);
+    }
     out.push_str(&rust_string_enum(
         "HarnConnectorSetupStage",
         "Closed connector-setup stages owned by `std/connectors/setup`.",
@@ -255,22 +176,9 @@ pub(super) fn generate_rust_for_version(
         "Closed connector-setup error codes owned by `std/connectors/setup`.",
         &connector_setup.error_codes,
     ));
-    out.push_str(
-        "#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnConnectorSetupEvent {\n\
-         \x20   pub schema: String,\n\
-         \x20   pub sequence: u64,\n\
-         \x20   pub connector: String,\n\
-         \x20   pub stage: HarnConnectorSetupStage,\n\
-         \x20   pub status: HarnConnectorSetupStatus,\n\
-         \x20   pub interaction: HarnConnectorSetupInteraction,\n\
-         \x20   pub message: String,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub error_code: Option<HarnConnectorSetupErrorCode>,\n\
-         \x20   #[serde(default, skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub recovery: Option<String>,\n\
-         }\n\n",
-    );
+    for record in &connector_setup.records {
+        record.append(&mut out, super::records::Target::Rust);
+    }
     out.push_str(&rust_wire_types());
 
     for vocabulary in acp_method_vocabularies() {
@@ -402,6 +310,7 @@ pub(super) fn generate_rust_for_version(
     append_rust_session_update_payloads(&mut out);
     append_rust_prepared_session_types(&mut out);
     append_rust_session_recap_types(&mut out);
+    super::plan_records::append(&mut out, super::records::Target::Rust);
 
     // Consumers vendor this artifact verbatim, sometimes as a new file. Keep
     // one POSIX final newline without a trailing blank line so their
@@ -629,23 +538,7 @@ fn rust_activity_progress(values: &[String]) -> String {
 
 fn rust_wire_types() -> String {
     let mut out = String::from(
-        r#"/// Author identity on a collaborative plan revision or comment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanAuthor {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-}
-
-/// Source identity for an immutable plan revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanSource {
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub uri: Option<String>,
-}
-
-/// Closed collaborative plan-comment lifecycle.
+        r#"/// Closed collaborative plan-comment lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnPlanCommentState {
@@ -665,48 +558,6 @@ pub enum HarnPlanApprovalState {
     Rejected,
 }
 
-/// One normalized executable plan step.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanStep {
-    pub id: String,
-    pub content: String,
-    pub status: String,
-    pub priority: Option<Value>,
-}
-
-/// Typed approval state for an executable plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanApproval {
-    pub state: HarnPlanApprovalState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reviewer: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reviewers: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-/// Normalized executable plan embedded in a collaborative revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanArtifact {
-    #[serde(rename = "_type")]
-    pub type_name: String,
-    pub schema_version: String,
-    pub id: String,
-    pub tool: String,
-    pub title: String,
-    pub summary: String,
-    pub steps: Vec<HarnPlanStep>,
-    pub assumptions: Vec<String>,
-    pub open_questions: Vec<String>,
-    pub verification_commands: Vec<String>,
-    pub approval: HarnPlanApproval,
-}
-
 /// Typed mutation that produced an immutable plan revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -719,78 +570,6 @@ pub enum HarnPlanRevisionOperation {
         comment_id: String,
         state: HarnPlanCommentState,
     },
-}
-
-/// Immutable collaborative plan revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanRevision {
-    pub revision_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_revision_id: Option<String>,
-    pub markdown: String,
-    pub plan: HarnPlanArtifact,
-    pub author: HarnPlanAuthor,
-    pub source: HarnPlanSource,
-    pub created_at: String,
-    pub operation: HarnPlanRevisionOperation,
-}
-
-/// UTF-8 byte range fallback for a plan-comment anchor.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanTextRange {
-    pub start: usize,
-    pub end: usize,
-}
-
-/// Stable-step and quoted-text/range anchor for a plan comment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanCommentAnchor {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quoted_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub range: Option<HarnPlanTextRange>,
-}
-
-/// Anchored collaborative plan comment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanComment {
-    pub comment_id: String,
-    pub anchor: HarnPlanCommentAnchor,
-    pub body: String,
-    pub state: HarnPlanCommentState,
-    pub author: HarnPlanAuthor,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-/// Receipt binding a comment resolution to input/output revisions and an agent event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanCommentResolutionReceipt {
-    pub receipt_id: String,
-    pub comment_id: String,
-    pub input_revision_id: String,
-    pub output_revision_id: String,
-    pub agent_run_id: String,
-    pub event_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub explanation: Option<String>,
-    pub created_at: String,
-}
-
-/// Harn's canonical collaborative plan-document contract.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnPlanDocument {
-    #[serde(rename = "_type")]
-    pub type_name: String,
-    pub schema_version: String,
-    pub document_id: String,
-    pub current_revision: HarnPlanRevision,
-    pub comments: Vec<HarnPlanComment>,
-    pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 /// Closed ACP permission-option vocabulary.
