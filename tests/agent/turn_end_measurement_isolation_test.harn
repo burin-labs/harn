@@ -36,7 +36,7 @@ fn grading_verdicts(events: list) -> list {
     .to_list()
 }
 
-pipeline test_grading_done_cannot_override_turn_end_continue(harness: Harness, _task: unknown) {
+pipeline test_grading_done_cannot_override_turn_end_continue(harness: Harness) {
   with_llm_script(
     harness.llm,
     [
@@ -75,7 +75,7 @@ pipeline test_grading_done_cannot_override_turn_end_continue(harness: Harness, _
   )
 }
 
-pipeline test_grading_continue_cannot_override_turn_end_done(harness: Harness, _task: unknown) {
+pipeline test_grading_continue_cannot_override_turn_end_done(harness: Harness) {
   with_llm_script(
     harness.llm,
     [

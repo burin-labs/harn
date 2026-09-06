@@ -94,7 +94,7 @@ fn complaints(harness: Harness, finals: list) -> list {
  * which is what reached the `dict` parameter. Before the fix every case here
  * threw the type error above and produced no terminal record.
  */
-pipeline test_bare_json_scalar_final_message_returns_a_result(harness: Harness, _task: unknown) {
+pipeline test_bare_json_scalar_final_message_returns_a_result(harness: Harness) {
   const found = complaints(harness, ["true", "false", "42", "null", "[1, 2, 3]"])
   assert(
     len(found) == 0,
@@ -110,7 +110,7 @@ pipeline test_bare_json_scalar_final_message_returns_a_result(harness: Harness, 
  * made every final message bypass the verdict path would turn the cases above
  * green without fixing anything, and these are what refuse that.
  */
-pipeline test_non_json_final_messages_still_complete(harness: Harness, _task: unknown) {
+pipeline test_non_json_final_messages_still_complete(harness: Harness) {
   const found = complaints(harness, ["ok", "True"])
   assert(
     len(found) == 0,
@@ -124,7 +124,7 @@ pipeline test_non_json_final_messages_still_complete(harness: Harness, _task: un
  * the whole final message must not leak into visible text, so the guard the
  * fix makes reachable cannot be satisfied by accepting everything.
  */
-pipeline test_internal_verdict_envelope_is_still_stripped(harness: Harness, _task: unknown) {
+pipeline test_internal_verdict_envelope_is_still_stripped(harness: Harness) {
   const outcome = run_final_message(
     harness,
     json_stringify({verdict: "done", reasoning: "the task is complete"}),

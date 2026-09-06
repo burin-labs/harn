@@ -1051,10 +1051,7 @@ pipeline test_completion_evidence_mutation_only_turn_has_empty_research(
  * ONLY proof that verification succeeded arrives through a call that fills no
  * evidence slot.
  */
-pipeline test_command_handle_polls_are_declared_verification_evidence(
-  harness: Harness,
-  _task: any,
-) {
+pipeline test_command_handle_polls_are_declared_verification_evidence(harness: Harness) {
   // The handle tools are opt-in; a run that never dispatches to the background
   // never registers them. Enable them explicitly so this census measures the
   // annotation rather than the default tool set.
@@ -1086,7 +1083,7 @@ pipeline test_command_handle_polls_are_declared_verification_evidence(
  * the fix has widened from "verification-bearing" to "every call" and the
  * projection has stopped projecting.
  */
-pipeline test_declared_role_decides_whether_a_poll_reaches_the_judge(_task: any) {
+pipeline test_declared_role_decides_whether_a_poll_reaches_the_judge() {
   const poll_text = "Command succeeded (exit 0)\n5 passed in 2.24s"
   const messages = [
     __assistant_facts(

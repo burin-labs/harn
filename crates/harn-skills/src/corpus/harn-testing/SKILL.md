@@ -56,6 +56,20 @@ launch behavior.
 - Verify closed error variants and diagnostic codes.
 - Keep fixtures minimal and readable.
 
+## Declare a test pipeline
+
+- A test is `pipeline test_<claim>(...)`. Discovery is pipeline-only; a
+  `fn test_*` is never collected.
+- Declare only the parameters the body uses. The runner derives one argument
+  per declared non-`Harness` parameter, so a test runs identically at arity
+  two, one, or zero. A trailing `_task` slot carries nothing and is noise:
+  `pipeline test_route_is_local(harness: Harness)` and
+  `pipeline test_labels_are_human()` are complete signatures.
+- Take `harness: Harness` as the first parameter only when the body reaches a
+  capability through it.
+- `@test(cases: [...])` rows and `@test(fixture: ...)` do count the remaining
+  parameters. Those slots are part of the contract; keep them.
+
 ## Run Harn test suites
 
 - Put module behavior behind a public Harn function and call that function
