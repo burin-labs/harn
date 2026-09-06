@@ -1329,7 +1329,11 @@ fn a_mechanism_that_answered_neither_question_reports_neither() {
         } => {
             assert_eq!(delivered, None, "silence is not an answer of false");
             assert_eq!(iteration, None, "an unknown iteration is not iteration 0");
-            assert_eq!(streak, Some(2), "the fields that were answered still arrive");
+            assert_eq!(
+                streak,
+                Some(2),
+                "the fields that were answered still arrive"
+            );
         }
         other => panic!("expected FeedbackInjected, got {other:?}"),
     }
