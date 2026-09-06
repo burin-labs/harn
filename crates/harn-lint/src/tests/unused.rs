@@ -212,23 +212,37 @@ greet("hi", "there")
 }
 
 #[test]
-fn private_pipeline_inputs_respect_the_test_runner_convention() {
-    for name in ["default", "main", "auto", "helper", "test_helper"] {
+fn private_pipeline_inputs_are_removable_whatever_the_declaration_is_named() {
+    // The test runner derives one argument per declared non-`Harness`
+    // parameter, so a `test_*` name never owns a trailing unused slot.
+    for name in ["default", "main", "auto", "helper", "test_helper", "test"] {
         let source = format!(
             "pipeline {name}(harness: Harness, _task: unknown) {{\n  harness.stdio.println(\"ready\")\n}}"
         );
         let diagnostics = lint_source(&source);
-        assert_eq!(
+        assert!(
             has_rule(&diagnostics, "unused-pipeline-input"),
-            name != "test_helper",
-            "only test-runner convention owns this unused input: {diagnostics:?}"
+            "every private declaration owns its own arity: {diagnostics:?}"
         );
-        let expected = if name == "test_helper" {
-            source.clone()
-        } else {
+        assert_eq!(
+            apply_fixes(&source, &diagnostics),
             source.replace(", _task: unknown", "")
-        };
-        assert_eq!(apply_fixes(&source, &diagnostics), expected);
+        );
+    }
+}
+
+#[test]
+fn an_attributed_test_declaration_keeps_a_slot_its_rows_count() {
+    for source in [
+        "@test(cases: [{name: \"one\", args: [1]}])\npipeline test_row(_task: int) { return 1 }",
+        "@test(fixture: seed)\npipeline test_fixture(_task: int) { return 1 }",
+    ] {
+        let diagnostics = lint_source(source);
+        assert!(
+            !has_rule(&diagnostics, "unused-pipeline-input"),
+            "an attributed row or fixture counts the slot: {diagnostics:?}"
+        );
+        assert_eq!(apply_fixes(source, &diagnostics), source);
     }
 }
 
