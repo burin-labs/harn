@@ -60,7 +60,7 @@ pub fn release_contract() -> ReleaseContract {
           "reaudit",
           "allow_unfolded_fragments",
         ],
-        jobs: ["detect-drift", "open-development-bump", "publish"],
+        jobs: ["detect-drift", "publish"],
         observed_steps: [
           "Compare Cargo.toml workspace version to latest vX.Y.Z tag",
           "Publish release",
@@ -100,6 +100,7 @@ pub fn release_contract() -> ReleaseContract {
           "cache_budget",
           "container",
           "release",
+          "open-development-bump",
         ],
         observed_steps: [
           "Verify benchmark source revision",
@@ -109,6 +110,7 @@ pub fn release_contract() -> ReleaseContract {
           "Download and verify certified candidate archive bytes",
           "Verify release archive provenance",
           "Publish certified assets without replacement",
+          "Plan development identity after published release",
         ],
       },
     },
