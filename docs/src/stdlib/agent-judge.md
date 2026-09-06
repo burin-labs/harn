@@ -166,7 +166,7 @@ it only over the one question a deterministic oracle has already answered.
 
 ### When the judge is not called at all
 
-Neither judge seam is called when the runtime already holds the answer. All six
+Neither judge seam is called when the runtime already holds the answer. All seven
 of these must hold:
 
 | Clause | Required reading |
@@ -177,6 +177,7 @@ of these must hold:
 | the turn is the sealed final answer | `stop_reason` is `sentinel` |
 | there is an answer to hand back | the final response is non-empty |
 | nothing is deferred past the turn | `pending_tool_batch_effect_count` is zero |
+| no acceptance row is outstanding | the ledger's `pending_count` is zero |
 
 No provider call is made and no `judge_started` event is emitted. The directive
 seals as `accept` with `source: "gate"` and
@@ -188,13 +189,33 @@ source write behind it is an ordinary prose completion and still calls the
 judge, as do an unverified path, a red or unrun verifier, a non-sentinel
 boundary, and a run with no deterministic gate.
 
+The acceptance-ledger clause is there because the skip does not only skip the
+judge. The pending-requirements check that turns a `done` into a `continue` lives
+inside the structured invocation, so a judge that is never asked takes the ledger
+with it. A declared row can only be established as met by an assessment, so with
+no assessment in hand every declared row is pending and the judge is asked. What
+the clause never does is let the skip fire *because* a ledger came back met.
+
+The judge cap reads the same ledger. A cap reached over a passing verifier
+converts to `stop_verified`, which seals `done`; that conversion now also
+requires the ledger to be clear, because a cap is a budget rather than an
+assessment and the judge may have spent its whole budget refusing the row. With
+no rows outstanding the conversion is unchanged and still reports
+`judge_cap_reached_over_verified_pass`.
+
+A `done` sealed without a judge now records an explicit empty ledger rather than
+`nil`. `nil` reads the same for "no rows were declared" and "rows were declared
+and nobody looked", and only the second is a false completion.
+
 One predicate answers for both slots, read at the single point where the plan
 decides whether to announce a judge. The catalog-declared `completion_review`
 light-scrutiny skip is subordinate to it: that rule never reads the verification
 at all, so on a typed green terminal it was deciding, from a model's catalog row,
 a question the oracle had already answered. It now decides only what the
 verification did not, and its receipt still carries `source: "catalog"` so a
-reader can tell the two skips apart.
+reader can tell the two skips apart. The ledger clause applies to that skip too,
+for the same reason: a skipped judge is a skipped pending-requirements check,
+whichever rule did the skipping.
 
 Projection receipts name their selected actions and resolved evidence roles in
 `selected_actions`, so a host whose verifier declares no
