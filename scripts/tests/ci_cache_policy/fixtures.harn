@@ -65,7 +65,7 @@ pub fn ci_concurrency() {
     group: gha_expression("github.workflow")
       + "-"
       + gha_expression(
-        "github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref",
+        "github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref",
       ),
     "cancel-in-progress": gha_expression("github.event_name == 'pull_request'"),
   }

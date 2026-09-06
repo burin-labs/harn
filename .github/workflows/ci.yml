@@ -11,16 +11,17 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # Pull requests and merge groups retain isolated keys; every main push shares
-  # one key so the branch's runs are ordered rather than interleaved.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}
-  # A new commit invalidates the old result for a pull request, so those cancel.
-  # Main pushes never do. Superseding them looked like a saving while merges
-  # were occasional, but under a steady merge rate each push cancels the run
-  # before it, and a cancelled run leaves that head sha with no executed
-  # result. A branch whose runs are all cancelled reports nothing at all, which
-  # is indistinguishable from a branch that is passing. They share one group
-  # key, so they queue behind each other instead.
+  # A main push is immutable proof for one commit, so each one gets its own key.
+  # Keying main by the branch instead lets a later push evict an older pending
+  # proof before any job starts, and merges land closer together than a run
+  # takes, so most main commits never finish being proved at all. A head commit
+  # whose run was evicted carries no executed result, and a branch reporting
+  # nothing is indistinguishable from a branch reporting green. Per-commit keys
+  # let main runs execute in parallel rather than queue behind each other.
+  # Pull requests and merge groups keep their own keys.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
+  # A new commit genuinely invalidates the previous pull-request result, so
+  # those still supersede. Nothing supersedes a main push.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
