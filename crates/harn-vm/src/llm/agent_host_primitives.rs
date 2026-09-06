@@ -1578,18 +1578,13 @@ pub(super) async fn host_agent_dispatch_tool_call(
             hook_reminder_reports.extend(reports);
             let hook_result = rendered?;
             let dropped_bytes = hook_result.dropped_bytes;
+            let hook_denial = hook_result.denial;
             let rendered = hook_result.text;
-            let output_truncated = dropped_bytes > 0;
-            if output_truncated {
-                crate::boundary::BoundaryFailure::new(
-                    crate::boundary::BoundaryId::PostToolOutput,
-                    crate::boundary::BoundaryFailureKind::Truncated,
-                    format!("PostToolUse hooks truncated output from tool {tool_name}"),
-                )
-                .with_dropped_bytes(dropped_bytes)
-                .in_session(&session_id)
-                .report();
-            }
+            let output_truncated = structured_tool_result::report_post_hook_truncation(
+                dropped_bytes,
+                &tool_name,
+                &session_id,
+            );
             let reminder_payload = serde_json::json!({
                 "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
                 "session": {"id": &session_id},
@@ -1602,6 +1597,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     "dropped_bytes": dropped_bytes,
                     "original_size": rendered_before_hooks.len(),
                     "final_size": rendered.len(),
+                    "denial": hook_denial.as_deref().map(crate::orchestration::PostToolDenial::to_json),
                 },
                 "truncated": output_truncated,
                 "dropped_bytes": dropped_bytes,
@@ -1616,22 +1612,21 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 super::reminder_providers::options_map_to_json(options),
             ))
             .await?;
-            let denied = agent_tools::is_denied_tool_result(&raw_result);
             // A dispatch that returned `Ok(..)` can still carry a failure in its
             // body (`{ok:false}` / `{status:"error"}` / `{error:".."}`, or an
             // MCP-shaped `{isError:true}`). Surface those instead of laundering
             // them into `ok:true`: the agent loop reads `ok`/`status`.
             // Prefer the pre-coercion declaration: a dict-returning handler's
             // coerced payload no longer parses (harn#7884).
-            let error_category = if denied {
-                Some("tool_rejected")
-            } else {
-                declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
-            };
-            let is_failure = error_category.is_some();
+            let failure = structured_tool_result::failure_projection(
+                &raw_result,
+                declared_failure,
+                &rendered,
+                hook_denial.as_deref(),
+            );
+            let is_failure = failure.category.is_some();
             let observation =
                 format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
-            let error = is_failure.then(|| rendered.clone());
             let result = serde_json::json!({
                 "ok": !is_failure,
                 "status": if is_failure { "error" } else { "ok" },
@@ -1641,8 +1636,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "result": raw_result,
                 "rendered_result": rendered,
                 "observation": observation,
-                "error": error,
-                "error_category": error_category,
+                "error": failure.error,
+                "error_category": failure.category,
+                "denial": hook_denial.as_deref().map(crate::orchestration::PostToolDenial::to_json),
                 "mutation_status": mutation_status,
                 "changed_paths": changed_paths,
                 "data": data,
