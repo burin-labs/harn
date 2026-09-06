@@ -1,0 +1,10 @@
+import { agent_loop } from "std/agent/loop"
+
+// harn#8159. `done_judge` was renamed to `turn_end_condition` with no alias,
+// and nothing refused the old spelling: a run configured with it proceeded
+// with no turn-end judge and reported what a run that never asked for one
+// reports. The surface check alone would say "no option reads `done_judge`",
+// which sends a caller looking for a feature that is still here.
+pipeline test(harness: Harness, task: unknown) {
+  agent_loop(harness, "do work", nil, {provider: "mock", max_iterations: 1, done_judge: true})
+}

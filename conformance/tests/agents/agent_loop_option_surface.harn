@@ -1,0 +1,32 @@
+import { agent_loop_options } from "std/agent/options"
+
+/**
+ * harn#8159 direction control. The refusals live in
+ * `tests/errors_by_feature/agent_loop_*_option_*`; this pins the other
+ * direction, which is the half a check like this quietly breaks. A validator
+ * that refused everything would satisfy both error tests and be useless, and a
+ * validator that refused a legitimate nesting would push callers back to the
+ * silence it replaced.
+ */
+pipeline default(harness: Harness) {
+  const nested = agent_loop_options(
+    harness,
+    {
+      provider: "mock",
+      verify_completion_judge: {
+        requirement_contract: {requirements: [{requirement_id: "build", name: "Build it."}]},
+      },
+    },
+  )
+  harness.stdio.println(len(nested.verify_completion_judge.requirement_contract.requirements))
+  // A free-form dict option declares no properties, so nothing is known about
+  // its keys and nothing about them can be refused.
+  const freeform = agent_loop_options(
+    harness,
+    {provider: "mock", context_profile: {anything_at_all: true}},
+  )
+  harness.stdio.println(freeform.context_profile.anything_at_all)
+  // Runtime-internal plumbing rides through untouched.
+  const internal = agent_loop_options(harness, {provider: "mock", _preset_kind: "captain"})
+  harness.stdio.println(internal._preset_kind)
+}

@@ -1,0 +1,1 @@
+no option reads `requirement_contract` at the top level; it is read at `turn_end_condition.requirement_contract`
