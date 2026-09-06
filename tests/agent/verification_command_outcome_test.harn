@@ -1,0 +1,78 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_tool_call, with_llm_script } from "std/testing"
+import { verification_gate_input } from "std/verification"
+
+fn command_fact(status: string) -> dict {
+  return {
+    command_status: status,
+    run_outcome: {command_status: status, exit_code: status == "failed" ? 1 : 0},
+  }
+}
+
+pipeline test_command_outcomes_outrank_dispatch_success(harness: Harness) {
+  const previous = {ok: false, error: "existing failure"}
+  for status in ["failed", "passed"] {
+    const gate = verification_gate_input(
+      harness.agent,
+      previous,
+      {ok: true, data: {command_status: status}},
+    )
+    assert_eq(gate.current.value.exit_code, nil, "absent exit stays absent")
+    assert_eq(gate.status == "cleared", status == "passed")
+  }
+  for status in ["failed", "completed", "pending", "running", "unknown"] {
+    const current = {
+      ok: true,
+      data: command_fact(status),
+      diagnostics: [],
+      result: "command output",
+    }
+    const gate = verification_gate_input(harness.agent, previous, current)
+    assert_eq(gate.status == "cleared", status == "completed", status)
+    assert_eq(gate.gate_bearing_failure, status == "failed", status)
+    const stale = verification_gate_input(
+      harness.agent,
+      previous,
+      current + {classification: {status: "bound_stale", feedsGates: false, advisory: true}},
+    )
+    assert(stale.advisory && !stale.gate_bearing_failure && stale.status != "cleared", status)
+  }
+}
+
+pipeline test_agent_loop_preserves_failed_verification_until_command_passes(harness: Harness) {
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify",
+    {
+      parameters: {status: {type: "string"}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { args -> agent_tool_handler_result("command output", command_fact(args.status)) },
+    },
+  )
+  const options: AgentSpec = {
+    provider: "mock",
+    tools: tools,
+    tool_format: "native",
+    max_iterations: 2,
+    stall_diagnostics: true,
+  }
+  for status in ["failed", "completed", "pending", "running", "unknown"] {
+    const result = with_llm_script(
+      harness.llm,
+      [
+        llm_tool_call("verify", {status: "failed"}, "first"),
+        llm_tool_call("verify", {status: status}, "second"),
+      ],
+      { -> agent_loop(harness, "Verify", nil, options) },
+    )
+    const dispatch = result.stall_checkpoint.verification_dispatch[0]
+    assert(dispatch.ok == true && dispatch.arguments.status == status, "second dispatch reached")
+    assert_eq(dispatch.data, command_fact(status), "handler produced the requested command outcome")
+    const state = agent_stall_checkpoint_state(harness.agent, result.stall_checkpoint)
+    assert_eq(state.last_diagnostic_class, status == "completed" ? "pass" : "fail", status)
+  }
+}

@@ -579,40 +579,64 @@ pub fn __verification_delta_feeds_gates(value: unknown) -> bool {
   return !["advisory", "bound_stale", "stale", "unbound"].contains(status)
 }
 
-pub fn __verification_delta_explicit_success(value: unknown) -> bool {
-  if value == nil {
-    return false
+pub fn __verification_delta_outcome(value: unknown) -> string {
+  const status = __verification_delta_status(value)
+  if ["pending", "running", "unknown"].contains(status) {
+    return "unknown"
   }
   if value?.ok != nil {
-    return value.ok ? true : false
+    return value.ok ? "pass" : "fail"
   }
   if value?.success != nil {
-    return value.success ? true : false
+    return value.success ? "pass" : "fail"
   }
   const exit = to_int(value?.exit ?? value?.exit_code)
   if exit != nil {
-    return exit == 0
+    return exit == 0 ? "pass" : "fail"
   }
-  const status = __verification_delta_status(value)
-  return ["pass", "passed", "success", "succeeded"].contains(status)
+  if ["pass", "passed", "success", "succeeded"].contains(status) {
+    return "pass"
+  }
+  return ["error", "fail", "failed", "failure", "timed_out", "timeout"].contains(status) ? "fail" : "unknown"
+}
+
+pub fn __verification_delta_explicit_success(value: unknown) -> bool {
+  return __verification_delta_outcome(value) == "pass"
 }
 
 pub fn __verification_delta_explicit_failure(value: any) -> bool {
-  if value == nil {
-    return false
+  return __verification_delta_outcome(value) == "fail"
+}
+
+/** Command facts outrank the surrounding tool's successful dispatch receipt. */
+pub fn __verification_command_fact(value: dict) -> dict {
+  const data = value?.data ?? value?.result?.data ?? value
+  const command = data?.run_outcome ?? value?.run_outcome ?? data
+  const command_status = command?.command_status ?? data?.command_status
+  const exit = to_int(command?.exit_code)
+  if command_status == nil && exit == nil {
+    return value
   }
-  if value?.ok != nil {
-    return !(value.ok ? true : false)
-  }
-  if value?.success != nil {
-    return !(value.success ? true : false)
-  }
-  const exit = to_int(value?.exit ?? value?.exit_code)
-  if exit != nil {
-    return exit != 0
-  }
-  const status = __verification_delta_status(value)
-  return ["error", "fail", "failed", "failure", "timed_out", "timeout"].contains(status)
+  const status = lowercase(to_string(command_status ?? command?.status ?? ""))
+  const terminal = ["", "completed", "complete", "success", "succeeded", "passed", "pass", "ok"]
+  const failed = ["failed", "failure", "error", "cancelled", "timed_out", "timeout"].contains(
+    status,
+  )
+    || (terminal.contains(status) && exit != nil && exit != 0)
+  const passed = !failed
+    && ((exit == 0 && terminal.contains(status))
+      || ["success", "succeeded", "passed", "pass", "ok"].contains(status))
+  return value
+    + {
+      ok: passed ? true : failed ? false : nil,
+      success: nil,
+      exit: nil,
+      exit_code: exit,
+      status: passed ? "passed" : failed ? "failed" : "pending",
+      diagnostics: passed || (failed && len(value?.diagnostics ?? []) > 0) ? value
+        ?.diagnostics : nil,
+      errors: passed || (failed && len(value?.errors ?? []) > 0) ? value?.errors : nil,
+    }
 }
 
 pub fn __verification_delta_has_collection(value: unknown) -> bool {
@@ -629,6 +653,9 @@ pub fn __verification_delta_synthetic_failure(value: any) -> dict {
 
 pub fn __verification_delta_raw_entries(value: any) -> list {
   if value == nil {
+    return []
+  }
+  if ["pending", "running", "unknown"].contains(__verification_delta_status(value)) {
     return []
   }
   const kind = type_of(value)
