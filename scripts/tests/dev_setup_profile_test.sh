@@ -345,11 +345,15 @@ if ! grep -Fxq "target-dir = \"$bootstrap_target_dir\" # harn-dev-setup-managed"
   echo "bootstrap setup did not configure a durable private target directory" >&2
   exit 1
 fi
-# Bootstrap is the phase an interactive session waits on, so it must not sweep
-# the shared target root; the compiling profiles below own that housekeeping.
-if [[ -s "$tmp_root/prune-bootstrap.txt" ]]; then
-  echo "bootstrap setup swept the shared target root instead of deferring it" >&2
-  cat "$tmp_root/prune-bootstrap.txt" >&2
+# Bootstrap sweeps the shared target root like every other profile. It used to
+# be excluded to protect the interactive wait, but bootstrap is the profile that
+# configures a worktree and the compiling profiles it deferred to are ones a
+# worktree never runs, so excluding it switched the collector off in practice.
+# The interval is stamped beside the shared cache instead, which is what makes
+# the sweep affordable here: one worktree per interval pays it, not each one.
+# See the reachability cases at the end of this suite.
+if [[ ! -s "$tmp_root/prune-bootstrap.txt" ]]; then
+  echo "bootstrap setup did not sweep the shared target root" >&2
   exit 1
 fi
 if [[ ! -s "$tmp_root/prune-rust.txt" ]]; then
@@ -668,6 +672,155 @@ mv "$rust_repo/bin/cargo" "$rust_repo/bin/cargo.fixture-owned"
 if [[ "$(grep -Fxc -- '-V' "$ambient_cargo_record")" -ne 1 \
   || -e "$ambient_rustc_record" ]]; then
   echo "hostile ambient Cargo negative control did not fire" >&2
+  exit 1
+fi
+
+# Reachability of the shared-cache GC.
+#
+# The sweep, its eviction rules and its liveness probe were all correct and
+# covered by prune_stale_targets_test.sh; what was missing was any path that
+# reached them. Bootstrap was excluded, and bootstrap is the profile that
+# configures a worktree, so a machine carrying 80 worktrees had run setup in 37
+# of them and held no GC stamp at all.
+#
+# These cases pin the reachability contract itself, so a later change that
+# reintroduces a per-profile exclusion or a per-worktree stamp fails here rather
+# than silently switching the collector off again.
+prune_reachability_root="$tmp_root/prune-reachability"
+prune_shared_storage="$prune_reachability_root/storage"
+prune_invocations="$prune_reachability_root/invocations.txt"
+mkdir -p "$prune_shared_storage"
+
+# A stub sweep, so these cases measure whether setup reaches the collector and
+# what it hands it. Whether the collector then evicts the right entries is
+# prune_stale_targets_test.sh's question, and is asserted against the real
+# script below.
+install_recording_pruner() {
+  local repo="$1"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '%s\n' 'printf "%s protect=%s\n" "$PWD" "${HARN_TARGET_GC_PROTECT-__unset__}" \'
+    printf '%s\n' '  >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
+  } > "$repo/scripts/prune_stale_targets.sh"
+  chmod +x "$repo/scripts/prune_stale_targets.sh"
+}
+
+# One setup run, with the stamp interval left live so it can actually decide.
+run_setup_for_prune() {
+  local repo="$1" profile="$2" state="$3" output="$4"
+
+  mkdir -p "$tmp_root/tmp-prune-$profile" "$state"
+  HARN_DEV_TARGET_DIR='' \
+  HARN_DEV_BUILD_DIR='' \
+  PATH="$repo/bin:$fixture_system_path" \
+    HOME="$prune_reachability_root/home" \
+    TMPDIR="$tmp_root/tmp-prune-$profile" \
+    HARN_DEV_SETUP_STORAGE_ROOT="$prune_shared_storage" \
+    HARN_DEV_SETUP_PROFILE="$profile" \
+    HARN_DEV_SETUP_FORCE=0 \
+    HARN_CARGO_TARGET_SEED_KEY='' \
+    HARN_CARGO_TARGET_SEED_TEST_COPY=1 \
+    HARN_DEV_SETUP_STATE_DIR="$state" \
+    HARN_DEV_TARGET_WORKTREE_PATH="$repo" \
+    DEV_SETUP_TEST_CARGO_RECORD="$prune_reachability_root/cargo-$profile.txt" \
+    DEV_SETUP_TEST_RESOLVER_RECORD="$prune_reachability_root/resolver-$profile.txt" \
+    DEV_SETUP_TEST_PRUNE_RECORD="$prune_invocations" \
+    "$repo/scripts/dev_setup.sh" > "$output" 2>&1
+}
+
+prune_worktree_a="$(make_fixture_repo prune-reach-a)"
+prune_worktree_b="$(make_fixture_repo prune-reach-b)"
+install_recording_pruner "$prune_worktree_a"
+install_recording_pruner "$prune_worktree_b"
+add_available_cargo_tools "$prune_worktree_a"
+add_available_cargo_tools "$prune_worktree_b"
+
+# 1. Bootstrap reaches the collector. This is the case that was silently off:
+#    the profile every worktree runs was the one profile excluded.
+run_setup_for_prune "$prune_worktree_a" bootstrap \
+  "$prune_reachability_root/state-a" \
+  "$prune_reachability_root/bootstrap-output.txt"
+if [[ ! -s "$prune_invocations" ]]; then
+  echo "bootstrap setup did not reach the shared-cache GC" >&2
+  cat "$prune_reachability_root/bootstrap-output.txt" >&2
+  exit 1
+fi
+
+# 2. The invoking worktree's own target dir is handed over as protected. Setup
+#    restores a Cargo target seed, and a restored seed carries the seed's
+#    timestamps, so without this the sweep can retire the tree the caller is
+#    about to build into.
+prune_protect="$(sed -n '1s/.*protect=//p' "$prune_invocations")"
+if [[ -z "$prune_protect" || "$prune_protect" == "__unset__" ]]; then
+  echo "setup ran the GC without naming its own entry as protected" >&2
+  cat "$prune_invocations" >&2
+  exit 1
+fi
+# Entries are named <parent>-<leaf>, so the protected name ends with this
+# worktree's leaf.
+if [[ "$(basename "$prune_protect")" != *"-$(basename "$prune_worktree_a")" ]]; then
+  echo "protected entry does not name the invoking worktree: $prune_protect" >&2
+  exit 1
+fi
+
+# 3. The interval is machine-wide, not per-worktree. A second worktree with its
+#    own state dir, sharing the storage root, must not sweep again. A
+#    per-worktree stamp is what made the sweep expensive enough to exclude from
+#    bootstrap in the first place.
+if [[ ! -f "$prune_shared_storage/prune-stale-targets.stamp" ]]; then
+  echo "GC stamp was not written beside the cache it guards" >&2
+  exit 1
+fi
+run_setup_for_prune "$prune_worktree_b" bootstrap \
+  "$prune_reachability_root/state-b" \
+  "$prune_reachability_root/second-output.txt"
+if [[ "$(wc -l < "$prune_invocations")" -ne 1 ]]; then
+  echo "a second worktree swept again; the GC interval is not machine-wide" >&2
+  cat "$prune_invocations" >&2
+  exit 1
+fi
+if ! grep -Fq 'harn-target GC recently checked.' \
+  "$prune_reachability_root/second-output.txt"; then
+  echo "second worktree did not report skipping the recent sweep" >&2
+  cat "$prune_reachability_root/second-output.txt" >&2
+  exit 1
+fi
+
+# 4. The real sweep honours the protected entry. Negative control first: with
+#    no protection, an orphan-shaped cold entry is collected, so the assertion
+#    below cannot pass vacuously.
+prune_guard_storage="$prune_reachability_root/guard-storage"
+prune_guard_entry="$prune_guard_storage/harn-target/projects-caller"
+mkdir -p "$prune_guard_entry" "$prune_reachability_root/no-repos"
+touch -t 202001010000 "$prune_guard_entry"
+# Captured rather than piped into `grep -q`: grep exits on its first match and
+# SIGPIPEs the sweep, which under `pipefail` reads as the sweep having failed.
+unguarded_output="$(
+  HARN_DEV_SETUP_STORAGE_ROOT="$prune_guard_storage" \
+    HARN_TARGET_GC_ROOTS="$prune_reachability_root/no-repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    "$repo_root/scripts/prune_stale_targets.sh" --dry-run
+)"
+if ! grep -Fq 'would remove orphan: projects-caller' <<< "$unguarded_output"; then
+  echo "negative control failed: an unprotected cold orphan was not collected" >&2
+  printf '%s\n' "$unguarded_output" >&2
+  exit 1
+fi
+guard_output="$(
+  HARN_DEV_SETUP_STORAGE_ROOT="$prune_guard_storage" \
+    HARN_TARGET_GC_ROOTS="$prune_reachability_root/no-repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    HARN_TARGET_GC_PROTECT="/some/worktree/path/projects-caller" \
+    "$repo_root/scripts/prune_stale_targets.sh"
+)"
+if ! grep -Fq "keep (caller's own entry): projects-caller" <<< "$guard_output"; then
+  echo "the sweep did not report keeping the caller's own entry" >&2
+  printf '%s\n' "$guard_output" >&2
+  exit 1
+fi
+if [[ ! -d "$prune_guard_entry" ]]; then
+  echo "the sweep removed the caller's own entry" >&2
+  printf '%s\n' "$guard_output" >&2
   exit 1
 fi
 
