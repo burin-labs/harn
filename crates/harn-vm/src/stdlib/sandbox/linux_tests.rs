@@ -203,8 +203,22 @@ fn sandboxed_tar_extracts_symlinks_without_widening_the_write_root() {
         Path::new("harn"),
     );
 
+    // The write boundary this case asserts is enforced by Landlock. A host
+    // without it reports isolation as disabled and cannot refuse the write, so
+    // running the assertion there would blame the backend for a kernel the
+    // runner does not have. Assert the reported capability either way, and the
+    // refusal only where the mechanism actually exists: an unenforceable host
+    // must not read as a satisfied boundary.
     let outside = tempfile::tempdir().expect("outside workspace");
     let refused = run_tar(outside.path());
+    if landlock_abi_version() == 0 {
+        assert!(
+            String::from_utf8_lossy(&refused.stderr)
+                .contains("Landlock is not available on this host"),
+            "a host without Landlock must say so rather than imply a boundary",
+        );
+        return;
+    }
     assert!(
         !refused.status.success(),
         "fchmodat2 must not weaken the Landlock write boundary",
