@@ -441,6 +441,16 @@ pub type AgentExecutionSpec = {
    * `std/agent/loop_finalize`.
    */
   final_wrapup?: bool,
+  /**
+   * Host-owned wording for the wrap-up turn, replacing the generic
+   * budget/turn-limit directive. Read at `std/agent/loop_turn_scope`.
+   */
+  wrapup_directive?: string,
+  /**
+   * Host-supplied structured context rendered into the wrap-up turn. Read at
+   * `std/agent/loop_turn_scope`.
+   */
+  wrapup_context?: dict,
   /** Cap on verification retries before the run seals. Default 20. */
   max_verify_attempts?: int,
   /**
