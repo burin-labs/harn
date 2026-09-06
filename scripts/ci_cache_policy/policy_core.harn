@@ -172,6 +172,12 @@ pub const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
 pub const BLACKSMITH_ENABLE_VAR = "HARN_CI_ENABLE_BLACKSMITH_LINUX"
 
+/** The step that names where the slow E2E suite is about to land. */
+pub const E2E_CAPACITY_DECISION_STEP = "Decide where the slow E2E suite lands"
+
+/** The input that carries the evacuation switch into that decision. */
+pub const E2E_EVACUATION_INPUT = "FLEET_EVACUATION"
+
 pub const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
 // Blacksmith's Ubuntu image does not expose Landlock. Keep the complete set of
@@ -1481,18 +1487,48 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   return errors
 }
 
-/** Keep the slow suite evacuable through the same paid-capacity switch. */
+/**
+ * Keep the slow suite evacuable through the same paid-capacity switch.
+ *
+ * The switch has to reach two places, and only one of them is the routing
+ * expression. The capacity job names where this suite is about to land, and a
+ * name that reads the owned census while the switch sends the job to elastic
+ * paid capacity is worse than no name at all: it attributes the run to a rung
+ * it never touched. So the switch is required on `runs-on` and on the input
+ * the capacity script actually measures the route from.
+ *
+ * This checks that seam rather than a specific environment variable on the
+ * job. The suite derives its own compiler and thread budget on the runner it
+ * lands on, so there is no longer a static budget variable to name, and a
+ * rule that named one would pass by matching a string while the switch failed
+ * to reach the route.
+ */
 pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
   const job = e2e?.jobs?.e2e ?? {}
+  const capacity_job = e2e?.jobs?.["e2e-capacity"] ?? {}
+  const capacity_step = step_by_name(capacity_job?.steps ?? [], E2E_CAPACITY_DECISION_STEP)
   let errors: list<string> = []
-  for field in [job?.["runs-on"], job?.env?.HARN_E2E_JOBS] {
-    if !contains(to_string(field ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
-      errors = errors
-        + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
-    }
+  if !contains(to_string(job?.["runs-on"] ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
+    errors = errors
+      + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
   }
   if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
     errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
+  }
+  if capacity_step == nil {
+    errors = errors
+      + ["e2e.yml:e2e-capacity must keep the '${E2E_CAPACITY_DECISION_STEP}' step"]
+    return errors
+  }
+  if !contains(
+    to_string(capacity_step?.env?.[E2E_EVACUATION_INPUT] ?? ""),
+    "vars.${BLACKSMITH_ENABLE_VAR} == 'true'",
+  ) {
+    errors = errors
+      + [
+        "e2e.yml:e2e-capacity must pass ${BLACKSMITH_ENABLE_VAR} to the route it measures "
+          + "as ${E2E_EVACUATION_INPUT}",
+      ]
   }
   return errors
 }

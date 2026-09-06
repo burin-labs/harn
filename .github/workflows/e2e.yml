@@ -74,6 +74,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SELFHOSTED_DISABLED: ${{ needs.runner-availability.outputs.selfhosted_disabled }}
           RUNNER_CAPACITY: ${{ needs.runner-availability.outputs.capacity }}
+          # The same switch the routing expression below reads. Without it here
+          # this step would report the owned census while the job ran on
+          # elastic paid capacity.
+          FLEET_EVACUATION: ${{ vars.HARN_CI_ENABLE_BLACKSMITH_LINUX == 'true' }}
 
   e2e:
     name: Slow E2E suite

@@ -35,6 +35,21 @@ decision=$(e2e_runner_capacity_decision push '' "$retired")
   'E2E_RUNNER_CAPACITY event=pull_request route=hosted reason=event_is_not_a_main_push pool=linux_big carriers=not_consulted' ]]
 [[ $(e2e_runner_capacity_decision schedule '' "$measured") == *route=hosted* ]]
 
+# The fleet-evacuation switch takes every event to elastic paid capacity, so
+# the decision line must name the hosted route and its single carrier rather
+# than the owned census the job will not use.
+[[ $(e2e_runner_capacity_decision push '' "$measured" true) == \
+  'E2E_RUNNER_CAPACITY event=push route=hosted reason=fleet_evacuation_switch_on pool=linux_big carriers=1' ]]
+[[ $(e2e_runner_capacity_decision pull_request '' '' true) == \
+  'E2E_RUNNER_CAPACITY event=pull_request route=hosted reason=fleet_evacuation_switch_on pool=linux_big carriers=1' ]]
+
+# The switch is only the literal `true`. An unset or otherwise-valued switch
+# must leave the census answer standing, or a typo in the workflow would
+# silently evacuate the fleet.
+[[ $(e2e_runner_capacity_decision push '' "$measured" '') == *route=owned* ]]
+[[ $(e2e_runner_capacity_decision push '' "$measured" 'false') == *route=owned* ]]
+[[ $(e2e_runner_capacity_decision push '' "$measured" 'TRUE') == *route=owned* ]]
+
 # Routing switched off org-wide is a decision, not a missing measurement.
 [[ $(e2e_runner_capacity_decision push 'retired' "$measured") == \
   'E2E_RUNNER_CAPACITY event=push route=hosted reason=owned_routing_retired pool=linux_big carriers=not_consulted' ]]
@@ -53,4 +68,4 @@ refuses capacity_pool_absent push '' '{"linux_big":{"online":"3"}}'
 e2e_runner_capacity_decision push '' '{"macos_big":{"online":2}}' 2>"$diagnostic" || true
 grep -q 'pools=macos_big' "$diagnostic"
 
-echo 'E2E runner capacity: owned, retired, non-push, retired-routing and unmeasurable-census controls passed'
+echo 'E2E runner capacity: owned, retired, non-push, evacuation-switch, retired-routing and unmeasurable-census controls passed'

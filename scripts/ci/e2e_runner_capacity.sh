@@ -8,6 +8,10 @@
 # nothing in the log to attribute it to. This runs first and refuses by name
 # when the census cannot be read, so the choice is only ever made over counts
 # that were actually observed.
+#
+# It reads the same fleet-evacuation switch the routing expression reads, for
+# the same reason: a script that reported the owned census while the switch
+# sent the job to elastic paid capacity would name a route the job never took.
 set -euo pipefail
 
 E2E_CAPACITY_POOL=${E2E_CAPACITY_POOL:-linux_big}
@@ -20,7 +24,16 @@ e2e_capacity_refuse() {
 }
 
 e2e_runner_capacity_decision() {
-  local event=$1 disabled=$2 capacity=$3 pool=$E2E_CAPACITY_POOL online idle
+  local event=$1 disabled=$2 capacity=$3 evacuate=${4:-} pool=$E2E_CAPACITY_POOL online idle
+  # The fleet-evacuation switch is read first because the routing expression
+  # reads it first: when it is on, every event goes to elastic paid capacity
+  # regardless of what the owned census says. Reporting the census answer here
+  # would name a route the job never takes, which is the divergence this
+  # script exists to close.
+  if [[ "$evacuate" == true ]]; then
+    echo "E2E_RUNNER_CAPACITY event=$event route=hosted reason=fleet_evacuation_switch_on pool=$pool carriers=1"
+    return 0
+  fi
   if [[ "$event" != push ]]; then
     echo "E2E_RUNNER_CAPACITY event=$event route=hosted reason=event_is_not_a_main_push pool=$pool carriers=not_consulted"
     return 0
@@ -63,7 +76,8 @@ e2e_runner_capacity_decision() {
 e2e_runner_capacity_main() {
   local line route
   line=$(e2e_runner_capacity_decision \
-    "${EVENT_NAME:-}" "${SELFHOSTED_DISABLED:-}" "${RUNNER_CAPACITY:-}") || return 1
+    "${EVENT_NAME:-}" "${SELFHOSTED_DISABLED:-}" "${RUNNER_CAPACITY:-}" \
+    "${FLEET_EVACUATION:-}") || return 1
   echo "$line" >&2
   route=${line##*route=}
   route=${route%% *}
