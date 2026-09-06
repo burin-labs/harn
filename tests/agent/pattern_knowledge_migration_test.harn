@@ -1,0 +1,38 @@
+import { pattern_learning_ensure_migrated } from "std/agent/pattern_knowledge"
+
+pipeline test_pattern_learning_migration_refuses_an_unreadable_marker(harness: Harness) {
+  const outside = harness.fs.mkdtemp_in_workspace("pattern-migration-outside")
+  const inside = harness.fs.mkdtemp_in_workspace("pattern-migration-inside")
+  const denied_options = {
+    project_root: inside,
+    memory_root: path_join(outside, "memory"),
+    namespace: "denied-marker",
+  }
+  const policy = {workspace_roots: [inside]}
+  const first = harness.runtime.with_execution_policy(
+    policy,
+    fn() { return pattern_learning_ensure_migrated(harness, denied_options) },
+  )
+  const second = harness.runtime.with_execution_policy(
+    policy,
+    fn() { return pattern_learning_ensure_migrated(harness, denied_options) },
+  )
+  assert_eq(first.migrated, false)
+  assert_eq(first.unavailable, true)
+  assert_eq(first.marker_status, "scope_denied")
+  assert_eq(second, first, "a denied marker must not look like a fresh migration on retry")
+  assert(
+    !harness.fs.exists(path_join(outside, "memory", "denied-marker")),
+    "a denied marker probe must not create migration state",
+  )
+  const visible_options = {
+    project_root: inside,
+    memory_root: path_join(inside, "memory"),
+    namespace: "visible-marker",
+  }
+  const visible_first = pattern_learning_ensure_migrated(harness, visible_options)
+  const visible_second = pattern_learning_ensure_migrated(harness, visible_options)
+  assert_eq(visible_first.migrated, true)
+  assert_eq(visible_second.migrated, false)
+  assert_eq(visible_second.already_done, true)
+}

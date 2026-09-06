@@ -59,6 +59,14 @@ const DEFAULT_SUPPRESSION_DAYS: int = 14
 
 const DEFAULT_SESSION_IMPORT_LIMIT: int = 100
 
+pub type PatternLearningMigrationResult = {
+  migrated: bool,
+  skipped?: bool,
+  already_done?: bool,
+  unavailable?: bool,
+  marker_status?: string,
+}
+
 /**
  * Return the current pattern-learning state for the selected project memory namespace.
  *
@@ -1337,13 +1345,24 @@ fn pl_migrate_state(harness: Harness, options: any = nil) -> nil {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_ensure_migrated(harness: Harness, options: any = nil) -> dict {
+pub fn pattern_learning_ensure_migrated(
+  harness: Harness,
+  options: any = nil,
+) -> PatternLearningMigrationResult {
   if options?.skip_migration ?? false {
     return {migrated: false, skipped: true}
   }
   const marker = pl_migration_marker(harness.fs, options)
-  if harness.fs.exists(marker) {
+  const marker_status = try {
+    to_string(harness.fs.status(marker)?.status ?? "stat_error")
+  } catch (_error) {
+    "stat_error"
+  }
+  if contains(["present_file", "present_dir", "present_other"], marker_status) {
     return {migrated: false, already_done: true}
+  }
+  if marker_status != "missing" {
+    return {migrated: false, unavailable: true, marker_status: marker_status}
   }
   pl_migrate_observations(harness, options)
   pl_migrate_pending(harness, options)

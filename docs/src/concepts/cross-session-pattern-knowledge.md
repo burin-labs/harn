@@ -43,6 +43,11 @@ pattern-learning operations call that migration automatically. Read operations
 never migrate or write, so hosts that need legacy records during inspection
 should call the explicit migration once during a writable launch phase.
 
+The migration probes the marker with `harness.fs.status` before reading legacy
+records. A `missing` status starts migration. Any denied or errored status
+returns `{migrated: false, unavailable: true, marker_status: "..."}` without
+writing pattern state.
+
 Those per-stream files are migration inputs, not the current session-store
 backend. `std/session-store` now writes all streams through the canonical
 `harn-session-store` SQLite database at `.harn/session-store.sqlite`.
