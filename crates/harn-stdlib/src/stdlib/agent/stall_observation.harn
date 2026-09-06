@@ -896,6 +896,7 @@ pub fn agent_stall_observe_completed_dispatch(
     next_state = next_state + {observation_recurrence_counts: recurrence.counts}
     all_repeated = all_repeated && recurrence.count > 1
     if !config.enabled
+      || !config.observation_recurrence_advisory
       || recurrence.count
         != config.repeat_same_observation
       || next_state.same_observation_streak

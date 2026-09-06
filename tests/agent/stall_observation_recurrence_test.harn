@@ -250,20 +250,23 @@ pipeline test_agent_loop_withholds_extension_for_repeated_only_boundary(
   harness: Harness,
   task: unknown,
 ) {
-  _assert_agent_loop_budget_guard(
-    harness,
-    {
-      enabled: true,
-      repeat_same_observation: 2,
-      repeat_success: 99,
-      repeat_same_error: 99,
-      no_progress_messages: 99,
-      ping_pong_cycles: 99,
-      hard_stop_after_trips: 99,
-      inject_feedback: false,
-    },
-    1,
-  )
+  for advisory in [true, false] {
+    _assert_agent_loop_budget_guard(
+      harness,
+      {
+        enabled: true,
+        observation_recurrence_advisory: advisory,
+        repeat_same_observation: 2,
+        repeat_success: 99,
+        repeat_same_error: 99,
+        no_progress_messages: 99,
+        ping_pong_cycles: 99,
+        hard_stop_after_trips: 99,
+        inject_feedback: false,
+      },
+      advisory ? 1 : 0,
+    )
+  }
 }
 
 pipeline test_budget_guard_remains_on_when_stall_feedback_is_disabled(
