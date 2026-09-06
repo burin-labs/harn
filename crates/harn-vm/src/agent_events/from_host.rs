@@ -62,12 +62,37 @@ impl HostTranscriptRole {
     }
 }
 
+/// How much of a host payload the arm behind a registry row actually reads.
+///
+/// "Declared as a field" is not "consumed": some arms fold a payload key into
+/// a differently-named field, and some take the whole payload as one value.
+/// The census in [`dropped_payload_keys`] needs that distinction to tell a
+/// key nobody reads from a key that is read under another name.
+#[derive(Clone, Copy, Debug)]
+enum PayloadConsumption {
+    /// The arm keeps the payload whole, so no key can be lost.
+    Whole,
+    /// Every consumed key survives into the serialized event under its own
+    /// name, so a round trip decides.
+    Fields,
+    /// A round trip decides, except for these keys, which the arm reads and
+    /// folds into a differently-named field.
+    FieldsFolding(&'static [&'static str]),
+}
+
 #[derive(Clone, Copy, Debug)]
 struct HostEventPolicy {
     event_type: &'static str,
     transcript_role: Option<HostTranscriptRole>,
+    payload_consumption: PayloadConsumption,
 }
 
+/// A row whose arm keeps every consumed key under its own name.
+///
+/// This is the default on purpose. A row added without thinking about
+/// consumption over-reports a fold as a drop, which is noisy and visible; the
+/// opposite default would silently exempt the next arm from the census and
+/// rebuild the very defect this registry exists to expose.
 const fn host_event(
     event_type: &'static str,
     transcript_role: Option<HostTranscriptRole>,
@@ -75,6 +100,32 @@ const fn host_event(
     HostEventPolicy {
         event_type,
         transcript_role,
+        payload_consumption: PayloadConsumption::Fields,
+    }
+}
+
+/// A row whose arm stores the payload whole (`checkpoint`, `payload`, …).
+const fn host_event_whole(
+    event_type: &'static str,
+    transcript_role: Option<HostTranscriptRole>,
+) -> HostEventPolicy {
+    HostEventPolicy {
+        event_type,
+        transcript_role,
+        payload_consumption: PayloadConsumption::Whole,
+    }
+}
+
+/// A row whose arm reads `folded` keys into differently-named fields.
+const fn host_event_folding(
+    event_type: &'static str,
+    transcript_role: Option<HostTranscriptRole>,
+    folded: &'static [&'static str],
+) -> HostEventPolicy {
+    HostEventPolicy {
+        event_type,
+        transcript_role,
+        payload_consumption: PayloadConsumption::FieldsFolding(folded),
     }
 }
 
@@ -127,37 +178,82 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     // The loud-boundary funnel (harn#5142). Registered so a `.harn` boundary
     // reports a drop through the same typed event as the Rust funnel.
     host_event("boundary_failure", None),
-    host_event("typed_checkpoint", ASSISTANT),
-    host_event("model_job", TOOL),
-    host_event("loop_stuck", ASSISTANT),
-    host_event("reserved_terminal_verify", ASSISTANT),
-    host_event("agent_loop_stall_warning", ASSISTANT),
-    host_event("cache_hit", None),
-    host_event("cache_miss", None),
+    host_event_whole("typed_checkpoint", ASSISTANT),
+    host_event_whole("model_job", TOOL),
+    host_event_whole("loop_stuck", ASSISTANT),
+    host_event_whole("reserved_terminal_verify", ASSISTANT),
+    host_event_whole("agent_loop_stall_warning", ASSISTANT),
+    host_event_whole("cache_hit", None),
+    host_event_whole("cache_miss", None),
     // `std/llm` handler telemetry. Every one of these shipped in the embedded
     // stdlib while this registry refused it, so the events were emitted and
     // dropped; the drift check in `from_host_tests` is what keeps the two
     // halves together from here.
-    host_event("llm_call_log", None),
-    host_event("llm_routing_decision", None),
-    host_event("llm_fallback_attempt", None),
-    host_event("llm_shadow_diff", None),
-    host_event("semantic_cache_hit", None),
-    host_event("semantic_cache_miss", None),
-    host_event("agent_scratchpad_reorganization", None),
+    host_event_whole("llm_call_log", None),
+    host_event_whole("llm_routing_decision", None),
+    host_event_whole("llm_fallback_attempt", None),
+    host_event_whole("llm_shadow_diff", None),
+    host_event_whole("semantic_cache_hit", None),
+    host_event_whole("semantic_cache_miss", None),
+    host_event_whole("agent_scratchpad_reorganization", None),
     host_event("stance_armed", None),
     host_event("stance_write_access_granted", None),
     host_event("stance_write_access_denied", None),
     host_event("stance_disarmed", None),
-    host_event("completion_confirmation_nudge", None),
-    host_event("fenced_call_attempt_nudge", None),
-    host_event("malformed_call_markup_nudge", None),
-    host_event("missing_tool_call_nudge", None),
+    host_event_folding(
+        "completion_confirmation_nudge",
+        None,
+        &["message", "text", "visible_text_prefix"],
+    ),
+    host_event_folding(
+        "fenced_call_attempt_nudge",
+        None,
+        &["message", "text", "fence"],
+    ),
+    host_event_folding(
+        "malformed_call_markup_nudge",
+        None,
+        &["message", "text", "marker"],
+    ),
+    host_event_folding(
+        "missing_tool_call_nudge",
+        None,
+        &["message", "text", "tool"],
+    ),
     host_event("repair_output_contract_applied", None),
-    host_event("no_progress_streak_nudge", None),
-    host_event("tool_call_blank_name_dropped", None),
-    host_event("llm_auto_continue", None),
-    host_event("context_overflow_recovery", ASSISTANT),
+    host_event_folding(
+        "no_progress_streak_nudge",
+        None,
+        &["message", "text", "turns_since_progress"],
+    ),
+    host_event_folding(
+        "tool_call_blank_name_dropped",
+        None,
+        &["message", "text", "dropped_count"],
+    ),
+    host_event_folding(
+        "llm_auto_continue",
+        None,
+        &[
+            "message",
+            "text",
+            "previous_max_tokens",
+            "raised_max_tokens",
+            "attempt",
+            "max_continuations",
+        ],
+    ),
+    host_event_folding(
+        "context_overflow_recovery",
+        ASSISTANT,
+        &[
+            "message",
+            "text",
+            "attempt",
+            "max_recoveries",
+            "archived_messages",
+        ],
+    ),
 ];
 
 /// Every `event_type` this boundary accepts, for the drift check that keeps
@@ -193,6 +289,79 @@ fn host_event_policy(event_type: &str) -> Option<&'static HostEventPolicy> {
         .find(|policy| policy.event_type == event_type)
 }
 
+/// Payload keys the emitter wrote that no reader of the decoded event can see.
+///
+/// `AgentEvent` is an internally-tagged enum with no `deny_unknown_fields`, so
+/// `serde` discards a key the target variant does not declare. The discard is
+/// the whole defect: the emit succeeds, the run succeeds, and the field is
+/// missing only for whoever reads the timeline afterwards.
+///
+/// The census is a round trip rather than a hand-written key list. Serializing
+/// the decoded event answers "what will a reader actually see" from the same
+/// derives that did the dropping, so it cannot drift out of date the way a
+/// second copy of every variant's fields would. The registry supplies only
+/// what a round trip cannot know: which arms keep the payload whole, and which
+/// keys are read under a different name.
+///
+/// A `null` input value is not reported. Every optional field skips
+/// serializing when absent, so an explicit `null` round-trips to nothing
+/// through a field that does exist and is not evidence of a drop.
+fn dropped_payload_keys(
+    policy: &HostEventPolicy,
+    payload: &Value,
+    event: &AgentEvent,
+) -> Vec<String> {
+    let folded: &[&str] = match policy.payload_consumption {
+        PayloadConsumption::Whole => return Vec::new(),
+        PayloadConsumption::Fields => &[],
+        PayloadConsumption::FieldsFolding(keys) => keys,
+    };
+    let Value::Object(sent) = payload else {
+        return Vec::new();
+    };
+    let Ok(Value::Object(read)) = serde_json::to_value(event) else {
+        return Vec::new();
+    };
+    sent.iter()
+        .filter(|(key, value)| {
+            !value.is_null() && !read.contains_key(*key) && !folded.contains(&key.as_str())
+        })
+        .map(|(key, _)| key.clone())
+        .collect()
+}
+
+/// Report each dropped key once per session, through the loud-boundary funnel.
+///
+/// [`crate::boundary::BoundaryFailureKind::Dropped`] already names this exact
+/// shape — bytes consumed that produced neither action nor error — so the
+/// signal joins the boundary vocabulary that exists rather than inventing a
+/// parallel one. It is deliberately not an error: the population of stray keys
+/// is known to be non-empty and some of it is load-bearing on live paths, so
+/// refusing the event here would turn an invisible loss into a dead run.
+fn report_dropped_payload_keys(
+    session_id: &str,
+    event_type: &str,
+    policy: &HostEventPolicy,
+    payload: &Value,
+    event: &AgentEvent,
+) {
+    for key in dropped_payload_keys(policy, payload, event) {
+        if !crate::agent_sessions::mark_dropped_host_payload_key_warning(
+            session_id, event_type, &key,
+        ) {
+            continue;
+        }
+        crate::boundary::BoundaryFailure::new(
+            crate::boundary::BoundaryId::HostEventIngest,
+            crate::boundary::BoundaryFailureKind::Dropped,
+            format!("`{event_type}` payload key `{key}` is not read by any field of the event it becomes"),
+        )
+        .in_session(session_id)
+        .with_excerpt(&payload.to_string())
+        .report();
+    }
+}
+
 impl AgentEvent {
     /// Build a typed [`AgentEvent`] from a host `emit_event` call.
     ///
@@ -203,19 +372,27 @@ impl AgentEvent {
     /// vocabulary is additive across pins — so the call returns `Ok(None)`
     /// after at most one warning per type per session. Callers must not
     /// journal or emit the dropped name.
+    ///
+    /// A registered type whose payload carries a key no field of the resulting
+    /// event reads is accepted, and the lost key is reported once per session
+    /// through the loud-boundary funnel. It is a report rather than a refusal
+    /// because live emitters are known to pass keys nothing consumes; see
+    /// [`dropped_payload_keys`].
     pub fn from_host_payload(
         session_id: &str,
         event_type: &str,
         payload: &Value,
     ) -> Result<Option<AgentEvent>, VmError> {
-        if host_event_policy(event_type).is_none() {
+        let Some(policy) = host_event_policy(event_type) else {
             warn_unknown_host_event_once(session_id, event_type);
             return Ok(None);
-        }
-        if let Some(event) = from_host_special(session_id, event_type, payload) {
-            return Ok(Some(event));
-        }
-        from_host_generic(session_id, event_type, payload).map(Some)
+        };
+        let event = match from_host_special(session_id, event_type, payload) {
+            Some(event) => event,
+            None => from_host_generic(session_id, event_type, payload)?,
+        };
+        report_dropped_payload_keys(session_id, event_type, policy, payload, &event);
+        Ok(Some(event))
     }
 
     pub(crate) fn host_transcript_role(event_type: &str) -> Option<HostTranscriptRole> {

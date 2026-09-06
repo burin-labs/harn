@@ -364,8 +364,8 @@ use metadata::{
 #[cfg(test)]
 pub(crate) use runtime_store::fresh_session_runtime;
 pub(crate) use runtime_store::{
-    active_session_runtime, mark_unknown_host_event_warning, swap_active_session_runtime,
-    AgentSessionRuntime,
+    active_session_runtime, mark_dropped_host_payload_key_warning, mark_unknown_host_event_warning,
+    swap_active_session_runtime, AgentSessionRuntime,
 };
 use runtime_store::{
     clear_unknown_host_event_warnings, DEFAULT_TRANSCRIPT_BUDGET_POLICY, SESSIONS, SESSION_CAP,

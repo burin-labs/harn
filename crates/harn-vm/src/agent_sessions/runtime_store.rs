@@ -35,6 +35,8 @@ impl<T: Copy> SharedValue<T> {
 pub(crate) struct AgentSessionRuntime {
     sessions: SharedCell<HashMap<String, SessionState>>,
     pub(super) unknown_host_event_warnings: SharedCell<HashSet<(String, String)>>,
+    /// One entry per (session, event type, dropped key) already reported.
+    pub(super) dropped_host_payload_key_warnings: SharedCell<HashSet<(String, String, String)>>,
     session_cap: SharedValue<usize>,
     default_transcript_budget_policy: SharedCell<SessionTranscriptBudgetPolicy>,
 }
@@ -44,6 +46,7 @@ impl Default for AgentSessionRuntime {
         Self {
             sessions: SharedCell(parking_lot::RwLock::new(HashMap::new())),
             unknown_host_event_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),
+            dropped_host_payload_key_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),
             session_cap: SharedValue(parking_lot::Mutex::new(DEFAULT_SESSION_CAP)),
             default_transcript_budget_policy: SharedCell(parking_lot::RwLock::new(
                 SessionTranscriptBudgetPolicy::default(),
@@ -75,11 +78,34 @@ pub(crate) fn mark_unknown_host_event_warning(session_id: &str, event_type: &str
         .insert((session_id.to_string(), event_type.to_string()))
 }
 
+/// Record that this dropped payload key has been reported for this session.
+///
+/// Returns `true` the first time only, so a key dropped on every iteration of a
+/// loop reports once instead of once per turn.
+pub(crate) fn mark_dropped_host_payload_key_warning(
+    session_id: &str,
+    event_type: &str,
+    key: &str,
+) -> bool {
+    active_session_runtime()
+        .dropped_host_payload_key_warnings
+        .borrow_mut()
+        .insert((
+            session_id.to_string(),
+            event_type.to_string(),
+            key.to_string(),
+        ))
+}
+
 pub(super) fn clear_unknown_host_event_warnings(session_id: &str) {
     active_session_runtime()
         .unknown_host_event_warnings
         .borrow_mut()
         .retain(|(warned_session_id, _)| warned_session_id != session_id);
+    active_session_runtime()
+        .dropped_host_payload_key_warnings
+        .borrow_mut()
+        .retain(|(warned_session_id, _, _)| warned_session_id != session_id);
 }
 
 pub(crate) fn swap_active_session_runtime(
