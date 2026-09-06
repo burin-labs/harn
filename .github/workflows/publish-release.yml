@@ -48,6 +48,15 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      tag:
+        description: 'Explicit immutable release tag for current-main recovery.'
+        type: string
+      expected_source_sha:
+        description: 'Exact certified commit selected by the signed tag.'
+        type: string
+      expected_policy_sha:
+        description: 'Exact current-main workflow execution commit.'
+        type: string
       bootstrap_new_crates:
         description: >-
           First-release bootstrap for a new workspace crate that an
@@ -101,7 +110,7 @@ concurrency:
   # publishes from the merged-main tag commit; the main-push branch only
   # publishes when Cargo.toml is *ahead* of the latest tag, which by
   # definition is a different version).
-  group: publish-release-${{ github.ref_name }}
+  group: publish-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -117,15 +126,13 @@ jobs:
       cargo_version: ${{ steps.check.outputs.cargo_version }}
       latest_tag: ${{ steps.check.outputs.latest_tag }}
       publish_ref: ${{ steps.check.outputs.publish_ref }}
-      development_bump: ${{ steps.development.outputs.required }}
-      development_version: ${{ steps.development.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Need full history so all `vX.Y.Z` tags are present locally;
           # the default shallow clone omits tags.
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || 'main' }}
 
       - name: Compare Cargo.toml workspace version to latest vX.Y.Z tag
         id: check
@@ -133,6 +140,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          EXPECTED_POLICY_SHA: ${{ inputs.expected_policy_sha }}
           # Used by `gh release view` in the no-drift branch below to
           # confirm the existing release artifact actually shipped.
           GH_TOKEN: ${{ github.token }}
@@ -140,6 +150,17 @@ jobs:
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
           source scripts/lib/release_version.sh
+          if [[ -n "$INPUT_TAG$EXPECTED_SOURCE_SHA$EXPECTED_POLICY_SHA" ]]; then
+            scripts/validate_release_publication_inputs.sh
+            scripts/verify_release_tag_main_ancestry.sh --tag "$INPUT_TAG"
+            {
+              echo 'drift=true'
+              echo "cargo_version=${INPUT_TAG#v}"
+              echo "latest_tag=$INPUT_TAG"
+              echo "publish_ref=$INPUT_TAG"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           LATEST_TAG="$(
             git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
@@ -252,6 +273,15 @@ jobs:
               && release_development_target_matches_stable "$CARGO_VERSION" "$LATEST_VERSION"; then
               DRIFT=false
               echo "::notice::Workspace $CARGO_VERSION is the declared development target after $LATEST_TAG; publish job will skip."
+            elif release_development_target_precedes_stable "$CARGO_VERSION" "$LATEST_VERSION"; then
+              # An at-SHA release can tag its certified candidate without
+              # merging the release commit into main. Until publication and
+              # the subsequent development bump complete, main therefore
+              # remains on X.Y.Z-dev while the immutable vX.Y.Z tag exists on
+              # the certified history line. That is a wait state, not drift.
+              scripts/verify_release_tag_main_ancestry.sh --tag "$LATEST_TAG"
+              DRIFT=false
+              echo "::notice::Workspace $CARGO_VERSION precedes certified candidate tag $LATEST_TAG. Publication or the post-publication development bump is still pending; this main-push run will skip cleanly."
             else
               matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
               if [[ -z "$matching_tag_commit" ]]; then
@@ -356,99 +386,16 @@ jobs:
             echo "publish_ref=$PUBLISH_REF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Detect post-release development bump
-        id: development
-        run: |
-          set -euo pipefail
-          source scripts/lib/release_version.sh
-          version="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          latest_tag="$({
-            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sed -n '1p'
-          } || true)"
-          release_development_bump_plan "$version" "$latest_tag"
-          {
-            echo "required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED"
-            echo "version=$RELEASE_DEVELOPMENT_BUMP_VERSION"
-            echo "reason=$RELEASE_DEVELOPMENT_BUMP_REASON"
-          } >> "$GITHUB_OUTPUT"
-          echo "::notice::Post-release development bump: required=$RELEASE_DEVELOPMENT_BUMP_REQUIRED reason=$RELEASE_DEVELOPMENT_BUMP_REASON version=${RELEASE_DEVELOPMENT_BUMP_VERSION:-<none>}"
-
-  open-development-bump:
-    name: Open post-release development bump
-    needs: detect-drift
-    if: github.event_name != 'workflow_dispatch' && needs.detect-drift.outputs.development_bump == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Mint GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: main
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Configure isolated Harn build
-        run: make setup-rust
-
-      - name: Prepare and open development bump
-        id: development-bump
-        env:
-          EXPECTED_DEVELOPMENT_VERSION: ${{ needs.detect-drift.outputs.development_version }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
-          HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
-
-      # A skipped open is a correct no-op, not a failure: main already carries
-      # the target development version. There is no pull request to arm, and the
-      # validator refuses an empty one, so it must not run.
-      - name: Validate grammar receipt and arm development bump
-        if: steps.development-bump.outputs.skipped != 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
-        run: |
-          set -euo pipefail
-          ./scripts/validate_development_bump.sh
-
   publish:
     name: Publish release
     needs: detect-drift
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
     steps:
-      # Mint a short-lived GitHub App installation token so the tag push
-      # below comes from the harn-release-bot identity instead of
-      # GITHUB_TOKEN. GHA suppresses workflow chains triggered by
-      # GITHUB_TOKEN-authenticated pushes, so a tag pushed under the
-      # default token would NOT fire build-release-binaries.yml — and
-      # we'd ship to crates.io without binaries or a container image.
-      # An App token bypasses that suppression cleanly.
-      - name: Mint GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: main
-          # Persist the App token in .git/config so the later `git push`
-          # in release_ship.sh --finalize uses it for the tag push.
-          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || 'main' }}
 
       - name: Stage current release tools
         id: stage-release-tools
@@ -527,10 +474,9 @@ jobs:
       - name: Publish release
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          # gh CLI inside release_ship.sh uses GH_TOKEN for `gh release`.
-          # Use the App token so the GitHub release author is the bot,
-          # consistent with the tag pusher.
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Finalization is read-only on GitHub because the trusted tag already
+          # exists and --skip-github-release leaves assets to the binary path.
+          GH_TOKEN: ${{ github.token }}
           # First-release bootstrap recovery path. See harn#609.
           # release_ship.sh + verify_crate_packages.sh both honor the
           # env var: skip the publish dry-run and downstream package
