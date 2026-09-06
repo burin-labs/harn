@@ -73,7 +73,9 @@ pub(crate) struct SpawnOutcome {
     pub(crate) exit_code: i32,
     pub(crate) signal: Option<String>,
     pub(crate) stdout: String,
+    pub(crate) stdout_truncated: bool,
     pub(crate) stderr: String,
+    pub(crate) stderr_truncated: bool,
     pub(crate) output_path: PathBuf,
     pub(crate) stdout_path: PathBuf,
     pub(crate) stderr_path: PathBuf,
@@ -333,7 +335,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         refusal.emit();
     }
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
-    let (stdout, stderr) = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
+    let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
     Ok(SpawnOutcome {
         command_id,
@@ -345,8 +347,10 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         ended_at,
         exit_code,
         signal,
-        stdout,
-        stderr,
+        stdout: inline.stdout,
+        stdout_truncated: inline.stdout_truncated,
+        stderr: inline.stderr,
+        stderr_truncated: inline.stderr_truncated,
         output_path: artifacts.output_path,
         stdout_path: artifacts.stdout_path,
         stderr_path: artifacts.stderr_path,
@@ -590,7 +594,9 @@ pub(crate) fn build_response(
         .opt_str("signal", outcome.signal)
         .bool("timed_out", outcome.timed_out)
         .str("stdout", outcome.stdout)
+        .bool("stdout_truncated", outcome.stdout_truncated)
         .str("stderr", outcome.stderr)
+        .bool("stderr_truncated", outcome.stderr_truncated)
         .str("output_path", to_agent_path(&outcome.output_path))
         .str("stdout_path", to_agent_path(&outcome.stdout_path))
         .str("stderr_path", to_agent_path(&outcome.stderr_path))
@@ -761,7 +767,9 @@ pub(crate) fn running_response(
         .nil("signal")
         .bool("timed_out", false)
         .str("stdout", "")
+        .bool("stdout_truncated", false)
         .str("stderr", "")
+        .bool("stderr_truncated", false)
         .str("output_path", to_agent_path(&artifacts.output_path))
         .str("stdout_path", to_agent_path(&artifacts.stdout_path))
         .str("stderr_path", to_agent_path(&artifacts.stderr_path))
@@ -796,11 +804,25 @@ pub(crate) fn now_rfc3339() -> String {
     harn_vm::clock::system_now_rfc3339()
 }
 
-pub(crate) fn inline_output(
-    stdout: &[u8],
-    stderr: &[u8],
-    capture: CaptureConfig,
-) -> (String, String) {
+/// The inline text a process result hands a script author, and whether that
+/// text is the whole stream.
+///
+/// The flags exist because a prefix of sorted command output reads as a
+/// complete answer about a smaller world: `stdout` shorter than the real
+/// output is indistinguishable from a command that produced less. `byte_count`
+/// carries the true size, but recovering the fact from it requires already
+/// suspecting it, and it compares bytes against characters.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InlineOutput {
+    pub(crate) stdout: String,
+    /// The returned `stdout` omits bytes the process wrote.
+    pub(crate) stdout_truncated: bool,
+    pub(crate) stderr: String,
+    /// The returned `stderr` omits bytes the process wrote.
+    pub(crate) stderr_truncated: bool,
+}
+
+pub(crate) fn inline_output(stdout: &[u8], stderr: &[u8], capture: CaptureConfig) -> InlineOutput {
     if capture.merge_stderr {
         let mut merged = Vec::with_capacity(stdout.len() + stderr.len() + 1);
         merged.extend_from_slice(stdout);
@@ -808,38 +830,57 @@ pub(crate) fn inline_output(
             merged.push(b'\n');
         }
         merged.extend_from_slice(stderr);
-        return (
-            if capture.stdout {
-                lossy_prefix(&merged, capture.max_inline_bytes)
-            } else {
-                String::new()
-            },
-            String::new(),
-        );
+        // Both streams are in `stdout` here, so the merged stream's
+        // completeness is what `stdout_truncated` reports. `stderr` is empty
+        // by construction rather than by dropping anything.
+        let (text, truncated) = if capture.stdout {
+            lossy_prefix(&merged, capture.max_inline_bytes)
+        } else {
+            (String::new(), false)
+        };
+        return InlineOutput {
+            stdout: text,
+            stdout_truncated: truncated,
+            stderr: String::new(),
+            stderr_truncated: false,
+        };
     }
-    (
-        if capture.stdout {
-            lossy_prefix(stdout, capture.max_inline_bytes)
-        } else {
-            String::new()
-        },
-        if capture.stderr {
-            lossy_prefix(stderr, capture.max_inline_bytes)
-        } else {
-            String::new()
-        },
-    )
+    let (stdout_text, stdout_truncated) = if capture.stdout {
+        lossy_prefix(stdout, capture.max_inline_bytes)
+    } else {
+        (String::new(), false)
+    };
+    let (stderr_text, stderr_truncated) = if capture.stderr {
+        lossy_prefix(stderr, capture.max_inline_bytes)
+    } else {
+        (String::new(), false)
+    };
+    InlineOutput {
+        stdout: stdout_text,
+        stdout_truncated,
+        stderr: stderr_text,
+        stderr_truncated,
+    }
 }
 
-fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> String {
+/// Decode at most `max_inline_bytes` of `bytes`, and report whether any input
+/// byte went unrepresented.
+///
+/// Two things drop bytes, and both count: the cap, and an incomplete UTF-8
+/// sequence straddling the cap, which is decoded only up to the last valid
+/// boundary. An invalid byte inside the cap does not, because the lossy decode
+/// represents it with a replacement character rather than dropping it.
+fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> (String, bool) {
     let cap = bytes.len().min(max_inline_bytes);
-    match std::str::from_utf8(&bytes[..cap]) {
-        Ok(text) => text.to_string(),
-        Err(error) if error.error_len().is_none() => {
-            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
-        }
-        Err(_) => String::from_utf8_lossy(&bytes[..cap]).into_owned(),
-    }
+    let (text, consumed) = match std::str::from_utf8(&bytes[..cap]) {
+        Ok(text) => (text.to_string(), cap),
+        Err(error) if error.error_len().is_none() => (
+            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned(),
+            error.valid_up_to(),
+        ),
+        Err(_) => (String::from_utf8_lossy(&bytes[..cap]).into_owned(), cap),
+    };
+    (text, consumed < bytes.len())
 }
 
 pub(crate) fn sandbox_kind() -> &'static str {
@@ -982,7 +1023,7 @@ mod tests {
 
     #[test]
     fn inline_output_does_not_split_utf8_codepoint() {
-        let (stdout, stderr) = inline_output(
+        let inline = inline_output(
             "alpha 🚀 beta".as_bytes(),
             &[],
             CaptureConfig {
@@ -991,13 +1032,15 @@ mod tests {
             },
         );
 
-        assert_eq!(stdout, "alpha ");
-        assert_eq!(stderr, "");
+        assert_eq!(inline.stdout, "alpha ");
+        assert!(inline.stdout_truncated);
+        assert_eq!(inline.stderr, "");
+        assert!(!inline.stderr_truncated);
     }
 
     #[test]
     fn inline_output_preserves_lossy_text_after_invalid_byte() {
-        let (stdout, stderr) = inline_output(
+        let inline = inline_output(
             b"a\xffb",
             &[],
             CaptureConfig {
@@ -1006,8 +1049,115 @@ mod tests {
             },
         );
 
-        assert_eq!(stdout, "a\u{fffd}b");
-        assert_eq!(stderr, "");
+        assert_eq!(inline.stdout, "a\u{fffd}b");
+        // An invalid byte inside the cap is represented, not dropped. Reporting
+        // truncation here would make every binary-ish capture read partial.
+        assert!(!inline.stdout_truncated);
+        assert_eq!(inline.stderr, "");
+    }
+
+    /// The falsifier from #7675: a capture over the cap must say so.
+    #[test]
+    fn inline_output_reports_stdout_over_the_cap_as_truncated() {
+        let bytes = vec![b'a'; 64];
+        let inline = inline_output(
+            &bytes,
+            &[],
+            CaptureConfig {
+                max_inline_bytes: 32,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert_eq!(inline.stdout.len(), 32);
+        assert!(inline.stdout_truncated);
+    }
+
+    /// The negative control from #7675. An output of exactly the cap is whole,
+    /// so an off-by-one here would make every capture read truncated and the
+    /// flag would carry no information.
+    #[test]
+    fn inline_output_reports_stdout_exactly_at_the_cap_as_whole() {
+        let bytes = vec![b'a'; 32];
+        let inline = inline_output(
+            &bytes,
+            &[],
+            CaptureConfig {
+                max_inline_bytes: 32,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert_eq!(inline.stdout.len(), 32);
+        assert!(!inline.stdout_truncated);
+    }
+
+    #[test]
+    fn inline_output_reports_each_stream_independently() {
+        let inline = inline_output(
+            &vec![b'a'; 64],
+            &vec![b'b'; 8],
+            CaptureConfig {
+                max_inline_bytes: 32,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert!(inline.stdout_truncated);
+        assert!(!inline.stderr_truncated);
+
+        let swapped = inline_output(
+            &vec![b'a'; 8],
+            &vec![b'b'; 64],
+            CaptureConfig {
+                max_inline_bytes: 32,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert!(!swapped.stdout_truncated);
+        assert!(swapped.stderr_truncated);
+    }
+
+    /// With `merge_stderr` both streams arrive in `stdout`, so the merged
+    /// stream's completeness is what `stdout_truncated` answers. `stderr` is
+    /// empty because nothing was routed there, not because bytes were dropped.
+    #[test]
+    fn inline_output_reports_truncation_of_the_merged_stream_on_stdout() {
+        let inline = inline_output(
+            &vec![b'a'; 64],
+            &vec![b'b'; 64],
+            CaptureConfig {
+                merge_stderr: true,
+                max_inline_bytes: 32,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert!(inline.stdout_truncated);
+        assert_eq!(inline.stderr, "");
+        assert!(!inline.stderr_truncated);
+    }
+
+    /// A stream the caller asked not to capture is absent by request. Nothing
+    /// was dropped from a stream that was never read.
+    #[test]
+    fn inline_output_does_not_report_an_uncaptured_stream_as_truncated() {
+        let inline = inline_output(
+            &vec![b'a'; 64],
+            &vec![b'b'; 64],
+            CaptureConfig {
+                stdout: false,
+                stderr: false,
+                max_inline_bytes: 32,
+                ..CaptureConfig::default()
+            },
+        );
+
+        assert_eq!(inline.stdout, "");
+        assert!(!inline.stdout_truncated);
+        assert_eq!(inline.stderr, "");
+        assert!(!inline.stderr_truncated);
     }
 
     #[test]
