@@ -113,7 +113,7 @@ A refused child emits `harn.process.sandbox_refusal.v1` through
 | `resource` | string or null | refused resource when reported by the backend |
 | `refused_paths` | array of strings | paths implicated, when they can be determined |
 | `observability` | string | how the refusal was detected; currently only `inferred` |
-| `stderr_excerpt` | string | first 512 bytes of the child's stderr |
+| `stderr_excerpt` | string | bounded child-output evidence; stderr when it carried the refusal, otherwise stdout |
 | `count` | integer | refusals coalesced into this record |
 
 `observability: "inferred"` is the honest label for what the OS gives us today:
