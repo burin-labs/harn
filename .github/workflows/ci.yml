@@ -478,7 +478,7 @@ jobs:
       # deliberate change to which release semantics this repository is
       # checked against.
       ORCHESTRATOR_REPOSITORY: burin-labs/harn-bump-fleet
-      ORCHESTRATOR_REF: 79354cb7dad80c7776bb57a78c80785b6592a3eb
+      ORCHESTRATOR_REF: 0eb9ccd5efdd2f94b0037999a8a70f97c5ea0c5e
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -514,6 +514,7 @@ jobs:
       - name: Evaluate the release contract
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           harn run --no-sandbox \
             .release-orchestrator/check_release_contract.harn \
