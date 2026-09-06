@@ -299,7 +299,7 @@ pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completi
         fn() { return agent_loop(harness, "Create and exercise the requested behavior.", nil, opts) },
       )
       const requirement_receipts = completion_receipts(captured.events).filter(
-        { receipt -> receipt?.requirements != nil },
+        { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
       assert_eq(len(requirement_receipts), 1)
@@ -549,7 +549,7 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
         fn() { return agent_loop(harness, "Create the requested artifact.", nil, opts) },
       )
       const requirement_receipts = completion_receipts(captured.events).filter(
-        { receipt -> receipt?.requirements != nil },
+        { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
       assert_eq(len(requirement_receipts), 1)
@@ -784,7 +784,7 @@ pipeline test_omitted_report_is_attributed_to_the_judge_after_one_retry(
         fn() { return agent_loop(harness, "Say hello.", nil, no_write_judge_opts(session, 2)) },
       )
       const receipts = completion_receipts(captured.events).filter(
-        { receipt -> receipt?.requirements != nil },
+        { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
       assert_eq(len(receipts), 1)
@@ -958,7 +958,15 @@ pipeline test_a_ledger_free_task_completes_on_one_judge_call(harness: Harness, t
       const receipts = completion_receipts(captured.events)
       const last = receipts[len(receipts) - 1]
       assert_eq(last.action, "accept")
-      assert_eq(last?.requirements, nil)
+      // A ledger-free run records an EXPLICIT empty ledger, not `nil`. `nil`
+      // read the same for "no rows were declared" and "rows were declared and
+      // nobody assessed them", and only the second is a false completion, so
+      // the receipt can no longer be silent about which one this is. The claim
+      // is unchanged: this run declared nothing and nothing was outstanding.
+      assert(last?.requirements != nil, "a sealed done always says what the ledger held")
+      assert_eq(last.requirements.required_count, 0)
+      assert_eq(last.requirements.pending_count, 0)
+      assert(last.requirements.complete, "an undeclared ledger is complete, not unknown")
     },
   )
 }
@@ -993,7 +1001,7 @@ pipeline test_a_declared_ledger_still_demands_a_report_and_falls_closed(
       // One re-ask happened, and the omitted report still vetoed.
       assert_eq(len(itemization_retries(captured.events)), 1)
       const receipts = completion_receipts(captured.events).filter(
-        { receipt -> receipt?.requirements != nil },
+        { receipt -> (receipt?.requirements?.required_count ?? 0) > 0 },
       )
         .to_list()
       assert_eq(len(receipts), 1)

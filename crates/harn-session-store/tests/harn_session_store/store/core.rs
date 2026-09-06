@@ -1416,3 +1416,91 @@ async fn committed_metadata_change_is_published_by_both_backends() {
     })
     .await;
 }
+
+/// An attribute learned after the session exists can be recorded, and recording
+/// it does not erase the ones already there.
+///
+/// Attributes used to be reachable only through `create`, which made every one
+/// of them a create-time fact. A writer that learned something later — the
+/// provider a run actually used, say — had no way to store it and no way to
+/// find out it had not: the value simply never appeared, and the read came back
+/// null as if nothing had ever been known.
+///
+/// The empty-map case at the end is the falsifier. A replace-shaped
+/// implementation passes every other assertion here and fails only that one, by
+/// clearing the map when a caller who knows nothing about attributes performs an
+/// ordinary title update.
+#[tokio::test]
+async fn an_attribute_learned_after_creation_merges_without_erasing_the_others() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let session = store
+            .create(CreateSession {
+                id: Some("late-attribute".into()),
+                attributes: std::collections::BTreeMap::from([
+                    ("source".to_string(), json!("importer")),
+                    ("build".to_string(), json!("1.2.3")),
+                ]),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create session");
+
+        let updated = store
+            .update(
+                &session.id,
+                UpdateSession {
+                    attributes: std::collections::BTreeMap::from([
+                        // Learned late: absent at create.
+                        ("provider".to_string(), json!("fixture")),
+                        // Learned again: a later writer corrects an earlier one.
+                        ("build".to_string(), json!("1.2.4")),
+                    ]),
+                    ..UpdateSession::default()
+                },
+            )
+            .await
+            .expect("merge attributes");
+
+        assert_eq!(
+            updated.attributes.get("provider"),
+            Some(&json!("fixture")),
+            "an attribute learned after creation must be recorded"
+        );
+        assert_eq!(
+            updated.attributes.get("build"),
+            Some(&json!("1.2.4")),
+            "a key present in the update must win"
+        );
+        assert_eq!(
+            updated.attributes.get("source"),
+            Some(&json!("importer")),
+            "a key absent from the update must survive it"
+        );
+
+        // THE FALSIFIER. A caller that knows nothing about attributes must not
+        // clear them by touching anything else.
+        let after_title = store
+            .update(
+                &session.id,
+                UpdateSession {
+                    title: Some("unrelated".into()),
+                    ..UpdateSession::default()
+                },
+            )
+            .await
+            .expect("update title only");
+        assert_eq!(
+            after_title.attributes, updated.attributes,
+            "an empty attribute map is no change, never a request to clear"
+        );
+
+        // Durability, not just the returned value: the merge must be readable
+        // back through a fresh describe rather than only in the write's echo.
+        let described = store.describe(&session.id).await.expect("describe");
+        assert_eq!(
+            described.attributes, updated.attributes,
+            "the merged attributes must be what the store actually holds"
+        );
+    })
+    .await;
+}

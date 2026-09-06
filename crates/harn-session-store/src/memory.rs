@@ -239,6 +239,8 @@ impl SessionStore for MemorySessionStore {
         if let Some(value) = request.usage_cost_usd_micros {
             record.meta.usage_cost_usd_micros = value;
         }
+        // Merge, never replace: an absent key is not a request to clear one.
+        record.meta.attributes.extend(request.attributes);
         let (updated_at_ms, updated_at) = crate::event::now_ms_and_rfc3339();
         record.meta.updated_at_ms = updated_at_ms;
         record.meta.updated_at = updated_at;

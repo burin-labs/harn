@@ -26,9 +26,12 @@
 //   negative — (a) the same green reading with NO source write behind it
 //              (`verified`) still calls the judge and its refusal stands;
 //              (b) an unrun verifier still calls the judge; (c) a run with
-//              no deterministic gate at all still calls the judge; and (d) the
+//              no deterministic gate at all still calls the judge; (d) the
 //              same holds with BOTH judge seams declared, so the skip is keyed
-//              on the reading rather than on which seam asked.
+//              on the reading rather than on which seam asked; and (e) a run
+//              declaring an acceptance row nothing has established still calls
+//              the judge, because the pending-requirements check lives behind
+//              it and a skip would take the ledger with it.
 //
 // Clause (a) is the load-bearing one. `verified` and `verified_after_write`
 // differ by one derived fact and read almost identically, and a mechanism keyed
@@ -142,6 +145,31 @@ fn base_opts(session: string) {
   }
 }
 
+/**
+ * A completion judge declaring one acceptance row nothing has measured.
+ *
+ * The skip does not only skip the judge, it skips everything behind it, and the
+ * pending-requirements check that turns a done into a continue lives inside the
+ * structured invocation.
+ */
+fn completion_judge_with_open_ledger() -> dict {
+  return {
+    turn_end_condition: {
+      provider: "mock",
+      max_invocations: 1,
+      requirement_contract: {
+        requirements: [
+          {
+            requirement_id: "unmet-row",
+            name: "The acceptance row nobody measured.",
+            evidence_roles: ["deterministic_verification"],
+          },
+        ],
+      },
+    },
+  }
+}
+
 /** The other judge seam, which runs BEFORE the completion one. */
 fn verification_judge() -> dict {
   return {verify_completion_judge: {provider: "mock", max_invocations: 1}}
@@ -168,6 +196,12 @@ fn run_case(harness: Harness, label: string, script: list, extra: dict) {
         judge_calls: judge_calls(captured.events),
         judge_invoked: first?.invoked?.turn_end_condition ?? false,
         provider_calls: len(harness.llm.mock_calls()),
+        // Read off the receipt, which is the runtime's own reading of the
+        // declared contract. A fixture that restated its own row count would
+        // pass with the contract under an unrecognized key and no ledger
+        // configured at all.
+        ledger_recorded: first?.requirements != nil,
+        ledger_required: first?.requirements?.required_count ?? -1,
       }
     },
   )
@@ -239,6 +273,21 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("both_no_write_accepted=" + to_string(both_no_write.accepted))
   harness.stdio.println("both_no_write_judge_calls=" + to_string(both_no_write.judge_calls))
+  // THE ACCEPTANCE LEDGER. Same typed green terminal, plus one declared row
+  // nothing has established. A green verifier answers "did the declared command
+  // pass"; it is not an answer to "was each thing the task asked for delivered".
+  const open_ledger = run_case(
+    harness,
+    "open-ledger",
+    working_script(judge_refusing(refusal)),
+    {verify_completion: gate_observing("passed", "verified_after_write")}
+      + completion_judge_with_open_ledger(),
+  )
+  harness.stdio.println("open_ledger_required=" + to_string(open_ledger.ledger_required))
+  harness.stdio.println("open_ledger_accepted=" + to_string(open_ledger.accepted))
+  harness.stdio.println("open_ledger_judge_calls=" + to_string(open_ledger.judge_calls))
+  harness.stdio.println("green_ledger_recorded=" + to_string(green.ledger_recorded))
+  harness.stdio.println("green_ledger_required=" + to_string(green.ledger_required))
   // Every case declares an adjudicator, so the cases differ by ONE variable.
   contract_effect(
     harness.stdio,
@@ -279,4 +328,28 @@ pipeline default(harness: Harness) {
     both_no_write.judge_calls == 0,
   )
   contract_negative(harness.stdio, "both_seams_accept_without_a_write", both_no_write.accepted)
+  // NON-VACUITY for the ledger clauses. If the contract were declared under an
+  // unrecognized key the run would configure no ledger, the skip would fire,
+  // and the two negatives below would pass while measuring nothing.
+  contract_effect(
+    harness.stdio,
+    "the_open_ledger_case_really_declares_one_row",
+    open_ledger.ledger_required == 1,
+  )
+  // NEGATIVE (e): an outstanding acceptance row is the judge's question, so
+  // the terminal reading does not get to answer it.
+  contract_negative(
+    harness.stdio,
+    "an_open_ledger_row_skips_the_judge",
+    open_ledger.judge_calls == 0,
+  )
+  contract_negative(harness.stdio, "an_open_ledger_row_accepts", open_ledger.accepted)
+  // EFFECT: a done sealed with no judge still says what the ledger held. `nil`
+  // reads the same for "no rows were declared" and "rows were declared and
+  // nobody looked", and only the second is a false completion.
+  contract_effect(
+    harness.stdio,
+    "a_skipped_done_records_its_ledger_explicitly",
+    green.ledger_recorded && green.ledger_required == 0,
+  )
 }
