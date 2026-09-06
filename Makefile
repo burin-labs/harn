@@ -721,6 +721,7 @@ test-pr-gate-scripts:
 	./scripts/tests/sign_local_macos_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
+	./scripts/tests/sccache_rustc_wrapper_test.sh
 	./scripts/tests/cargo_toolchain_pin_test.sh
 	./scripts/tests/cargo_target_seed_test.sh
 	./scripts/tests/cli_aot_merge_driver_test.sh
