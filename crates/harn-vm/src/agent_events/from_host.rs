@@ -251,6 +251,7 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             // parsing prose. `repair_feedback` below already read it.
             iteration: obj_opt_usize(payload, "iteration"),
             tool_name: None,
+            turn_claimed_for_repair: None,
             // Absent unless the mechanism says. A receipts-only mechanism says
             // `false`; one that still injects says `true`; one that has not been
             // taught the question stays `None` rather than claiming either.
