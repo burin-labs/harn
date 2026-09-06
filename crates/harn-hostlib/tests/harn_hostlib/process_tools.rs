@@ -1465,6 +1465,49 @@ fn wait_command_returns_completed_background_result() {
 }
 
 #[test]
+fn wait_command_projects_spawn_time_sandbox_assessment() {
+    let workspace = tempdir().unwrap();
+    let _policy = install_confining_policy(workspace.path());
+    let session_id = unique_session_id("test-wait-command-sandbox-denial");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["fixture", "nested-child"]));
+    req.insert(
+        "cwd".into(),
+        vstr(workspace.path().to_string_lossy().as_ref()),
+    );
+    req.insert("background".into(), VmValue::Bool(true));
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&start, "handle_id");
+    let completion_rx =
+        register_completion_notifier(&handle_id).expect("handle should still be live");
+
+    controller.append_stderr(b"nested child: Operation not permitted\n");
+    controller.complete_with(ExitStatus::from_code(1));
+    completion_rx.recv().expect("waiter completion never fired");
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    let waited_value = call("hostlib_tools_wait_command", wait_req).unwrap();
+    assert_response_matches_schema("wait_command", &waited_value);
+    let waited = require_dict(waited_value);
+    let sandbox = require_nested_dict(&waited, "sandbox");
+    assert_eq!(require_str(&sandbox, "denial_reporting"), "inferred_only");
+    let denial = require_nested_dict(&waited, "denial");
+    assert_eq!(require_str(&denial, "gate"), "process_sandbox");
+    assert_eq!(require_str(&denial, "operation"), "unknown");
+    require_nil(&denial, "resource");
+    assert_eq!(require_list(&denial, "command").len(), 2);
+    assert_eq!(
+        require_str(&denial, "stderr_excerpt"),
+        "nested child: Operation not permitted\n"
+    );
+}
+
+#[test]
 fn wait_command_carries_background_snapshot_binding_to_completion() {
     let session_id = unique_session_id("test-wait-command-snapshot-binding");
     let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
