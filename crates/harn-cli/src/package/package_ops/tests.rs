@@ -346,7 +346,7 @@ fn extract_api_symbols_uses_parsed_body_boundaries() {
     let symbols = extract_api_symbols(
         r#"/** A shaped response. */
 pub fn shaped() -> {value: string} {
-  return {value: "ok"}
+  return {value: "ok"} /* } pub fn phantom() {} */
 }
 
 /** A streamed value. */

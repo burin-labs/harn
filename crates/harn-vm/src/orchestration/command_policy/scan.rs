@@ -1131,10 +1131,10 @@ pub(super) fn path_outside_workspace(
     if cwd.as_ref().is_some_and(|cwd| !under_any_root(cwd, &roots)) {
         return true;
     }
-    // The shared analysis keeps resolved argv lossless and obtains shell words
-    // from the same AST that owns executable discovery. This avoids rebuilding
-    // argv from the display-only, space-joined `command_text` projection.
-    for path in absolute_path_candidates_from_words(&analysis.argument_words) {
+    // The shared analysis obtains role-aware operands from the same parser that
+    // owns executable discovery. The executable's own location is not a path
+    // the command reads or writes, even when that location is absolute.
+    for path in absolute_path_candidates_from_words(analysis.path_operand_words()) {
         if !under_any_root(&normalize_path(&path), &roots) {
             return true;
         }
@@ -1142,16 +1142,22 @@ pub(super) fn path_outside_workspace(
     false
 }
 
-/// Absolute paths the command would actually hand to a program.
+/// Absolute paths the command would actually hand to a program as operands.
 ///
 /// Words come from the structural shell-analysis seam rather than
 /// `split_whitespace`. Quoted whitespace therefore stays inside one argument,
 /// while real `sh -c`, substitution, pipeline, and compound-command children
-/// contribute their own words. Exact argv never passes through shell parsing.
-pub(super) fn absolute_path_candidates_from_words(words: &[String]) -> Vec<String> {
+/// contribute their own role-aware words. Exact argv never passes through
+/// shell parsing.
+pub(super) fn absolute_path_candidates_from_words<I, S>(words: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     words
-        .iter()
+        .into_iter()
         .filter_map(|word| {
+            let word = word.as_ref();
             // The tokenizer removes quoting; trailing punctuation can still ride
             // along from subshell and list syntax the segment splitter leaves in.
             let trimmed = word.trim_end_matches([',', ';', ')']);
