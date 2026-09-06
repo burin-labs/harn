@@ -104,8 +104,25 @@ pipeline test_sccache_action_rejects_a_step_local_inherited_size_override(
 }
 
 @test
-pipeline test_ci_concurrency_keeps_one_current_main_run(harness: Harness, task: unknown) {
+pipeline test_ci_concurrency_keeps_an_executed_result_per_main_head(
+  harness: Harness,
+  task: unknown,
+) {
   assert_eq(ci_workflow_concurrency_errors({concurrency: ci_concurrency()}), [])
+}
+
+@test
+pipeline test_ci_concurrency_rejects_cancelling_main_pushes(harness: Harness, task: unknown) {
+  // The defect this policy exists to refuse: main shares one concurrency
+  // group, so cancelling on push means each merge kills the run before it and
+  // the branch stops producing an executed result for any head sha.
+  let cancels_main = ci_concurrency()
+  cancels_main["cancel-in-progress"] = gha_expression(
+    "github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')",
+  )
+  const errors = ci_workflow_concurrency_errors({concurrency: cancels_main})
+  assert_eq(len(errors), 1)
+  assert(contains(errors[0] ?? "", "main pushes queue"))
 }
 
 @test

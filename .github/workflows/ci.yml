@@ -11,10 +11,17 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # The newest main tree supersedes stale integration work. Pull requests and
-  # merge groups retain isolated keys.
+  # Pull requests and merge groups retain isolated keys; every main push shares
+  # one key so the branch's runs are ordered rather than interleaved.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # A new commit invalidates the old result for a pull request, so those cancel.
+  # Main pushes never do. Superseding them looked like a saving while merges
+  # were occasional, but under a steady merge rate each push cancels the run
+  # before it, and a cancelled run leaves that head sha with no executed
+  # result. A branch whose runs are all cancelled reports nothing at all, which
+  # is indistinguishable from a branch that is passing. They share one group
+  # key, so they queue behind each other instead.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always

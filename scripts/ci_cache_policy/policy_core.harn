@@ -228,8 +228,16 @@ pub const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
   + "{{ github.workflow }}-$"
   + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}"
 
-pub const CI_WORKFLOW_CANCEL_POLICY = "$"
-  + "{{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}"
+/**
+ * Pull-request runs cancel; main pushes never do.
+ *
+ * Main shares one concurrency group, so cancelling on push meant each merge
+ * killed the run before it. Under a steady merge rate the branch stops
+ * completing runs entirely, and a head sha with a cancelled run carries no
+ * executed result at all — which reads the same as a branch that is passing.
+ * Queueing costs runner minutes; cancelling costs the evidence.
+ */
+pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
 
 pub const MAIN_ONLY_RUST_IF =
   "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true'"
@@ -1414,7 +1422,7 @@ pub fn ci_cache_policy_errors(
   return errors
 }
 
-/** Keep one current pull-request proof and one current main proof. */
+/** Keep one current pull-request proof and an executed result per main head. */
 pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   let errors: list<string> = []
   if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
@@ -1425,7 +1433,9 @@ pub fn ci_workflow_concurrency_errors(workflow: dict) -> list<string> {
   }
   if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
     errors = errors
-      + ["ci.yml must cancel superseded pull-request and main-push runs only"]
+      + [
+        "ci.yml must cancel superseded pull-request runs only; main pushes queue so every head sha keeps an executed result",
+      ]
   }
   return errors
 }
