@@ -23,6 +23,7 @@ case "$*" in
   'release upload '*)
     [[ "$*" != *clobber* ]]
     name="$(basename "$4")"
+    if [[ "${SILENT_UPLOAD_NAME:-}" == "$name" ]]; then exit 0; fi
     digest="sha256:$(shasum -a 256 "$4" | awk '{print $1}')"
     if [[ "${RACE:-false}" == true ]]; then digest=sha256:conflicting; fi
     jq --arg name "$name" --arg digest "$digest" '.[0][0].assets += [{name:$name,digest:$digest}]' "$FIXTURE_DIR/releases.json" > "$FIXTURE_DIR/next.json"
@@ -46,6 +47,10 @@ printf '' > "$tmp/calls"
 publish
 [[ "$(grep -c '^release upload ' "$tmp/calls")" == 7 ]]
 [[ "$(jq '[.[0][0].assets[] | select(.name | startswith("harn-sdk-"))] | length' "$tmp/releases.json")" == 2 ]]
+printf '[[{"tag_name":"v0.10.131","assets":[{"name":"unexpected.bin","digest":"sha256:unexpected"}]}]]' > "$tmp/releases.json"
+printf '' > "$tmp/calls"
+if publish > "$tmp/refusal" 2>&1; then echo 'FAIL: accepted an unowned extra release asset' >&2; exit 1; fi
+if grep -q '^release ' "$tmp/calls"; then echo 'FAIL: mutated release with an unowned extra asset' >&2; exit 1; fi
 printf '[[{"tag_name":"v0.10.131","assets":[{"name":"SHA256SUMS","digest":"sha256:conflicting"}]}]]' > "$tmp/releases.json"
 printf '' > "$tmp/calls"
 if publish > "$tmp/refusal" 2>&1; then echo 'FAIL: accepted conflicting metadata' >&2; exit 1; fi
@@ -55,4 +60,10 @@ printf '' > "$tmp/calls"
 export RACE=true
 if publish > "$tmp/refusal" 2>&1; then echo 'FAIL: accepted conflicting concurrent upload' >&2; exit 1; fi
 if grep -Eq 'clobber|delete|^release edit ' "$tmp/calls"; then echo 'FAIL: replaced bytes or finalized after conflicting upload' >&2; exit 1; fi
+printf '[[{"tag_name":"v0.10.131","assets":[]}]]' > "$tmp/releases.json"
+printf '' > "$tmp/calls"
+unset RACE
+export SILENT_UPLOAD_NAME=release-assets.json
+if publish > "$tmp/refusal" 2>&1; then echo 'FAIL: accepted a nominal upload that left a canonical asset absent' >&2; exit 1; fi
+if grep -Eq 'clobber|delete|^release edit ' "$tmp/calls"; then echo 'FAIL: finalized after an absent canonical upload' >&2; exit 1; fi
 echo 'publication create-only, idempotency and conflict controls passed'
