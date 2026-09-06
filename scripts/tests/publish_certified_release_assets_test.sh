@@ -41,6 +41,11 @@ publish
 [[ "$(grep -c '^release upload ' "$tmp/calls")" == 7 ]]
 publish
 [[ "$(grep -c '^release upload ' "$tmp/calls")" == 7 ]]
+printf '[[{"tag_name":"v0.10.131","assets":[{"name":"harn-sdk-python.tar.gz","digest":"sha256:sdk-python"},{"name":"harn-sdk-typescript.tar.gz","digest":"sha256:sdk-typescript"}]}]]' > "$tmp/releases.json"
+printf '' > "$tmp/calls"
+publish
+[[ "$(grep -c '^release upload ' "$tmp/calls")" == 7 ]]
+[[ "$(jq '[.[0][0].assets[] | select(.name | startswith("harn-sdk-"))] | length' "$tmp/releases.json")" == 2 ]]
 printf '[[{"tag_name":"v0.10.131","assets":[{"name":"SHA256SUMS","digest":"sha256:conflicting"}]}]]' > "$tmp/releases.json"
 printf '' > "$tmp/calls"
 if publish > "$tmp/refusal" 2>&1; then echo 'FAIL: accepted conflicting metadata' >&2; exit 1; fi

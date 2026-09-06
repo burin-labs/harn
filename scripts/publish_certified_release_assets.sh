@@ -22,9 +22,11 @@ inventory() {
     [.[][] | select(.tag_name == $tag)] as $r |
     ($r | length) <= 1 and
     all($r[].assets[]; . as $asset |
-      ([$expected[0][] | select(.name == $asset.name and .digest == $asset.digest)] | length) == 1) and
+      ($asset.name == "harn-sdk-python.tar.gz" or
+       $asset.name == "harn-sdk-typescript.tar.gz" or
+       ([$expected[0][] | select(.name == $asset.name and .digest == $asset.digest)] | length) == 1)) and
     all($expected[0][]; . as $e | ([$r[].assets[] | select(.name == $e.name)] | length) <= 1)
-  ' "$scratch/releases.json" >/dev/null || { echo 'error: existing release assets conflict with the exact seven-file publication' >&2; return 1; }
+  ' "$scratch/releases.json" >/dev/null || { echo 'error: existing release assets conflict with the canonical publication assets' >&2; return 1; }
 }
 inventory
 if [[ "$(jq --arg tag "$tag" '[.[][] | select(.tag_name == $tag)] | length' "$scratch/releases.json")" == 0 ]]; then
@@ -38,7 +40,11 @@ for file in "${files[@]}"; do
   fi
 done
 inventory
-jq -e --arg tag "$tag" '[.[][] | select(.tag_name == $tag) | .assets[]] | length == 7' "$scratch/releases.json" >/dev/null
+jq -e --arg tag "$tag" --slurpfile expected "$scratch/expected.json" '
+  [.[][] | select(.tag_name == $tag) | .assets[]] as $assets |
+  all($expected[0][]; . as $e |
+    ([$assets[] | select(.name == $e.name and .digest == $e.digest)] | length) == 1)
+' "$scratch/releases.json" >/dev/null
 [[ "$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')" == "$tag_object" ]] || { echo 'error: release tag changed during publication' >&2; exit 1; }
 gh release edit "$tag" --repo "$repo" --notes-file "$notes" --prerelease="$prerelease" --latest="$latest"
 echo 'Published exact seven verified assets without overwriting existing bytes'
