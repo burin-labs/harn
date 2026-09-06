@@ -12,7 +12,7 @@ pub enum PostToolAction {
     /// Replace the visible result and classify the tool call as denied.
     Deny {
         result: String,
-        denial: PostToolDenial,
+        denial: Box<PostToolDenial>,
     },
     /// Replace the result and account for bytes removed from model-visible
     /// output. This survives a later hook appending text.
@@ -47,7 +47,7 @@ impl PostToolDenial {
 pub struct PostToolHookResult {
     pub text: String,
     pub dropped_bytes: usize,
-    pub denial: Option<PostToolDenial>,
+    pub denial: Option<Box<PostToolDenial>>,
 }
 
 impl PostToolHookResult {
@@ -103,7 +103,10 @@ pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, V
                     }
                     return Ok(wrap_post_tool_effects(
                         effects,
-                        PostToolAction::Deny { result, denial },
+                        PostToolAction::Deny {
+                            result,
+                            denial: Box::new(denial),
+                        },
                     ));
                 }
                 if truncated {

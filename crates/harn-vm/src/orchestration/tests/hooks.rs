@@ -97,10 +97,10 @@ async fn post_tool_hook_preserves_denial_across_later_rewrites() {
         pre: None,
         post: Some(Arc::new(|_name, _result: &str| PostToolAction::Deny {
             result: "first wording".to_string(),
-            denial: PostToolDenial {
+            denial: Box::new(PostToolDenial {
                 kind: "policy_blocked".to_string(),
                 message: "stable reason".to_string(),
-            },
+            }),
         })),
     });
     register_tool_hook(ToolHook {
