@@ -854,10 +854,6 @@ pub(crate) fn sandbox_kind() -> &'static str {
     }
 }
 
-pub(crate) fn sandbox_enforced() -> bool {
-    harn_vm::orchestration::current_execution_policy().is_some()
-}
-
 pub(crate) fn sandbox_response(
     reporting: harn_vm::process_sandbox::ProcessSandboxDenialReporting,
 ) -> harn_vm::value::DictMap {

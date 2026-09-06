@@ -56,6 +56,13 @@ fn handler_denial(retryable: bool) {
   }
 }
 
+fn handler_denial_text(retryable: bool) {
+  if retryable {
+    return "Command failed (exit -1): approval is temporarily unavailable."
+  }
+  return "Command failed (exit 1): the process sandbox refused an operation."
+}
+
 fn refusing_toolset(retryable: bool) {
   let tools = tool_registry()
   tools = tool_define(
@@ -65,8 +72,7 @@ fn refusing_toolset(retryable: bool) {
     {
       handler: { _args ->
         agent_tool_handler_result(
-          "Command failed (exit -1)\napproval unavailable: "
-            + "command requires approval for risk class execution_semantics_unresolved",
+          handler_denial_text(retryable),
           {
             command_status: "failed",
             sandbox: {denial_reporting: "inferred_only"},
