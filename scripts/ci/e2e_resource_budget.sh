@@ -27,14 +27,17 @@ e2e_resource_budget() {
 e2e_online_local_runners() {
   # Include idle listeners and runners outside this job's label pool. Their
   # processes share this host, whereas an org-wide pool count spans hosts.
-  local listeners count
-  if ! listeners=$(ps -C Runner.Listener -o pid=); then
-    echo '::error::E2E_RESOURCE_BUDGET_UNMEASURED: listener census failed' >&2
+  local cores=${1:-unmeasured} listeners count census_status
+  if listeners=$(ps -C Runner.Listener -o pid=); then
+    census_status=0
+  else
+    census_status=$?
+    echo "::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=listener_census_failed cpu_cores=$cores online_local_runners=unmeasured listener_processes=unmeasured census_status=$census_status" >&2
     return 1
   fi
   count=$(awk 'NF { count++ } END { print count+0 }' <<< "$listeners")
   if ((count == 0)); then
-    echo '::error::E2E_RESOURCE_BUDGET_UNMEASURED: listener census empty' >&2
+    echo "::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=listener_census_empty cpu_cores=$cores online_local_runners=0 listener_processes=0 census_status=$census_status" >&2
     return 1
   fi
   printf '%s\n' "$count"
@@ -42,12 +45,15 @@ e2e_online_local_runners() {
 
 e2e_resource_main() {
   local runners cores policy
+  if ! cores=$(nproc); then
+    echo '::error::E2E_RESOURCE_BUDGET_UNMEASURED reason=cpu_census_failed cpu_cores=unmeasured online_local_runners=unmeasured' >&2
+    return 1
+  fi
   case "${RUNNER_ENVIRONMENT:-}" in
     github-hosted) runners=1 ;;
-    self-hosted) runners=$(e2e_online_local_runners) || return 1 ;;
+    self-hosted) runners=$(e2e_online_local_runners "$cores") || return 1 ;;
     *) echo '::error::E2E_RESOURCE_BUDGET_UNMEASURED: runner environment missing' >&2; return 1 ;;
   esac
-  cores=$(nproc) || return 1
   policy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rust-resource-policy.json"
   e2e_resource_budget "$policy" "$cores" "$runners" >> "${GITHUB_OUTPUT:?}"
 }
