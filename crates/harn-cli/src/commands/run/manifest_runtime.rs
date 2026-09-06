@@ -132,16 +132,6 @@ pub(crate) async fn connect_mcp_servers(
     let mut registrations: Vec<harn_vm::RegisteredMcpServer> = Vec::new();
 
     for server in servers {
-        let resolved_auth = match mcp::resolve_auth_for_server(server).await {
-            Ok(resolution) => resolution,
-            Err(error) => {
-                eprintln!(
-                    "warning: mcp: failed to load auth for '{}': {}",
-                    server.name, error
-                );
-                AuthResolution::None
-            }
-        };
         let spec = serde_json::json!({
             "name": server.name,
             "transport": server.transport.clone().unwrap_or_else(|| "stdio".to_string()),
@@ -149,34 +139,40 @@ pub(crate) async fn connect_mcp_servers(
             "args": server.args,
             "env": server.env,
             "url": server.url,
-            "auth_token": match resolved_auth {
-                AuthResolution::StaticBearer(token) => Some(token),
-                AuthResolution::OAuthStore => None,
-                AuthResolution::None => server.auth_token.clone(),
-            },
+            "auth_token": server.auth_token,
+            "auth_static": mcp::uses_static_auth(server),
             "token_exchange": server.token_exchange.clone(),
             "protocol_version": server.protocol_version,
             "proxy_server_name": server.proxy_server_name,
         });
+        let preparation = std::sync::Arc::new(ManifestMcpPreparation(server.clone()));
 
         // Register every server so skill activation and mcp_ensure_active can
         // find lazy entries; eager entries are connected below.
         registrations.push(harn_vm::RegisteredMcpServer {
             name: server.name.clone(),
             spec: spec.clone(),
+            preparation: Some(preparation.clone()),
             lazy: server.lazy,
             card: server.card.clone(),
             keep_alive: server.keep_alive_ms.map(Duration::from_millis),
         });
 
         if server.lazy {
-            eprintln!(
-                "[harn] mcp: deferred '{}' (lazy, boots on first use)",
-                server.name
-            );
             continue;
         }
 
+        use harn_vm::McpServerPreparation;
+        let spec = match preparation.prepare(spec).await {
+            Ok(spec) => spec,
+            Err(error) => {
+                eprintln!(
+                    "warning: mcp: failed to prepare '{}': {}",
+                    server.name, error
+                );
+                continue;
+            }
+        };
         match harn_vm::connect_mcp_server_from_json(&spec).await {
             Ok(handle) => {
                 eprintln!("[harn] mcp: connected to '{}'", server.name);
@@ -197,5 +193,41 @@ pub(crate) async fn connect_mcp_servers(
 
     if !mcp_dict.is_empty() {
         vm.set_global("mcp", harn_vm::VmValue::dict(mcp_dict));
+    }
+}
+
+struct ManifestMcpPreparation(package::McpServerConfig);
+
+impl fmt::Debug for ManifestMcpPreparation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ManifestMcpPreparation")
+            .finish_non_exhaustive()
+    }
+}
+
+#[async_trait::async_trait]
+impl harn_vm::McpServerPreparation for ManifestMcpPreparation {
+    async fn prepare(
+        &self,
+        mut spec: serde_json::Value,
+    ) -> Result<serde_json::Value, harn_vm::VmError> {
+        let server = &self.0;
+        let resolved_auth = match mcp::resolve_auth_for_server(server).await {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                eprintln!(
+                    "warning: mcp: failed to load auth for '{}': {}",
+                    server.name, error
+                );
+                AuthResolution::None
+            }
+        };
+        spec["auth_token"] = serde_json::json!(match resolved_auth {
+            AuthResolution::StaticBearer(token) => Some(token),
+            AuthResolution::OAuthStore => None,
+            AuthResolution::None => server.auth_token.clone(),
+        });
+        Ok(spec)
     }
 }

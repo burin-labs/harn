@@ -459,13 +459,19 @@ fn print_focused_status_report(
     Ok(())
 }
 
+pub(crate) fn uses_static_auth(server: &McpServerConfig) -> bool {
+    server.auth.as_ref().is_some_and(|auth| {
+        auth.mode == Some(OAuthClientAuthMode::Static) || auth.secret_id.is_some()
+    })
+}
+
 pub(crate) async fn resolve_auth_for_server(
     server: &McpServerConfig,
 ) -> Result<AuthResolution, String> {
     // Static `[mcp.auth]`: the bearer lives in the connect secret store, not
     // an OAuth flow. Resolve it up front so it wins over discovery/refresh.
     if let Some(auth) = server.auth.as_ref() {
-        if auth.mode == Some(OAuthClientAuthMode::Static) || auth.secret_id.is_some() {
+        if uses_static_auth(server) {
             let secret_id = auth.secret_id.as_deref().ok_or_else(|| {
                 format!(
                     "MCP server '{}' uses static auth but does not set auth.secret_id",

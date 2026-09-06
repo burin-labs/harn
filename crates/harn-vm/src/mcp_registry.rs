@@ -19,7 +19,7 @@
 //! function all operate on the same instance.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::mcp::{connect_mcp_server_from_json, VmMcpClientHandle};
@@ -27,12 +27,19 @@ use crate::value::VmError;
 
 pub const DEFAULT_MCP_TRANSPORT: &str = "stdio";
 
-/// One server's registration. Mirrors `McpServerConfig` but is owned
-/// by the VM side so harn-cli can hand off and forget.
+/// Host-owned connection preparation, invoked by the activation owner.
+#[async_trait::async_trait]
+pub trait McpServerPreparation: std::fmt::Debug + Send + Sync {
+    /// Resolve host-owned connection inputs only when activation is requested.
+    async fn prepare(&self, spec: serde_json::Value) -> Result<serde_json::Value, VmError>;
+}
+
+/// One server registration, including optional deferred host preparation.
 #[derive(Clone, Debug)]
 pub struct RegisteredMcpServer {
     pub name: String,
     pub spec: serde_json::Value,
+    pub preparation: Option<Arc<dyn McpServerPreparation>>,
     pub lazy: bool,
     /// Optional card source (URL or local path) from `harn.toml`.
     pub card: Option<String>,
@@ -179,7 +186,11 @@ pub async fn ensure_active(name: &str) -> Result<VmMcpClientHandle, VmError> {
         ))
     })?;
 
-    let handle = connect_mcp_server_from_json(&registration.spec).await?;
+    let spec = match &registration.preparation {
+        Some(preparation) => preparation.prepare(registration.spec.clone()).await?,
+        None => registration.spec.clone(),
+    };
+    let handle = connect_mcp_server_from_json(&spec).await?;
 
     // Install under the lock. Handle race: another task may have
     // connected the same server in the meantime; keep the incumbent handle.
@@ -348,6 +359,7 @@ mod tests {
         register_servers(vec![RegisteredMcpServer {
             name: "x".into(),
             spec: make_spec("x"),
+            preparation: None,
             lazy: true,
             card: Some("card.json".into()),
             keep_alive: None,
@@ -377,10 +389,55 @@ mod tests {
         register_servers(vec![RegisteredMcpServer {
             name: "a".into(),
             spec: make_spec("a"),
+            preparation: None,
             lazy: false,
             card: None,
             keep_alive: None,
         }]);
         assert!(is_registered("a"));
+    }
+
+    #[test]
+    fn preparation_waits_for_activation_and_its_failure_is_observed() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Debug)]
+        struct Preparation(Arc<AtomicUsize>);
+
+        #[async_trait::async_trait]
+        impl McpServerPreparation for Preparation {
+            async fn prepare(
+                &self,
+                _spec: serde_json::Value,
+            ) -> Result<serde_json::Value, VmError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Err(VmError::Runtime("preparation control fired".into()))
+            }
+        }
+
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset();
+        let calls = Arc::new(AtomicUsize::new(0));
+        register_servers(vec![RegisteredMcpServer {
+            name: "deferred-preparation".into(),
+            spec: make_spec("deferred-preparation"),
+            preparation: Some(Arc::new(Preparation(calls.clone()))),
+            lazy: true,
+            card: None,
+            keep_alive: None,
+        }]);
+        assert!(is_registered("deferred-preparation"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(ensure_active("deferred-preparation"))
+            .unwrap_err();
+        assert!(error.to_string().contains("preparation control fired"));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(active_handle("deferred-preparation").is_none());
+        reset();
     }
 }

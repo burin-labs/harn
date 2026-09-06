@@ -1052,6 +1052,21 @@ impl SessionFold {
 /// The loop's own verdict wins when it left one: a host that exits without
 /// closing the session leaves `status = open`, which would otherwise report a
 /// finished run as still running.
+///
+/// A CLOSED SESSION IS NOT A VERDICT. When the fold found no terminal and no
+/// final status, nothing in the session says how the run ended, and `closed`
+/// only says somebody shut the session. Reporting that as `completed` invents
+/// the one answer a reader most wants and cannot check: it is the difference
+/// between "this run finished its work" and "this row exists".
+///
+/// Measured before the change: an agent run that ended on a `policy_no_progress`
+/// terminal projected `status: "completed"` with `terminal: null`, because the
+/// terminal had been recorded against a different session id than the one the
+/// record was projected from. The mapping below was correct at every step —
+/// a policy kind projects to `stopped` — and still published a policy cut as a
+/// clean finish, because the last branch answers a question it has no evidence
+/// for. `unknown` is the honest reading, and it is already this function's word
+/// for "no writer observed, so no claim".
 fn run_status_for(
     session_status: &SessionStatus,
     terminal_kind: Option<crate::agent_events::AgentTerminalKind>,
@@ -1069,7 +1084,7 @@ fn run_status_for(
             RunWriterObservation::Active => "running",
             RunWriterObservation::NotObserved => "unknown",
         },
-        SessionStatus::Closed => "completed",
+        SessionStatus::Closed => "unknown",
         SessionStatus::SoftDeleted | SessionStatus::HardDeleted => "deleted",
     }
 }
