@@ -57,10 +57,21 @@
       "type": "object",
       "properties": {
         "kind": { "type": "string" },
-        "enforced": { "type": "boolean" }
+        "enforced": { "type": "boolean" },
+        "denial_reporting": {
+          "type": "string",
+          "enum": ["not_enforced", "backend_unavailable", "inferred_only"],
+          "description": "Coverage of mid-run sandbox denial reporting. inferred_only means a null denial is not proof that no operation was refused."
+        }
       },
-      "required": ["kind", "enforced"],
+      "required": ["kind", "enforced", "denial_reporting"],
       "additionalProperties": false
+    },
+    "denial": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/process_sandbox_denial" }
+      ]
     },
     "audit_id": { "type": "string" },
     "policy_context": {
@@ -106,10 +117,53 @@
     "byte_count",
     "output_sha256",
     "sandbox",
+    "denial",
     "audit_id"
   ],
   "additionalProperties": false,
   "$defs": {
+    "process_sandbox_denial": {
+      "type": "object",
+      "properties": {
+        "schema": { "const": "harn.process.sandbox_refusal.v1" },
+        "gate": { "const": "process_sandbox" },
+        "capability": { "const": "process.run" },
+        "backend": { "type": "string" },
+        "operation": { "enum": ["read", "write", "unknown"] },
+        "resource": { "type": ["string", "null"] },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "cwd": { "type": "string" },
+        "refused_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "observability": { "enum": ["inferred"] },
+        "stderr_excerpt": { "type": "string" },
+        "count": { "type": "integer", "minimum": 1 },
+        "retryable": { "const": false },
+        "reason": { "type": "string" }
+      },
+      "required": [
+        "schema",
+        "gate",
+        "capability",
+        "backend",
+        "operation",
+        "resource",
+        "command",
+        "cwd",
+        "refused_paths",
+        "observability",
+        "stderr_excerpt",
+        "count",
+        "retryable",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
     "process_cleanup": {
       "type": "object",
       "properties": {

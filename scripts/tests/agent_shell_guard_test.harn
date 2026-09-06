@@ -1,6 +1,22 @@
 // Tests for the shared Codex and Claude shell guard.
 import "../agent_shell_guard.harn"
 
+// A repository that owns the admission command, and one that does not. The
+// worktree rule must answer differently in the two, so every other case in
+// this file states which repository it is standing in rather than inheriting a
+// default.
+const ADMITTED: WorktreeAdmission = {
+  available: true,
+  command: "scripts/fleet-worktree-admit.ts",
+  denial: "",
+}
+
+const UNADMITTED: WorktreeAdmission = {available: false, command: "", denial: ""}
+
+fn verdict(payload: string) -> ShellGuardDecision {
+  return decision(payload, ADMITTED)
+}
+
 fn claude_payload(command: string) -> string {
   return json_stringify({tool_name: "Bash", tool_input: {command: command}})
 }
@@ -83,8 +99,8 @@ pipeline test_raw_git_worktree_add_is_denied_across_parser_shapes(harness: Harne
     const violation = raw_worktree_add_violation(command)
     assert(violation != "", command + " should require Fleet admission")
     assert(violation.contains("fleet-worktree-admit"))
-    assert(!decision(codex_payload(command)).allow)
-    assert(!decision(claude_payload(command)).allow)
+    assert(!verdict(codex_payload(command)).allow)
+    assert(!verdict(claude_payload(command)).allow)
   }
 }
 
@@ -102,8 +118,8 @@ pipeline test_worktree_guard_does_not_match_text_or_non_creation_operations(
     "./scripts/fleet-worktree-admit --issue-url https://github.com/acme/repo/issues/1",
   ] {
     assert_eq(raw_worktree_add_violation(command), "", command + " is not raw creation")
-    assert(decision(codex_payload(command)).allow)
-    assert(decision(claude_payload(command)).allow)
+    assert(verdict(codex_payload(command)).allow)
+    assert(verdict(claude_payload(command)).allow)
   }
 }
 
@@ -112,7 +128,7 @@ pipeline test_quoted_shell_separators_stay_inside_arguments(harness: Harness, ta
   const diagnostic = "ps -axo command | rg 'rustc .*harn_vm|cargo build --locked' | head -n 20"
   assert_eq(cargo_violation(diagnostic), "")
   assert_eq(len(segments_of(diagnostic)), 3)
-  assert(decision(codex_payload(diagnostic)).allow)
+  assert(verdict(codex_payload(diagnostic)).allow)
 }
 
 @test
@@ -230,20 +246,86 @@ pipeline test_user_files_keep_recoverable_trash_path(harness: Harness, task: unk
 @test
 pipeline test_codex_and_claude_share_one_decision(harness: Harness, task: unknown) {
   for encode in [claude_payload, codex_payload] {
-    assert(!decision(encode("cargo test")).allow)
-    assert(decision(encode("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
-    assert(decision(encode("make test")).allow)
-    assert(decision(encode("cargo tree -p harn-vm")).allow)
-    assert(!decision(encode("trash /tmp/generated.log")).allow)
-    assert(!decision(encode("git worktree add ../unowned origin/main")).allow)
-    assert(!decision(encode("/usr/bin/trash .build/debug/ModuleCache")).allow)
-    assert(decision(encode("trash /Users/alice/Documents/report.txt")).allow)
+    assert(!verdict(encode("cargo test")).allow)
+    assert(verdict(encode("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
+    assert(verdict(encode("make test")).allow)
+    assert(verdict(encode("cargo tree -p harn-vm")).allow)
+    assert(!verdict(encode("trash /tmp/generated.log")).allow)
+    assert(!verdict(encode("git worktree add ../unowned origin/main")).allow)
+    assert(!verdict(encode("/usr/bin/trash .build/debug/ModuleCache")).allow)
+    assert(verdict(encode("trash /Users/alice/Documents/report.txt")).allow)
     // The Cargo-only escape must not bypass unrelated command policy.
-    assert(!decision(encode("HARN_ALLOW_RAW_CARGO=1 trash /tmp/generated.log")).allow)
+    assert(!verdict(encode("HARN_ALLOW_RAW_CARGO=1 trash /tmp/generated.log")).allow)
   }
   // Non-Bash tools and unparseable payloads never deny — a broken guard must
   // not read as a rejection.
-  assert(decision(json_stringify({tool_name: "Read", tool_input: {}})).allow)
-  assert(decision("not json at all").allow)
-  assert(decision("").allow)
+  assert(verdict(json_stringify({tool_name: "Read", tool_input: {}})).allow)
+  assert(verdict("not json at all").allow)
+  assert(verdict("").allow)
+}
+
+@test
+pipeline test_worktree_refusal_requires_the_repository_to_own_admission(
+  harness: Harness,
+  task: unknown,
+) {
+  // The rule is pure argv analysis, so it fires in every repository that wires
+  // this guard. Refusing in one with no admission command names a command the
+  // operator cannot run, which is what this pair exists to prevent.
+  const creation = "git worktree add ../lane origin/main"
+  const admitted = decision(codex_payload(creation), ADMITTED)
+  assert(!admitted.allow, "a repository that owns admission must refuse raw creation")
+  assert(admitted.reason.contains("fleet-worktree-admit"))
+  assert(
+    admitted.reason.contains("scripts/fleet-worktree-admit.ts"),
+    "the refusal must name where this repository provides the command: " + admitted.reason,
+  )
+  const unadmitted = decision(codex_payload(creation), UNADMITTED)
+  assert(
+    unadmitted.allow,
+    "a repository with no admission command must allow raw creation: " + unadmitted.reason,
+  )
+  // Everything else the guard refuses is unaffected by admission.
+  assert(!decision(codex_payload("cargo test"), UNADMITTED).allow)
+}
+
+@test
+pipeline test_unreadable_admission_census_refuses_rather_than_reading_as_absent(
+  harness: Harness,
+  task: unknown,
+) {
+  // A denied look is not the same answer as an absent file. If it were allowed
+  // to read as one, a sandbox that hides the repository would silently turn the
+  // rule off in the one place it is wired.
+  const blind: WorktreeAdmission = {
+    available: false,
+    command: "",
+    denial: "worktree admission: read denied for `/workspace/scripts/fleet-worktree-admit.ts`",
+  }
+  const verdict_blind = decision(codex_payload("git worktree add ../lane"), blind)
+  assert(!verdict_blind.allow, "an unreadable census must refuse, not allow")
+  assert(verdict_blind.reason.contains("could not tell"))
+  assert(verdict_blind.reason.contains("read denied"))
+}
+
+@test
+pipeline test_admission_is_read_from_the_wrappers_measurement(harness: Harness, task: unknown) {
+  // The guard runs in a hook host with no filesystem builtin, so the wrapper
+  // measures and reports. "Nobody measured" must never read as "no admission
+  // command here", which is the only way this rule could switch itself off.
+  const unmeasured = worktree_admission_reported("", "")
+  assert(!unmeasured.available)
+  assert(unmeasured.denial != "", "an unset checked flag must be a denial")
+  assert(unmeasured.denial.contains(ADMISSION_CHECKED_ENV))
+  const none_here = worktree_admission_reported("1", "")
+  assert(!none_here.available)
+  assert_eq(none_here.denial, "", "a measured absence is an answer, not a denial")
+  const owned = worktree_admission_reported("1", "scripts/fleet-worktree-admit.ts")
+  assert(owned.available)
+  assert_eq(owned.command, "scripts/fleet-worktree-admit.ts")
+  // A wrapper naming a path this policy does not know has drifted from it.
+  // Refusing by name beats silently treating the rename as "no command here".
+  const drifted = worktree_admission_reported("1", "scripts/renamed-admit.ts")
+  assert(!drifted.available)
+  assert(drifted.denial.contains("does not know"))
 }

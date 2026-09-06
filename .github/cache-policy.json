@@ -15,8 +15,7 @@
     "max_bytes": 8589934592,
     "build_headroom_bytes": 17179869184,
     "dev_drive_size_default": "25GB",
-    "dev_drive_size_full_workspace": "50GB",
-    "dev_drive_size_release_certify": "50GB"
+    "dev_drive_size_full_workspace": "50GB"
   },
   "macos_workspace_warm": {
     "artifact_name": "workspace-macos-warm",

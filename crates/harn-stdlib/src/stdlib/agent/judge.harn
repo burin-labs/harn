@@ -59,6 +59,7 @@ pub import {
   __judge_completion_verdict_contradicts_itself,
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
+  __judge_contradiction_feedback,
   __judge_gaps_unattributed_count,
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
@@ -563,6 +564,16 @@ fn __judge_invoke_structured(
     completion_requirement_unassessed_feedback(requirement_report)
   } else if requirements_pending {
     completion_requirement_pending_feedback(requirement_report)
+  } else if gap_contradicts_done {
+    // The branch that used to fall through to `decoded.detail`, which on this
+    // path is the judge's own rationale for DONE. Handing that back as the
+    // reason a run may not stop tells the actor its work is complete, so the
+    // veto reads as an approval and the actor correctly does nothing. Measured
+    // on three read-only review cells: five conversions in a row, the same
+    // sentence re-injected each time, one tool call across seven iterations,
+    // and the run ended at the judge cap. A veto has to name the condition it
+    // found unmet, or it cannot advance the loop it just refused to end.
+    __judge_contradiction_feedback(decoded)
   } else {
     decoded.detail
   }
@@ -601,7 +612,38 @@ fn __judge_invoke_structured(
       ""
     },
     judge_duration_ms: duration_ms,
-    source: "llm",
+    // The judge's OWN answer, kept whether or not it survived. `verdict` above
+    // is the answer of record and may be an override's; without this field a
+    // reader cannot tell the two apart, and a record that reports an override
+    // under the judge's name is not a record of what happened.
+    judge_verdict: decoded.verdict,
+    // The party that produced `judge_verdict`. STABLE across an override, so
+    // downstream arbitration can still ask "was this a model judge's refusal"
+    // without reading `source`, whose meaning changes below.
+    judge_source: "llm",
+    // `source` names the party whose answer `verdict` IS, not the slot the
+    // decision came through. It read "llm" unconditionally, so every override
+    // above was published as the model's own word.
+    source: if verdict == decoded.verdict {
+      "llm"
+    } else {
+      "gate"
+    },
+    // Typed, so a consumer reads the overriding party and the rule applied
+    // rather than pattern-matching prose. Absent when nothing was overridden.
+    override: if verdict == decoded.verdict {
+      nil
+    } else {
+      {
+        party: "gate",
+        rule: if requirements_pending {
+          "completion_requirements_pending"
+        } else {
+          "completion_judge_gap_contradicts_done"
+        },
+        judge_verdict: decoded.verdict,
+      }
+    },
     admission: ran.admission,
     typed_checkpoint: checkpoint,
     requirement_report: requirement_report,
