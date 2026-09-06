@@ -41,6 +41,60 @@ pub enum RefusalObservability {
     Inferred,
 }
 
+impl RefusalObservability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inferred => "inferred",
+        }
+    }
+}
+
+/// How completely the active process-sandbox backend reports mid-run denials.
+///
+/// This is separate from an individual refusal's `observability`: it describes
+/// what an EMPTY refusal slot means. In particular, `InferredOnly` means that
+/// no structured backend report was available, so absence must not be read as
+/// proof that the sandbox allowed every operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ProcessSandboxDenialReporting {
+    NotEnforced,
+    BackendUnavailable,
+    InferredOnly,
+}
+
+impl ProcessSandboxDenialReporting {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotEnforced => "not_enforced",
+            Self::BackendUnavailable => "backend_unavailable",
+            Self::InferredOnly => "inferred_only",
+        }
+    }
+}
+
+/// Operation class reported by a backend. Current backends cannot report this
+/// fact, so inferred records say `Unknown` instead of guessing from prose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ProcessSandboxOperation {
+    Read,
+    Write,
+    Unknown,
+}
+
+impl ProcessSandboxOperation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// A typed child-process sandbox refusal.
 ///
 /// Replaces reading the identity back out of an error message string. The
@@ -56,6 +110,11 @@ pub struct ProcessSandboxRefusal {
     pub schema: String,
     pub command: Vec<String>,
     pub cwd: String,
+    pub backend: String,
+    pub operation: ProcessSandboxOperation,
+    /// The refused resource when the backend reports one. `None` under the
+    /// current inference-only contract; never recover this by parsing prose.
+    pub resource: Option<String>,
     /// May be empty even on a real refusal. Read `observability` first.
     pub refused_paths: Vec<String>,
     pub observability: RefusalObservability,
@@ -80,6 +139,12 @@ impl ProcessSandboxRefusal {
         metadata.insert("schema".to_string(), serde_json::json!(self.schema));
         metadata.insert("command".to_string(), serde_json::json!(self.command));
         metadata.insert("cwd".to_string(), serde_json::json!(self.cwd));
+        metadata.insert("backend".to_string(), serde_json::json!(self.backend));
+        metadata.insert(
+            "operation".to_string(),
+            serde_json::json!(self.operation.as_str()),
+        );
+        metadata.insert("resource".to_string(), serde_json::json!(self.resource));
         metadata.insert(
             "refused_paths".to_string(),
             serde_json::json!(self.refused_paths),
@@ -87,6 +152,10 @@ impl ProcessSandboxRefusal {
         metadata.insert(
             "observability".to_string(),
             serde_json::to_value(self.observability).unwrap_or(serde_json::Value::Null),
+        );
+        metadata.insert(
+            "stderr_excerpt".to_string(),
+            serde_json::json!(self.stderr_excerpt),
         );
         metadata.insert("count".to_string(), serde_json::json!(self.count));
         crate::events::log_warn_meta(
@@ -96,7 +165,7 @@ impl ProcessSandboxRefusal {
         );
     }
 
-    pub fn inferred(command: Vec<String>, cwd: String, evidence: &str) -> Self {
+    pub fn inferred(backend: String, command: Vec<String>, cwd: String, evidence: &str) -> Self {
         let mut stderr_excerpt: String = evidence.chars().take(Self::MAX_EXCERPT).collect();
         if evidence.chars().count() > Self::MAX_EXCERPT {
             stderr_excerpt.push('…');
@@ -105,12 +174,110 @@ impl ProcessSandboxRefusal {
             schema: Self::SCHEMA.to_string(),
             command,
             cwd,
+            backend,
+            operation: ProcessSandboxOperation::Unknown,
+            resource: None,
             refused_paths: Vec::new(),
             observability: RefusalObservability::Inferred,
             stderr_excerpt,
             count: 1,
         }
     }
+
+    /// Project this record into the existing agent-handler denial contract.
+    /// Consumers must never reconstruct these fields from `stderr_excerpt`.
+    pub fn handler_denial_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "schema": self.schema,
+            "gate": "process_sandbox",
+            "capability": "process.run",
+            "backend": self.backend,
+            "operation": self.operation.as_str(),
+            "resource": self.resource,
+            "command": self.command,
+            "cwd": self.cwd,
+            "refused_paths": self.refused_paths,
+            "observability": self.observability.as_str(),
+            "stderr_excerpt": self.stderr_excerpt,
+            "count": self.count,
+            "retryable": false,
+            "reason": "The process sandbox refused an operation in the child process.",
+        })
+    }
+
+    pub fn handler_denial_value(&self) -> VmValue {
+        crate::json_to_vm_value(&self.handler_denial_json())
+    }
+}
+
+/// Spawn-time contract for assessing a completed child. Capture this before a
+/// background waiter changes threads: execution policy is scoped to the
+/// spawning thread, but reporting coverage belongs to the command receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessSandboxReportingContext {
+    pub backend: String,
+    pub reporting: ProcessSandboxDenialReporting,
+}
+
+impl ProcessSandboxReportingContext {
+    pub fn current() -> Self {
+        let reporting = match crate::orchestration::current_execution_policy() {
+            Some(policy)
+                if policy.sandbox_profile.confines_processes()
+                    && effective_fallback(policy.sandbox_profile) != SandboxFallback::Off =>
+            {
+                if ActiveBackend::available() {
+                    ProcessSandboxDenialReporting::InferredOnly
+                } else {
+                    ProcessSandboxDenialReporting::BackendUnavailable
+                }
+            }
+            _ => ProcessSandboxDenialReporting::NotEnforced,
+        };
+        Self {
+            backend: super::active_backend_filesystem_mechanism().to_string(),
+            reporting,
+        }
+    }
+
+    pub fn assess_exit(
+        &self,
+        success: bool,
+        sandbox_signal: bool,
+        stdout: &[u8],
+        stderr: &[u8],
+        command: &[String],
+        cwd: &str,
+    ) -> ProcessSandboxAssessment {
+        let stderr_lower = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+        let stdout_lower = String::from_utf8_lossy(stdout).to_ascii_lowercase();
+        let permission_errno = !success
+            && (stderr_lower.contains("operation not permitted")
+                || stderr_lower.contains("permission denied")
+                || stderr_lower.contains("access is denied")
+                || stdout_lower.contains("operation not permitted"));
+        let refusal = (self.reporting == ProcessSandboxDenialReporting::InferredOnly
+            && (permission_errno || sandbox_signal))
+            .then(|| {
+                let evidence = if stderr.is_empty() { stdout } else { stderr };
+                ProcessSandboxRefusal::inferred(
+                    self.backend.clone(),
+                    command.to_vec(),
+                    cwd.to_string(),
+                    &String::from_utf8_lossy(evidence),
+                )
+            });
+        ProcessSandboxAssessment {
+            reporting: self.reporting,
+            refusal,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessSandboxAssessment {
+    pub reporting: ProcessSandboxDenialReporting,
+    pub refusal: Option<ProcessSandboxRefusal>,
 }
 
 pub fn process_violation_error(
@@ -125,39 +292,28 @@ pub fn process_violation_error(
     if !policy.sandbox_profile.confines_processes() {
         return None;
     }
-    if effective_fallback(policy.sandbox_profile) == SandboxFallback::Off
-        || !ActiveBackend::available()
-    {
-        return None;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    if !output.status.success()
-        && (stderr.contains("operation not permitted")
-            || stderr.contains("permission denied")
-            || stderr.contains("access is denied")
-            || stdout.contains("operation not permitted"))
-    {
-        // The substring match above is still the detector on every platform
-        // that cannot do better. What changes is that its uncertainty now
-        // travels as a typed field instead of being something a consumer has to
-        // know by folklore: `Inferred` says the paths are unavailable and the
-        // classification is lossy in both directions.
-        ProcessSandboxRefusal::inferred(command.to_vec(), cwd.to_string(), &stderr).emit();
+    let sandbox_signal = sandbox_signal_status(output);
+    let assessment = ProcessSandboxReportingContext::current().assess_exit(
+        output.status.success(),
+        sandbox_signal,
+        &output.stdout,
+        &output.stderr,
+        command,
+        cwd,
+    );
+    if let Some(refusal) = assessment.refusal {
+        refusal.emit();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let action = if sandbox_signal {
+            "terminated"
+        } else {
+            "denied"
+        };
         return Some(sandbox_denial_error(
             format!(
-                "sandbox violation: process was denied by the OS sandbox (status {})",
-                output.status.code().unwrap_or(-1)
-            ),
-            &format!("{stderr}\n{stdout}"),
-            &policy,
-        ));
-    }
-    if sandbox_signal_status(output) {
-        return Some(sandbox_denial_error(
-            format!(
-                "sandbox violation: process was terminated by the OS sandbox (status {})",
-                output.status
+                "sandbox violation: process was {action} by the OS sandbox (status {})",
+                output.status,
             ),
             &format!("{stderr}\n{stdout}"),
             &policy,

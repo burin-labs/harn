@@ -31,6 +31,9 @@ use harn_hostlib::process::{
 use harn_hostlib::tools::long_running::register_completion_notifier;
 use harn_hostlib::tools::ToolsCapability;
 use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_vm::orchestration::{
+    pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+};
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -194,6 +197,23 @@ fn cleanup_report_fixture(signal: i32) -> ProcessCleanupReport {
     }
 }
 
+struct ExecutionPolicyGuard;
+
+impl Drop for ExecutionPolicyGuard {
+    fn drop(&mut self) {
+        pop_execution_policy();
+    }
+}
+
+fn install_confining_policy(root: &std::path::Path) -> ExecutionPolicyGuard {
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::OsHardened,
+        workspace_roots: vec![root.to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+    ExecutionPolicyGuard
+}
+
 // -------- run_command --------
 
 #[test]
@@ -246,6 +266,68 @@ fn run_command_propagates_nonzero_exit_code() {
     let resp = require_dict(resp_value);
     assert_eq!(require_int(&resp, "exit_code"), 7);
     assert!(!require_bool(&resp, "timed_out"));
+}
+
+#[test]
+fn run_command_projects_mid_run_sandbox_assessment_without_collapsing_coverage() {
+    let workspace = tempdir().unwrap();
+    let _policy = install_confining_policy(workspace.path());
+    let (spawner, _guard) = install_mock();
+
+    let mut denied = MockProcessConfig::completed(1);
+    denied.stderr = b"write failed: Operation not permitted".to_vec();
+    spawner.enqueue(denied);
+    let mut ordinary = MockProcessConfig::completed(1);
+    ordinary.stderr = b"compiler error: unknown name".to_vec();
+    spawner.enqueue(ordinary);
+
+    let mut denied_req = dict();
+    denied_req.insert("argv".into(), vlist_str(&["fixture", "denied"]));
+    denied_req.insert(
+        "cwd".into(),
+        vstr(workspace.path().to_string_lossy().as_ref()),
+    );
+    let denied_value = call("hostlib_tools_run_command", denied_req).unwrap();
+    assert_response_matches_schema("run_command", &denied_value);
+    let denied_result = require_dict(denied_value);
+    let denied_sandbox = require_nested_dict(&denied_result, "sandbox");
+    assert_eq!(
+        require_str(&denied_sandbox, "denial_reporting"),
+        "inferred_only"
+    );
+    let denial = require_nested_dict(&denied_result, "denial");
+    assert_eq!(
+        require_str(&denial, "schema"),
+        "harn.process.sandbox_refusal.v1"
+    );
+    assert_eq!(require_str(&denial, "gate"), "process_sandbox");
+    assert!(!require_str(&denial, "backend").is_empty());
+    assert_eq!(require_str(&denial, "operation"), "unknown");
+    require_nil(&denial, "resource");
+    assert_eq!(require_list(&denial, "command").len(), 2);
+    assert_eq!(
+        require_str(&denial, "stderr_excerpt"),
+        "write failed: Operation not permitted"
+    );
+    assert_eq!(require_int(&denial, "count"), 1);
+    assert_eq!(require_str(&denial, "observability"), "inferred");
+    assert!(!require_bool(&denial, "retryable"));
+
+    let mut ordinary_req = dict();
+    ordinary_req.insert("argv".into(), vlist_str(&["fixture", "ordinary"]));
+    ordinary_req.insert(
+        "cwd".into(),
+        vstr(workspace.path().to_string_lossy().as_ref()),
+    );
+    let ordinary_value = call("hostlib_tools_run_command", ordinary_req).unwrap();
+    assert_response_matches_schema("run_command", &ordinary_value);
+    let ordinary_result = require_dict(ordinary_value);
+    require_nil(&ordinary_result, "denial");
+    let ordinary_sandbox = require_nested_dict(&ordinary_result, "sandbox");
+    assert_eq!(
+        require_str(&ordinary_sandbox, "denial_reporting"),
+        "inferred_only"
+    );
 }
 
 // -------- toolchain_facts --------

@@ -1,5 +1,5 @@
-// MECHANISM CONTRACT (onramp tier): a handler-reported permanent denial is a
-// failed call.
+// MECHANISM CONTRACT (onramp tier): a process-sandbox denial projected through
+// a handler result is a failed call.
 //
 // Contract = {trigger, effect, negative}:
 //   trigger  — a tool handler runs, refuses internally, and reports a typed
@@ -30,12 +30,29 @@ import { contract_effect, contract_negative } from "./lib/mechanism_contract"
  * typed denial itself.
  */
 fn handler_denial(retryable: bool) {
+  if retryable {
+    return {
+      gate: "approval_policy",
+      capability: "process.run",
+      retryable: true,
+      reason: "Approval is temporarily unavailable.",
+    }
+  }
   return {
-    gate: "approval_policy",
+    schema: "harn.process.sandbox_refusal.v1",
+    gate: "process_sandbox",
     capability: "process.run",
-    denied_paths: [],
+    backend: "test_backend",
+    operation: "unknown",
+    resource: nil,
+    command: ["bash", "scripts/check.sh"],
+    cwd: "/workspace",
+    refused_paths: [],
+    observability: "inferred",
+    stderr_excerpt: "write failed: Operation not permitted",
+    count: 1,
     retryable: retryable,
-    reason: "Approval is unavailable for risk class execution_semantics_unresolved.",
+    reason: "The process sandbox refused an operation in the child process.",
   }
 }
 
@@ -50,7 +67,11 @@ fn refusing_toolset(retryable: bool) {
         agent_tool_handler_result(
           "Command failed (exit -1)\napproval unavailable: "
             + "command requires approval for risk class execution_semantics_unresolved",
-          {command_status: "failed", denial: handler_denial(retryable)},
+          {
+            command_status: "failed",
+            sandbox: {denial_reporting: "inferred_only"},
+            denial: handler_denial(retryable),
+          },
         )
       },
       parameters: {command: {type: "string", description: "Command to run"}},
@@ -70,6 +91,27 @@ fn succeeding_toolset() {
     {
       handler: { _args ->
         agent_tool_handler_result("ok", {command_status: "succeeded", denial: nil})
+      },
+      parameters: {command: {type: "string", description: "Command to run"}},
+      returns: {type: "object"},
+      annotations: {kind: "execute"},
+    },
+  )
+  return tools
+}
+
+fn ordinary_failure_toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a command.",
+    {
+      handler: { _args ->
+        agent_tool_handler_result(
+          "Command failed (exit 1): compiler error",
+          {command_status: "failed", sandbox: {denial_reporting: "inferred_only"}, denial: nil},
+        )
       },
       parameters: {command: {type: "string", description: "Command to run"}},
       returns: {type: "object"},
@@ -206,8 +248,36 @@ fn successful_handler_result_case(harness: Harness) {
   )
 }
 
+fn ordinary_failure_without_denial_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [run_call("failure-1"), run_call("failure-2"), llm_text("Diagnosed. ##DONE##")],
+    { ->
+      const session = "contract-handler-ordinary-failure-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Diagnose the failed check.",
+          nil,
+          base_opts(session, ordinary_failure_toolset()),
+        ) },
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_ordinary_failure_not_sandbox_cut",
+        cutoff_count(captured.events) > 0
+          || captured.result.status != "done"
+          || len(harness.llm.mock_calls()) != 3,
+      )
+    },
+  )
+}
+
 pipeline default(harness: Harness) {
   handler_reported_denial_case(harness)
   retryable_handler_denial_case(harness)
   successful_handler_result_case(harness)
+  ordinary_failure_without_denial_case(harness)
 }

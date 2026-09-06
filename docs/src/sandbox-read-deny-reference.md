@@ -108,6 +108,9 @@ A refused child emits `harn.process.sandbox_refusal.v1` through
 | `schema` | string | `harn.process.sandbox_refusal.v1` |
 | `command` | array of strings | argv of the refused child |
 | `cwd` | string | working directory of the spawn |
+| `backend` | string | active process-sandbox backend |
+| `operation` | `read`, `write`, or `unknown` | refused operation class when reported by the backend |
+| `resource` | string or null | refused resource when reported by the backend |
 | `refused_paths` | array of strings | paths implicated, when they can be determined |
 | `observability` | string | how the refusal was detected; currently only `inferred` |
 | `stderr_excerpt` | string | first 512 bytes of the child's stderr |
@@ -118,3 +121,12 @@ Landlock and seatbelt refuse in-kernel without notifying the supervisor, so the
 refusal is reconstructed from the child's exit and stderr rather than observed
 directly. The enum is `#[non_exhaustive]`; a backend that can report a refusal
 directly will add a variant rather than change the meaning of this one.
+
+`tools.run_command` returns the same record in `denial` using the common
+agent-handler denial shape (`gate: "process_sandbox"`, `retryable: false`). Its
+`sandbox.denial_reporting` field is always present. `inferred_only` means a
+null `denial` is not evidence that every child operation was allowed;
+`backend_unavailable` and `not_enforced` name the other two coverage states.
+Current Landlock, seatbelt, and AppContainer integrations cannot report a
+resource or operation directly, so inferred records use `resource: null` and
+`operation: "unknown"` rather than parsing tool- or locale-specific prose.

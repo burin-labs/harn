@@ -358,6 +358,8 @@ struct WaiterContext {
     cwd: PathBuf,
     process_group_id: Option<u32>,
     command_display: String,
+    command: Vec<String>,
+    sandbox_reporting: harn_vm::process_sandbox::ProcessSandboxReportingContext,
     progress_interval: Option<Duration>,
     progress_max_interval: Option<Duration>,
     progress_max_inline_bytes: usize,
@@ -458,6 +460,7 @@ pub(crate) fn spawn_long_running_with_options(
 ) -> Result<LongRunningHandleInfo, HostlibError> {
     let requested_cwd = cwd.as_ref().map(to_agent_path);
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
+    let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
     let mut env = env;
     proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
     let spec = SpawnSpec {
@@ -527,6 +530,8 @@ pub(crate) fn spawn_long_running_with_options(
         cwd: effective_cwd.clone(),
         process_group_id,
         command_display: command_display.clone(),
+        command: all_argv,
+        sandbox_reporting,
         progress_interval: options.progress_interval,
         progress_max_interval: options.progress_max_interval,
         progress_max_inline_bytes: options.progress_max_inline_bytes,
@@ -664,8 +669,9 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let timed_out = cancelled && cancellation.timed_out;
     let process_cleanup = cancellation.process_cleanup;
 
+    let sandbox_signal = status.is_some_and(|status| proc::is_sandbox_signal(status.signal));
     let (exit_code, signal_name) = match status {
-        Some(s) => decode_exit_status(s),
+        Some(status) => decode_exit_status(status),
         // wait() itself failed — treat as killed (extremely unusual).
         None => (-1, Some("SIGKILL".to_string())),
     };
@@ -699,6 +705,17 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         }
     };
     let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
+    let sandbox_assessment = context.sandbox_reporting.assess_exit(
+        exit_code == 0 && signal_name.is_none(),
+        command_status == CommandStatus::Completed && sandbox_signal,
+        &stdout,
+        &stderr,
+        &context.command,
+        &to_agent_path(&context.cwd),
+    );
+    if let Some(refusal) = sandbox_assessment.refusal.as_ref() {
+        refusal.emit();
+    }
 
     let mut payload = serde_json::Map::new();
     payload.insert(
@@ -740,6 +757,18 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
     payload.insert("stdout".into(), serde_json::Value::String(inline_stdout));
     payload.insert("stderr".into(), serde_json::Value::String(inline_stderr));
+    payload.insert(
+        "sandbox".into(),
+        crate::json::vm_dict_to_json(&proc::sandbox_response(sandbox_assessment.reporting)),
+    );
+    payload.insert(
+        "denial".into(),
+        sandbox_assessment
+            .refusal
+            .as_ref()
+            .map(|refusal| refusal.handler_denial_json())
+            .unwrap_or(serde_json::Value::Null),
+    );
     payload.insert(
         "output_path".into(),
         serde_json::Value::String(to_agent_path(&artifacts.output_path)),

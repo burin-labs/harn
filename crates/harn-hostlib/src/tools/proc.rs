@@ -83,6 +83,7 @@ pub(crate) struct SpawnOutcome {
     pub(crate) duration: Duration,
     pub(crate) timed_out: bool,
     pub(crate) process_cleanup: Option<process_handle::ProcessCleanupReport>,
+    pub(crate) sandbox_assessment: harn_vm::process_sandbox::ProcessSandboxAssessment,
 }
 
 pub(crate) use crate::process::EnvMode;
@@ -143,6 +144,9 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let command_id = next_command_id();
     let requested_cwd = req.cwd.as_ref().map(to_agent_path);
     let effective_cwd = resolve_effective_cwd(req.builtin, req.cwd.as_deref())?;
+    let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
+    let mut refusal_command = vec![req.program.clone()];
+    refusal_command.extend(req.args.iter().cloned());
 
     let mut env = req.env.clone();
     apply_toolchain_path(Some(&effective_cwd), &mut env, req.env_mode);
@@ -244,27 +248,43 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let ended_at = Some(now_rfc3339());
 
-    let (mut command_status, mut exit_code, mut signal, mut timed_out, mut process_cleanup) =
-        match outcome {
-            process_handle::WaitOutcome::Exited(status) => {
-                let (exit_code, signal) = decode_status(status);
-                (CommandStatus::Completed, exit_code, signal, false, None)
-            }
-            process_handle::WaitOutcome::TimedOut(report) => (
-                CommandStatus::TimedOut,
-                -1,
-                Some("SIGKILL".to_string()),
-                true,
-                Some(report),
-            ),
-            process_handle::WaitOutcome::Interrupted(report) => (
-                CommandStatus::Killed,
-                -1,
-                Some("SIGTERM".to_string()),
+    let (
+        mut command_status,
+        mut exit_code,
+        mut signal,
+        mut sandbox_signal,
+        mut timed_out,
+        mut process_cleanup,
+    ) = match outcome {
+        process_handle::WaitOutcome::Exited(status) => {
+            let sandbox_signal = is_sandbox_signal(status.signal);
+            let (exit_code, signal) = decode_status(status);
+            (
+                CommandStatus::Completed,
+                exit_code,
+                signal,
+                sandbox_signal,
                 false,
-                Some(report),
-            ),
-        };
+                None,
+            )
+        }
+        process_handle::WaitOutcome::TimedOut(report) => (
+            CommandStatus::TimedOut,
+            -1,
+            Some("SIGKILL".to_string()),
+            false,
+            true,
+            Some(report),
+        ),
+        process_handle::WaitOutcome::Interrupted(report) => (
+            CommandStatus::Killed,
+            -1,
+            Some("SIGTERM".to_string()),
+            false,
+            false,
+            Some(report),
+        ),
+    };
     if drain_timed_out || drain_interrupted {
         if let Some(cleanup) = drain_cleanup {
             if let Some(existing) = process_cleanup.as_mut() {
@@ -277,11 +297,13 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
             command_status = CommandStatus::TimedOut;
             exit_code = -1;
             signal = Some("SIGKILL".to_string());
+            sandbox_signal = false;
             timed_out = true;
         } else {
             command_status = CommandStatus::Killed;
             exit_code = -1;
             signal = Some("SIGTERM".to_string());
+            sandbox_signal = false;
         }
     }
     if command_status == CommandStatus::Completed {
@@ -298,6 +320,17 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
                 },
             ));
         }
+    }
+    let sandbox_assessment = sandbox_reporting.assess_exit(
+        exit_code == 0 && signal.is_none(),
+        sandbox_signal,
+        &stdout_bytes,
+        &stderr_bytes,
+        &refusal_command,
+        &to_agent_path(&effective_cwd),
+    );
+    if let Some(refusal) = sandbox_assessment.refusal.as_ref() {
+        refusal.emit();
     }
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let (stdout, stderr) = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
@@ -323,6 +356,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         duration: started.elapsed(),
         timed_out,
         process_cleanup,
+        sandbox_assessment,
     })
 }
 
@@ -584,13 +618,14 @@ pub(crate) fn build_response(
         Some(handle_id) => builder.str("handle_id", handle_id),
         None => builder.nil("handle_id"),
     };
-    let mut sandbox = harn_vm::value::DictMap::new();
-    sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert(
-        harn_vm::value::intern_key("enforced"),
-        VmValue::Bool(sandbox_enforced()),
+    builder = builder.dict(
+        "sandbox",
+        sandbox_response(outcome.sandbox_assessment.reporting),
     );
-    builder = builder.dict("sandbox", sandbox);
+    builder = match outcome.sandbox_assessment.refusal.as_ref() {
+        Some(refusal) => builder.value("denial", refusal.handler_denial_value()),
+        None => builder.nil("denial"),
+    };
     if let Some(policy_context) = policy_context {
         builder = builder.dict("policy_context", policy_context);
     }
@@ -710,11 +745,8 @@ pub(crate) fn running_response(
     snapshot_binding: Option<&harn_vm::value::DictMap>,
 ) -> VmValue {
     let artifacts = planned_artifact_paths(&command_id);
-    let mut sandbox = harn_vm::value::DictMap::new();
-    sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert(
-        harn_vm::value::intern_key("enforced"),
-        VmValue::Bool(sandbox_enforced()),
+    let sandbox = sandbox_response(
+        harn_vm::process_sandbox::ProcessSandboxReportingContext::current().reporting,
     );
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id.clone())
@@ -736,6 +768,7 @@ pub(crate) fn running_response(
         .int("line_count", 0)
         .int("byte_count", 0)
         .str("output_sha256", "")
+        .nil("denial")
         .dict("sandbox", sandbox)
         .str("audit_id", format!("audit_{command_id}"))
         .str("command", command_display.clone())
@@ -825,6 +858,22 @@ pub(crate) fn sandbox_enforced() -> bool {
     harn_vm::orchestration::current_execution_policy().is_some()
 }
 
+pub(crate) fn sandbox_response(
+    reporting: harn_vm::process_sandbox::ProcessSandboxDenialReporting,
+) -> harn_vm::value::DictMap {
+    let mut sandbox = harn_vm::value::DictMap::new();
+    sandbox.put_str("kind", sandbox_kind());
+    sandbox.insert(
+        harn_vm::value::intern_key("enforced"),
+        VmValue::Bool(matches!(
+            reporting,
+            harn_vm::process_sandbox::ProcessSandboxDenialReporting::InferredOnly
+        )),
+    );
+    sandbox.put_str("denial_reporting", reporting.as_str());
+    sandbox
+}
+
 fn decode_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {
     if let Some(code) = status.code {
         (code, None)
@@ -833,6 +882,19 @@ fn decode_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {
     } else {
         (-1, None)
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn is_sandbox_signal(signal: Option<i32>) -> bool {
+    matches!(
+        signal,
+        Some(libc::SIGSYS) | Some(libc::SIGABRT) | Some(libc::SIGKILL)
+    )
+}
+
+#[cfg(not(unix))]
+pub(crate) fn is_sandbox_signal(_signal: Option<i32>) -> bool {
+    false
 }
 
 fn format_signal(sig: i32) -> String {

@@ -112,8 +112,10 @@ pub(crate) use refusal::mechanism_skipped_warning;
 pub(crate) use refusal::unavailable;
 pub(crate) use refusal::{path_is_denied, process_sandbox_read_deny_roots};
 pub use refusal::{
-    process_violation_error, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable, SandboxRequirement,
+    process_violation_error, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
+    ProcessSandboxOperation, ProcessSandboxRefusal, ProcessSandboxReportingContext,
+    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    SandboxRequirement,
 };
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod toolchain_cache;
