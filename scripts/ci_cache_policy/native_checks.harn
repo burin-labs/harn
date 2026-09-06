@@ -157,7 +157,7 @@ pub fn windows_release_certify_warm_errors(
     errors = errors
       + ["${warm.workflow} must grant actions: write for warm artifact upload/download"]
   }
-  const expected_drive_size = windows_release_certify_dev_drive_size(warm)
+  const expected_drive_size = windows_nightly_dev_drive_size(warm)
   const dev_drives = matching_named_steps(job, "Set up Dev Drive")
   if len(dev_drives) != 1
     || trim(to_string(dev_drives[0]?.with?.["drive-size"] ?? ""))
@@ -500,6 +500,17 @@ fn windows_nightly_storage_budget_errors(job: dict) -> list<string> {
         ]
     }
   }
+  // The terminal receipt is a record; the before-build receipt is a decision.
+  // Only the latter is checked for the gate flag, so a future reordering that
+  // drops it fails here rather than in a linker error.
+  const before = matching_named_steps(job, WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP)
+  if len(before) != 1
+    || !contains(trim(before[0]?.run ?? ""), WINDOWS_STORAGE_HEADROOM_FLAG) {
+    errors = errors
+      + [
+        "windows-nightly.yml:nextest must refuse the build when the before_build reading is under the declared headroom",
+      ]
+  }
   return errors
 }
 
@@ -654,11 +665,9 @@ pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
       "cache-policy.json macos_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
     ]
   }
-  if warm.dev_drive_size_full_workspace == warm.dev_drive_size_default
-    || warm.dev_drive_size_release_certify
-      == warm.dev_drive_size_default {
+  if warm.dev_drive_size_full_workspace == warm.dev_drive_size_default {
     return [
-      "cache-policy.json windows_workspace_warm must give full-workspace and release-certify runs larger Dev Drive ceilings than the default",
+      "cache-policy.json windows_workspace_warm must give full-workspace runs a larger Dev Drive ceiling than the default",
     ]
   }
   return []

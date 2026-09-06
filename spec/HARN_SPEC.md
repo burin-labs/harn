@@ -8069,6 +8069,7 @@ require_file_header = false
 require_docstrings = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
+test_root_components = ["pipeline-tests"]
 ```
 
 - `disabled` silences the listed rules for the whole project.
@@ -8087,6 +8088,14 @@ persona_step_allowlist = ["legacy_helper"]
 - `persona_step_allowlist` lists non-stdlib helper functions that
   `@persona` bodies may call directly without a matching `@step`
   declaration.
+- `test_root_components` names directories whose whole subtree is test
+  source, in addition to the built-in `tests`. Rules that treat test
+  files differently, notably `assert-outside-test`, read this list. It
+  is additive: a project can widen the set Harn recognises and never
+  narrow it. A file whose stem ends in `_test` or `-test` is test
+  source wherever it lives and needs no entry here. Declaring a
+  directory is a structural fact visible in review, unlike a marker
+  comment inside a file that wants a rule turned off.
 
 ## Sandbox mode
 

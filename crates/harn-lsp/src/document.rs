@@ -255,6 +255,7 @@ impl DocumentState {
             require_stdlib_metadata: is_stdlib_source,
             complexity_threshold: project_lint.complexity_threshold,
             persona_step_allowlist: &project_lint.persona_step_allowlist,
+            test_root_components: &project_lint.test_root_components,
             severity_overrides: project_lint.severity.clone(),
             ..Default::default()
         };

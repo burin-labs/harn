@@ -24,10 +24,9 @@ impl<'a> Linter<'a> {
     /// old behaviour, because there is nothing to read a root from.
     pub(super) fn in_test_source(&self) -> bool {
         self.in_test_pipeline()
-            || self
-                .file_path
-                .as_deref()
-                .is_some_and(crate::is_test_source_path)
+            || self.file_path.as_deref().is_some_and(|path| {
+                crate::is_test_source_path_with_roots(path, &self.test_root_components)
+            })
     }
 
     pub(super) fn is_test_pipeline_name(name: &str) -> bool {
