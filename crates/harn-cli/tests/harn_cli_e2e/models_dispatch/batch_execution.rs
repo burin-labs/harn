@@ -209,16 +209,24 @@ pub(crate) fn rejoin_cli_quarantines_an_artifact_without_matching_receipts() {
     )
     .expect("parse download");
     let (_, artifact_path) = result_artifact(&download);
-    fs::write(artifact_path, b"changed without receipt update\n").expect("change raw artifact");
+    // Preserve valid provider JSON so a parser failure cannot impersonate the
+    // provenance check. Only the bytes covered by the recorded hash change.
+    let mut artifact = fs::read(artifact_path).expect("read raw artifact");
+    artifact.extend_from_slice(b"\n");
+    fs::write(artifact_path, artifact).expect("change raw artifact");
     let changed = run_rejoin(&execution, &manifest_path, "changed-artifact");
     assert_eq!(changed["consumable"], false);
     assert_eq!(
         changed["quarantine"]["reasons"],
         serde_json::json!(["missing_results", "lineage_or_artifact_errors"])
     );
-    assert!(changed["errors"]
-        .as_array()
-        .is_some_and(|errors| !errors.is_empty()));
+    let hash_mismatch = format!("result_artifact_hash_mismatch: {artifact_path}");
+    assert!(
+        changed["errors"].as_array().is_some_and(|errors| errors
+            .iter()
+            .any(|error| error.as_str() == Some(hash_mismatch.as_str()))),
+        "the raw-artifact hash check did not fire: {changed}"
+    );
 }
 
 #[test]
