@@ -343,6 +343,41 @@ install_locked_node_dependencies() {
   )
 }
 
+build_sccache_rustc_wrapper() {
+  local source_path="$ROOT_DIR/scripts/sccache_rustc_wrapper.rs"
+  local source_hash host_triple executable_suffix wrapper_dir wrapper_path temporary_path
+  source_hash="$(shasum -a 256 "$source_path" | awk '{print $1}')"
+  host_triple="$(rustc -vV | sed -n 's/^host: //p')"
+  if [[ -z "$host_triple" ]]; then
+    echo "error: rustc did not report a host triple for the sccache wrapper" >&2
+    return 1
+  fi
+
+  executable_suffix=""
+  case "${OS:-$(uname -s)}" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*) executable_suffix=".exe" ;;
+  esac
+  wrapper_dir="$HARN_DEV_SETUP_STORAGE_ROOT/sccache-wrapper/$host_triple-$source_hash"
+  wrapper_path="$wrapper_dir/harn-sccache-wrapper$executable_suffix"
+  if [[ ! -x "$wrapper_path" ]]; then
+    mkdir -p "$wrapper_dir"
+    temporary_path="$wrapper_path.tmp.$$"
+    rustc --edition=2021 -C strip=symbols "$source_path" -o "$temporary_path"
+    # A same-filesystem hard link publishes the complete executable atomically
+    # and never replaces a live wrapper, including on Windows. A concurrent
+    # publisher may win first; its source-addressed artifact is equivalent.
+    if ! ln "$temporary_path" "$wrapper_path" 2>/dev/null \
+      && [[ ! -x "$wrapper_path" ]]; then
+      rm -f "$temporary_path"
+      echo "error: failed to publish the sccache wrapper" >&2
+      return 1
+    fi
+    rm -f "$temporary_path"
+  fi
+
+  printf '%s\n' "$wrapper_path"
+}
+
 echo "=== Harn dev setup ==="
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -383,16 +418,11 @@ if command -v sccache >/dev/null 2>&1; then
   # absolute per-worktree path that every Cargo entry point exports. Two
   # worktrees compiling the byte-identical registry dependency therefore
   # produced different keys, and a real cold build here measured 1 Rust cache
-  # hit against 638 misses. scripts/sccache_rustc_wrapper.sh drops that one
-  # variable for rustc only, which is what lets the dependency graph be shared.
-  #
-  # Windows keeps bare sccache: Cargo executes rustc-wrapper directly, so a
-  # `.sh` there is not runnable and the status quo is the safe answer.
-  rustc_wrapper="sccache"
-  case "${OS:-$(uname -s)}" in
-    Windows_NT | MINGW* | MSYS* | CYGWIN*) ;;
-    *) rustc_wrapper="$(pwd -P)/scripts/sccache_rustc_wrapper.sh" ;;
-  esac
+  # hit against 638 misses. The generated native wrapper drops that one
+  # variable for sccache only, which lets the dependency graph be shared. It
+  # also keeps Cargo's synthetic binary-path environment on the direct rustc
+  # path because sccache 0.17's daemon-side execution can lose those variables.
+  rustc_wrapper="$(build_sccache_rustc_wrapper)"
 fi
 
 force_target_dir=0

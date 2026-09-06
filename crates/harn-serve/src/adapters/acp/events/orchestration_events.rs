@@ -111,6 +111,7 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             iteration,
             tool_name,
             turn_claimed_for_repair,
+            delivered,
         } => {
             let mut payload = serde_json::json!({"feedbackKind": kind, "content": content});
             if let Some(object) = payload.as_object_mut() {
@@ -128,6 +129,12 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                         "turnClaimedForRepair".to_string(),
                         serde_json::json!(claimed),
                     );
+                }
+                // `false` is the load-bearing reading here: it is a mechanism
+                // reporting that it wrote a receipt and delivered nothing.
+                // Only an absent field means the question went unanswered.
+                if let Some(delivered) = delivered {
+                    object.insert("delivered".to_string(), serde_json::json!(delivered));
                 }
             }
             sink.emit_agent_event_ext("feedback_injected", session_id, payload);
