@@ -1,0 +1,163 @@
+{
+  "arm": "baseline",
+  "case_id": "tune-config-baseline",
+  "completion_attempts": [],
+  "completion_claim_observations": [],
+  "completion_directives": [
+    {
+      "action": "accept",
+      "admission": {
+        "admitted": true,
+        "checkpoint_name": "agent.completion_judge",
+        "deadline_reserve_ms": 5000,
+        "judge_model": "openai/gpt-5.4-mini",
+        "judge_model_source": "judge_config",
+        "operation_budget_ms": 60000,
+        "outcome": "admitted",
+        "prompt_chars": 5332,
+        "prompt_token_estimate": 1333,
+        "provider_timeout_ms": 60000,
+        "remaining_ms": null,
+        "schema": "harn.completion_judge_admission.v1"
+      },
+      "checkpoint": {
+        "_type": "typed_output_checkpoint",
+        "attempts": 1,
+        "checkpoint_attempts": 1,
+        "data": {
+          "detail": "Evidence token `config-ready-marker-41` was observed and the deterministic verifier `inspect_status` passed, with status `ready`. The configuration is ready to yield to the user now.",
+          "gap_class": "failed_verification",
+          "verdict": "done"
+        },
+        "error": "",
+        "error_category": null,
+        "extracted_json": false,
+        "final_accepted": true,
+        "model": "openai/gpt-5.4-mini",
+        "name": "agent.completion_judge",
+        "ok": true,
+        "parse_failures": [],
+        "provider": "openrouter",
+        "raw_outputs": [
+          "{\"detail\":\"Evidence token `config-ready-marker-41` was observed and the deterministic verifier `inspect_status` passed, with status `ready`. The configuration is ready to yield to the user now.\",\"gap_class\":\"failed_verification\",\"verdict\":\"done\"}"
+        ],
+        "raw_text": "{\"detail\":\"Evidence token `config-ready-marker-41` was observed and the deterministic verifier `inspect_status` passed, with status `ready`. The configuration is ready to yield to the user now.\",\"gap_class\":\"failed_verification\",\"verdict\":\"done\"}",
+        "repaired": false,
+        "retries": 0,
+        "schema_failures": [],
+        "status": "accepted",
+        "trace": [
+          {
+            "attempt": 1,
+            "error": "",
+            "error_category": null,
+            "extracted_json": false,
+            "ok": true,
+            "raw_text": "{\"detail\":\"Evidence token `config-ready-marker-41` was observed and the deterministic verifier `inspect_status` passed, with status `ready`. The configuration is ready to yield to the user now.\",\"gap_class\":\"failed_verification\",\"verdict\":\"done\"}",
+            "repaired": false,
+            "validator_errors": []
+          }
+        ],
+        "usage": {
+          "accounting_status": "reported",
+          "cache_hit_ratio": 0.0,
+          "cache_read_tokens": 0,
+          "cache_savings_usd": 0.0,
+          "cache_supported": true,
+          "cache_visibility": null,
+          "cache_write_tokens": 0,
+          "cost_usd": 0.00131775,
+          "input_tokens": 1403,
+          "known_cost_usd": 0.00131775,
+          "output_tokens": 59,
+          "projected_cost_usd": 0.00131775,
+          "provider_attempts": {
+            "empty_completion": 0,
+            "other": 0,
+            "rate_limited": 0,
+            "retries": 0,
+            "total": 1
+          },
+          "provider_call_count": 1,
+          "reported_total_tokens": 1462,
+          "served_fast": false,
+          "unpriced_calls": 0,
+          "unpriced_reason": null,
+          "unpriced_tokens": 0,
+          "usage_unknown_calls": 0
+        },
+        "validation_errors": [],
+        "validator_failures": [],
+        "version": 1
+      },
+      "completion_claim": null,
+      "converted_from": "gap_contradicts_done_survived_reask_over_passing_verifier",
+      "evidence_id": "sha256:fc4df379df12465a04b3d8672fe9fee6fbd78f53beae104c74d66e23f29df4c0",
+      "feedback_delivery": "none",
+      "gap_class": "other",
+      "invoked": {
+        "deterministic": true,
+        "turn_end_condition": false,
+        "verify_completion_judge": true
+      },
+      "outcome": "done",
+      "pending_tool_batch_effect_count": 0,
+      "projection": {
+        "included_action_count": 0,
+        "included_fallback_observation_count": 1,
+        "included_read_only_call_count": 1,
+        "lifecycle_issue_count": 0,
+        "omitted_harness_authored_result_count": 0,
+        "omitted_older_action_count": 0,
+        "omitted_read_only_call_count": 0,
+        "raw_message_count": 4,
+        "raw_transcript_digest": "sha256:efd86eb1fda53e0e7639064bbb4bf97a69f5c990990b342cac84eff28496d1b0",
+        "relevant_call_count": 0,
+        "schema": "harn.completion_judge_evidence_projection.v1",
+        "selected_actions": [],
+        "serialized_chars": 1576
+      },
+      "reason": "gap_contradicts_done_survived_reask_over_passing_verifier",
+      "requirements": null,
+      "schema": "harn.completion_directive_receipt.v1",
+      "source": "llm",
+      "trigger": "natural",
+      "verification": {
+        "command": "inspect_status",
+        "observed": "passed",
+        "observed_at_evidence_index": -2,
+        "oracle_expected": true
+      }
+    }
+  ],
+  "completion_judge": {
+    "cap_reached": false,
+    "invocations": 1,
+    "max_invocations": 2,
+    "vetoes": 0
+  },
+  "completion_judge_cap_reached": false,
+  "evidence": "config-ready-marker-41",
+  "evidence_reported": true,
+  "exit_contract_met": true,
+  "explicit_exit": false,
+  "failure_bucket": "none",
+  "fallback_exit": false,
+  "inspected": true,
+  "inspection_call_ids": [
+    "call_Rdew1DOly2oFabLmrliYDJEc"
+  ],
+  "known_cost_usd": 0.001539,
+  "max_tokens": 2048,
+  "pair": "tune-config",
+  "pass": true,
+  "provider_call_count": 4,
+  "schema": "harn.completion_claim_eval_receipt.v1",
+  "session_id": "completion-claim-tune-config-baseline-5-998c27c2-fc0c-4a2d-bb1e-f373dd4f3fd9",
+  "status": "done",
+  "stop_reason": "natural",
+  "terminal_error": "",
+  "trial": 5,
+  "unpriced_calls": 0,
+  "usage_unknown_calls": 0
+}

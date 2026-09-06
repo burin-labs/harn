@@ -1,0 +1,195 @@
+{
+  "arm": "treatment",
+  "case_id": "tune-release-treatment",
+  "completion_attempts": [
+    {
+      "tool_call_id": "call_4id9okYqj0C68lsuv6VQKeIE"
+    },
+    {
+      "tool_call_id": "call_k5TGBdYjXOpYR0PiI44g9H6L"
+    }
+  ],
+  "completion_claim_observations": [
+    {
+      "disposition": "invalid",
+      "reason": "completion_claim_evidence_ref_unresolved",
+      "schema": "harn.completion_claim_observation.v1",
+      "source": "tool"
+    },
+    {
+      "disposition": "valid",
+      "evidence_ref_count": 1,
+      "requirement_count": 1,
+      "schema": "harn.completion_claim_observation.v1",
+      "source": "tool"
+    }
+  ],
+  "completion_directives": [
+    {
+      "action": "accept",
+      "admission": {
+        "admitted": true,
+        "checkpoint_name": "agent.completion_judge",
+        "deadline_reserve_ms": 5000,
+        "judge_model": "openai/gpt-5.4-mini",
+        "judge_model_source": "judge_config",
+        "operation_budget_ms": 60000,
+        "outcome": "admitted",
+        "prompt_chars": 5583,
+        "prompt_token_estimate": 1396,
+        "provider_timeout_ms": 60000,
+        "remaining_ms": null,
+        "schema": "harn.completion_judge_admission.v1"
+      },
+      "checkpoint": {
+        "_type": "typed_output_checkpoint",
+        "attempts": 1,
+        "checkpoint_attempts": 1,
+        "data": {
+          "detail": "The verifier ran and passed, and inspect_status reported the release as ready with evidence token release-ready-marker-73. No unresolved verification or authorization remains.",
+          "gap_class": "failed_verification",
+          "verdict": "done"
+        },
+        "error": "",
+        "error_category": null,
+        "extracted_json": false,
+        "final_accepted": true,
+        "model": "openai/gpt-5.4-mini",
+        "name": "agent.completion_judge",
+        "ok": true,
+        "parse_failures": [],
+        "provider": "openrouter",
+        "raw_outputs": [
+          "{\"detail\":\"The verifier ran and passed, and inspect_status reported the release as ready with evidence token release-ready-marker-73. No unresolved verification or authorization remains.\",\"gap_class\":\"failed_verification\",\"verdict\":\"done\"}"
+        ],
+        "raw_text": "{\"detail\":\"The verifier ran and passed, and inspect_status reported the release as ready with evidence token release-ready-marker-73. No unresolved verification or authorization remains.\",\"gap_class\":\"failed_verification\",\"verdict\":\"done\"}",
+        "repaired": false,
+        "retries": 0,
+        "schema_failures": [],
+        "status": "accepted",
+        "trace": [
+          {
+            "attempt": 1,
+            "error": "",
+            "error_category": null,
+            "extracted_json": false,
+            "ok": true,
+            "raw_text": "{\"detail\":\"The verifier ran and passed, and inspect_status reported the release as ready with evidence token release-ready-marker-73. No unresolved verification or authorization remains.\",\"gap_class\":\"failed_verification\",\"verdict\":\"done\"}",
+            "repaired": false,
+            "validator_errors": []
+          }
+        ],
+        "usage": {
+          "accounting_status": "reported",
+          "cache_hit_ratio": 0.0,
+          "cache_read_tokens": 0,
+          "cache_savings_usd": 0.0,
+          "cache_supported": true,
+          "cache_visibility": null,
+          "cache_write_tokens": 0,
+          "cost_usd": 0.001335,
+          "input_tokens": 1468,
+          "known_cost_usd": 0.001335,
+          "output_tokens": 52,
+          "projected_cost_usd": 0.001335,
+          "provider_attempts": {
+            "empty_completion": 0,
+            "other": 0,
+            "rate_limited": 0,
+            "retries": 0,
+            "total": 1
+          },
+          "provider_call_count": 1,
+          "reported_total_tokens": 1520,
+          "served_fast": false,
+          "unpriced_calls": 0,
+          "unpriced_reason": null,
+          "unpriced_tokens": 0,
+          "usage_unknown_calls": 0
+        },
+        "validation_errors": [],
+        "validator_failures": [],
+        "version": 1
+      },
+      "completion_claim": {
+        "requirements": [
+          {
+            "evidence_refs": [
+              "call_yo23Ckslq15NLp8A9VuUYRFi"
+            ],
+            "requirement_id": "task"
+          }
+        ],
+        "schema": "harn.completion_claim.v1",
+        "source": "tool"
+      },
+      "converted_from": "failed_verification_contradicted_by_gate",
+      "evidence_id": "sha256:68992a2e63250cd6d17f717638a626438ab0f2960730e7c37a32d779debe4648",
+      "feedback_delivery": "none",
+      "gap_class": "failed_verification",
+      "invoked": {
+        "deterministic": true,
+        "turn_end_condition": false,
+        "verify_completion_judge": true
+      },
+      "outcome": "done",
+      "pending_tool_batch_effect_count": 0,
+      "projection": {
+        "included_action_count": 0,
+        "included_fallback_observation_count": 1,
+        "included_read_only_call_count": 1,
+        "lifecycle_issue_count": 0,
+        "omitted_harness_authored_result_count": 0,
+        "omitted_older_action_count": 0,
+        "omitted_read_only_call_count": 0,
+        "raw_message_count": 8,
+        "raw_transcript_digest": "sha256:824bcdd4d5ba3a5b723b9db856628bdae49557a5718579dc1f2938af71aaa2a0",
+        "relevant_call_count": 0,
+        "schema": "harn.completion_judge_evidence_projection.v1",
+        "selected_actions": [],
+        "serialized_chars": 1533
+      },
+      "reason": "failed_verification_contradicted_by_gate",
+      "requirements": null,
+      "schema": "harn.completion_directive_receipt.v1",
+      "source": "llm",
+      "trigger": "explicit_completion_claim",
+      "verification": {
+        "command": "inspect_status",
+        "observed": "passed",
+        "observed_at_evidence_index": -2,
+        "oracle_expected": true
+      }
+    }
+  ],
+  "completion_judge": {
+    "cap_reached": false,
+    "invocations": 1,
+    "max_invocations": 2,
+    "vetoes": 0
+  },
+  "completion_judge_cap_reached": false,
+  "evidence": "release-ready-marker-73",
+  "evidence_reported": true,
+  "exit_contract_met": true,
+  "explicit_exit": true,
+  "failure_bucket": "none",
+  "fallback_exit": false,
+  "inspected": true,
+  "inspection_call_ids": [
+    "call_yo23Ckslq15NLp8A9VuUYRFi"
+  ],
+  "known_cost_usd": 0.005266799999999999,
+  "max_tokens": 2048,
+  "pair": "tune-release",
+  "pass": true,
+  "provider_call_count": 6,
+  "schema": "harn.completion_claim_eval_receipt.v1",
+  "session_id": "completion-claim-tune-release-treatment-5-6bec1d48-1fcc-4cf7-a9e7-78abc85ece05",
+  "status": "done",
+  "stop_reason": "explicit_completion_claim",
+  "terminal_error": "",
+  "trial": 5,
+  "unpriced_calls": 0,
+  "usage_unknown_calls": 0
+}

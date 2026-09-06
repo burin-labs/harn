@@ -1,0 +1,361 @@
+{
+  "arm": "treatment",
+  "case_id": "tune-config-treatment-diagnostic",
+  "completion_attempts": [
+    {
+      "input": {},
+      "tool_call_id": "call_dJV9Tdh6dC0VPcytLvoAXAmE"
+    }
+  ],
+  "completion_claim_observations": [
+    {
+      "disposition": "invalid",
+      "reason": "completion_claim_evidence_ref_unresolved",
+      "schema": "harn.completion_claim_observation.v1",
+      "source": "tool"
+    },
+    {
+      "disposition": "valid",
+      "evidence_ref_count": 0,
+      "requirement_count": 0,
+      "schema": "harn.completion_claim_observation.v1",
+      "source": "implicit"
+    },
+    {
+      "disposition": "valid",
+      "evidence_ref_count": 0,
+      "requirement_count": 0,
+      "schema": "harn.completion_claim_observation.v1",
+      "source": "implicit"
+    },
+    {
+      "disposition": "valid",
+      "evidence_ref_count": 0,
+      "requirement_count": 0,
+      "schema": "harn.completion_claim_observation.v1",
+      "source": "implicit"
+    }
+  ],
+  "completion_directives": [
+    {
+      "action": "continue",
+      "admission": {
+        "admitted": true,
+        "checkpoint_name": "agent.completion_judge",
+        "deadline_reserve_ms": 5000,
+        "judge_model": "openai/gpt-5.4-mini",
+        "judge_model_source": "judge_config",
+        "operation_budget_ms": 60000,
+        "outcome": "admitted",
+        "prompt_chars": 5413,
+        "prompt_token_estimate": 1354,
+        "provider_timeout_ms": 60000,
+        "remaining_ms": null,
+        "schema": "harn.completion_judge_admission.v1"
+      },
+      "checkpoint": {
+        "_type": "typed_output_checkpoint",
+        "attempts": 1,
+        "checkpoint_attempts": 1,
+        "data": {
+          "detail": "Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the recorded read-only inspection supports completion.",
+          "gap_class": "other",
+          "verdict": "done"
+        },
+        "error": "",
+        "error_category": null,
+        "extracted_json": false,
+        "final_accepted": true,
+        "model": "openai/gpt-5.4-mini",
+        "name": "agent.completion_judge",
+        "ok": true,
+        "parse_failures": [],
+        "provider": "openrouter",
+        "raw_outputs": [
+          "{\"detail\":\"Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the recorded read-only inspection supports completion.\",\"gap_class\":\"other\",\"verdict\":\"done\"}"
+        ],
+        "raw_text": "{\"detail\":\"Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the recorded read-only inspection supports completion.\",\"gap_class\":\"other\",\"verdict\":\"done\"}",
+        "repaired": false,
+        "retries": 0,
+        "schema_failures": [],
+        "status": "accepted",
+        "trace": [
+          {
+            "attempt": 1,
+            "error": "",
+            "error_category": null,
+            "extracted_json": false,
+            "ok": true,
+            "raw_text": "{\"detail\":\"Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the recorded read-only inspection supports completion.\",\"gap_class\":\"other\",\"verdict\":\"done\"}",
+            "repaired": false,
+            "validator_errors": []
+          }
+        ],
+        "usage": {
+          "accounting_status": "reported",
+          "cache_hit_ratio": 0.0,
+          "cache_read_tokens": 0,
+          "cache_savings_usd": 0.0,
+          "cache_supported": true,
+          "cache_visibility": null,
+          "cache_write_tokens": 0,
+          "cost_usd": 0.0012795,
+          "input_tokens": 1436,
+          "known_cost_usd": 0.0012795,
+          "output_tokens": 45,
+          "projected_cost_usd": 0.0012795,
+          "provider_attempts": {
+            "empty_completion": 0,
+            "other": 0,
+            "rate_limited": 0,
+            "retries": 0,
+            "total": 1
+          },
+          "provider_call_count": 1,
+          "reported_total_tokens": 1481,
+          "served_fast": false,
+          "unpriced_calls": 0,
+          "unpriced_reason": null,
+          "unpriced_tokens": 0,
+          "usage_unknown_calls": 0
+        },
+        "validation_errors": [],
+        "validator_failures": [],
+        "version": 1
+      },
+      "completion_claim": {
+        "requirements": [],
+        "schema": "harn.completion_claim.v1",
+        "source": "implicit"
+      },
+      "converted_from": null,
+      "evidence_id": "sha256:3f1a28034ca4a293ac66804553fcf8481a963ff5bcf7d56361171ddab4d998bb",
+      "feedback_delivery": "deferred",
+      "gap_class": "failed_verification",
+      "invoked": {
+        "deterministic": false,
+        "turn_end_condition": false,
+        "verify_completion_judge": true
+      },
+      "outcome": "continue",
+      "pending_tool_batch_effect_count": 0,
+      "projection": {
+        "included_action_count": 0,
+        "included_fallback_observation_count": 1,
+        "included_read_only_call_count": 2,
+        "lifecycle_issue_count": 0,
+        "omitted_harness_authored_result_count": 0,
+        "omitted_older_action_count": 0,
+        "omitted_read_only_call_count": 0,
+        "raw_message_count": 7,
+        "raw_transcript_digest": "sha256:ad3bb3870dbfb2044ab70ffd8bc49a0ad37eddf7de298249084699b5a08b4434",
+        "relevant_call_count": 0,
+        "schema": "harn.completion_judge_evidence_projection.v1",
+        "selected_actions": [],
+        "serialized_chars": 1876
+      },
+      "reason": "completion_judge_gap_contradicts_done",
+      "requirements": null,
+      "schema": "harn.completion_directive_receipt.v1",
+      "source": "llm",
+      "trigger": "natural",
+      "verification": null
+    },
+    {
+      "action": "continue",
+      "admission": {
+        "admitted": true,
+        "checkpoint_name": "agent.completion_judge",
+        "deadline_reserve_ms": 5000,
+        "judge_model": "openai/gpt-5.4-mini",
+        "judge_model_source": "judge_config",
+        "operation_budget_ms": 60000,
+        "outcome": "admitted",
+        "prompt_chars": 5409,
+        "prompt_token_estimate": 1353,
+        "provider_timeout_ms": 60000,
+        "remaining_ms": null,
+        "schema": "harn.completion_judge_admission.v1"
+      },
+      "checkpoint": {
+        "_type": "typed_output_checkpoint",
+        "attempts": 1,
+        "checkpoint_attempts": 1,
+        "data": {
+          "detail": "Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the read-only inspect_status result is the cited basis for completion.",
+          "gap_class": "missing_artifact",
+          "verdict": "done"
+        },
+        "error": "",
+        "error_category": null,
+        "extracted_json": false,
+        "final_accepted": true,
+        "model": "openai/gpt-5.4-mini",
+        "name": "agent.completion_judge",
+        "ok": true,
+        "parse_failures": [],
+        "provider": "openrouter",
+        "raw_outputs": [
+          "{\"detail\":\"Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the read-only inspect_status result is the cited basis for completion.\",\"gap_class\":\"missing_artifact\",\"verdict\":\"done\"}"
+        ],
+        "raw_text": "{\"detail\":\"Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the read-only inspect_status result is the cited basis for completion.\",\"gap_class\":\"missing_artifact\",\"verdict\":\"done\"}",
+        "repaired": false,
+        "retries": 0,
+        "schema_failures": [],
+        "status": "accepted",
+        "trace": [
+          {
+            "attempt": 1,
+            "error": "",
+            "error_category": null,
+            "extracted_json": false,
+            "ok": true,
+            "raw_text": "{\"detail\":\"Evidence token CONFIG-READY-41 explicitly states the configuration is ready: yes, and the read-only inspect_status result is the cited basis for completion.\",\"gap_class\":\"missing_artifact\",\"verdict\":\"done\"}",
+            "repaired": false,
+            "validator_errors": []
+          }
+        ],
+        "usage": {
+          "accounting_status": "reported",
+          "cache_hit_ratio": 0.0,
+          "cache_read_tokens": 0,
+          "cache_savings_usd": 0.0,
+          "cache_supported": true,
+          "cache_visibility": null,
+          "cache_write_tokens": 0,
+          "cost_usd": 0.0014685,
+          "input_tokens": 1646,
+          "known_cost_usd": 0.0014685,
+          "output_tokens": 52,
+          "projected_cost_usd": 0.0014685,
+          "provider_attempts": {
+            "empty_completion": 0,
+            "other": 0,
+            "rate_limited": 0,
+            "retries": 0,
+            "total": 1
+          },
+          "provider_call_count": 1,
+          "reported_total_tokens": 1698,
+          "served_fast": false,
+          "unpriced_calls": 0,
+          "unpriced_reason": null,
+          "unpriced_tokens": 0,
+          "usage_unknown_calls": 0
+        },
+        "validation_errors": [],
+        "validator_failures": [],
+        "version": 1
+      },
+      "completion_claim": {
+        "requirements": [],
+        "schema": "harn.completion_claim.v1",
+        "source": "implicit"
+      },
+      "converted_from": null,
+      "evidence_id": "sha256:11c971553b671222c8643c447850e88bfe1211ddc248df64020375e6c96fe5a5",
+      "feedback_delivery": "deferred",
+      "gap_class": "other",
+      "invoked": {
+        "deterministic": false,
+        "turn_end_condition": false,
+        "verify_completion_judge": true
+      },
+      "outcome": "continue",
+      "pending_tool_batch_effect_count": 0,
+      "projection": {
+        "included_action_count": 0,
+        "included_fallback_observation_count": 1,
+        "included_read_only_call_count": 2,
+        "lifecycle_issue_count": 0,
+        "omitted_harness_authored_result_count": 0,
+        "omitted_older_action_count": 0,
+        "omitted_read_only_call_count": 0,
+        "raw_message_count": 9,
+        "raw_transcript_digest": "sha256:71046ee1e7cb2ee321eda1d0fe5073c98d22e8e455395d92e376b174aa2e0be0",
+        "relevant_call_count": 0,
+        "schema": "harn.completion_judge_evidence_projection.v1",
+        "selected_actions": [],
+        "serialized_chars": 1874
+      },
+      "reason": "completion_judge_gap_contradicts_done",
+      "requirements": null,
+      "schema": "harn.completion_directive_receipt.v1",
+      "source": "llm",
+      "trigger": "natural",
+      "verification": null
+    },
+    {
+      "action": "stop_unverified",
+      "admission": null,
+      "checkpoint": null,
+      "completion_claim": {
+        "requirements": [],
+        "schema": "harn.completion_claim.v1",
+        "source": "implicit"
+      },
+      "converted_from": null,
+      "evidence_id": "sha256:14493ce8d2ea33eea9671a388312d1e3e192f5c2e6a2c96afc09106595526e28",
+      "feedback_delivery": "none",
+      "gap_class": null,
+      "invoked": {
+        "deterministic": false,
+        "turn_end_condition": false,
+        "verify_completion_judge": false
+      },
+      "outcome": "stop_unverified",
+      "pending_tool_batch_effect_count": 0,
+      "projection": {
+        "included_action_count": 0,
+        "included_fallback_observation_count": 1,
+        "included_read_only_call_count": 2,
+        "lifecycle_issue_count": 0,
+        "omitted_harness_authored_result_count": 0,
+        "omitted_older_action_count": 0,
+        "omitted_read_only_call_count": 0,
+        "raw_message_count": 11,
+        "raw_transcript_digest": "sha256:af979592c4d9c87811272c2a8fc93a4d82135341e3404ad60ae40a9d0fe28d77",
+        "relevant_call_count": 0,
+        "schema": "harn.completion_judge_evidence_projection.v1",
+        "selected_actions": [],
+        "serialized_chars": 1874
+      },
+      "reason": "completion_judge_cap_reached",
+      "requirements": null,
+      "schema": "harn.completion_directive_receipt.v1",
+      "source": "policy",
+      "trigger": "natural",
+      "verification": null
+    }
+  ],
+  "completion_judge": {
+    "cap_reached": true,
+    "invocations": 2,
+    "max_invocations": 2,
+    "vetoes": 2
+  },
+  "completion_judge_cap_reached": true,
+  "evidence": "CONFIG-READY-41",
+  "evidence_reported": true,
+  "exit_contract_met": false,
+  "explicit_exit": false,
+  "failure_bucket": "terminal_not_done",
+  "fallback_exit": true,
+  "inspected": true,
+  "inspection_call_ids": [
+    "call_MsdLqM9pgXb8AvEU6hNGm5b3"
+  ],
+  "known_cost_usd": 0.01007685,
+  "max_tokens": 2048,
+  "pair": "tune-config",
+  "pass": false,
+  "provider_call_count": 9,
+  "schema": "harn.completion_claim_eval_receipt.v1",
+  "session_id": "completion-claim-tune-config-treatment-diagnostic-1-f2b9af1b-0087-41ec-badc-24faa3ef65ea",
+  "status": "completion_unverified",
+  "stop_reason": "completion_judge_cap_reached",
+  "terminal_error": "",
+  "trial": 1,
+  "unpriced_calls": 0,
+  "usage_unknown_calls": 0
+}
