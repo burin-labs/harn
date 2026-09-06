@@ -1443,3 +1443,62 @@ fn every_terminal_kind_agrees_with_its_typed_projection() {
         );
     }
 }
+
+/// The terminal says WHEN it was sealed, not only what it was.
+///
+/// The record already dates the run's end from this stamp, but only as
+/// `finished_at`, whose provenance a reader has to look up in `run_clock` before
+/// knowing it came from the terminal rather than from the last observed event.
+/// Carrying it on the terminal removes that join.
+///
+/// The assertion is against `finished_at` rather than a literal, because a
+/// literal would pass just as happily if both fields were wrong together. Tying
+/// them proves it is the terminal's own clock and not a second reading of it.
+#[tokio::test]
+async fn the_terminal_carries_the_moment_it_was_sealed() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, terminal("stuck", "no_progress"))
+        .await
+        .expect("append terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+
+    let sealed_at = run.metadata["terminal"]["sealed_at"]
+        .as_str()
+        .expect("a terminal must say when it was sealed");
+    assert!(!sealed_at.is_empty(), "an empty stamp is not a measurement");
+    assert_eq!(
+        Some(sealed_at),
+        run.finished_at.as_deref(),
+        "sealed_at must be the same stamp the run's end is dated from"
+    );
+    assert_eq!(
+        run.metadata["run_clock"]["finished_at_source"], "agent_run_terminal",
+        "the run's end must be sourced from the terminal for this pairing to mean anything"
+    );
+
+    // The control: a session with no terminal has no terminal block to carry a
+    // stamp, rather than one carrying an empty or invented value.
+    let bare = MemorySessionStore::default();
+    let bare_meta = bare
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    bare.append(&bare_meta.id, user_message("no terminal here"))
+        .await
+        .expect("append message");
+    let bare_run = project_run_record_from_session(&bare, &bare_meta.id)
+        .await
+        .expect("project");
+    assert!(
+        !bare_run.metadata.contains_key("terminal"),
+        "a run with no terminal must not report when one was sealed"
+    );
+}
