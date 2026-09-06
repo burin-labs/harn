@@ -2960,6 +2960,46 @@ fingerprint-stable edit still busts the entry-chunk cache for the changed
 file. `harn dev`'s contribution is the dependent-pruning half: dependents whose
 imports' fingerprints didn't move are never re-precompiled.
 
+## harn precompile
+
+Compile `.harn` sources ahead of time so a later `harn run` of the same source
+skips parse and compile.
+
+```bash
+harn precompile script.harn      # one file
+harn precompile src/             # walk a tree for every .harn file
+harn precompile src/ --out build # write artifacts to a sibling tree instead
+```
+
+Artifacts are written beside each source as `<name>.harnbc` for an entry chunk
+and `<name>.harnmod` for a module, unless `--out` redirects them.
+
+| Flag | Description |
+|---|---|
+| `--out <DIR>` | Write artifacts under `DIR`, mirroring the source tree, instead of beside each source. |
+| `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
+| `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
+
+### Regenerating artifacts, and what cannot go stale
+
+`harn precompile` is also the command that refreshes these artifacts for a
+source tree. Re-running it over the same tree rewrites every artifact from
+current source; deleting the `.harnbc` and `.harnmod` files and re-running is
+equivalent, because a missing artifact is compiled on demand.
+
+An artifact that no longer matches its source is not used. Both families are
+found by a key derived from source content, not from a timestamp: an entry
+chunk by a hash of the entry source, a module artifact by a hash of the module
+source, each combined with the Harn release and a compiler fingerprint. A
+candidate whose header does not carry the key being looked up is rejected and
+the source is compiled instead. So editing a file cannot leave a run executing
+the previous version of it, and an artifact older than the source beside it is
+not evidence that the old code ran.
+
+That is worth stating because the opposite is a natural thing to suspect. If a
+run appears to ignore an edit, the artifacts are the wrong place to look
+first; check that the edited file is the one the run actually imports.
+
 ## harn portal
 
 Launch the local Harn observability portal for persisted runs.
