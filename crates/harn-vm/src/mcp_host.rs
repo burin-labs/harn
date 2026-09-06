@@ -423,6 +423,7 @@ pub async fn spawn(spec: JsonValue, options: SpawnOptions) -> Result<String, VmE
     mcp_registry::register_servers(vec![RegisteredMcpServer {
         name: name.clone(),
         spec: spec.clone(),
+        preparation: None,
         lazy: meta.lazy,
         card: meta.card,
         keep_alive: meta.keep_alive,

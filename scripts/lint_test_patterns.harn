@@ -213,6 +213,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/hosted_worker_connectors_e2e.rs",
   "crates/harn-cli/tests/harn_cli_fast/llm_mock_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/mcp_server_cli.rs",
+  // Lazy manifest setup must prove both silent help and actual child activation.
+  "crates/harn-cli/tests/harn_cli_e2e/mcp_lazy_registration.rs",
   "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e/support.rs",
