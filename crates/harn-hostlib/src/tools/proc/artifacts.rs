@@ -547,6 +547,7 @@ fn mark_artifacts_active_under_namespace(
     Ok(())
 }
 
+#[cfg(test)]
 fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
     if let Some(dir) = artifact_dir(artifacts) {
         let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
