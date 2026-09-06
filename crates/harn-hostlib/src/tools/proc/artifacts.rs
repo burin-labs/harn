@@ -49,6 +49,12 @@ struct CompletedArtifact {
     completed_at: SystemTime,
 }
 
+#[derive(Clone, Copy)]
+enum ArtifactLeaseCleanup {
+    NamespaceHeld,
+    LeaseOnly,
+}
+
 /// Releases a newly acquired active lease unless ownership is transferred to
 /// the completed or live artifact registry. Drop deliberately does not take
 /// the namespace lock: it is the last-resort cleanup when that lock caused the
@@ -129,10 +135,7 @@ pub(crate) fn persist_artifacts(
             output_sha256: format!("sha256:{}", hex::encode(Sha256::digest(&combined))),
         })
     })();
-    let artifacts = match persisted {
-        Ok(artifacts) => artifacts,
-        Err(error) => return Err(error),
-    };
+    let artifacts = persisted?;
     register_completed_artifacts_with_guard(command_id, handle_id, &artifacts, active_lease)?;
     let current_dir = artifact_dir(&artifacts);
     maybe_sweep_stale_artifacts(current_dir.as_deref());
@@ -162,9 +165,7 @@ pub(crate) fn register_live_artifacts(
         })?;
         Ok(())
     })();
-    if let Err(error) = created {
-        return Err(error);
-    }
+    created?;
     register_artifacts(command_id, handle_id, &artifacts);
     active_lease.keep_registered();
     let current_dir = artifact_dir(&artifacts);
@@ -203,7 +204,7 @@ pub(crate) fn summarize_artifacts(
         output_sha256: format!("sha256:{}", hex::encode(Sha256::digest(&combined))),
         ..planned_artifact_paths(command_id)
     };
-    register_artifacts(command_id, handle_id, &artifacts);
+    register_fallback_artifacts(command_id, handle_id, &artifacts);
     artifacts
 }
 
@@ -303,12 +304,58 @@ pub(crate) fn live_artifact_tail(
 
 fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &CommandArtifacts) {
     let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
+    register_artifact_aliases(&mut store, command_id, handle_id, artifacts);
+}
+
+fn register_artifact_aliases(
+    store: &mut ArtifactRegistry,
+    command_id: &str,
+    handle_id: Option<&str>,
+    artifacts: &CommandArtifacts,
+) {
     store
         .by_id
         .insert(command_id.to_string(), artifacts.clone());
     if let Some(handle_id) = handle_id {
         store.by_id.insert(handle_id.to_string(), artifacts.clone());
     }
+}
+
+fn register_fallback_artifacts(
+    command_id: &str,
+    handle_id: Option<&str>,
+    artifacts: &CommandArtifacts,
+) {
+    let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
+    register_completed_artifacts_in_store(
+        &mut store,
+        command_id,
+        handle_id,
+        artifacts,
+        max_artifact_dirs(),
+        ArtifactLeaseCleanup::LeaseOnly,
+    );
+}
+
+fn register_completed_artifacts_in_store(
+    store: &mut ArtifactRegistry,
+    command_id: &str,
+    handle_id: Option<&str>,
+    artifacts: &CommandArtifacts,
+    max_dirs: usize,
+    lease_cleanup: ArtifactLeaseCleanup,
+) {
+    register_artifact_aliases(store, command_id, handle_id, artifacts);
+    let Some(dir) = artifact_dir(artifacts) else {
+        return;
+    };
+    if !store.completed.iter().any(|entry| entry.path == dir) {
+        store.completed.push_back(CompletedArtifact {
+            path: dir,
+            completed_at: SystemTime::now(),
+        });
+    }
+    retire_completed_artifacts(store, max_dirs, None, lease_cleanup);
 }
 
 fn register_completed_artifacts_with_guard(
@@ -354,19 +401,14 @@ fn register_completed_artifacts_with_options(
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
     with_artifact_namespace_lock(temp_dir, timeout, || {
         let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
-        store
-            .by_id
-            .insert(command_id.to_string(), artifacts.clone());
-        if let Some(handle_id) = handle_id {
-            store.by_id.insert(handle_id.to_string(), artifacts.clone());
-        }
-        if !store.completed.iter().any(|entry| entry.path == dir) {
-            store.completed.push_back(CompletedArtifact {
-                path: dir.clone(),
-                completed_at: SystemTime::now(),
-            });
-        }
-        retire_completed_artifacts_under_namespace(&mut store, max_dirs, None);
+        register_completed_artifacts_in_store(
+            &mut store,
+            command_id,
+            handle_id,
+            artifacts,
+            max_dirs,
+            ArtifactLeaseCleanup::NamespaceHeld,
+        );
         Ok(())
     })
 }
@@ -375,6 +417,20 @@ fn retire_completed_artifacts_under_namespace(
     store: &mut ArtifactRegistry,
     max_dirs: usize,
     expired_before: Option<SystemTime>,
+) {
+    retire_completed_artifacts(
+        store,
+        max_dirs,
+        expired_before,
+        ArtifactLeaseCleanup::NamespaceHeld,
+    );
+}
+
+fn retire_completed_artifacts(
+    store: &mut ArtifactRegistry,
+    max_dirs: usize,
+    expired_before: Option<SystemTime>,
+    lease_cleanup: ArtifactLeaseCleanup,
 ) {
     loop {
         let over_limit = max_dirs != 0 && store.completed.len() > max_dirs;
@@ -390,7 +446,17 @@ fn retire_completed_artifacts_under_namespace(
         store
             .by_id
             .retain(|_, artifacts| artifact_dir(artifacts).as_ref() != Some(&retired.path));
-        mark_artifact_dir_inactive_under_namespace(&retired.path);
+        match lease_cleanup {
+            ArtifactLeaseCleanup::NamespaceHeld => {
+                mark_artifact_dir_inactive_under_namespace(&retired.path);
+            }
+            ArtifactLeaseCleanup::LeaseOnly => {
+                // A persistence failure can itself be caused by namespace-lock
+                // contention. Bound the process registry immediately and leave
+                // the unlocked marker for a later namespace sweep to remove.
+                release_artifact_lease(&retired.path);
+            }
+        }
     }
 }
 
@@ -1066,6 +1132,40 @@ mod tests {
         assert!(active.contains_key(&second_dir));
         drop(active);
         mark_artifacts_inactive(&second);
+    }
+
+    #[test]
+    fn fallback_registration_uses_the_same_bounded_alias_fifo() {
+        let temp = tempdir().unwrap();
+        let first_dir = artifact_dir(temp.path(), std::process::id(), 500, 1);
+        let second_dir = artifact_dir(temp.path(), std::process::id(), 500, 2);
+        let first = artifacts_in(&first_dir);
+        let second = artifacts_in(&second_dir);
+        let mut store = ArtifactRegistry::default();
+
+        register_completed_artifacts_in_store(
+            &mut store,
+            "fallback-command-first",
+            Some("fallback-handle-first"),
+            &first,
+            1,
+            ArtifactLeaseCleanup::LeaseOnly,
+        );
+        register_completed_artifacts_in_store(
+            &mut store,
+            "fallback-command-second",
+            Some("fallback-handle-second"),
+            &second,
+            1,
+            ArtifactLeaseCleanup::LeaseOnly,
+        );
+
+        assert!(!store.by_id.contains_key("fallback-command-first"));
+        assert!(!store.by_id.contains_key("fallback-handle-first"));
+        assert!(store.by_id.contains_key("fallback-command-second"));
+        assert!(store.by_id.contains_key("fallback-handle-second"));
+        assert_eq!(store.completed.len(), 1);
+        assert_eq!(store.completed.front().unwrap().path, second_dir);
     }
 
     #[test]
