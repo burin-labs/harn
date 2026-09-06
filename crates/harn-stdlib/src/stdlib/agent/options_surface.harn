@@ -58,14 +58,19 @@ fn __option_schema_branches(node: any) -> list<any> {
  * @errors: []
  */
 fn __option_declared_keys(node: any) -> list<string> {
-  let names = []
+  // Concatenate whole key lists rather than appending one name at a time. The
+  // element-wise version was quadratic in the number of declared keys and cost
+  // 82ms per `agent_loop_options` call, on a path every sub-agent, worker and
+  // workflow stage takes.
+  let names: list<string> = []
   for branch in __option_schema_branches(node) {
     const properties = branch?.properties
     if type_of(properties) == "dict" {
-      for name in keys(properties) {
-        names = names + [name]
-      }
+      names = names + keys(properties)
     }
+  }
+  if len(names) == 0 {
+    return names
   }
   return unique(names)
 }
@@ -96,11 +101,6 @@ fn __option_child_schema(node: any, key: string) -> any {
 /**
  * Every declared option path, as `[key, dotted path]` pairs.
  *
- * This is what makes a wrong-depth key debuggable. Knowing that
- * `requirement_contract` is not a top-level option does not tell a caller
- * that it belongs on the judge config, and the wrong-depth case is the one
- * that cannot be worked out from a rejection alone.
- *
  * @effects: []
  * @errors: []
  */
@@ -125,6 +125,8 @@ fn __option_paths(node: any, path: string) -> list<list<string>> {
  * @errors: []
  */
 fn __option_key_accepted_elsewhere(key: string, at_path: string) -> string {
+  // Only reached on a rejection, which ends the run, so this walk of the whole
+  // declared surface is off the hot path.
   let elsewhere = []
   for pair in __option_paths(schema_of(AgentPresetOptions), "") {
     const name = to_string(pair[0])
@@ -198,6 +200,9 @@ fn __check_option_keys(value: any, node: any, path: string) {
  * @effects: []
  * @errors: [ValueError]
  */
-pub fn __validate_agent_loop_option_keys(opts: dict) {
+pub fn __validate_agent_loop_option_keys(opts: any) {
+  if type_of(opts) != "dict" {
+    return
+  }
   __check_option_keys(opts, schema_of(AgentPresetOptions), "")
 }
