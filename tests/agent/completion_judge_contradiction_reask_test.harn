@@ -434,3 +434,148 @@ pipeline test_contradiction_conversion_needs_a_declared_oracle(harness: Harness,
     "but a declared verifier that passed still overrules it after the re-ask",
   )
 }
+
+// -------------------------------------------------------------------------------------------------
+
+// harn#8193 and the code-explore judge-cap cells. The re-ask half above landed;
+// the ACTOR-facing half did not. This file's own preamble names the symptom —
+// "the actor was handed the judge's own 'the work is finished' text as its next
+// step" — and then pins only the re-ask and the arbitration. These three close
+// the gap the preamble described.
+
+// -------------------------------------------------------------------------------------------------
+
+/** Every `verify_completion` feedback string the loop actually injected. */
+fn __verify_feedback(events: unknown) -> list<string> {
+  return events.filter(
+    { event -> event.type == "feedback_injected" && event?.kind == "verify_completion" },
+  )
+    .map({ event -> to_string(event?.content ?? "") })
+    .to_list()
+}
+
+/** Every canonical judge decision, in order. */
+fn __judge_decisions(events: unknown) {
+  return events.filter({ event -> event.type == "judge_decision" }).to_list()
+}
+
+pipeline test_a_vetoed_done_is_not_told_it_is_done(harness: Harness, task: unknown) {
+  // THE FALSIFIER, from the archived code-explore cells. A named gap survives
+  // its re-ask, so the refusal stands and the actor is fed. What it must not be
+  // fed is the judge's own rationale for finishing, which is what the loop sent
+  // on five consecutive iterations: the same sentence each time, indistinguish-
+  // able from an approval, one tool call across seven turns, cap reached.
+  const captured = __run(
+    harness,
+    "contradiction-feedback-names-the-condition",
+    [
+      llm_done(),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  const feedback = __verify_feedback(captured.events)
+  assert(len(feedback) >= 1, "a standing refusal must feed the actor something")
+  // The falsifier proper. Before the fix EVERY one of these was the judge's own
+  // rationale for finishing; the assertion is over all of them because one
+  // surviving copy is enough to tell the actor it is done.
+  for message in feedback {
+    assert(
+      !contains(message, "The required verifier passed all 3 tests"),
+      "the veto handed back the judge's own DONE rationale, so it reads as an "
+        + "approval and the actor has nothing to act on: "
+        + message,
+    )
+  }
+  // And the veto has to actually say what is unmet, not merely avoid saying the
+  // wrong thing. Scoped to at least one message because the loop also injects
+  // feedback on paths this fix does not own.
+  assert(
+    len(feedback.filter({ message -> contains(message, "outstanding gap") }).to_list()) >= 1,
+    "no injected feedback named the condition the veto found unmet: "
+      + json_stringify(feedback),
+  )
+}
+
+pipeline test_the_veto_feedback_is_not_merely_suppressed(harness: Harness, task: unknown) {
+  // THE DIRECTION CONTROL. Emitting nothing would satisfy the assertions above
+  // by removing the evidence rather than fixing it, and a silent veto is the
+  // same non-advancing loop with less to read. Every refusal still speaks.
+  const captured = __run(
+    harness,
+    "contradiction-feedback-not-suppressed",
+    [
+      llm_done(),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  for message in __verify_feedback(captured.events) {
+    assert(trim(message) != "", "a refusal that says nothing cannot advance the loop either")
+  }
+}
+
+pipeline test_an_override_does_not_wear_the_judges_name(harness: Harness, task: unknown) {
+  // harn#8193. The record used to report `source: "llm"` on a verdict the model
+  // never gave, and carried no field holding what it did give. One archived cell
+  // reported the judge's final verdict as `done` while all five of its canonical
+  // decisions read `continue`.
+  const captured = __run(
+    harness,
+    "override-names-its-author",
+    [
+      llm_done(),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      __judge_done_with_gap("unresolved_authorization"),
+      llm_done(),
+    ],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  // Only the model judge's decisions carry the pair. The deterministic gate
+  // also emits a `judge_decision`, with `source: "deterministic"` and no judge
+  // answer of its own, and reading that row as an override is how this test
+  // failed the first time I wrote it.
+  const decisions = __judge_decisions(captured.events).filter(
+    { decision -> decision?.judge_verdict != nil },
+  )
+    .to_list()
+  assert(len(decisions) >= 1, "the model judge must have been asked at least once")
+  let saw_override = false
+  for decision in decisions {
+    if decision?.verdict != decision?.judge_verdict {
+      saw_override = true
+      assert_eq(decision?.judge_verdict, "done")
+      assert_eq(decision?.verdict, "continue")
+      assert_eq(
+        decision?.source,
+        "gate",
+        "an overridden verdict must name the gate as its author, not the model",
+      )
+      assert_eq(decision?.override?.party, "gate")
+      assert_eq(decision?.override?.rule, "completion_judge_gap_contradicts_done")
+    } else {
+      assert_eq(
+        decision?.source,
+        "llm",
+        "a verdict the judge actually gave must still be sourced to the judge",
+      )
+    }
+  }
+  assert(saw_override, "this fixture must actually exercise an override, or it proves nothing")
+}

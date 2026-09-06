@@ -38,6 +38,15 @@ pub type CompletionStageVerdict = {
   reasoning?: string,
   next_step?: string,
   source?: string,
+  // The judge's own answer, and the party that produced it. `verdict` and
+  // `source` above describe the answer of RECORD, which an override may have
+  // authored; these two stay the model's, so a reader can tell the two apart
+  // and arbitration can still find a model refusal after a conversion.
+  judge_verdict?: string?,
+  judge_source?: string?,
+  // Typed conversion record: the overriding party and the rule it applied.
+  // Absent when the verdict of record is the judge's own.
+  override?: dict?,
   trigger?: string?,
   reason?: string?,
   gap_class?: CompletionJudgeGapClass?,
@@ -107,7 +116,14 @@ pub fn __completion_arbitrate_verification(
   verdict: CompletionStageVerdict,
   evaluation: CompletionPolicyEvaluation,
 ) -> CompletionStageVerdict {
-  if !verdict.vetoed || verdict.source != "llm" {
+  // Reads `judge_source`, the party that produced the judge's own answer, not
+  // `source`, which names the author of the verdict of record and therefore
+  // reads "gate" on exactly the overridden decisions this arbitration exists
+  // to reconsider. Falls back to `source` for a verdict built before the pair
+  // existed, so an older shape keeps its previous behaviour rather than
+  // silently ceasing to arbitrate.
+  const judged_by = to_string(verdict?.judge_source ?? verdict.source ?? "")
+  if !verdict.vetoed || judged_by != "llm" {
     return verdict
   }
   if !__completion_arbitration_converts(
@@ -155,7 +171,14 @@ pub fn __completion_arbitrate_contradiction(
   verdict: CompletionStageVerdict,
   evaluation: CompletionPolicyEvaluation,
 ) -> CompletionStageVerdict {
-  if !verdict.vetoed || verdict.source != "llm" {
+  // Reads `judge_source`, the party that produced the judge's own answer, not
+  // `source`, which names the author of the verdict of record and therefore
+  // reads "gate" on exactly the overridden decisions this arbitration exists
+  // to reconsider. Falls back to `source` for a verdict built before the pair
+  // existed, so an older shape keeps its previous behaviour rather than
+  // silently ceasing to arbitrate.
+  const judged_by = to_string(verdict?.judge_source ?? verdict.source ?? "")
+  if !verdict.vetoed || judged_by != "llm" {
     return verdict
   }
   if to_string(verdict.reason ?? "") != "completion_judge_gap_contradicts_done" {

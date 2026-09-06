@@ -80,6 +80,11 @@ fn judge_decision_round_trips_through_jsonl_sink() {
         converted_from: None,
         escalation_recommended: Some(true),
         escalation_target: Some("frontier".into()),
+        judge_verdict: None,
+        judge_override: None,
+        gap_class: None,
+        judge_outcome: None,
+        terminal_evidence_preserved: None,
     });
     sink.flush().unwrap();
 
@@ -101,6 +106,11 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             converted_from,
             escalation_recommended,
             escalation_target,
+            judge_verdict: None,
+            judge_override: None,
+            gap_class: None,
+            judge_outcome: None,
+            terminal_evidence_preserved: None,
         } => {
             assert_eq!(session_id, "s");
             assert_eq!(iteration, 2);
@@ -155,6 +165,11 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         converted_from: None,
         escalation_recommended: None,
         escalation_target: None,
+        judge_verdict: None,
+        judge_override: None,
+        gap_class: None,
+        judge_outcome: None,
+        terminal_evidence_preserved: None,
     });
 
     let text = std::fs::read_to_string(&path).unwrap();
