@@ -1,6 +1,6 @@
 name: Publish release
 
-# Fires on three triggers:
+# Fires on two triggers:
 #
 #   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
 #      bump-fleet watcher creates the tag only after the exact Release PR
@@ -10,22 +10,7 @@ name: Publish release
 #      The tag push (under the harn-release-bot App identity) also
 #      cascades to build-release-binaries.yml for tarballs + container.
 #
-#   2. push to main — no-op/self-heal only. A release whose Cargo.toml
-#      version is ahead of the latest `vX.Y.Z` tag must already have a
-#      matching `vX.Y.Z` tag at the bumping commit. The one EXPECTED
-#      exception is the release-commit transient: the `Release vX.Y.Z`
-#      commit lands on main a few seconds before the signed `vX.Y.Z` tag
-#      is pushed at that same commit, so for that brief window the version
-#      is ahead with no matching tag yet. When HEAD is the genuine
-#      `Release vX.Y.Z` commit for the current version, this run is a
-#      clean no-op (drift=false, exit 0) and waits for the tag push to
-#      publish — it does NOT turn main red. If the version is ahead with
-#      no matching tag and HEAD is NOT that release commit, the workflow
-#      still fails loudly instead of tagging main HEAD. That keeps
-#      main-anchored publishing mandatory, while a stray version bump without
-#      a tag is still caught.
-#
-#   3. workflow_dispatch — manual recovery for the partial-failure case
+#   2. workflow_dispatch — manual recovery for the partial-failure case
 #      (tag pushed but crates.io publish was incomplete). With no
 #      drift, dispatch checks out the existing release tag so crates.io,
 #      release notes, and the git tag stay tied to the same commit.
@@ -44,7 +29,6 @@ name: Publish release
 # `reaudit: true`) to opt back in for paranoid local runs.
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -88,19 +72,8 @@ permissions:
   contents: read
 
 concurrency:
-  # Scope by ref so a tag-push run does not contend with concurrent
-  # main-push runs from the same release commit (or vice versa). Without
-  # the ref scope a queued tag-push run could sit behind a long main-push
-  # detect-drift and be silently skipped if the GHA queue policy decides
-  # the queued run is stale — see harn#2547 for the v0.8.47 incident
-  # where the tag-push run was cancelled before reaching the publish
-  # step. Different `group` values run concurrently; crates.io
-  # publication is already idempotent (release_ship.sh skips
-  # already-published crates), and the tag-push and main-push paths can
-  # only ever publish the same version once anyway (the tag-push branch
-  # publishes from the merged-main tag commit; the main-push branch only
-  # publishes when Cargo.toml is *ahead* of the latest tag, which by
-  # definition is a different version).
+  # Scope by ref so tag publication and manual recovery do not evict each
+  # other. Publication is idempotent and always anchored to a release tag.
   group: publish-release-${{ github.ref_name }}
   cancel-in-progress: false
 
