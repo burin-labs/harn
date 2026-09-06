@@ -1443,16 +1443,10 @@ fn every_terminal_kind_agrees_with_its_typed_projection() {
     }
 }
 
-/// The terminal says WHEN it was sealed, not only what it was.
-///
-/// The record already dates the run's end from this stamp, but only as
-/// `finished_at`, whose provenance a reader has to look up in `run_clock` before
-/// knowing it came from the terminal rather than from the last observed event.
-/// Carrying it on the terminal removes that join.
-///
-/// The assertion is against `finished_at` rather than a literal, because a
-/// literal would pass just as happily if both fields were wrong together. Tying
-/// them proves it is the terminal's own clock and not a second reading of it.
+/// The terminal carries its own seal time, so a reader no longer joins
+/// `finished_at` through `run_clock` to learn it came from the terminal.
+/// Asserting against `finished_at` rather than a literal ties the two clocks,
+/// so both being wrong together cannot pass.
 #[tokio::test]
 async fn the_terminal_carries_the_moment_it_was_sealed() {
     let store = MemorySessionStore::default();
