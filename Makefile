@@ -540,7 +540,7 @@ lint-harn:
 	tmp=$$(mktemp); \
 	find crates/harn-stdlib/src/stdlib -name '*.harn' -print0 | xargs -0 "$$harn_bin" lint > "$$tmp" 2>&1 || true; \
 	if grep -q 'HARN-STD-101' "$$tmp"; then \
-		grep -E 'HARN-STD-101|^crates/' "$$tmp" | head -40; \
+		grep -E 'HARN-STD-101' -B1 "$$tmp" | grep -v 'no issues found' | head -40; \
 		rm -f "$$tmp"; \
 		echo "HARN-STD-101 warnings found above — fix or backfill (see scripts/backfill_stdlib_metadata.harn)"; \
 		exit 1; \

@@ -23,7 +23,7 @@ fn define_failing_tool(tools: any, name: string, message: string) {
       },
       parameters: {},
       returns: {type: "string"},
-      annotations: {kind: "read"},
+      annotations: {kind: "read", completion_evidence_role: "verification"},
     },
   )
 }
