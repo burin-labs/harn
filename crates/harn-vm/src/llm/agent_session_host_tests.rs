@@ -730,6 +730,20 @@ fn initial_user_content_falls_back_to_text_message() {
 }
 
 #[test]
+fn initial_message_content_does_not_override_the_initial_message() {
+    let mut opts = crate::value::DictMap::new();
+    opts.insert(
+        crate::value::intern_key("initial_message_content"),
+        VmValue::String("retired alias".into()),
+    );
+
+    assert_eq!(
+        initial_user_content(&opts, "hello"),
+        serde_json::Value::String("hello".to_string())
+    );
+}
+
+#[test]
 fn tool_results_use_one_durable_shape_for_every_provider() {
     for (channel, id, expected_role, ok) in [
         (

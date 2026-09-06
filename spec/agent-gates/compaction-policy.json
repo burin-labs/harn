@@ -96,7 +96,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
-        "line": 328,
+        "line": 326,
         "reader": "compaction_policy"
       },
       {
