@@ -11,6 +11,8 @@ use super::process_test_support::ProcessTestChild;
 
 const PROCESS_TEST_ROOT: &str = "HARN_SESSION_LEASE_PROCESS_TEST_ROOT";
 const PROCESS_TEST_ACTION: &str = "HARN_SESSION_LEASE_PROCESS_TEST_ACTION";
+const PROCESS_TEST_DATABASE: &str = "HARN_SESSION_LEASE_PROCESS_TEST_DATABASE";
+const PROCESS_TEST_CHANGED_CWD: &str = "HARN_SESSION_LEASE_PROCESS_TEST_CHANGED_CWD";
 
 #[test]
 fn lease_process_child() {
@@ -39,6 +41,34 @@ fn lease_process_child() {
         }
         action => panic!("unknown child action {action}"),
     }
+}
+
+#[tokio::test]
+async fn cwd_store_process_child() {
+    let Some(database) = std::env::var_os(PROCESS_TEST_DATABASE) else {
+        return;
+    };
+    let changed_cwd = std::env::var_os(PROCESS_TEST_CHANGED_CWD).expect("changed cwd");
+    let store = SqliteSessionStore::open(Path::new(&database)).expect("child ordinary store");
+    std::env::set_current_dir(&changed_cwd).expect("change child cwd");
+    println!("READY");
+    std::io::stdout().flush().expect("flush ready signal");
+    std::io::stdin()
+        .read_exact(&mut [0_u8; 1])
+        .expect("read mutation signal");
+
+    let error = store
+        .create(CreateSession::default())
+        .await
+        .expect_err("maintenance must exclude mutation after cwd changes");
+    assert!(matches!(
+        error,
+        StoreError::Contention {
+            kind: StoreContention::MaintenanceActive,
+            ..
+        }
+    ));
+    println!("CONTENDED");
 }
 
 #[test]
@@ -82,6 +112,34 @@ fn killed_writer_releases_its_project_lease() {
 
     SessionMaintenanceLease::try_acquire(root.path())
         .expect("the operating system releases a killed writer's lease");
+}
+
+#[test]
+fn mutation_lock_domain_survives_cwd_change() {
+    for relative_open in [true, false] {
+        let root = tempfile::tempdir().expect("store root");
+        let changed_cwd = root.path().join("changed-cwd");
+        std::fs::create_dir(&changed_cwd).expect("changed cwd directory");
+        let database = root.path().join("session-store.sqlite");
+        let child_database = if relative_open {
+            Path::new("session-store.sqlite")
+        } else {
+            database.as_path()
+        };
+        let mut child = ProcessTestChild::spawn("cwd_store_process_child", |command| {
+            command
+                .current_dir(root.path())
+                .env(PROCESS_TEST_DATABASE, child_database)
+                .env(PROCESS_TEST_CHANGED_CWD, &changed_cwd);
+        });
+        child.wait_for("READY");
+
+        let _maintenance =
+            SqliteSessionStore::open_for_maintenance(&database).expect("parent maintenance store");
+        child.send(b"mutate\n");
+        child.wait_for("CONTENDED");
+        child.wait_success();
+    }
 }
 
 #[tokio::test]

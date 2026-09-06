@@ -157,7 +157,7 @@ impl SqliteSessionStore {
     }
 
     pub fn open_with_hooks(path: impl AsRef<Path>, hooks: StoreHooks) -> StoreResult<Self> {
-        let path = path.as_ref().to_path_buf();
+        let path = stable_file_path(path.as_ref())?;
         let store_dir = store_directory(&path);
         let _initialization_lease = SessionMutationLease::try_acquire(&store_dir)
             .map_err(|error| map_lease(error, StoreContention::MaintenanceActive))?;
@@ -186,7 +186,7 @@ impl SqliteSessionStore {
         path: impl AsRef<Path>,
         hooks: StoreHooks,
     ) -> StoreResult<Self> {
-        let path = path.as_ref().to_path_buf();
+        let path = stable_file_path(path.as_ref())?;
         let store_dir = store_directory(&path);
         let lease = SessionMaintenanceLease::try_acquire(&store_dir)
             .map_err(|error| map_lease(error, StoreContention::ProjectLeaseHeld))?;
@@ -236,6 +236,11 @@ impl SqliteSessionStore {
         })
     }
 
+    /// Stable database path retained by this handle.
+    ///
+    /// Writable file-backed stores resolve relative input when they open so a
+    /// later process-wide current-directory change cannot move their lock
+    /// domain away from the already-open SQLite database.
     pub fn path(&self) -> &Path {
         &self.inner.path
     }
@@ -271,6 +276,10 @@ impl SqliteSessionStore {
             }
         }
     }
+}
+
+fn stable_file_path(path: &Path) -> StoreResult<PathBuf> {
+    std::path::absolute(path).map_err(|error| StoreError::Backend(error.to_string()))
 }
 
 fn store_directory(path: &Path) -> PathBuf {
