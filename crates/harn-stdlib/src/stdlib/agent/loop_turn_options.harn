@@ -3,7 +3,9 @@ import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
+import { __agent_stall_verification_dispatch } from "std/agent/stall_checkpoint"
 import { AgentStallState } from "std/agent/stall_types"
+import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
 pub import { __turn_end_judge_hit } from "std/agent/turn_end"
 
 pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_information_gain: bool}
@@ -30,8 +32,8 @@ pub type AgentIterationInfo = {
 }
 
 /**
- * Fold the two stall signals that become authoritative only after dispatch:
- * exact observation recurrence and completed read-only actuation.
+ * Fold observations and caller progress once after dispatch completes, before
+ * the checkpoint is exposed to a callback or returned across a stage boundary.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -65,7 +67,18 @@ pub fn __agent_loop_completed_dispatch_stall(args: dict) -> AgentLoopCompletedDi
           ),
       ),
     }
-  return {state: state, no_information_gain: completed.no_information_gain}
+  const progressed = __agent_stall_fold_verify_state(
+    state,
+    args.stall_config,
+    {
+      dispatch: args.dispatch,
+      verification_dispatch: __agent_stall_verification_dispatch(args.dispatch, args.turn_opts),
+      iteration: args.iteration,
+      session_id: args.session_id,
+    },
+    __turn_made_edit(args.dispatch, args.turn_opts?.tools),
+  )
+  return {state: progressed, no_information_gain: completed.no_information_gain}
 }
 
 pub fn __sync_tool_search_state(opts: any, turn_opts: dict) {

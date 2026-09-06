@@ -1,0 +1,117 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_tool_call, with_llm_script } from "std/testing"
+
+pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: Harness) {
+  const sid = harness.agent.open()
+  let handlers = []
+  let observed = []
+  let checkpoint = nil
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Verify source",
+    {
+      parameters: {failures: {type: "int"}},
+      annotations: {kind: "verify", completion_evidence_role: "verification"},
+      handler: { args ->
+        handlers = handlers + [args.failures]
+        return agent_tool_handler_result(
+          "Opaque verification output",
+          {
+            failures: args.failures,
+            run_outcome: {
+              command_status: args.failures == 0 ? "completed" : "failed",
+              exit_code: args.failures == 0 ? 0 : 1,
+            },
+          },
+        )
+      },
+    },
+  )
+  const registry = tool_define(
+    tools,
+    "look",
+    "Read source",
+    {
+      parameters: {path: {type: "string"}},
+      annotations: {kind: "read"},
+      handler: { args ->
+        handlers = handlers + [args.path]
+        return "source"
+      },
+    },
+  )
+  const progress = { payload ->
+    require payload.session_id == sid, "the callback must belong to the executing session"
+    require len(payload.dispatch) == 1, "only an actual completed dispatch supplies progress"
+    const verifications = payload.verification_dispatch
+    const value = if len(verifications) == 0 {
+      nil
+    } else {
+      require verifications[0].data.failures != nil, "progress must come from the reached producer"
+      -verifications[0].data.failures
+    }
+    observed = observed + [value]
+    return value
+  }
+  for step in [
+    {name: "verify", args: {failures: 3}, high: -3, flat: 0},
+    {name: "look", args: {path: "a.txt"}, high: -3, flat: 1},
+    {name: "verify", args: {failures: 1}, high: -1, flat: 0},
+    {name: "verify", args: {failures: 0}, high: 0, flat: 0},
+  ] {
+    const before = len(observed)
+    const result = with_llm_script(
+      harness.llm,
+      [llm_tool_call(step.name, step.args)],
+      { ->
+        agent_loop(
+          harness,
+          "Continue",
+          nil,
+          {
+            provider: "mock",
+            session_id: sid,
+            tools: registry,
+            tool_format: "native",
+            max_iterations: 1,
+            stall_checkpoint: checkpoint,
+            post_turn_callback: { info ->
+              require len(observed) == len(handlers),
+                "completed progress must be visible before product post-turn effects"
+              require info.stall_checkpoint.state.verify_state_high == step.high,
+                "the product callback must receive the same final progress checkpoint"
+              return nil
+            },
+            stall_diagnostics: {
+              enabled: true,
+              progress_signal: progress,
+              repeat_same_error: 99,
+              repeat_same_observation: 99,
+              repeat_success: 99,
+              hard_stop_after_trips: 99,
+              ping_pong_cycles: 99,
+            },
+          },
+        )
+      },
+    )
+    checkpoint = result.stall_checkpoint
+    require len(observed) == before + 1 && len(handlers) == len(observed),
+      "hydration and each real dispatch must invoke the callback exactly once"
+    require checkpoint.state.verify_state_high == step.high,
+      "a final pending dispatch must expose its progress before another stage starts"
+    require checkpoint.state.verify_turns_since_advance == step.flat,
+      "flat reads and improving verification must advance the canonical counter correctly"
+    const projected = agent_stall_checkpoint_state(harness.agent, checkpoint)
+    require projected.verify_state_high == step.high && len(observed) == before + 1,
+      "checkpoint projection must preserve progress without invoking the callback again"
+    require projected.failing_verify_turns == (step.high == 0 ? 0 : step.high == -1 ? 2 : 1),
+      "progress folding must preserve pending diagnostic evidence and clean verification reset"
+  }
+  require handlers == [3, "a.txt", 1, 0] && observed == [-3, nil, -1, 0],
+    "every expected handler and supplied evidence must reach the canonical lifetime"
+  harness.agent.close(sid)
+}

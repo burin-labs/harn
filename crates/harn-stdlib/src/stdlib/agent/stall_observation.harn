@@ -1285,6 +1285,8 @@ pub fn __agent_stall_observe_monologue_actuation(
  * in execution order. Its empty default supplies no verification evidence;
  * raw `prev_dispatch` remains the action/repetition input, never a passing check.
  * `diagnostic_consumed` prevents committing the same dispatch twice on resume.
+ * The canonical loop sets `observe_progress` false because completed-dispatch
+ * intake already folded that callback before exposing its checkpoint.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -1306,6 +1308,7 @@ pub fn agent_stall_observe_tool_calls(
   payload: any = nil,
   diagnostic_consumed: bool = false,
   verification_dispatch: list = [],
+  observe_progress: bool = true,
 ) -> AgentStallObservation {
   const observation = __agent_stall_observe_core(
     agent,
@@ -1356,7 +1359,7 @@ pub fn agent_stall_observe_tool_calls(
     defer_feedback,
   )
   let resolved = signaled
-  if observation.config.progress_signal != nil {
+  if observe_progress && observation.config.progress_signal != nil {
     resolved = resolved
       + {
         state: __agent_stall_fold_verify_state(

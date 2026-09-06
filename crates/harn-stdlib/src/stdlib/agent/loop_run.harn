@@ -336,6 +336,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           },
           stall_checkpoint.consumed_dispatch_position == stall_checkpoint.dispatch_position,
           stall_checkpoint.verification_dispatch,
+          false,
         )
         stall_state = stall_observation.state
         stall_checkpoint = stall_checkpoint
