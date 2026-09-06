@@ -58,7 +58,14 @@ pipeline test_completed_text_turns_preserve_the_write_axis_stop(harness: Harness
           loop_until_done: true,
           done_sentinel: "TASK_DONE",
           max_nudges: 99,
-          iteration_budget: {mode: "adaptive", initial: 4, max: 8, extend_by: 4},
+          iteration_budget: {
+            mode: "adaptive",
+            initial: 4,
+            max: 8,
+            extend_by: 4,
+            progress_window: 1,
+            expose_decisions: true,
+          },
           stall_diagnostics: {
             enabled: true,
             no_verifier_progress_limit: 3,
