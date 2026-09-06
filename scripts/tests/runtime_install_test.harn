@@ -22,6 +22,21 @@ type InstallReceipt = {
   binary_path: string,
 }
 
+/**
+ * Assert that a path is genuinely absent.
+ *
+ * `fs.exists` renders a sandbox scope denial as `false`, so `assert(!exists)`
+ * passes for a path the test was merely forbidden to look at. Every absence
+ * this file asserts is load-bearing: it is how the tests prove a rejected
+ * download left no cache or install state behind. `fs.status` names the
+ * denial instead of collapsing it into absence, so a denied path fails here
+ * and says which status it actually saw.
+ */
+fn assert_missing(fs: HarnessFs, path: string) {
+  const state = to_string(fs.status(path)?.status ?? "unknown")
+  assert_eq(state, "missing", "expected " + path + " to be absent, saw status " + state)
+}
+
 fn fixture(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("runtime-install-")
   const platform = harness.system.platform()
@@ -254,7 +269,7 @@ pipeline online_manifest_and_digest_pins_preserve_exact_release_integrity(
       },
     ),
   )
-  assert(!harness.fs.exists(f.plan.metadata_path))
+  assert_missing(harness.fs, f.plan.metadata_path)
   assert_eq(harness.fs.read_text(pinned.binary_path), "runtime fixture")
 }
 
@@ -281,8 +296,8 @@ pipeline mismatching_download_never_becomes_cache_or_install_state(
   assert(is_err(failure))
   const detail = to_string(unwrap_err(failure))
   assert(detail.contains("SHA256 mismatch"), "unexpected failure: " + detail)
-  assert(!harness.fs.exists(f.plan.archive_path))
-  assert(!harness.fs.exists(f.request.install_dir))
+  assert_missing(harness.fs, f.plan.archive_path)
+  assert_missing(harness.fs, f.request.install_dir)
   assert_eq(len(harness.testing.http_mock_calls()), 2)
 }
 
@@ -304,5 +319,5 @@ pipeline absent_release_exhausts_bounded_sources_without_inventing_success(
   assert(is_err(failure))
   assert(to_string(unwrap_err(failure)).contains("release v0.10.999 is absent"))
   assert_eq(len(harness.testing.http_mock_calls()), 2)
-  assert(!harness.fs.exists(f.request.install_dir))
+  assert_missing(harness.fs, f.request.install_dir)
 }
