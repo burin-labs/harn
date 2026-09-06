@@ -267,6 +267,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/stall_observation" => "stdlib/agent/stall_observation.harn",
     "agent/stall_verification" => "stdlib/agent/stall_verification.harn",
     "agent/stall_detectors" => "stdlib/agent/stall_detectors.harn",
+    "agent/run_meter" => "stdlib/agent/run_meter.harn",
+    "agent/cut_landing" => "stdlib/agent/cut_landing.harn",
     "agent/cut_rules" => "stdlib/agent/cut_rules.harn",
     "agent/governors" => "stdlib/agent/governors.harn",
     "agent/control" => "stdlib/agent/control.harn",
@@ -923,6 +925,62 @@ mod tests {
         assert!(function
             .signature
             .contains("options: ToolRegistryOptions? = nil"));
+    }
+
+    #[test]
+    fn soft_landing_modules_own_their_public_surface() {
+        // The cut-rule layer is three owners: the meter registry, the
+        // predicate evaluator, and the latched landing machine. A rename that
+        // drops one of these from its module is the failure this catches.
+        for (module, expected) in [
+            (
+                "agent/run_meter",
+                &[
+                    "meter_observation_lower",
+                    "meter_observation_render",
+                    "meter_observation_upper",
+                    "run_meter_bounded",
+                    "run_meter_charge",
+                    "run_meter_digest",
+                    "run_meter_exact",
+                    "run_meter_field_registered",
+                    "run_meter_field_spec",
+                    "run_meter_fields",
+                    "run_meter_new",
+                    "run_meter_observe",
+                    "run_meter_project_next_call",
+                    "run_meter_read",
+                    "run_meter_registry_digest",
+                    "run_meter_unavailable",
+                ][..],
+            ),
+            (
+                "agent/cut_landing",
+                &[
+                    "cut_action_allowed",
+                    "cut_predicate_evaluate",
+                    "cut_predicate_render",
+                    "cut_predicate_validate",
+                    "cut_rules_digest",
+                    "cut_rules_tick",
+                    "cut_rules_validate",
+                    "cut_state_complete",
+                    "cut_state_new",
+                    "cut_state_record_admission",
+                    "cut_state_record_terminal_emit",
+                    "cut_terminal_emit_due",
+                    "cut_terminal_evidence",
+                ][..],
+            ),
+        ] {
+            let exports = public_functions_for_module(module)
+                .into_iter()
+                .map(|function| function.name)
+                .collect::<BTreeSet<_>>();
+            for name in expected {
+                assert!(exports.contains(*name), "std/{module} should export {name}");
+            }
+        }
     }
 
     #[test]
