@@ -103,7 +103,7 @@ event = "agent_event:boundary_failure"
 anchors = [
   "crates/harn-vm/src/orchestration/hooks.rs",
   "crates/harn-vm/src/stdlib/workflow/hooks.rs",
-  "crates/harn-vm/src/llm/agent_host_primitives.rs",
+  "crates/harn-vm/src/llm/agent_host_primitives/structured_tool_result.rs",
 ]
 test = "crates/harn-vm/src/llm/agent_host_primitives/tool_output_truncation_tests.rs"
 notes = "The hook result carries cumulative dropped_bytes structurally. A later hook can append enough text to restore the original length without erasing the earlier truncation fact; legacy string/result rewrites remain modifications and never guess at data loss."
