@@ -458,13 +458,27 @@ mkdir -p "${SETUP_STATE_DIR}"
 # Reclaim per-worktree target dirs left behind by worktrees that have since
 # been removed. Best-effort; never fail setup over housekeeping.
 #
-# The state dir this is stamped against is per-worktree, so every new worktree
-# would otherwise pay a full sweep of the shared target root -- measured at
-# ~40s across 12 roots. Bootstrap exists to configure a worktree for its first
-# Cargo probe and to be waited on interactively, so housekeeping stays out of
-# it; the profiles that already compile absorb the sweep instead.
-if [[ "${SETUP_PROFILE}" != "bootstrap" ]] && [[ -x ./scripts/prune_stale_targets.sh ]]; then
-  prune_stamp="${SETUP_STATE_DIR}/prune-stale-targets.stamp"
+# The interval is stamped beside the cache the sweep collects, not in the
+# per-worktree state dir, and every profile runs it.
+#
+# Both of those were previously the other way round, and together they meant the
+# collector never ran. A per-worktree stamp made each new worktree pay a full
+# sweep of the shared root, so the sweep was kept out of bootstrap to protect an
+# interactive wait -- but bootstrap is the profile that configures a worktree,
+# and once its target dir is baked into `.cargo/config.toml` every later build
+# reads that setting without re-entering setup. So the profiles that were
+# supposed to absorb the sweep were the ones a worktree never ran. Measured on a
+# development machine carrying 80 worktrees: 37 had run setup, none held a
+# stamp, and entries sat in the shared cache for 27 days.
+#
+# A shared stamp inverts the cost that motivated the exclusion. The sweep is
+# machine-wide work, so exactly one worktree per interval pays it (~24s measured
+# over 27 entries) instead of every worktree paying it once. The stamp is
+# claimed before the sweep rather than after, so several worktrees configuring
+# themselves at once do not all sweep the same root; housekeeping that loses its
+# turn simply waits for the next interval.
+if [[ -x ./scripts/prune_stale_targets.sh ]]; then
+  prune_stamp="${HARN_DEV_SETUP_STORAGE_ROOT}/prune-stale-targets.stamp"
   prune_interval="${HARN_DEV_SETUP_PRUNE_SECONDS:-86400}"
   should_prune=1
 
@@ -477,7 +491,12 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]] && [[ -x ./scripts/prune_stale_target
   fi
 
   if [[ "${should_prune}" -eq 1 ]]; then
-    ./scripts/prune_stale_targets.sh && touch "${prune_stamp}" || true
+    mkdir -p "$(dirname "${prune_stamp}")" 2>/dev/null || true
+    touch "${prune_stamp}" 2>/dev/null || true
+    # This worktree's own target dir is named so the sweep cannot collect it.
+    # Setup restores a Cargo target seed above, and a restored seed carries the
+    # seed's timestamps, so the tree this run just installed reads as idle.
+    HARN_TARGET_GC_PROTECT="${target_dir:-}" ./scripts/prune_stale_targets.sh || true
   else
     echo "harn-target GC recently checked."
   fi

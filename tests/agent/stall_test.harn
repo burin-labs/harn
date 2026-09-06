@@ -274,6 +274,21 @@ fn _ok_dispatch() {
   return [{tool_name: "run", ok: true, result: "all tests pass"}]
 }
 
+fn _edit_dispatch() {
+  // A successful workspace mutation. It is the edit's own success, never
+  // verification evidence, so it must not reach `verification_dispatch`.
+  return [{tool_name: "apply_fix", ok: true, result: "edit applied"}]
+}
+
+/**
+ * The declared verification evidence in a dispatch. These fixtures name their
+ * verification tool "run"; every other result is an action, mirroring the
+ * evidence-role selection the agent loop owns in production.
+ */
+fn _verification_of(prev_dispatch: any) {
+  return (prev_dispatch ?? []).filter({ result -> result.tool_name == "run" })
+}
+
 /**
  * Fold one repair turn: observe a substantive "run" call, classifying
  * `prev_dispatch` (the prior turn's result) with `prior_made_edit`.
@@ -291,6 +306,10 @@ fn _fold(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made_edit: a
     "",
     false,
     prior_made_edit,
+    "",
+    nil,
+    false,
+    _verification_of(prev_dispatch),
   )
 }
 
@@ -417,7 +436,7 @@ pipeline test_fold_productive_edit_resets_streak(harness: Harness, task: any) {
   // The PRIOR turn made a successful edit (turn_made_edit = true). The fold sees
   // no new verification result this turn (prev_dispatch is the edit's ok result),
   // so it bumps the epoch and owes a re-verify; the failure model is preserved.
-  const oe = _fold(harness.agent, o1.state, _ok_dispatch(), true)
+  const oe = _fold(harness.agent, o1.state, _edit_dispatch(), true)
   assert(oe.state.write_epoch == 1)
   assert(oe.state.reverify_owed)
   assert(oe.state.last_diagnostic_class == "fail")
@@ -485,14 +504,14 @@ pipeline test_fold_edit_retest_thrash_increments_streak(harness: Harness, task: 
   const o1 = _fold(harness.agent, agent_stall_initial_state(), _fail_dispatch("boom"), false)
   assert(o1.state.same_diagnostic_streak == 1)
   // Edit turn: no result yet, owes a re-verify, model + streak preserved.
-  const e1 = _fold(harness.agent, o1.state, _ok_dispatch(), true)
+  const e1 = _fold(harness.agent, o1.state, _edit_dispatch(), true)
   assert(e1.state.same_diagnostic_streak == 1)
   assert(e1.state.reverify_owed)
   // Same failure recurs after the edit => streak advances to 2 (not reset).
   const o2 = _fold(harness.agent, e1.state, _fail_dispatch("boom"), false)
   assert(o2.state.same_diagnostic_streak == 2)
   assert(!o2.state.reverify_owed)
-  const e2 = _fold(harness.agent, o2.state, _ok_dispatch(), true)
+  const e2 = _fold(harness.agent, o2.state, _edit_dispatch(), true)
   assert(e2.state.same_diagnostic_streak == 2)
   // Same failure recurs again => streak hits 3 => trip.
   const o3 = _fold(harness.agent, e2.state, _fail_dispatch("boom"), false)
@@ -548,6 +567,10 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness
     "",
     false,
     false,
+    "",
+    nil,
+    false,
+    _verification_of(_fail_dispatch("boom")),
   )
   assert(o1.state.last_diagnostic_class == "fail")
   assert(o1.state.same_diagnostic_streak == 1)
@@ -565,6 +588,10 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness
     "",
     false,
     false,
+    "",
+    nil,
+    false,
+    _verification_of(_fail_dispatch("boom")),
   )
   assert(o2.warning == nil)
   assert(o2.state.same_diagnostic_streak == 2)
@@ -668,6 +695,10 @@ fn _fold_guarded(agent: HarnessAgent, state: any, prev_dispatch: any, prior_made
     "",
     false,
     prior_made_edit,
+    "",
+    nil,
+    false,
+    _verification_of(prev_dispatch),
   )
 }
 
@@ -684,6 +715,10 @@ fn _fold_stale_guarded(agent: HarnessAgent, state: any, prev_dispatch: any, prio
     "",
     false,
     prior_made_edit,
+    "",
+    nil,
+    false,
+    _verification_of(prev_dispatch),
   )
 }
 
@@ -814,6 +849,10 @@ fn _fold_hard_cap(agent: HarnessAgent, state: any, prev_dispatch: any, prior_mad
     "",
     false,
     prior_made_edit,
+    "",
+    nil,
+    false,
+    _verification_of(prev_dispatch),
   )
 }
 
@@ -880,7 +919,7 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(harness: Ha
     _fail_dispatch("error A"),
     false,
   )
-  const edit_ok = _fold_hard_cap(harness.agent, o1.state, _ok_dispatch(), true)
+  const edit_ok = _fold_hard_cap(harness.agent, o1.state, _edit_dispatch(), true)
   assert(edit_ok.state.reverify_owed)
   assert(edit_ok.state.failing_verify_turns == 1)
   const o2 = _fold_hard_cap(harness.agent, edit_ok.state, _fail_dispatch("error B"), false)
@@ -1124,6 +1163,10 @@ fn _fold_floor(
     "",
     false,
     prior_made_edit,
+    "",
+    nil,
+    false,
+    _verification_of(prev_dispatch),
   )
 }
 
@@ -1266,9 +1309,9 @@ fn _parity_drive(agent: HarnessAgent, cfg: any) {
   let out = []
   const seq = [
     [_fail_dispatch("boom"), false],
-    [_ok_dispatch(), true],
+    [_edit_dispatch(), true],
     [_fail_dispatch("boom"), false],
-    [_ok_dispatch(), true],
+    [_edit_dispatch(), true],
     [_fail_dispatch("boom"), false],
   ]
   for step in seq {
@@ -1284,6 +1327,10 @@ fn _parity_drive(agent: HarnessAgent, cfg: any) {
       "",
       false,
       step[1],
+      "",
+      nil,
+      false,
+      _verification_of(step[0]),
     )
     s = o.state
     out = out.appending(
@@ -1387,6 +1434,10 @@ fn _fold_pred(agent: HarnessAgent, state: any, cfg: any, made_edit: any) {
     false,
     made_edit,
     "",
+    nil,
+    false,
+    _verification_of(_fail_dispatch("boom")),
+    "",
     {},
   )
 }
@@ -1470,6 +1521,10 @@ fn _fold_remediation(agent: HarnessAgent, state: any, cb: any, prev_dispatch: an
     "",
     false,
     false,
+    "",
+    nil,
+    false,
+    _verification_of(prev_dispatch),
   )
 }
 
