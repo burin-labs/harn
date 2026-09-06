@@ -33,6 +33,7 @@ pub fn capability_binding_for_schema(
         "host_lease" => CapabilityId::HostLease,
         "lint" => CapabilityId::Lint,
         "rules" => CapabilityId::Rules,
+        "repo" => CapabilityId::Repo,
         "scanner" => CapabilityId::Scanner,
         "secret_store" => CapabilityId::SecretStore,
         "session" => CapabilityId::Agent,
@@ -324,6 +325,11 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     HostCapabilityGroup {
         capability: CapabilityId::Scanner,
         methods: &["scan_incremental", "scan_project"],
+        effects: FS_READ,
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Repo,
+        methods: &["loc"],
         effects: FS_READ,
     },
     HostCapabilityGroup {

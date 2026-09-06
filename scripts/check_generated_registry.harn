@@ -32,10 +32,26 @@
 // drift guard.
 //
 // Pure validation logic lives in the pub fns; main does the filesystem reads.
-import { generated_artifact_dependency_errors } from "./generated_artifacts_schema.harn"
+import {
+  generated_artifact_dependency_errors,
+  generated_output_patterns,
+} from "./generated_artifacts_schema.harn"
 import { scan_glob } from "./path_visibility.harn"
 
 const REGISTRY = "scripts/generated_artifacts.toml"
+
+const LOC_REGISTRY = "scripts/repo-loc.json"
+
+/** Exactly one generated-output projection; missing or duplicate rows cannot pass. */
+pub fn repo_loc_projection_errors(artifacts: list, registry: dict) -> list<string> {
+  const rows = registry.exclusions.filter(fn(row) { row.reason == "generated" })
+  if rows.count != 1 || rows[0]?.patterns != generated_output_patterns(artifacts) {
+    return [
+      "repo-loc generated exclusions differ from registered outputs; run this checker with --write-repo-loc",
+    ]
+  }
+  return []
+}
 
 const MAKEFILE = "Makefile"
 
@@ -557,6 +573,16 @@ pipeline main(harness: Harness, task: unknown) {
     return 1
   }
   const artifacts = registry?.artifact ?? []
+  let loc_registry = json_parse(harness.fs.read_text(LOC_REGISTRY))
+  if argv == ["--write-repo-loc"] {
+    loc_registry.exclusions = [
+      {reason: "generated", patterns: generated_output_patterns(artifacts)},
+    ]
+      + loc_registry.exclusions.filter(fn(row) { row.reason != "generated" })
+    harness.fs.write_text(LOC_REGISTRY, json_stringify_pretty(loc_registry) + "\n")
+  } else if argv.count > 0 {
+    throw "usage: check_generated_registry.harn [--write-repo-loc]"
+  }
   const exempt = registry?.meta?.exempt_checks ?? []
   const dispatch = registry?.preflight?.dispatch ?? {}
   const make_text = harness.fs.read_text(MAKEFILE)
@@ -584,6 +610,7 @@ pipeline main(harness: Harness, task: unknown) {
     },
   )
     + preflight_dispatch_errors(targets, dispatch)
+    + repo_loc_projection_errors(artifacts, loc_registry)
   if errors.count > 0 {
     harness.stdio.eprintln("error: generated-artifact registry is out of sync:\n")
     for e in errors {

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Repository measurement receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "registry_version", "root", "complete", "total", "per_language", "per_area", "files", "excluded", "unsupported", "unmapped"],
+  "properties": {
+    "schema_version": {"const": 1}, "registry_version": {"const": 1},
+    "root": {"type": "string"}, "complete": {"type": "boolean"},
+    "total": {"$ref": "#/$defs/counts"},
+    "per_language": {"type": "object", "additionalProperties": {"$ref": "#/$defs/counts"}},
+    "per_area": {"type": "object", "additionalProperties": {"$ref": "#/$defs/counts"}},
+    "files": {
+      "type": "array", "items": {
+        "type": "object", "required": ["path", "language", "area", "counts"], "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"}, "language": {"type": "string"},
+          "area": {"type": ["string", "null"]}, "counts": {"$ref": "#/$defs/counts"}
+        }
+      }
+    },
+    "excluded": {
+      "type": "array", "items": {
+        "type": "object", "required": ["path", "reason", "directory", "measured"], "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"}, "reason": {"type": "string"},
+          "directory": {"type": "boolean"}, "measured": {"const": false}
+        }
+      }
+    },
+    "unsupported": {
+      "type": "array", "items": {
+        "type": "object", "required": ["path", "reason", "physical", "blank"], "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string"}, "reason": {"type": "string"},
+          "physical": {"type": "integer", "minimum": 0}, "blank": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "unmapped": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "counts": {
+      "type": "object", "required": ["physical", "doc_delimiter_lines", "code", "comment", "blank", "files"], "additionalProperties": false,
+      "properties": {
+        "physical": {"type": "integer", "minimum": 0}, "doc_delimiter_lines": {"type": "integer", "minimum": 0},
+        "code": {"type": "integer", "minimum": 0}, "comment": {"type": "integer", "minimum": 0},
+        "blank": {"type": "integer", "minimum": 0}, "files": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

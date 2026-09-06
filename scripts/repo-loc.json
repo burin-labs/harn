@@ -1,0 +1,203 @@
+{
+  "areas": [
+    {
+      "name": "Parser",
+      "patterns": [
+        "crates/harn-lexer/**",
+        "crates/harn-parser/**"
+      ]
+    },
+    {
+      "name": "Runtime",
+      "patterns": [
+        "crates/harn-stdlib/**",
+        "crates/harn-vm/**",
+        "crates/harn-hostlib/**"
+      ]
+    },
+    {
+      "name": "Portal",
+      "patterns": [
+        "crates/harn-cli/portal/**"
+      ]
+    },
+    {
+      "name": "CLI",
+      "patterns": [
+        "crates/harn-cli/**"
+      ]
+    },
+    {
+      "name": "Language tooling",
+      "patterns": [
+        "crates/harn-lint/**",
+        "crates/harn-fmt/**",
+        "crates/harn-lsp/**",
+        "crates/harn-dap/**"
+      ]
+    },
+    {
+      "name": "Compiler",
+      "patterns": [
+        "crates/harn-kernel/**"
+      ]
+    },
+    {
+      "name": "Browser",
+      "patterns": [
+        "crates/harn-wasm/**"
+      ]
+    },
+    {
+      "name": "Grammar/editor",
+      "patterns": [
+        "tree-sitter-harn/**",
+        "editors/**"
+      ]
+    },
+    {
+      "name": "Spec",
+      "patterns": [
+        "spec/**"
+      ]
+    },
+    {
+      "name": "Conformance",
+      "patterns": [
+        "conformance/**"
+      ]
+    },
+    {
+      "name": "Scripts",
+      "patterns": [
+        "scripts/**"
+      ]
+    },
+    {
+      "name": "Documentation",
+      "patterns": [
+        "docs/**",
+        "website/**"
+      ]
+    },
+    {
+      "name": "Other",
+      "patterns": [
+        "**"
+      ]
+    }
+  ],
+  "exclusions": [
+    {
+      "patterns": [
+        "crates/harn-capability-contracts/src/vm_declared.rs",
+        "crates/harn-cli/generated/cli-bytecode",
+        "crates/harn-cli/generated/cli-bytecode-manifest.json",
+        "crates/harn-cli/src/commands/app_host/harn_wasm.d.ts",
+        "crates/harn-cli/src/commands/app_host/runtime/harn_wasm.js",
+        "crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.d.ts",
+        "crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.gz",
+        "crates/harn-hostlib/data/grammar-fitness/receipt.v1.json",
+        "crates/harn-parser/src/diagnostic/harness_migrations_generated.rs",
+        "crates/harn-serve/openapi.yaml",
+        "crates/harn-stdlib/src/stdlib/llm/provider_names.harn",
+        "crates/harn-vm/src/llm/capabilities.toml",
+        "crates/harn-vm/src/llm/providers.toml",
+        "crates/harn-vm/src/triggers/event/schemas_generated.rs",
+        "crates/harn-wasm/demo/language-vocabulary.json",
+        "crates/harn-wasm/demo/package.json",
+        "crates/harn-wasm/wit/harn-kernel.json",
+        "docs/diagnostic-examples.json",
+        "docs/diagnostics-catalog.json",
+        "docs/llm/harn-triggers-quickref.md",
+        "docs/provider-support.json",
+        "docs/src/SUMMARY.md",
+        "docs/src/connectors/parity-matrix.md",
+        "docs/src/diagnostics.md",
+        "docs/src/language-spec.md",
+        "docs/src/provider-matrix.md",
+        "docs/src/provider-support.md",
+        "docs/src/spec/language",
+        "docs/theme/harn-keywords.js",
+        "editors/vscode/syntaxes/harn-prompt.tmLanguage.json",
+        "scripts/check_docs_workflow_quickstart.harn",
+        "scripts/check_receipt_struct_duplication.harn",
+        "scripts/provider_catalog_fixtures/expected_candidate.toml",
+        "scripts/provider_catalog_fixtures/expected_drift_report.md",
+        "scripts/release_contract.env",
+        "scripts/release_contract.json",
+        "spec/HARN_SPEC.md",
+        "spec/language-vocabulary.json",
+        "spec/openapi.snapshot",
+        "spec/protocol-artifacts/HarnProtocol.swift",
+        "spec/protocol-artifacts/go/harnprotocol/harnprotocol.go",
+        "spec/protocol-artifacts/harn-protocol.rs",
+        "spec/protocol-artifacts/harn-protocol.ts",
+        "spec/protocol-artifacts/harn-tools.ts",
+        "spec/protocol-artifacts/manifest.json",
+        "spec/protocol-artifacts/python/harn_protocol.py",
+        "spec/protocol-artifacts/schemas/harn-tools-v2.schema.json",
+        "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
+        "spec/provider-catalog/HarnProviderCatalog.swift",
+        "spec/provider-catalog/harn-provider-catalog.d.ts",
+        "spec/provider-catalog/harn-provider-catalog.harn",
+        "spec/provider-catalog/provider-catalog.json",
+        "spec/provider-catalog/provider-catalog.schema.json",
+        "spec/run-view-fixtures/cases/legacy-sparse/expected/runs/run.run_view.json",
+        "spec/run-view-fixtures/cases/legacy-sparse/expected/session_view.json",
+        "spec/run-view-fixtures/cases/root-transcript/expected/runs/run.run_view.json",
+        "spec/run-view-fixtures/cases/root-transcript/expected/session_view.json",
+        "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/00-root.run_view.json",
+        "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/01-child.run_view.json",
+        "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/session_view.json",
+        "spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/runs/run.run_view.json",
+        "spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/session_view.json",
+        "spec/schemas/portable-kernel-benchmark.v1.schema.json",
+        "spec/schemas/session-bundle.v1.schema.json",
+        "tree-sitter-harn/grammar/keywords.js",
+        "tree-sitter-harn/src"
+      ],
+      "reason": "generated"
+    },
+    {
+      "patterns": [
+        "**/Cargo.lock",
+        "**/package-lock.json"
+      ],
+      "reason": "lockfiles"
+    },
+    {
+      "patterns": [
+        "**/target",
+        "**/.target",
+        "**/.target-*",
+        "**/.harn-runs",
+        "**/.harn-toolchain-cache",
+        "**/.build",
+        "**/build",
+        "**/dist",
+        "**/coverage",
+        "**/__pycache__"
+      ],
+      "reason": "build_output"
+    },
+    {
+      "patterns": [
+        "**/node_modules",
+        "**/.venv",
+        "**/venv"
+      ],
+      "reason": "vendored"
+    },
+    {
+      "patterns": [
+        "**/.git",
+        "**/.burin",
+        "**/.harn"
+      ],
+      "reason": "other"
+    }
+  ],
+  "ignore_policy": "none",
+  "version": 1
+}

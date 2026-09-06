@@ -1,6 +1,88 @@
+import { with_temp_dir } from "std/testing"
 // Tests for scripts/check_generated_registry.harn — exercise the pure
 // pub fns on synthetic inputs (no filesystem dependency).
 import "../check_generated_registry.harn"
+import { generated_output_patterns } from "../generated_artifacts_schema.harn"
+
+@test
+pipeline test_repo_loc_generated_projection(harness: Harness, task: unknown) {
+  const artifacts = [{outputs: ["generated[1].rs", "tree/", "tree", "star*.rs", "harnprotocol.go"]}]
+  const patterns = generated_output_patterns(artifacts)
+  const campaign = json_parse(
+    harness.fs.read_text(path_join(harness.fs.source_dir(), "../repo-loc.json")),
+  )
+  const registry = {
+    version: 1,
+    areas: campaign.areas,
+    exclusions: [{reason: "generated", patterns: patterns}]
+      + campaign.exclusions.filter(fn(row) { row.reason != "generated" }),
+  }
+  assert_eq(repo_loc_projection_errors(artifacts, registry), [])
+  assert(repo_loc_projection_errors(artifacts + [{outputs: ["new.rs"]}], registry).count > 0)
+  assert(repo_loc_projection_errors(artifacts, {...registry, exclusions: []}).count > 0)
+  assert(
+    repo_loc_projection_errors(
+      artifacts,
+      {...registry, exclusions: registry.exclusions + registry.exclusions},
+    ).count
+      > 0,
+  )
+  with_temp_dir(
+    harness.fs,
+    fn(root) {
+      harness.fs.mkdir(path_join(root, "tree"))
+      for dir in ["crates", "crates/harn-cli", "crates/harn-cli/portal", ".build", "node_modules"] {
+        harness.fs.mkdir(path_join(root, dir))
+      }
+      for path in [
+        "generated[1].rs",
+        "generated1.rs",
+        "star*.rs",
+        "starX.rs",
+        "tree/child.rs",
+        "crates/harn-cli/portal/a.rs",
+        "crates/harn-cli/a.rs",
+        ".build/not-scanned.rs",
+        "node_modules/not-scanned.rs",
+      ] {
+        harness.fs.write_text(path_join(root, path), "fn main() {}\n")
+      }
+      for path in ["harnprotocol.go", "harnprotocol_test.go"] {
+        harness.fs.write_text(path_join(root, path), "package harnprotocol\n")
+      }
+      harness.fs.write_text(path_join(root, "Cargo.lock"), "version = 4\n")
+      const report = harness.repo.loc({root: root, registry: registry})
+      assert_eq(
+        report.files.map(fn(file) { file.path }).sorted(),
+        [
+          "crates/harn-cli/a.rs",
+          "crates/harn-cli/portal/a.rs",
+          "generated1.rs",
+          "harnprotocol_test.go",
+          "starX.rs",
+        ],
+      )
+      assert_eq(
+        report.files.find(fn(file) { file.path == "crates/harn-cli/portal/a.rs" })?.area,
+        "Portal",
+      )
+      assert_eq(report.files.find(fn(file) { file.path == "crates/harn-cli/a.rs" })?.area, "CLI")
+      assert_eq(
+        report.excluded.map(fn(file) { file.path + ":" + file.reason }).sorted(),
+        [
+          ".build:build_output",
+          "Cargo.lock:lockfiles",
+          "generated[1].rs:generated",
+          "harnprotocol.go:generated",
+          "node_modules:vendored",
+          "star*.rs:generated",
+          "tree:generated",
+        ],
+      )
+      assert(report.excluded.all(fn(file) { !file.measured }))
+    },
+  )
+}
 
 // --- whole_target_search --------------------------------------------------
 @test

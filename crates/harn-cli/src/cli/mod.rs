@@ -56,6 +56,7 @@ mod profile;
 mod provider;
 mod providers;
 mod quickstart;
+mod repo;
 mod routes;
 mod rule;
 mod run;
@@ -220,6 +221,7 @@ pub(crate) use providers::{
     ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
+pub(crate) use repo::{RepoArgs, RepoCommand};
 pub(crate) use routes::RoutesArgs;
 pub(crate) use rule::{RuleArgs, RuleCommand, RuleTestArgs};
 pub(crate) use run::RunArgs;
@@ -551,6 +553,8 @@ SCRIPTING
     /// Read-only structural search + lint: run a pattern, rule, or rule pack
     /// over a fileset and report matches or per-file counts (`--report-only`).
     Scan(ScanArgs),
+    /// Inspect repository measurements through shared host capabilities.
+    Repo(RepoArgs),
     /// Apply a codemod rule's `fix` across a fileset. Dry-run by default
     /// (unified diffs); `--apply` writes, safety- and capability-gated.
     Codemod(CodemodArgs),

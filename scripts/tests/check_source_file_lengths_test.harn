@@ -79,11 +79,16 @@ fn finding_kinds(findings: list<SourceLengthFinding>) -> list<string> {
 
 @test
 pipeline test_logical_line_count_handles_final_lines_and_crlf(harness: Harness, task: unknown) {
-  assert_eq(logical_line_count(""), 0)
-  assert_eq(logical_line_count("one"), 1)
-  assert_eq(logical_line_count("one\n"), 1)
-  assert_eq(logical_line_count("one\ntwo"), 2)
-  assert_eq(logical_line_count("one\r\ntwo\r\n"), 2)
+  with_temp_dir(
+    harness.fs,
+    fn(root) {
+      const texts = ["", "one", "one\n", "one\ntwo", "one\r\ntwo\r\n"]
+      for index in range(0, len(texts)) {
+        write_text(harness, root, to_string(index) + ".rs", texts[index]!)
+      }
+      assert_eq(source_inventory(harness, root).map(fn(file) { file.lines }), [0, 1, 1, 2, 2])
+    },
+  )
 }
 
 @test
@@ -229,18 +234,32 @@ pipeline test_source_scope_and_windows_path_normalization(harness: Harness, task
   with_temp_dir(
     harness.fs,
     { root ->
+      init_repo(harness.process, root)
+      write_text(harness, root, ".gitignore", "!build/\n")
+      write_text(harness, root, "nested/.agentignore", "hidden.rs\n")
+      write_source(harness, root, "build/reincluded.rs", 1)
+      write_source(harness, root, "dist/hidden.rs", 1)
+      write_source(harness, root, "nested/hidden.rs", 1)
       write_source(harness, root, "crates/app/src/lib.rs", 1)
       write_source(harness, root, "crates/app/tests/integration.rs", 1)
       write_source(harness, root, "crates/harn-stdlib/src/stdlib/agent/loop.harn", 1)
       write_source(harness, root, "crates/harn-stdlib/tests/fixture.harn", 1)
       write_source(harness, root, "spec/protocol-artifacts/generated.rs", 1)
       write_source(harness, root, "target/debug/generated.rs", 1)
+      write_source(harness, root, "target-source/lib.rs", 1)
+      write_source(harness, root, "target-build/debug/generated.rs", 1)
+      write_source(harness, root, "nested/target-source/debug/lib.rs", 1)
+      write_text(harness, root, "crates/harn-stdlib/src/stdlib/broken.harn", "\"unterminated\n")
       assert_eq(
         source_files(harness, root),
         [
+          "build/reincluded.rs",
           "crates/app/src/lib.rs",
           "crates/app/tests/integration.rs",
           "crates/harn-stdlib/src/stdlib/agent/loop.harn",
+          "crates/harn-stdlib/src/stdlib/broken.harn",
+          "nested/target-source/debug/lib.rs",
+          "target-source/lib.rs",
         ],
       )
     },
@@ -508,7 +527,40 @@ pipeline test_unscanned_sources_reconciliation_is_strict_and_sorted(
     unscanned_sources(
       ["crates/app/src/lib.rs"],
       ["z.rs", "crates/app/src/lib.rs", "a.rs", "spec/protocol-artifacts/generated.rs"],
+      [{path: "spec/protocol-artifacts", reason: "generated", directory: true}],
     ),
     ["a.rs", "z.rs"],
+  )
+  with_temp_dir(
+    harness.fs,
+    fn(root) {
+      init_repo(harness.process, root)
+      write_inventory(harness, root, [])
+      write_source(harness, root, "a.rs", 1)
+      write_source(harness, root, "node_modules/hidden.rs", 1)
+      write_source(harness, root, "ignored.rs", 1)
+      write_source(harness, root, "spec/protocol-artifacts/generated.rs", 1)
+      const base = commit_all(harness.process, root, "base")
+      write_text(harness, root, ".gitignore", "ignored.rs\n")
+      write_source(harness, root, "b.rs", 1)
+      commit_all(harness.process, root, "head")
+      const report = check_source_file_lengths(harness, root, "merge-base", base)
+      assert_eq(report.source_count, 2)
+      assert_eq(finding_kinds(report.findings), ["unscanned_source", "unscanned_source"])
+      assert_eq(
+        report.findings.map(fn(finding) { finding.path }),
+        ["ignored.rs", "node_modules/hidden.rs"],
+      )
+    },
+  )
+  with_temp_dir(
+    harness.fs,
+    fn(root) { assert(
+      is_err(
+        try {
+          source_inventory(harness, root)
+        },
+      ),
+    ) },
   )
 }

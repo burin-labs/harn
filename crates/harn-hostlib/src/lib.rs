@@ -48,6 +48,8 @@ pub mod host_lease;
 pub mod host_lease_capability;
 pub mod process;
 mod process_liveness;
+pub mod repo;
+pub mod repo_loc;
 pub mod sandbox;
 pub mod scanner;
 pub mod schemas;
@@ -187,6 +189,7 @@ pub fn install_default_with_embed_and_harn_reference_resolver(
     let _ = harn_reference_resolver;
     registry = registry
         .with(scanner::ScannerCapability)
+        .with(repo::RepoCapability)
         .with(embed)
         .with(session)
         .with(fs::FsCapability)

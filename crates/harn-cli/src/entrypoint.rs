@@ -538,6 +538,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
         },
         Command::Scan(args) => commands::scan::run(args).await,
+        Command::Repo(args) => commands::repo::run(args),
         Command::Codemod(args) => commands::codemod::run(args).await,
         Command::Rule(args) => commands::rule::run(args).await,
         Command::Try(args) => commands::try_cmd::run(args).await,

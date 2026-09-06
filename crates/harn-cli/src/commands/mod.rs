@@ -89,6 +89,7 @@ pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub(crate) mod replay;
 pub(crate) mod replay_offline_coding;
+pub(crate) mod repo;
 pub(crate) mod routes;
 pub(crate) mod rule;
 pub(crate) mod rules_cli;

@@ -128,6 +128,7 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.131-dev" }
 # unifies the feature across the build graph).
 harn-flock = { path = "../harn-flock", version = "=0.10.131-dev" }
 harn-parser = { path = "../harn-parser", version = "=0.10.131-dev" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.131-dev" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.131-dev" }
 harn-vm = { path = "../harn-vm", version = "=0.10.131-dev", default-features = false }
 harn-terminal = { path = "../harn-terminal", version = "=0.10.131-dev", optional = true }
@@ -139,6 +140,7 @@ hex = "0.4"
 tokio = { version = "1", features = ["rt", "macros", "sync", "fs", "net", "process", "time"] }
 thiserror = "2"
 tracing = "0.1"
+tokei = { version = "14", default-features = false }
 tempfile = "3"
 uuid = { version = "1", features = ["v7"] }
 
@@ -248,7 +250,6 @@ jsonschema = { version = "0.51.0", default-features = false }
 shell-words = "1.1"
 filetime = "0.2"
 criterion = "0.8"
-harn-lexer = { path = "../harn-lexer", version = "=0.10.131-dev" }
 harn-parser = { path = "../harn-parser", version = "=0.10.131-dev" }
 
 [[bench]]

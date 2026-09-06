@@ -1,4 +1,5 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import { literal_glob_path } from "./generated_artifacts_schema.harn"
 import { path_visibility, visibility_failure, zero_scan_failure } from "./path_visibility.harn"
 
 /** This gate's own name, quoted back into any denial it reports. */
@@ -11,25 +12,6 @@ const LEGACY_INVENTORY_PATH = "scripts/source-file-length-legacy.json"
 const LEGACY_INVENTORY_VERSION = 1
 
 const HISTORICAL_BASELINE_DIR = "scripts/source-file-length-baseline"
-
-const SKIP_DIR_NAMES = [
-  ".burin",
-  ".git",
-  ".harn",
-  ".harn-runs",
-  ".harn-toolchain-cache",
-  "node_modules",
-]
-
-const CARGO_TARGET_DIR_NAMES = [".target", "target"]
-
-const CARGO_TARGET_DIR_PREFIXES = [".target-"]
-
-const WORKTREE_CARGO_TARGET_DIR_PREFIX = "target-"
-
-const CARGO_TARGET_ARTIFACT_DIR_NAMES = ["debug", "release"]
-
-const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
 /** The only tree whose `.harn` sources the ratchet governs. */
 pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
@@ -73,158 +55,72 @@ fn repo_root(fs: HarnessFs) -> string {
   return path_normalize(path_join(fs.source_dir(), ".."))
 }
 
-/** Count logical lines, including a final line without a trailing newline. */
-pub fn logical_line_count(text: string) -> int {
-  if text == "" {
-    return 0
-  }
-  const parts = text.split("\n")
-  if text.ends_with("\n") {
-    return parts.count - 1
-  }
-  return parts.count
-}
-
 /** Canonicalize an inventory path independently of the host path separator. */
 pub fn normalize_source_path(path: string) -> string {
   return replace(path_normalize(path), "\\", "/")
 }
 
-/** Identify generated Cargo target directories without hiding similarly named source trees. */
-fn standard_cargo_target_dir_name(name: string) -> bool {
-  if CARGO_TARGET_DIR_NAMES.contains(name) {
-    return true
-  }
-  for prefix in CARGO_TARGET_DIR_PREFIXES {
-    if name.starts_with(prefix) {
-      return true
-    }
-  }
-  return false
-}
-
-fn root_worktree_cargo_target_dir(
-  fs: HarnessFs,
-  root: string,
-  rel_dir: string,
-  name: string,
-) -> bool {
-  if rel_dir != "" || !name.starts_with(WORKTREE_CARGO_TARGET_DIR_PREFIX) {
-    return false
-  }
-  const dir = path_join(root, name)
-  for artifact_dir in CARGO_TARGET_ARTIFACT_DIR_NAMES {
-    if fs.exists(path_join(dir, artifact_dir)) {
-      return true
-    }
-  }
-  return false
-}
-
-fn skip_dir(fs: HarnessFs, root: string, rel_dir: string, name: string) -> bool {
-  return SKIP_DIR_NAMES.contains(name)
-    || standard_cargo_target_dir_name(name)
-    || root_worktree_cargo_target_dir(fs, root, rel_dir, name)
-}
-
-/**
- * Recursively collect `suffix` files under `rel_dir`, skipping the directories
- * this script owns rules for.
- *
- * Those rules are not the whole story: `walk_dir` refuses on its own to descend
- * into `target`, `build`, `dist`, `node_modules`, `coverage`, `venv`, and
- * `__pycache__`, so the inventory's real reach is narrower than the constants
- * above suggest, and a source tree under one of those names would escape the
- * ratchet with no diagnostic.
- * The tracked-source reconciliation below makes such a hole loud by comparing
- * the inventory walk with git rather than trusting fixtures alone.
- */
-fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) -> list<string> {
-  const dir = if rel_dir == "" {
-    root
-  } else {
-    path_join(root, rel_dir)
-  }
-  // An empty list here means "this ratchet governs nothing under that root".
-  // A denial and an absent directory used to produce the same empty list, so a
-  // policy that hid a source tree read exactly like a repository that has none.
-  const seen = path_visibility(harness.fs, CHECK_NAME, dir)
+/** Project the ratchet's scope onto the repository-owned measurement registry. */
+fn source_measurement(harness: Harness, root: string) -> dict {
+  let registry = json_parse(
+    harness.fs.read_text(path_join(repo_root(harness.fs), "scripts/repo-loc.json")),
+  )
+  registry.include = ["**/*.rs", STDLIB_SOURCE_DIR + "/**/*.harn"]
+  registry.ignore_policy = "project"
+  // Campaign exclusions are broader. Preserve the ratchet's historical source scope.
+  registry.exclusions = registry.exclusions.filter(
+    fn(row) { !["generated", "build_output", "lockfiles", "vendored"].contains(row.reason) },
+  )
+    + [
+      {reason: "vendored", patterns: ["**/node_modules"]},
+      {reason: "generated", patterns: ["spec/protocol-artifacts{,/**}"]},
+      {
+        reason: "build_output",
+        patterns: [
+          "**/target{,/**}",
+          "**/.target{,/**}",
+          "**/.target-*{,/**}",
+          "**/.harn-runs{,/**}",
+          "**/.harn-toolchain-cache{,/**}",
+        ],
+      },
+    ]
+  const seen = path_visibility(harness.fs, CHECK_NAME, root)
   if seen.denial != "" {
     throw seen.denial
   }
-  if !seen.exists {
-    return []
-  }
-  let paths: list<string> = []
-  // scan-refused: zero_scan_failure on source_count in main.
-  const entries = harness.fs.walk(dir, {max_depth: 1, follow_symlinks: false}).filter(
-    { entry -> entry.depth == 1 },
-  )
-    .to_list()
-    .sorted_by({ entry -> entry.path })
-  for entry in entries {
-    const name = basename(entry.path)
-    if skip_dir(harness.fs, root, rel_dir, name) {
-      continue
-    }
-    const rel = normalize_source_path(
-      if rel_dir == "" {
-        name
-      } else {
-        path_join(rel_dir, name)
-      },
-    )
-    if entry.is_file && rel.ends_with(suffix) {
-      paths = paths.appending(rel)
-    } else if entry.is_dir {
-      for child in files_below(harness, root, rel, suffix) {
-        paths = paths.appending(child)
-      }
+  // A root target-* source tree stays eligible unless it contains Cargo artifacts.
+  // scan-refused: repo.loc rejects an empty eligible inventory.
+  for name in harness.fs.list_dir(root) {
+    if name.starts_with("target-")
+      && harness.fs.stat(path_join(root, name))?.is_dir
+      && ["debug", "release"].any(fn(child) { harness.fs.exists(path_join(root, name, child)) }) {
+      const literal = literal_glob_path(name)
+      registry.exclusions += [{reason: "build_output", patterns: [literal + "{,/**}"]}]
     }
   }
-  return paths
+  return harness.repo.loc({root: root, registry: registry})
 }
 
-/** Whether `path` is a generated source the ratchet must not govern. */
-pub fn is_generated_source(path: string) -> bool {
-  for prefix in GENERATED_SOURCE_PREFIXES {
-    if path.starts_with(prefix) {
-      return true
-    }
-  }
-  return false
+fn physical_sources(measurement: dict) -> list<SourceCount> {
+  // Lexically unsupported source still has an authoritative physical count.
+  return (measurement.files.map(fn(file) { {path: file.path, lines: file.counts.physical} })
+    + measurement.unsupported.map(fn(file) { {path: file.path, lines: file.physical} }))
+    .sorted_by(fn(file) { file.path })
 }
 
 /** Inventory all repo Rust plus the canonical stdlib Harn source. */
-pub fn source_files(harness: Harness, root: string = "") -> list<string> {
-  const resolved_root = if root == "" {
-    repo_root(harness.fs)
-  } else {
-    path_normalize(root)
-  }
-  let paths = files_below(harness, resolved_root, "", ".rs").filter(
-    { path -> !is_generated_source(path) },
-  )
-    .to_list()
-  for path in files_below(harness, resolved_root, STDLIB_SOURCE_DIR, ".harn") {
-    paths = paths.appending(path)
-  }
-  return paths.sorted()
-}
-
 pub fn source_inventory(harness: Harness, root: string = "") -> list<SourceCount> {
   const resolved_root = if root == "" {
     repo_root(harness.fs)
   } else {
     path_normalize(root)
   }
-  let sources: list<SourceCount> = []
-  for path in source_files(harness, resolved_root) {
-    sources = sources.appending(
-      {path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))},
-    )
-  }
-  return sources
+  return physical_sources(source_measurement(harness, resolved_root))
+}
+
+pub fn source_files(harness: Harness, root: string = "") -> list<string> {
+  return source_inventory(harness, root).map(fn(file) { file.path }).to_list()
 }
 
 fn source_index(sources: list<SourceCount>) -> dict<string, SourceCount> {
@@ -819,13 +715,24 @@ fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> 
  * only assert about paths the walk already reaches — so the inventory is
  * reconciled against git, the one authority on what source this repo has.
  */
-pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<string> {
+pub fn unscanned_sources(
+  scanned: list<string>,
+  tracked: list<string>,
+  excluded: list<dict>,
+) -> list<string> {
+  const generated = excluded.filter(fn(entry) { entry.reason == "generated" }).to_list()
+  let scanned_paths: dict<string, bool> = {}
+  for path in scanned {
+    scanned_paths[path] = true
+  }
   let missing: list<string> = []
   for path in tracked {
-    if is_generated_source(path) {
+    if generated.any(
+      fn(entry) { path == entry.path || (entry.directory && path.starts_with(entry.path + "/")) },
+    ) {
       continue
     }
-    if !scanned.contains(path) {
+    if scanned_paths[path] != true {
       missing = missing.appending(path)
     }
   }
@@ -843,7 +750,8 @@ pub fn check_source_file_lengths(
   } else {
     path_normalize(root)
   }
-  const sources = source_inventory(harness, resolved_root)
+  const measurement = source_measurement(harness, resolved_root)
+  const sources = physical_sources(measurement)
   const inventory = legacy_inventory(harness.fs, resolved_root)
   const requested_comparison = if comparison != "" {
     comparison
@@ -902,11 +810,15 @@ pub fn check_source_file_lengths(
         ),
       )
   }
-  // Reuses the inventory walk that just ran, so the reconciliation costs one
+  // Reuses the measurement that just ran, so the reconciliation costs one
   // `git ls-files`. Under a synthetic root nothing is tracked, so this is a
   // no-op for fixture tests rather than something they have to opt out of.
   const tracked = git_tracked_sources(harness.fs, harness.process, resolved_root)
-  for path in unscanned_sources(sources.map({ source -> source.path }).to_list(), tracked.paths) {
+  for path in unscanned_sources(
+    sources.map({ source -> source.path }).to_list(),
+    tracked.paths,
+    measurement.excluded,
+  ) {
     findings = findings.appending(
       {
         kind: "unscanned_source",

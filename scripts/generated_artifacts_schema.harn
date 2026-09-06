@@ -12,6 +12,34 @@
 // does not require editing this file — only removing or retyping one does.
 import "std/schema"
 
+/** A registered path is literal, even when its name contains glob syntax. */
+pub fn literal_glob_path(path: string) -> string {
+  let literal = path
+  for character in ["\\", "*", "?", "[", "]", "{", "}"] {
+    literal = replace(literal, character, "\\" + character)
+  }
+  return literal
+}
+
+/** Literal outputs; the counter prunes a matching directory before descending. */
+pub fn generated_output_patterns(artifacts: list) -> list<string> {
+  let patterns: list<string> = []
+  for artifact in artifacts {
+    for output in artifact?.outputs ?? [] {
+      const path = if output.ends_with("/") {
+        output.substring(0, output.len() - 1)
+      } else {
+        output
+      }
+      const pattern = literal_glob_path(path)
+      if !patterns.contains(pattern) {
+        patterns += [pattern]
+      }
+    }
+  }
+  return patterns.sorted()
+}
+
 /**
  * How a `check-*` target is dispatched by the drift-preflight aggregators.
  *
