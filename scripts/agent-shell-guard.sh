@@ -114,6 +114,21 @@ guard_command=(
 [[ "$harn_mode" == "standalone" ]] && guard_command+=(--standalone)
 guard_command+=(--allow=command_risk_scan "$script_dir/agent_shell_guard.harn")
 
+# The worktree rule may only name an admission command this repository actually
+# has. The guard runs in a hook host with no filesystem builtin, so the answer
+# is measured here, once, and reported to it. The two variables keep "this
+# repository owns none" apart from "nobody measured": the guard refuses on the
+# second and allows on the first. Keep the path in step with
+# WORKTREE_ADMISSION_POLICY in agent_shell_guard_policy.harn; the guard refuses
+# by name if the two ever disagree.
+guard_repo_root="$(cd "$script_dir/.." && pwd -P)"
+HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION=""
+if [[ -f "$guard_repo_root/scripts/fleet-worktree-admit.ts" ]]; then
+  HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION="scripts/fleet-worktree-admit.ts"
+fi
+export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION
+export HARN_EXT_SHELL_GUARD_WORKTREE_ADMISSION_CHECKED=1
+
 # A PreToolUse hook holds the agent's shell call open for as long as it runs, so
 # the harness timeout is the wrong backstop: by the time it fires the agent has
 # already paid the entire budget and still has no verdict. Bound the policy
