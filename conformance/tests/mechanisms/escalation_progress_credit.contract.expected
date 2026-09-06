@@ -1,2 +1,7 @@
-no_premature_stop_while_shrinking=true
-ran_to_completion_not_budget_cut=true
+complete_shrink_restarts_budget=true
+constant_failures_exhaust_restarted_budget=true
+constant_does_not_earn_progress=true
+partial_does_not_earn_progress=true
+disabled_does_not_earn_progress=true
+fresh_failure_defers_cap=true
+deferred_cap_fires_once_grace_expires=true
