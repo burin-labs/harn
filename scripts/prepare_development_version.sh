@@ -28,7 +28,7 @@ cargo metadata --format-version=1 --locked >/dev/null
 
 "$harn_bin" run "$script_dir/sync_protocol_fixture_runtime_versions.harn" -- \
   --from "$current" --to "$target"
-"$harn_bin" dump-protocol-artifacts --artifact-version "$target"
+"$harn_bin" dump-protocol-artifacts
 "$harn_bin" run "$script_dir/sync_grammar_fitness_receipt.harn"
 
 actual="$($harn_bin run "$metadata" -- current --root "$root")"

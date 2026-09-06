@@ -103,12 +103,50 @@ pub fn __judge_resolve_ungrounded_quotes(
   )
 }
 
-/** The instruction added to the user turn when a refusal quoted absent evidence. */
-fn __judge_ungrounded_quote_retry_prompt(quotes: list<string>) -> string {
+/**
+ * The instruction added to the user turn when a refusal quoted absent evidence.
+ *
+ * Named as paraphrase rather than as invention, because that is what was
+ * measured: the ungroundable quotes are sentences the judge composed about the
+ * evidence, not lines it hallucinated. The best line-level match for a rejected
+ * quote scored 0.50, which is the signature of a summary of a real region, not
+ * of a fabricated one. "Quote only lines that are actually there" does not
+ * reach that failure: a judge that believes it is describing what it saw reads
+ * the instruction as already satisfied and returns the same paraphrase.
+ *
+ * So the re-ask asks for a copied span, puts the judge's own words where they
+ * belong, and refuses the exit that costs nothing. An empty quote is an exit:
+ * the grounding check skips empty quotes by design, so a judge that cannot find
+ * a span can drop the field and keep the refusal. The prompt closes that by
+ * naming it, and requires either a span or a `continue` whose gap is stated in
+ * words without claiming evidence for it.
+ *
+ * Exported so the four instructions can be pinned by a test without a model.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_ungrounded_quote_retry_prompt(["the queue is still unsorted"])
+ */
+pub fn __judge_ungrounded_quote_retry_prompt(quotes: list<string>) -> string {
   return "\n\nYour previous reply refused the work and attributed it to evidence above, "
     + "but these quotes do not appear anywhere in the evidence you were given:\n"
     + join(quotes.map({ quote -> "  - " + quote }), "\n")
-    + "\nRe-read the evidence and answer again. Quote only lines that are actually there. "
+    + "\nThese are paraphrases. You summarized what the evidence showed instead of "
+    + "copying from it, so what you wrote is your sentence about the evidence and "
+    + "not a part of the evidence itself.\n"
+    + "Answer again under these rules:\n"
+    + "- `evidence_quote` must be a span copied character for character from the "
+    + "transcript or tool output above. Copy it; do not compose, summarize, "
+    + "reword, join separate lines, or fill in an ellipsis.\n"
+    + "- Put what you think the span shows in `detail`, in your own words. "
+    + "`detail` is where your reading of the evidence belongs; the quote is only "
+    + "the raw span it is a reading of.\n"
+    + "- An empty `evidence_quote` is not an accepted answer here. Leaving it out "
+    + "does not withdraw the refusal and does not resolve this. If no span "
+    + "supports the gap, reply `continue` with the gap named in `detail` and no "
+    + "evidence claimed for it, so the gap stands on your judgement rather than "
+    + "on a quote.\n"
     + "If the evidence does not in fact show the gap you had in mind, that gap is not "
     + "supported and you should not raise it; if the evidence shows the work IS done, reply `done`."
 }

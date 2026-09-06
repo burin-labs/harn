@@ -442,8 +442,7 @@ run_generated_audit() {
   time_phase "language-spec drift" make check-language-spec
   time_phase "highlight drift" make check-highlight
   time_phase "CLI AOT drift" make check-cli-aot
-  time_phase "protocol artifact drift" \
-    make check-protocol-artifacts PROTOCOL_ARTIFACT_VERSION="$(current_version)"
+  time_phase "protocol artifact drift" make check-protocol-artifacts
   time_phase "connector schema drift" make check-connector-schemas
   time_phase "harness migration table drift" make check-harness-migrations
   time_phase "session bundle schema drift" make check-session-bundle-schema
@@ -1232,10 +1231,10 @@ cmd_prepare() {
     reconcile_cargo_lock
 
     harn_cmd run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
-    # Artifact contents come from the already-audited source checkout. Stamp the
-    # selected release version explicitly so a Cargo.toml-only rewrite does not
-    # force a second full CLI build.
-    harn_cmd dump-protocol-artifacts --artifact-version "$next"
+    # Artifact contents come from the already-audited source checkout and no
+    # longer carry a version stamp, so a Cargo.toml-only rewrite leaves them
+    # byte-identical.
+    harn_cmd dump-protocol-artifacts
     # The package/release payload is intentionally ignored rather than committed.
     # Generate it once after the version bump with the stable pre-bump generator;
     # later audit/package steps verify the same target-independent bytes.

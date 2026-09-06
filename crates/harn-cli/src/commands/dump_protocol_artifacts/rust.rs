@@ -25,17 +25,15 @@ use super::values::*;
 /// wire-name vocabulary and serde DTOs for the permission and agent-event
 /// paths, where a hand-maintained parallel shape would otherwise drift.
 #[cfg(test)]
-pub(super) fn generate_rust() -> String {
-    generate_rust_for_version(
-        env!("CARGO_PKG_VERSION"),
+pub(super) fn generate_rust_for_tests() -> String {
+    generate_rust(
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
         &ActivityVocabulary::load_for_tests(),
     )
 }
 
-pub(super) fn generate_rust_for_version(
-    artifact_version: &str,
+pub(super) fn generate_rust(
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
     activity: &ActivityVocabulary,
@@ -53,11 +51,6 @@ pub(super) fn generate_rust_for_version(
     out.push_str("use serde::{Deserialize, Deserializer, Serialize, Serializer};\n");
     out.push_str("use serde_json::{Map, Value};\n\n");
 
-    out.push_str("/// Harn release that generated this binding.\n");
-    out.push_str(&format!(
-        "pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = {};\n\n",
-        json_string_literal(artifact_version)
-    ));
     out.push_str("pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = \"harn.tool_permission_decision.v1\";\n");
     out.push_str("pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = \"harn.tool_permission_activity.v1\";\n\n");
     out.push_str("pub const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA: &str = \"harn.external_action_activity.v1\";\n");

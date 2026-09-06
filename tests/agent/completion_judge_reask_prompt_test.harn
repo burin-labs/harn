@@ -1,0 +1,76 @@
+// Run: harn test tests/agent/completion_judge_reask_prompt_test.harn
+//
+// Pins the four instructions the `ungrounded_quote` re-ask has to carry.
+//
+// The measured failure is PARAPHRASE, not invention. On the checkpoint replay
+// the ungroundable quotes were sentences the judge composed about evidence it
+// had genuinely been shown; the best line-level match for a rejected quote
+// scored 0.50, which is what a summary of a real region scores, not what a
+// fabricated line scores. The previous re-ask said "quote only lines that are
+// actually there", which does not reach that failure: a judge that believes it
+// is describing what it saw reads that as already satisfied and returns the
+// same paraphrase.
+//
+// These cases pin instruction TEXT, so they prove the prompt says these things
+// and nothing more. Whether saying them changes the judge's behaviour is a
+// question about a model, and the falsifier for it is the N=3 checkpoint replay
+// owned by the eval lane. A green file here is not that evidence.
+import { __judge_ungrounded_quote_retry_prompt } from "std/agent/judge_contradiction"
+
+const QUOTES = ["the ready queue is still unsorted", "no test covers the retry"]
+
+@test
+pipeline test_reask_names_the_failure_as_paraphrase(harness: Harness, task: unknown) {
+  const prompt = __judge_ungrounded_quote_retry_prompt(QUOTES)
+  // Naming the mechanism, not just the outcome. "These are paraphrases" tells
+  // the judge which of its own behaviours produced the rejected quote.
+  assert(prompt.contains("These are paraphrases"))
+  assert(prompt.contains("summarized what the evidence showed instead of"))
+}
+
+@test
+pipeline test_reask_requires_a_copied_span(harness: Harness, task: unknown) {
+  const prompt = __judge_ungrounded_quote_retry_prompt(QUOTES)
+  assert(prompt.contains("copied character for character"))
+  // The forbidden operations are enumerated, because "copy it" alone leaves
+  // joining two real lines or filling an ellipsis looking permissible.
+  assert(prompt.contains("do not compose, summarize, reword, join separate lines"))
+}
+
+@test
+pipeline test_reask_sends_the_judges_own_words_to_detail(harness: Harness, task: unknown) {
+  const prompt = __judge_ungrounded_quote_retry_prompt(QUOTES)
+  assert(prompt.contains("Put what you think the span shows in `detail`"))
+  assert(prompt.contains("the quote is only"))
+}
+
+@test
+pipeline test_reask_closes_the_empty_quote_exit(harness: Harness, task: unknown) {
+  // The grounding check skips an empty quote by design, so dropping the field
+  // is a way to keep the refusal and pay nothing. The prompt has to refuse it
+  // by name and say what to do instead.
+  const prompt = __judge_ungrounded_quote_retry_prompt(QUOTES)
+  assert(prompt.contains("An empty `evidence_quote` is not an accepted answer"))
+  assert(prompt.contains("does not withdraw the refusal"))
+  assert(prompt.contains("reply `continue` with the gap named in `detail`"))
+}
+
+@test
+pipeline test_reask_still_names_the_offending_quotes(harness: Harness, task: unknown) {
+  // Control for the added text: a judge told only "that was wrong" has the same
+  // reply available to it, so the offending quotes must still be listed.
+  const prompt = __judge_ungrounded_quote_retry_prompt(QUOTES)
+  for quote in QUOTES {
+    assert(prompt.contains(quote))
+  }
+}
+
+@test
+pipeline test_reask_keeps_both_original_exits(harness: Harness, task: unknown) {
+  // Control against the new rules reading as "refuse harder". An unsupported
+  // gap must still be droppable, and evidence of completion must still be
+  // answerable with `done`.
+  const prompt = __judge_ungrounded_quote_retry_prompt(QUOTES)
+  assert(prompt.contains("that gap is not supported and you should not raise it"))
+  assert(prompt.contains("reply `done`"))
+}

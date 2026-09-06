@@ -40,11 +40,7 @@ pub(crate) fn dispatch(command: Command) {
             commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
         }
         Command::DumpProtocolArtifacts(args) => {
-            commands::dump_protocol_artifacts::run(
-                &args.output_dir,
-                args.check,
-                args.artifact_version.as_deref(),
-            );
+            commands::dump_protocol_artifacts::run(&args.output_dir, args.check);
         }
         Command::DumpHarnessMigrations(args) => {
             let code = commands::harness_migration_codegen::run(&args);

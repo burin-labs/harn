@@ -3,9 +3,9 @@ use super::*;
 
 #[test]
 fn generated_bindings_expose_one_prepared_session_contract() {
-    let typescript = generate_typescript();
-    let rust = generate_rust();
-    let swift = generate_swift();
+    let typescript = generate_typescript_for_tests();
+    let rust = generate_rust_for_tests();
+    let swift = generate_swift_for_tests();
     let python = generate_python();
     let go = generate_go();
     for (artifact, lease, update) in [
