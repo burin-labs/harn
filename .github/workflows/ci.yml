@@ -11,10 +11,13 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # The newest main tree supersedes stale integration work. Pull requests and
-  # merge groups retain isolated keys.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && 'main') || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # A main push is immutable proof for one commit, so each one gets its own key.
+  # Keying main by the branch instead lets the next merge evict a pending proof
+  # before any job starts, and merges land closer together than a run takes, so
+  # most main commits never finish being proved at all. Pull requests and merge
+  # groups keep their own keys and still supersede.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
