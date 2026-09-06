@@ -21,6 +21,12 @@ source bytes returns
 cannot erase the truncation signal by appending content. For custom logic,
 pass `pre` and/or `post` closures in the config table.
 
+A `PostToolUse` hook can reject an otherwise successful tool result with
+`{result: replacement, denial: {kind, message}}`. The visible `result` remains
+model-facing text. The stable denial record survives later result rewrites and
+reaches the agent tool envelope as `denial`, with `ok: false` and
+`error_category: "tool_rejected"`.
+
 ```harn
 register_tool_hook({pattern: "exec_*", deny: "exec is gated"})
 register_tool_hook({pattern: "*", max_output: 4000})

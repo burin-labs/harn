@@ -17,7 +17,7 @@ mod post_tool;
 mod reminder_fields;
 mod vm_entry;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
-pub use post_tool::{PostToolAction, PostToolHookResult};
+pub use post_tool::{PostToolAction, PostToolDenial, PostToolHookResult};
 use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks};
 
 tokio::task_local! {
@@ -1378,27 +1378,7 @@ pub async fn run_post_tool_hooks_with_ctx(
             }
             RuntimeHookHandler::NativePreTool(_) => continue,
         };
-        match action {
-            PostToolAction::Pass => {}
-            PostToolAction::Modify(new_result) => {
-                current.text = new_result;
-            }
-            PostToolAction::Truncate {
-                result,
-                dropped_bytes,
-            } => {
-                current.text = result;
-                current.dropped_bytes = current.dropped_bytes.saturating_add(dropped_bytes);
-            }
-            PostToolAction::Reminder { spec, then } => {
-                inject_hook_effects(
-                    "",
-                    vec![HookEffect::Reminder(spec)],
-                    Some(HookEvent::PostToolUse),
-                )?;
-                current = apply_post_tool_action(*then, current)?;
-            }
-        }
+        current = apply_post_tool_action(action, current)?;
     }
     Ok(current)
 }
