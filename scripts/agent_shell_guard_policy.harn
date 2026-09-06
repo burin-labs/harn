@@ -29,3 +29,24 @@ pub const DISPOSABLE_PATH_POLICY: DisposablePathPolicy = {
   macos_temp_prefixes: ["/var/folders/", "/private/var/folders/"],
   macos_temp_component: "/T",
 }
+
+/**
+ * Where a repository declares that it owns Fleet worktree admission.
+ *
+ * The worktree rule is pure argv analysis and therefore fires in every
+ * repository that wires this guard, including one that has no admission
+ * command to offer. Refusing there names a command the operator cannot run.
+ * The guard looks for one of these paths under the repository root and only
+ * refuses when it finds one.
+ */
+pub type WorktreeAdmissionPolicy = {
+  admission_command_paths: list<string>,
+  repository_markers: list<string>,
+  max_root_walk: int,
+}
+
+pub const WORKTREE_ADMISSION_POLICY: WorktreeAdmissionPolicy = {
+  admission_command_paths: ["scripts/fleet-worktree-admit.ts"],
+  repository_markers: [".git"],
+  max_root_walk: 12,
+}

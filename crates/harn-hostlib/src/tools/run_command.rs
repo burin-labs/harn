@@ -67,11 +67,8 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .map(to_agent_path)
         .unwrap_or_default();
 
-    let mut sandbox = harn_vm::value::DictMap::new();
-    sandbox.put_str("kind", proc::sandbox_kind());
-    sandbox.insert(
-        harn_vm::value::intern_key("enforced"),
-        VmValue::Bool(proc::sandbox_enforced()),
+    let sandbox = proc::sandbox_response(
+        harn_vm::process_sandbox::ProcessSandboxReportingContext::current().reporting,
     );
 
     let mut builder = ResponseBuilder::new()
@@ -95,6 +92,7 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
         .int("line_count", message.lines().count() as i64)
         .int("byte_count", message.len() as i64)
         .str("output_sha256", "")
+        .nil("denial")
         .dict("sandbox", sandbox)
         .str("audit_id", audit_id);
     if let Some(policy) = map.and_then(|value| value.get("command_policy")).cloned() {

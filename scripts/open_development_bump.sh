@@ -37,8 +37,7 @@ fi
 branch="automation/development-$actual"
 
 # The drift decision that scheduled this job can be minutes old by the time the
-# job runs, because publish-release runs on every push to main and reports a
-# required bump for every commit until one lands. In the 0.10.129 cutover the
+# job runs. In the 0.10.129 cutover the
 # decision was taken at 05:10Z while main was still on 0.10.128, the bump it was
 # about merged at 05:12Z, and this script ran at 05:19Z and opened a second one.
 #

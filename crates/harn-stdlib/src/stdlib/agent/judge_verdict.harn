@@ -168,6 +168,50 @@ pub fn __judge_completion_verdict_contradicts_itself(decoded: CompletionJudgeVer
 }
 
 /**
+ * What the actor is told when a `done` was overridden for contradicting itself.
+ *
+ * The branch this serves used to fall through to the judge's own `detail`,
+ * which on a `done` reply is its rationale for finishing. Injecting that as the
+ * reason a run may not stop hands the actor a paragraph saying the work is
+ * complete, so the veto is indistinguishable from an approval, the actor has
+ * nothing to act on, and the loop cannot advance. Measured on three read-only
+ * review cells: the same sentence re-injected on five consecutive iterations,
+ * one tool call across seven turns, and a run that ended at the judge cap.
+ *
+ * So this names the condition instead: that a gap was declared alongside the
+ * `done`, which gap, and the two ways out. The gap's own detail is included
+ * when it has one, because the class alone is a label and the actor needs the
+ * claim. The quote is deliberately NOT echoed: on the measured cells it was the
+ * judge's own summary prose rather than a line from the evidence, so repeating
+ * it would reintroduce exactly the sentence this function exists to stop
+ * sending.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_contradiction_feedback({verdict: "done", detail: "", gap_class: "other", gaps: [], gap_declared: true})
+ */
+pub fn __judge_contradiction_feedback(decoded: CompletionJudgeVerdict) -> string {
+  const first = if len(decoded.gaps) > 0 {
+    trim(to_string(decoded.gaps[0]?.detail ?? ""))
+  } else {
+    ""
+  }
+  const named = if first != "" {
+    " The outstanding item is: " + first
+  } else {
+    ""
+  }
+  return "The completion check reported the work finished while also recording an "
+    + "outstanding gap of class `"
+    + to_string(decoded.gap_class)
+    + "`, so it cannot be read as a confirmation."
+    + named
+    + " Either resolve that gap and say what you changed, or, if it does not "
+    + "apply to this task, say why it does not before finishing."
+}
+
+/**
  * __judge_completion_verdict_schema.
  *
  * One discriminant and one dual-purpose detail keep completion decisions
