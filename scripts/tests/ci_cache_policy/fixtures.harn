@@ -110,7 +110,6 @@ pub fn windows_warm_policy() {
     build_headroom_bytes: 17179869184,
     dev_drive_size_default: "25GB",
     dev_drive_size_full_workspace: "50GB",
-    dev_drive_size_release_certify: "50GB",
   }
 }
 
@@ -535,11 +534,7 @@ pub fn workflows() {
                 "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
               ),
               uses: "samypr100/setup-dev-drive@exact-pin",
-              with: {
-                "drive-size": gha_expression(
-                  "startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB'",
-                ),
-              },
+              with: {"drive-size": "50GB"},
             },
             {uses: "./.github/actions/rust-toolchain"},
             {
@@ -577,7 +572,8 @@ pub fn workflows() {
             {
               name: "Report Windows storage (before build)",
               if: "always()",
-              run: "./scripts/ci/windows_storage_budget.sh report before_build",
+              run:
+                "./scripts/ci/windows_storage_budget.sh report before_build --require-free-headroom",
             },
             {name: "Run workspace nextest", env: {RUST_MIN_STACK: "16777216"}},
             {

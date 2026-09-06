@@ -49,4 +49,37 @@ fi
 grep -Fq 'PHASE must match' "$tmpdir/invalid.err"
 [[ ! -s "$tmpdir/invalid.out" ]]
 
+# The floor is a gate, so both directions get a control. A one-sided test would
+# pass just as happily against a --require-free-headroom flag that never
+# compares anything.
+policy_dir="$tmpdir/policy"
+mkdir -p "$policy_dir"
+write_policy() {
+  cat > "$policy_dir/cache-policy.json" <<POLICY
+{"schema_version": 6, "windows_workspace_warm": {"build_headroom_bytes": $1}}
+POLICY
+}
+
+echo "a reading above the policy floor still passes with the receipt"
+write_policy 1
+above_output="$(
+  HARN_CACHE_POLICY_PATH="$policy_dir/cache-policy.json"     CARGO_HOME="$tmpdir/cargo-home"     CARGO_TARGET_DIR="$tmpdir/target"     "$script" report before_build --require-free-headroom
+)"
+[[ "$above_output" == *'windows_storage_phase=before_build'* ]]
+
+echo "a reading below the policy floor fails with both numbers in the message"
+# 2^62 bytes: no real filesystem clears it, so this control cannot pass by luck.
+write_policy 4611686018427387904
+if HARN_CACHE_POLICY_PATH="$policy_dir/cache-policy.json"   CARGO_HOME="$tmpdir/cargo-home"   CARGO_TARGET_DIR="$tmpdir/target"   "$script" report before_build --require-free-headroom   >"$tmpdir/floor.out" 2>"$tmpdir/floor.err"; then
+  echo "reading below the build headroom floor unexpectedly passed" >&2
+  exit 1
+fi
+grep -Fq '4611686018427387904-byte build headroom floor' "$tmpdir/floor.err"
+grep -Eq 'free space [0-9]+ bytes is below' "$tmpdir/floor.err"
+# The failing run publishes the same receipt a healthy run publishes.
+grep -Fq 'windows_storage_phase=before_build' "$tmpdir/floor.out"
+
+echo "the floor is opt-in: the same undersized reading passes without the flag"
+HARN_CACHE_POLICY_PATH="$policy_dir/cache-policy.json"   CARGO_HOME="$tmpdir/cargo-home"   CARGO_TARGET_DIR="$tmpdir/target"   "$script" report before_build >/dev/null
+
 echo "windows_storage_budget_test: ok"

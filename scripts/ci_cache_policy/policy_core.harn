@@ -19,7 +19,6 @@ pub type WindowsWorkspaceWarmPolicy = {
   build_headroom_bytes: int,
   dev_drive_size_default: string,
   dev_drive_size_full_workspace: string,
-  dev_drive_size_release_certify: string,
 }
 
 /**
@@ -370,6 +369,13 @@ pub const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
 
 pub const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
 
+/**
+ * The before-build reading is the one receipt that must also refuse. Without
+ *  this flag the step measures free space and enters the build anyway, which
+ *  is how a Dev Drive with under a gibibyte left reached the linker.
+ */
+pub const WINDOWS_STORAGE_HEADROOM_FLAG = "--require-free-headroom"
+
 pub const WINDOWS_STORAGE_INITIAL_STEP = "Report Windows storage (initial)"
 
 pub const WINDOWS_STORAGE_INITIAL_STEP_ID = "windows-storage-initial"
@@ -443,7 +449,6 @@ pub fn windows_workspace_warm_schema() {
       build_headroom_bytes: schema_int() + {minimum: 8589934592},
       dev_drive_size_default: drive_size_schema(),
       dev_drive_size_full_workspace: drive_size_schema(),
-      dev_drive_size_release_certify: drive_size_schema(),
     },
   )
 }
@@ -487,13 +492,17 @@ pub fn policy_schema() {
   )
 }
 
-pub fn windows_release_certify_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
-  return "$"
-    + "{{ startsWith(github.ref_name, 'release-certify/') && '"
-    + warm.dev_drive_size_release_certify
-    + "' || '"
-    + warm.dev_drive_size_default
-    + "' }}"
+/**
+ * The nightly workspace job compiles every crate on every ref, so its Dev
+ *  Drive takes the full-workspace ceiling unconditionally. It previously took
+ *  the default ceiling except on release-certify refs, which sized the drive
+ *  for a run the job never performs: an ordinary nightly ran out of space
+ *  mid-link with a restored warm target already occupying most of the volume.
+ *  A ref-conditional expression here would be a second owner of the same
+ *  question the workload already answers.
+ */
+pub fn windows_nightly_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
+  return warm.dev_drive_size_full_workspace
 }
 
 pub fn windows_ci_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
@@ -782,7 +791,6 @@ pub fn policy_from_validated(value: dict) -> CiCachePolicy {
       build_headroom_bytes: warm.build_headroom_bytes,
       dev_drive_size_default: warm.dev_drive_size_default,
       dev_drive_size_full_workspace: warm.dev_drive_size_full_workspace,
-      dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
     },
     macos_workspace_warm: {
       artifact_name: macos_warm.artifact_name,
