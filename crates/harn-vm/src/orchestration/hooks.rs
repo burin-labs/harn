@@ -17,7 +17,7 @@ mod post_tool;
 mod reminder_fields;
 mod vm_entry;
 use post_tool::{apply_post_tool_action, parse_post_tool_result};
-pub use post_tool::{PostToolAction, PostToolHookResult};
+pub use post_tool::{PostToolAction, PostToolDenial, PostToolHookResult};
 use vm_entry::{invoke_vm_hook_handler, invoke_vm_lifecycle_hooks};
 
 tokio::task_local! {
@@ -1383,6 +1383,10 @@ pub async fn run_post_tool_hooks_with_ctx(
             PostToolAction::Modify(new_result) => {
                 current.text = new_result;
             }
+            PostToolAction::Deny { result, denial } => {
+                current.text = result;
+                current.denial = Some(denial);
+            }
             PostToolAction::Truncate {
                 result,
                 dropped_bytes,
@@ -1814,6 +1818,44 @@ mod tests {
         ]))
         .expect_err("truncation without dropped bytes must fail");
         assert!(error.to_string().contains("dropped_bytes"));
+    }
+
+    #[test]
+    fn post_tool_result_parses_typed_denial() {
+        let action = parse_post_tool_result(dict(vec![
+            ("result", vm_string("request denied")),
+            (
+                "denial",
+                dict(vec![
+                    ("kind", vm_string("policy_blocked")),
+                    ("message", vm_string("policy wording")),
+                ]),
+            ),
+        ]))
+        .expect("typed post-tool denial");
+
+        match action {
+            PostToolAction::Deny { result, denial } => {
+                assert_eq!(result, "request denied");
+                assert_eq!(denial.kind, "policy_blocked");
+                assert_eq!(denial.message, "policy wording");
+            }
+            other => panic!("expected typed denial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_tool_result_rejects_incomplete_denial() {
+        let error = parse_post_tool_result(dict(vec![
+            ("result", vm_string("request denied")),
+            (
+                "denial",
+                dict(vec![("message", vm_string("policy wording"))]),
+            ),
+        ]))
+        .expect_err("denial without a stable kind must fail");
+
+        assert!(error.to_string().contains("non-empty string kind"));
     }
 
     #[test]

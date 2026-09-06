@@ -9,6 +9,11 @@ use super::{
 pub enum PostToolAction {
     Pass,
     Modify(String),
+    /// Replace the visible result and classify the tool call as denied.
+    Deny {
+        result: String,
+        denial: PostToolDenial,
+    },
     /// Replace the result and account for bytes removed from model-visible
     /// output. This survives a later hook appending text.
     Truncate {
@@ -21,11 +26,28 @@ pub enum PostToolAction {
     },
 }
 
-/// Final PostToolUse output plus cumulative, hook-declared data loss.
+/// Stable machine-readable reason supplied by a PostToolUse hook denial.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PostToolDenial {
+    pub kind: String,
+    pub message: String,
+}
+
+impl PostToolDenial {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": self.kind,
+            "message": self.message,
+        })
+    }
+}
+
+/// Final PostToolUse output plus cumulative hook metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostToolHookResult {
     pub text: String,
     pub dropped_bytes: usize,
+    pub denial: Option<PostToolDenial>,
 }
 
 impl PostToolHookResult {
@@ -33,8 +55,30 @@ impl PostToolHookResult {
         Self {
             text: text.to_string(),
             dropped_bytes: 0,
+            denial: None,
         }
     }
+}
+
+fn parse_denial(map: &crate::value::DictMap) -> Result<Option<PostToolDenial>, VmError> {
+    let Some(value) = map.get("denial") else {
+        return Ok(None);
+    };
+    let VmValue::Dict(denial) = value else {
+        return Err(VmError::Runtime(
+            "PostToolUse denial must be a {kind, message} record".to_string(),
+        ));
+    };
+    let field = |name: &str| match denial.get(name) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
+        _ => Err(VmError::Runtime(format!(
+            "PostToolUse denial requires non-empty string {name}"
+        ))),
+    };
+    Ok(Some(PostToolDenial {
+        kind: field("kind")?,
+        message: field("message")?,
+    }))
 }
 
 pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, VmError> {
@@ -47,9 +91,21 @@ pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, V
             PostToolAction::Modify(text.to_string()),
         )),
         VmValue::Dict(map) => {
+            let denial = parse_denial(&map)?;
             if let Some(result) = map.get("result") {
                 let result = result.display();
                 let truncated = matches!(map.get("truncated"), Some(VmValue::Bool(true)));
+                if let Some(denial) = denial {
+                    if truncated {
+                        return Err(VmError::Runtime(
+                            "PostToolUse denial cannot also declare truncation".to_string(),
+                        ));
+                    }
+                    return Ok(wrap_post_tool_effects(
+                        effects,
+                        PostToolAction::Deny { result, denial },
+                    ));
+                }
                 if truncated {
                     let dropped_bytes = map
                         .get("dropped_bytes")
@@ -75,6 +131,11 @@ pub(super) fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, V
                     PostToolAction::Modify(result),
                 ));
             }
+            if denial.is_some() {
+                return Err(VmError::Runtime(
+                    "PostToolUse denial requires a model-visible result".to_string(),
+                ));
+            }
             Ok(wrap_post_tool_effects(effects, PostToolAction::Pass))
         }
         other => Err(VmError::Runtime(format!(
@@ -93,6 +154,11 @@ pub(super) fn apply_post_tool_action(
         PostToolAction::Pass => Ok(current),
         PostToolAction::Modify(new_result) => {
             current.text = new_result;
+            Ok(current)
+        }
+        PostToolAction::Deny { result, denial } => {
+            current.text = result;
+            current.denial = Some(denial);
             Ok(current)
         }
         PostToolAction::Truncate {

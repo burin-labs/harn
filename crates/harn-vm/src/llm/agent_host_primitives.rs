@@ -1578,6 +1578,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             hook_reminder_reports.extend(reports);
             let hook_result = rendered?;
             let dropped_bytes = hook_result.dropped_bytes;
+            let hook_denial = hook_result.denial;
             let rendered = hook_result.text;
             let output_truncated = dropped_bytes > 0;
             if output_truncated {
@@ -1602,6 +1603,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     "dropped_bytes": dropped_bytes,
                     "original_size": rendered_before_hooks.len(),
                     "final_size": rendered.len(),
+                    "denial": hook_denial.as_ref().map(crate::orchestration::PostToolDenial::to_json),
                 },
                 "truncated": output_truncated,
                 "dropped_bytes": dropped_bytes,
@@ -1623,7 +1625,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             // them into `ok:true`: the agent loop reads `ok`/`status`.
             // Prefer the pre-coercion declaration: a dict-returning handler's
             // coerced payload no longer parses (harn#7884).
-            let error_category = if denied {
+            let error_category = if hook_denial.is_some() || denied {
                 Some("tool_rejected")
             } else {
                 declared_failure.or_else(|| agent_tools::ok_result_failure_category(&raw_result))
@@ -1631,7 +1633,10 @@ pub(super) async fn host_agent_dispatch_tool_call(
             let is_failure = error_category.is_some();
             let observation =
                 format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
-            let error = is_failure.then(|| rendered.clone());
+            let error = hook_denial
+                .as_ref()
+                .map(|denial| denial.message.clone())
+                .or_else(|| is_failure.then(|| rendered.clone()));
             let result = serde_json::json!({
                 "ok": !is_failure,
                 "status": if is_failure { "error" } else { "ok" },
@@ -1643,6 +1648,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "observation": observation,
                 "error": error,
                 "error_category": error_category,
+                "denial": hook_denial.as_ref().map(crate::orchestration::PostToolDenial::to_json),
                 "mutation_status": mutation_status,
                 "changed_paths": changed_paths,
                 "data": data,

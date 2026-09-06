@@ -83,8 +83,47 @@ async fn post_tool_hook_modifies_result() {
     clear_tool_hooks();
     assert_eq!(result.text, "[REDACTED]");
     assert_eq!(result.dropped_bytes, 0);
+    assert_eq!(result.denial, None);
     assert_eq!(clean.text, "clean output");
     assert_eq!(clean.dropped_bytes, 0);
+    assert_eq!(clean.denial, None);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn post_tool_hook_preserves_denial_across_later_rewrites() {
+    clear_tool_hooks();
+    register_tool_hook(ToolHook {
+        pattern: "exec".to_string(),
+        pre: None,
+        post: Some(Arc::new(|_name, _result: &str| PostToolAction::Deny {
+            result: "first wording".to_string(),
+            denial: PostToolDenial {
+                kind: "policy_blocked".to_string(),
+                message: "stable reason".to_string(),
+            },
+        })),
+    });
+    register_tool_hook(ToolHook {
+        pattern: "exec".to_string(),
+        pre: None,
+        post: Some(Arc::new(|_name, _result: &str| {
+            PostToolAction::Modify("second wording".to_string())
+        })),
+    });
+
+    let result = run_post_tool_hooks("exec", &serde_json::json!({}), "original")
+        .await
+        .expect("hook result");
+    clear_tool_hooks();
+
+    assert_eq!(result.text, "second wording");
+    assert_eq!(
+        result.denial,
+        Some(PostToolDenial {
+            kind: "policy_blocked".to_string(),
+            message: "stable reason".to_string(),
+        })
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
