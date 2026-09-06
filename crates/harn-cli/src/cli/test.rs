@@ -83,25 +83,32 @@ pub(crate) struct TestArgs {
     /// budget with `HARN_TEST_WORKER_MEMORY_MB`. This flag (also honored via
     /// the `HARN_TEST_JOBS` env var) overrides both caps. Ignored unless
     /// `--parallel` is set.
-    #[arg(long = "jobs", short = 'j', value_name = "N", env = "HARN_TEST_JOBS")]
+    ///
+    /// The env var is deliberately not bound here. A field clap filled in
+    /// from the environment is indistinguishable from one the caller typed,
+    /// and `harn test --plan` has to tell those apart: see
+    /// `commands::test::resolve_environment_defaults`.
+    #[arg(long = "jobs", short = 'j', value_name = "N")]
     pub jobs: Option<usize>,
-    /// 1-based shard index for user or conformance tests. Pair with `--shard-total`.
-    #[arg(long = "shard-index", value_name = "N", env = "HARN_TEST_SHARD_INDEX")]
+    /// 1-based shard index for user or conformance tests. Pair with
+    /// `--shard-total`. Also honored via `HARN_TEST_SHARD_INDEX`, resolved
+    /// after parsing rather than bound here.
+    #[arg(long = "shard-index", value_name = "N")]
     pub shard_index: Option<usize>,
-    /// Total number of user or conformance test shards. Pair with `--shard-index`.
-    #[arg(long = "shard-total", value_name = "N", env = "HARN_TEST_SHARD_TOTAL")]
+    /// Total number of user or conformance test shards. Pair with
+    /// `--shard-index`. Also honored via `HARN_TEST_SHARD_TOTAL`, resolved
+    /// after parsing rather than bound here.
+    #[arg(long = "shard-total", value_name = "N")]
     pub shard_total: Option<usize>,
     /// Harn JSON test receipt used as the shard-cost and regression baseline.
     /// The receipt must carry the same --timing-environment identity.
     #[arg(long = "timing-baseline", value_name = "PATH")]
     pub timing_baseline: Option<String>,
     /// Stable identity for the environment that produced or enforces timing
-    /// receipts (for example `github-linux-x64`).
-    #[arg(
-        long = "timing-environment",
-        value_name = "NAME",
-        env = "HARN_TEST_TIMING_ENVIRONMENT"
-    )]
+    /// receipts (for example `github-linux-x64`). Also honored via
+    /// `HARN_TEST_TIMING_ENVIRONMENT`, resolved after parsing rather than
+    /// bound here.
+    #[arg(long = "timing-environment", value_name = "NAME")]
     pub timing_environment: Option<String>,
     /// Fail cases that grow beyond this percentage of their receipt baseline.
     #[arg(long = "max-cost-regression-percent", default_value_t = 25)]
