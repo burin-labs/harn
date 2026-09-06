@@ -11,7 +11,6 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
-use super::external_action_types::append_swift_external_action_types;
 use super::prepared_session::append_swift_prepared_session_types;
 use super::session_recap::append_swift_session_recap_types;
 use super::session_update_payloads::append_swift_session_update_payloads;
@@ -151,50 +150,9 @@ pub(super) fn generate_swift_for_version(
     ));
     out.push_str("}\n\n");
 
-    out.push_str(&swift_enum(
-        "HarnExternalActionOutcome",
-        &external_actions.outcomes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionReceiptStatus",
-        &external_actions.receipt_statuses,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionNextAction",
-        &external_actions.next_actions,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionEnvironment",
-        &external_actions.environments,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionAuthorizationMethod",
-        &external_actions.authorization_methods,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionAuthenticationAssurance",
-        &external_actions.authentication_assurances,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionDisclosureSource",
-        &external_actions.disclosure_sources,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionErrorKind",
-        &external_actions.error_kinds,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionProtectedFieldClass",
-        &external_actions.protected_field_classes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionPassengerGender",
-        &external_actions.passenger_genders,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionActivityStatus",
-        &external_actions.activity_statuses,
-    ));
+    for (_, suffix, values) in external_actions.projections() {
+        out.push_str(&swift_enum(&format!("HarnExternalAction{suffix}"), values));
+    }
     out.push_str("public extension HarnExternalActionActivityStatus {\n");
     out.push_str(
         "    /// Whether this snapshot is a final outcome and may only replay identically.\n",
@@ -223,27 +181,9 @@ pub(super) fn generate_swift_for_version(
         out.push_str(&format!(": {index}\n"));
     }
     out.push_str("        default: Int.max\n        }\n    }\n}\n\n");
-    out.push_str(&swift_enum(
-        "HarnExternalActionPolicyLayer",
-        &external_actions.policy_layers,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionPolicyEvaluationOutcome",
-        &external_actions.policy_evaluation_outcomes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionDecisionOutcome",
-        &external_actions.decision_outcomes,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionDecider",
-        &external_actions.deciders,
-    ));
-    out.push_str(&swift_enum(
-        "HarnExternalActionReconciliationStatus",
-        &external_actions.reconciliation_statuses,
-    ));
-    append_swift_external_action_types(&mut out);
+    for record in &external_actions.records {
+        record.append(&mut out, super::records::Target::Swift);
+    }
     append_activity_types(&mut out, activity);
     out.push_str(&swift_enum(
         "HarnConnectorSetupStage",

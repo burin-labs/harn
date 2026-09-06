@@ -10,7 +10,6 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
-use super::external_action_types::append_typescript_external_action_types;
 use super::prepared_session::append_typescript_prepared_session_types;
 use super::session_recap::append_typescript_session_recap_types;
 use super::session_update_payloads::{
@@ -202,61 +201,13 @@ pub(super) fn generate_typescript_for_version(
         TOOL_CALL_RECEIPT_EXECUTORS,
         "HarnToolCallReceiptExecutor",
     ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_OUTCOMES",
-        &external_actions.outcomes,
-        "HarnExternalActionOutcome",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_RECEIPT_STATUSES",
-        &external_actions.receipt_statuses,
-        "HarnExternalActionReceiptStatus",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_NEXT_ACTIONS",
-        &external_actions.next_actions,
-        "HarnExternalActionNextAction",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_ENVIRONMENTS",
-        &external_actions.environments,
-        "HarnExternalActionEnvironment",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_AUTHORIZATION_METHODS",
-        &external_actions.authorization_methods,
-        "HarnExternalActionAuthorizationMethod",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_AUTHENTICATION_ASSURANCES",
-        &external_actions.authentication_assurances,
-        "HarnExternalActionAuthenticationAssurance",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_DISCLOSURE_SOURCES",
-        &external_actions.disclosure_sources,
-        "HarnExternalActionDisclosureSource",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_ERROR_KINDS",
-        &external_actions.error_kinds,
-        "HarnExternalActionErrorKind",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES",
-        &external_actions.protected_field_classes,
-        "HarnExternalActionProtectedFieldClass",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_PASSENGER_GENDERS",
-        &external_actions.passenger_genders,
-        "HarnExternalActionPassengerGender",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_ACTIVITY_STATUSES",
-        &external_actions.activity_statuses,
-        "HarnExternalActionActivityStatus",
-    ));
+    for (key, suffix, values) in external_actions.projections() {
+        out.push_str(&ts_array_owned(
+            &format!("EXTERNAL_ACTION_{}", key.to_uppercase()),
+            values,
+            &format!("HarnExternalAction{suffix}"),
+        ));
+    }
     out.push_str("export const EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES = [\n");
     for value in &external_actions.terminal_activity_statuses {
         out.push_str("  ");
@@ -289,32 +240,9 @@ pub(super) fn generate_typescript_for_version(
          \x20   <= EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(next as never)\n\
          }\n\n",
     );
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_POLICY_LAYERS",
-        &external_actions.policy_layers,
-        "HarnExternalActionPolicyLayer",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_POLICY_EVALUATION_OUTCOMES",
-        &external_actions.policy_evaluation_outcomes,
-        "HarnExternalActionPolicyEvaluationOutcome",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_DECISION_OUTCOMES",
-        &external_actions.decision_outcomes,
-        "HarnExternalActionDecisionOutcome",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_DECIDERS",
-        &external_actions.deciders,
-        "HarnExternalActionDecider",
-    ));
-    out.push_str(&ts_array_owned(
-        "EXTERNAL_ACTION_RECONCILIATION_STATUSES",
-        &external_actions.reconciliation_statuses,
-        "HarnExternalActionReconciliationStatus",
-    ));
-    append_typescript_external_action_types(&mut out);
+    for record in &external_actions.records {
+        record.append(&mut out, super::records::Target::Typescript);
+    }
     out.push_str(&ts_array_owned(
         "ACTIVITY_KINDS",
         &activity.kinds,

@@ -9,6 +9,7 @@ pub(super) const EXTERNAL_ACTION_VOCABULARY_SOURCE: &str =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ExternalActionVocabulary {
+    pub(super) records: Vec<super::records::Record>,
     pub(super) outcomes: Vec<String>,
     pub(super) receipt_statuses: Vec<String>,
     pub(super) next_actions: Vec<String>,
@@ -30,106 +31,96 @@ pub(super) struct ExternalActionVocabulary {
 }
 
 impl ExternalActionVocabulary {
+    /// Public enum and constant names shared by the three activity host bindings.
+    pub(super) fn projections(&self) -> [(&str, &str, &[String]); 16] {
+        [
+            ("outcomes", "Outcome", &self.outcomes),
+            ("receipt_statuses", "ReceiptStatus", &self.receipt_statuses),
+            ("next_actions", "NextAction", &self.next_actions),
+            ("environments", "Environment", &self.environments),
+            (
+                "authorization_methods",
+                "AuthorizationMethod",
+                &self.authorization_methods,
+            ),
+            (
+                "authentication_assurances",
+                "AuthenticationAssurance",
+                &self.authentication_assurances,
+            ),
+            (
+                "disclosure_sources",
+                "DisclosureSource",
+                &self.disclosure_sources,
+            ),
+            ("error_kinds", "ErrorKind", &self.error_kinds),
+            (
+                "protected_field_classes",
+                "ProtectedFieldClass",
+                &self.protected_field_classes,
+            ),
+            (
+                "passenger_genders",
+                "PassengerGender",
+                &self.passenger_genders,
+            ),
+            (
+                "activity_statuses",
+                "ActivityStatus",
+                &self.activity_statuses,
+            ),
+            ("policy_layers", "PolicyLayer", &self.policy_layers),
+            (
+                "policy_evaluation_outcomes",
+                "PolicyEvaluationOutcome",
+                &self.policy_evaluation_outcomes,
+            ),
+            (
+                "decision_outcomes",
+                "DecisionOutcome",
+                &self.decision_outcomes,
+            ),
+            ("deciders", "Decider", &self.deciders),
+            (
+                "reconciliation_statuses",
+                "ReconciliationStatus",
+                &self.reconciliation_statuses,
+            ),
+        ]
+    }
+
     pub(super) fn load(source: &ProtocolArtifactSource) -> Result<Self, String> {
         let text = source.read_text(EXTERNAL_ACTION_VOCABULARY_SOURCE)?;
-        Self::parse(&text)
+        let mut vocabulary = Self::parse(&text)?;
+        vocabulary.records = super::external_action_types::load(source)?;
+        Ok(vocabulary)
     }
 
     fn parse(source: &str) -> Result<Self, String> {
         let program = parse_source(source).map_err(|error| {
             format!("failed to parse {EXTERNAL_ACTION_VOCABULARY_SOURCE}: {error}")
         })?;
+        let values = |name| literal_union(&program, name, EXTERNAL_ACTION_VOCABULARY_SOURCE);
         let vocabulary = Self {
-            outcomes: literal_union(
-                &program,
-                "ExternalActionOutcome",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            receipt_statuses: literal_union(
-                &program,
-                "ExternalActionReceiptStatus",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            next_actions: literal_union(
-                &program,
-                "ExternalActionNextAction",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            environments: literal_union(
-                &program,
-                "ExternalActionEnvironment",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            authorization_methods: literal_union(
-                &program,
-                "ExternalActionAuthorizationMethod",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            authentication_assurances: literal_union(
-                &program,
-                "ExternalActionAuthenticationAssurance",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            disclosure_sources: literal_union(
-                &program,
-                "ExternalActionDisclosureSource",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            error_kinds: literal_union(
-                &program,
-                "ExternalActionErrorKind",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            protected_field_classes: literal_union(
-                &program,
-                "ExternalActionProtectedFieldClass",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            passenger_genders: literal_union(
-                &program,
-                "ExternalActionPassengerGender",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            activity_statuses: literal_union(
-                &program,
-                "ExternalActionActivityStatus",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            progress_activity_statuses: literal_union(
-                &program,
-                "ExternalActionProgressActivityStatus",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            terminal_activity_statuses: literal_union(
-                &program,
-                "ExternalActionTerminalActivityStatus",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            policy_layers: literal_union(
-                &program,
-                "ExternalActionPolicyLayer",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            policy_evaluation_outcomes: literal_union(
-                &program,
-                "ExternalActionPolicyEvaluationOutcome",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            decision_outcomes: literal_union(
-                &program,
-                "ExternalActionDecisionOutcome",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            deciders: literal_union(
-                &program,
-                "ExternalActionDecider",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
-            reconciliation_statuses: literal_union(
-                &program,
-                "ExternalActionReconciliationStatus",
-                EXTERNAL_ACTION_VOCABULARY_SOURCE,
-            )?,
+            records: Vec::new(),
+            outcomes: values("ExternalActionOutcome")?,
+            receipt_statuses: values("ExternalActionReceiptStatus")?,
+            next_actions: values("ExternalActionNextAction")?,
+            environments: values("ExternalActionEnvironment")?,
+            authorization_methods: values("ExternalActionAuthorizationMethod")?,
+            authentication_assurances: values("ExternalActionAuthenticationAssurance")?,
+            disclosure_sources: values("ExternalActionDisclosureSource")?,
+            error_kinds: values("ExternalActionErrorKind")?,
+            protected_field_classes: values("ExternalActionProtectedFieldClass")?,
+            passenger_genders: values("ExternalActionPassengerGender")?,
+            activity_statuses: values("ExternalActionActivityStatus")?,
+            progress_activity_statuses: values("ExternalActionProgressActivityStatus")?,
+            terminal_activity_statuses: values("ExternalActionTerminalActivityStatus")?,
+            policy_layers: values("ExternalActionPolicyLayer")?,
+            policy_evaluation_outcomes: values("ExternalActionPolicyEvaluationOutcome")?,
+            decision_outcomes: values("ExternalActionDecisionOutcome")?,
+            deciders: values("ExternalActionDecider")?,
+            reconciliation_statuses: values("ExternalActionReconciliationStatus")?,
         };
         let all = vocabulary.activity_statuses.iter().collect::<BTreeSet<_>>();
         let progress = vocabulary

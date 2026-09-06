@@ -13,7 +13,6 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
-use super::external_action_types::append_rust_external_action_types;
 use super::prepared_session::append_rust_prepared_session_types;
 use super::session_recap::append_rust_session_recap_types;
 use super::session_update_payloads::append_rust_session_update_payloads;
@@ -83,93 +82,25 @@ pub(super) fn generate_rust_for_version(
         "pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = {};\n\n",
         json_string_literal(ACP_PROMPT_ERROR_DATA_SCHEMA)
     ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionOutcome",
-        "Closed external-action receipt outcomes owned by `std/external_action/vocabulary`.",
-        &external_actions.outcomes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionReceiptStatus",
-        "Closed external-action receipt statuses owned by `std/external_action/vocabulary`.",
-        &external_actions.receipt_statuses,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionNextAction",
-        "Closed external-action follow-up actions owned by `std/external_action/vocabulary`.",
-        &external_actions.next_actions,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionEnvironment",
-        "Closed external-action environments owned by `std/external_action/vocabulary`.",
-        &external_actions.environments,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionAuthorizationMethod",
-        "Closed external-action authorization methods owned by `std/external_action/vocabulary`.",
-        &external_actions.authorization_methods,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionAuthenticationAssurance",
-        "Closed external-action authentication assurances owned by `std/external_action/vocabulary`.",
-        &external_actions.authentication_assurances,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionDisclosureSource",
-        "Closed external-action disclosure sources owned by `std/external_action/vocabulary`.",
-        &external_actions.disclosure_sources,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionErrorKind",
-        "Closed external-action error kinds owned by `std/external_action/vocabulary`.",
-        &external_actions.error_kinds,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionProtectedFieldClass",
-        "Closed protected-profile field classes owned by `std/external_action/vocabulary`.",
-        &external_actions.protected_field_classes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionPassengerGender",
-        "Closed passenger gender markers owned by `std/external_action/vocabulary`.",
-        &external_actions.passenger_genders,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionActivityStatus",
-        "Closed external-action activity statuses owned by `std/external_action/vocabulary`.",
-        &external_actions.activity_statuses,
-    ));
+    for (key, suffix, values) in external_actions.projections() {
+        out.push_str(&rust_string_enum(
+            &format!("HarnExternalAction{suffix}"),
+            &format!(
+                "Closed external-action {} owned by `std/external_action/vocabulary`.",
+                key.replace('_', " ")
+            ),
+            values,
+        ));
+    }
     out.push_str(&rust_terminal_activity_status(
         &external_actions.terminal_activity_statuses,
     ));
     out.push_str(&rust_activity_progress(
         &external_actions.progress_activity_statuses,
     ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionPolicyLayer",
-        "Closed external-action policy layers owned by `std/external_action/vocabulary`.",
-        &external_actions.policy_layers,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionPolicyEvaluationOutcome",
-        "Closed policy evaluation outcomes owned by `std/external_action/vocabulary`.",
-        &external_actions.policy_evaluation_outcomes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionDecisionOutcome",
-        "Closed external-action decision outcomes owned by `std/external_action/vocabulary`.",
-        &external_actions.decision_outcomes,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionDecider",
-        "Closed external-action decider kinds owned by `std/external_action/vocabulary`.",
-        &external_actions.deciders,
-    ));
-    out.push_str(&rust_string_enum(
-        "HarnExternalActionReconciliationStatus",
-        "Closed external-action reconciliation statuses owned by `std/external_action/vocabulary`.",
-        &external_actions.reconciliation_statuses,
-    ));
-    append_rust_external_action_types(&mut out);
+    for record in &external_actions.records {
+        record.append(&mut out, super::records::Target::Rust);
+    }
     out.push_str(&rust_string_enum(
         "HarnActivityKind",
         "Closed portable activity kinds owned by `std/activity/vocabulary`.",

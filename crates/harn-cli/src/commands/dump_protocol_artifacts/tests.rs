@@ -385,6 +385,7 @@ fn generic_permission_activity_projects_to_every_supported_host() {
 #[test]
 fn adding_external_action_values_updates_all_host_projections() {
     let vocabulary = ExternalActionVocabulary {
+        records: ExternalActionVocabulary::load_for_tests().records,
         outcomes: vec!["confirmed".into(), "future_outcome".into()],
         receipt_statuses: vec!["confirmed".into(), "future_status".into()],
         next_actions: vec!["none".into(), "future_action".into()],

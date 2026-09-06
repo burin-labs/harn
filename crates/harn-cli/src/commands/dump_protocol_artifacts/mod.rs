@@ -18,6 +18,8 @@ mod external_action;
 mod external_action_types;
 mod manifest;
 mod prepared_session;
+mod recap_records;
+mod records;
 mod session_recap;
 mod session_update_payloads;
 mod support;
