@@ -116,6 +116,16 @@ that turn and the following turn. Revisiting an older failure does not renew
 grace. A deferred cap remains due until it fires or verification passes; this
 setting does not defer other stop conditions.
 
+`stall_diagnostics.shrinking_failure_set_resets_budget` defaults to `false`.
+When enabled, a strictly smaller positive count of distinct verification errors
+resets the failing-verification budget. The producer must attest
+`diagnostics_complete: true` alongside structured diagnostics and a completed
+command outcome. `harness.tools.run_build_command` supplies this evidence for
+fully captured terminal output. Timeouts, partial output, warnings, and empty
+failed diagnostic sets cannot earn credit or replace the last completed failure
+baseline. Passing verification clears that baseline; later unchanged failures
+can exhaust the restarted budget.
+
 ```harn,ignore
 import { with_governance } from "std/agent/governors"
 

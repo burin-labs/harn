@@ -260,6 +260,7 @@ pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentS
       last_diagnostic_delta_reason: "terminal_success",
       same_diagnostic_streak: 0,
       failing_verify_turns: 0,
+      last_completed_failure_count: 0,
       reverify_owed: false,
       verified_write_epoch: stall_state.write_epoch,
     }
