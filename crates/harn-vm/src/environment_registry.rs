@@ -295,7 +295,8 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         | "HARN_EVENT_LOG_QUEUE_DEPTH" => EnvironmentValueShape::UnsignedInteger,
         "HARN_BUDGET_USD" => EnvironmentValueShape::NonNegativeNumber,
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
-        "HARN_BYTECODE_CACHE"
+        "HARN_ALLOW_TOOLCHAIN_MISMATCH"
+        | "HARN_BYTECODE_CACHE"
         | "HARN_DISPATCH_GENERATION_DEBUG"
         | "HARN_FLIGHT_RECORDER"
         | harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV

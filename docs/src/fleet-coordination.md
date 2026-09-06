@@ -317,6 +317,10 @@ HARN_CARGO_LEASE_MODE=required \
 ./scripts/cargo_with_worktree_build_dir.sh test -p harn-vm
 ```
 
+Before trusting a local Rust result, run `harn doctor` from the repository root.
+Its `rustc` check fails when the compiler resolved from `PATH` does not match
+`rust-toolchain.toml` and names the shadowing compiler path.
+
 `HARN_CARGO_LEASE_MODE` accepts `auto` (the local default), `required`, or
 `off`. Use `off` only for an intentionally independent lane:
 
