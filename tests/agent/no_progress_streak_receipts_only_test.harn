@@ -172,13 +172,15 @@ pipeline test_the_streak_still_reports_itself(harness: Harness, task: unknown) {
     "the receipt still carries what the loop would have said",
   )
   assert(receipts[0].streak >= 2, "the receipt names the streak it observed")
-  // The receipt cannot say "not delivered" itself. It is projected into the
-  // typed `FeedbackInjected` event, which carries kind, content and streak and
-  // drops the rest, so a `delivered` flag never reaches a reader. The demotion
-  // shows in the PAIR instead: this row present, its `no_progress_streak`
-  // sibling absent. Asserted here so the pair is what the file pins, and so a
-  // later attempt to add the flag finds this note before the assertion.
-  assert_eq(receipts[0].delivered, nil)
+  // The receipt now names its own demotion. It used to be unable to: the typed
+  // `FeedbackInjected` event carried kind, content and streak and dropped the
+  // rest, so the flag never reached a reader and the demotion could only be
+  // inferred from the PAIR. Both readings are pinned here, and they are
+  // independent. The flag is the mechanism's own report; the absent sibling is
+  // the observable consequence. A regression that silently stopped forwarding
+  // the flag would leave the second assertion green on its own, which is why
+  // the pair stays rather than being replaced by the flag.
+  assert_eq(receipts[0].delivered, false)
   assert_eq(len(__nudge_feedback(captured.events)), 0)
 }
 
