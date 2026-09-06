@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { __agent_loop_project_terminal_result } from "std/agent/loop_finalize"
 import { agent_stall_checkpoint_state } from "std/agent/stall_checkpoint"
 import { agent_stall_observe_tool_calls } from "std/agent/stall_observation"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
@@ -189,6 +190,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
     {name: "verify", args: {failures: 3}, high: -3, flat: 0, failed: 1},
   ] {
     const before = len(observed)
+    const prior_checkpoint = checkpoint
     const before_state = checkpoint == nil ? nil : agent_stall_checkpoint_state(
       harness.agent,
       checkpoint,
@@ -239,10 +241,36 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
     require projected.verify_state_high == step.high && len(observed) == before + 1,
       "checkpoint projection must preserve progress without invoking the callback again"
     require projected.failing_verify_turns == step.failed,
-      "progress folding must preserve pending diagnostic evidence and clean verification reset"
+      "progress folding must preserve pending diagnostic evidence and clean verification reset: ${step.name} expected=${step.failed} actual=${projected.failing_verify_turns} status=${result.status} reason=${projected.last_diagnostic_delta_reason}"
     if step.name == "done" {
       require projected.last_diagnostic_delta_reason == "terminal_success",
         "the actual successful terminal boundary must establish the clean episode"
+      const refused = __agent_loop_project_terminal_result(
+        harness,
+        {status: "done"},
+        "Continue",
+        {session_id: sid},
+        {
+          opts: {require_successful_tools: ["must_succeed"]},
+          final_status: "done",
+          stop_reason: "",
+          suspend_result: nil,
+          terminal_error: nil,
+          stall_state: before_state,
+          stall_checkpoint: prior_checkpoint,
+          stall_enabled_seen: true,
+          budget: {expose_decisions: false},
+          output_contract: nil,
+        },
+      )
+      assert_eq(refused.status, "failed")
+      assert_eq(refused.missing_required_tools, ["must_succeed"])
+      assert_eq(
+        refused.stall_checkpoint,
+        prior_checkpoint,
+        "required-tool refusal must preserve the actual failing checkpoint",
+      )
+      assert_eq(refused.current_failure.class, "fail")
     }
     if step.name == "edit" {
       require before_state != nil, "an edit comparison must have a real prior checkpoint"
