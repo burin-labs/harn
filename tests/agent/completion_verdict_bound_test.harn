@@ -51,11 +51,17 @@ pipeline test_verdict_schema_bounds_the_gap_class_without_requiring_it(
   task: unknown,
 ) {
   const schema = __judge_completion_verdict_schema()
+  // `none` joined the enum so an approval has a legal value to send. Without
+  // it, a `done` was told to omit the field and models sent `other` instead —
+  // the nearest member on offer — which read as a declared gap and made the
+  // approval a self-contradiction. An enum missing a member for the commonest
+  // answer is a defect in the offer.
   assert_eq(
     schema.properties.gap_class.enum.sorted(),
     [
       "failed_verification",
       "missing_artifact",
+      "none",
       "other",
       "unmet_manner_clause",
       "unresolved_authorization",
