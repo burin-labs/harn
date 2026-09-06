@@ -118,7 +118,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
-        "line": 100,
+        "line": 98,
         "reader": "agent_scratchpad_options"
       }
     ],

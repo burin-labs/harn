@@ -1,7 +1,7 @@
 import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { agent_skills_preview } from "std/agent/skills"
 
-pipeline test_scratchpad_has_one_spelling_per_setting(harness: Harness) {
+fn assert_scratchpad_has_one_spelling_per_setting() {
   const canonical = agent_scratchpad_options(
     {
       scratchpad: {
@@ -31,14 +31,20 @@ pipeline test_scratchpad_has_one_spelling_per_setting(harness: Harness) {
   }
 }
 
-pipeline test_only_the_declared_skills_field_advertises_loading(harness: Harness) {
+fn assert_only_the_declared_skills_field_advertises_loading(agent: HarnessAgent) {
   skill alpha {
     description "Alpha workflow"
     when_to_use "Use alpha for alpha-shaped work"
     prompt "Alpha instructions."
   }
-  const canonical = agent_skills_preview(harness.agent, {skills: alpha})
+  const canonical = agent_skills_preview(agent, {skills: alpha})
   assert(contains(json_stringify(canonical?.tools), "load_skill"))
-  const retired = agent_skills_preview(harness.agent, {skill_registry: alpha})
+  const retired = agent_skills_preview(agent, {skill_registry: alpha})
   assert(retired?.tools == nil)
+}
+
+pipeline default(harness: Harness) {
+  assert_scratchpad_has_one_spelling_per_setting()
+  assert_only_the_declared_skills_field_advertises_loading(harness.agent)
+  harness.stdio.println("agent option spellings passed")
 }
