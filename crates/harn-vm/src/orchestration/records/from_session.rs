@@ -710,6 +710,14 @@ fn assemble(
                     "kind": kind.as_str(),
                     "reason": terminal.reason.as_deref().or(terminal.stop_reason.as_deref()),
                     "owner": terminal.owner.as_deref().unwrap_or_else(|| kind.owner()),
+                    // WHEN the terminal was sealed, carried beside what it was.
+                    // The record already dates the run's end from this same
+                    // stamp, but only as `finished_at`, whose source a reader
+                    // has to look up in `run_clock` to know it came from the
+                    // terminal at all. A reader asking "when did this stop, and
+                    // was that stop the end of the run" had to join two fields
+                    // to find out; now the terminal answers for itself.
+                    "sealed_at": terminal.at.text,
                 }),
             );
         }

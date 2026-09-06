@@ -1,6 +1,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
+import { repair_test_tools } from "../../fixtures/agents/repair_tools"
 
 /**
  * Current-failure loop: a successful corrective edit that ALSO proposes
@@ -8,8 +9,6 @@ import { llm_text, with_llm_script } from "std/testing"
  * post-edit re-verify has run. When the verify closure vetoes, the loop
  * continues instead of stopping — the edit was re-verified, not taken on faith.
  */
-import { repair_test_tools } from "../../fixtures/agents/repair_tools"
-
 fn repair_tools() {
   return repair_test_tools("test failed: assertion X", true, "read")
 }

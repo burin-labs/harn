@@ -1443,3 +1443,56 @@ fn every_terminal_kind_agrees_with_its_typed_projection() {
         );
     }
 }
+
+/// The terminal carries its own seal time, so a reader no longer joins
+/// `finished_at` through `run_clock` to learn it came from the terminal.
+/// Asserting against `finished_at` rather than a literal ties the two clocks,
+/// so both being wrong together cannot pass.
+#[tokio::test]
+async fn the_terminal_carries_the_moment_it_was_sealed() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, terminal("stuck", "no_progress"))
+        .await
+        .expect("append terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+
+    let sealed_at = run.metadata["terminal"]["sealed_at"]
+        .as_str()
+        .expect("a terminal must say when it was sealed");
+    assert!(!sealed_at.is_empty(), "an empty stamp is not a measurement");
+    assert_eq!(
+        Some(sealed_at),
+        run.finished_at.as_deref(),
+        "sealed_at must be the same stamp the run's end is dated from"
+    );
+    assert_eq!(
+        run.metadata["run_clock"]["finished_at_source"], "agent_run_terminal",
+        "the run's end must be sourced from the terminal for this pairing to mean anything"
+    );
+
+    // The control: a session with no terminal has no terminal block to carry a
+    // stamp, rather than one carrying an empty or invented value.
+    let bare = MemorySessionStore::default();
+    let bare_meta = bare
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    bare.append(&bare_meta.id, user_message("no terminal here"))
+        .await
+        .expect("append message");
+    let bare_run = project_run_record_from_session(&bare, &bare_meta.id)
+        .await
+        .expect("project");
+    assert!(
+        !bare_run.metadata.contains_key("terminal"),
+        "a run with no terminal must not report when one was sealed"
+    );
+}
