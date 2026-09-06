@@ -50,6 +50,15 @@
 #
 # Usage:
 #   scripts/prune_stale_targets.sh [--dry-run]
+#   scripts/prune_stale_targets.sh [--dry-run] --remove-entry NAME [--remove-entry NAME]...
+#
+# `--remove-entry` names entries to retire regardless of their rank or age. It
+# exists because rank and age answer "was this touched recently", not "is this
+# still wanted": a lane whose pull request merged yesterday leaves a warm tree
+# that every automatic rule protects. An operator who has established that an
+# entry is finished had no way to say so through this tool, and the alternative
+# was removing paths around it, which skips the liveness probe and the
+# read-back. Named entries still go through both: a live process always wins.
 # Env:
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
@@ -103,7 +112,35 @@ target_entry_activity_epoch() {
 }
 
 dry_run=0
-[[ "${1:-}" == "--dry-run" ]] && dry_run=1
+requested_entries=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=1; shift ;;
+    --remove-entry)
+      [ "$#" -ge 2 ] || { echo "--remove-entry needs a NAME" >&2; exit 2; }
+      # One path segment only. A name carrying a separator could otherwise
+      # address a directory outside the managed root.
+      case "$2" in
+        ""|.|..|*/*) echo "invalid --remove-entry name: $2" >&2; exit 2 ;;
+      esac
+      requested_entries+=("$2"); shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# Was this entry named on the command line?
+entry_requested() {
+  local name="$1" want
+  [ "${#requested_entries[@]}" -gt 0 ] || return 1
+  for want in "${requested_entries[@]}"; do
+    [ "$want" = "$name" ] && return 0
+  done
+  return 1
+}
+
+# Names the caller asked for that no root turned out to hold. Reported at the
+# end: a removal request that silently matched nothing would read as success.
+matched_entries=()
 
 scanned=0; removed=0; kept=0; summary_printed=0
 # Paths reported as kept, read back after a destructive pass.
@@ -112,9 +149,31 @@ kept_paths=()
 # than the run had.
 walked_roots=()
 
+# A name that matched nothing is reported by name. Without this, a typo or an
+# already-removed entry would leave the run looking like it did the work.
+report_unmatched_entries() {
+  [ "${#requested_entries[@]}" -gt 0 ] || return 0
+  local want found
+  for want in "${requested_entries[@]}"; do
+    found=0
+    if [ "${#matched_entries[@]}" -gt 0 ]; then
+      for name in "${matched_entries[@]}"; do
+        [ "$name" = "$want" ] && { found=1; break; }
+      done
+    fi
+    if [ "$found" -eq 0 ]; then
+      echo "warning: --remove-entry matched no entry in any managed root: $want" >&2
+    fi
+  done
+  # An `&&` as the last statement would return 1 whenever the name DID match,
+  # and `set -e` turns that into a failing run that just did its job correctly.
+  return 0
+}
+
 print_summary() {
   [ "$summary_printed" -eq 1 ] && return 0
   summary_printed=1
+  report_unmatched_entries
   suffix=""
   [ "$dry_run" -eq 1 ] && suffix=" (dry-run)"
   local roots
@@ -394,6 +453,16 @@ prune_root() {
         echo "keep (live process: $pids): $name"
         kept=$((kept + 1)); kept_paths+=("$d"); continue
       fi
+    fi
+
+    # Placed after the liveness probe and before the rank and age rules on
+    # purpose. A live process still wins, because the caller can be wrong about
+    # a lane being finished but cannot be wrong about a compiler holding the
+    # tree open. Rank and age are exactly what the caller is overriding.
+    if entry_requested "$name"; then
+      matched_entries+=("$name")
+      remove_entry "$target_root" "$d" "named by caller"
+      continue
     fi
 
     if [ "$warm_entry" -eq 1 ]; then

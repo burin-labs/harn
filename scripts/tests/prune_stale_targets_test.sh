@@ -142,4 +142,78 @@ if [[ ! -d "$storage/harn-target/repos-live-root" ]]; then
   exit 1
 fi
 
+# --remove-entry: rank and age are what the caller overrides, so the entry the
+# automatic rules were protecting is the one this must take. The live entry is
+# the negative control; without it a flag that removed everything named would
+# pass this test just as happily.
+if [[ ! -d "$storage/harn-target/repos-live-root" ]]; then
+  echo "expected the live entry to still exist before the named-removal case" >&2
+  exit 1
+fi
+mkdir -p "$storage/harn-target/repos-finished-lane"
+printf 'artifact\n' > "$storage/harn-target/repos-finished-lane/artifact"
+
+run_gc --dry-run --remove-entry repos-finished-lane > "$tmp_root/named-dry.txt" 2>&1
+if [[ ! -d "$storage/harn-target/repos-finished-lane" ]]; then
+  echo "dry run removed a named entry" >&2
+  cat "$tmp_root/named-dry.txt" >&2
+  exit 1
+fi
+grep -Fq "would remove named by caller: repos-finished-lane" "$tmp_root/named-dry.txt" || {
+  echo "dry run did not report the named entry" >&2
+  cat "$tmp_root/named-dry.txt" >&2
+  exit 1
+}
+
+# A live process outranks the caller: the caller can be wrong about a lane being
+# finished, but not about a compiler holding the tree open. The probe matches a
+# process whose command line names the entry, so this control holds a real one
+# rather than leaning on rank, which is exactly what --remove-entry overrides.
+busy="$storage/harn-target/repos-busy-lane"
+mkdir -p "$busy"
+printf 'artifact\n' > "$busy/artifact"
+# Hold the entry the way Cargo does, through its lock file. The probe's other
+# arm reads process arguments, which `ps` truncates for the long temporary
+# paths this test builds, so a cmdline-based control would hang waiting for a
+# match that can never appear. The lock arm is lsof-based and path-length
+# independent.
+: > "$busy/.cargo-lock"
+exec 9<> "$busy/.cargo-lock"
+sleep 60 <&9 &
+busy_pid=$!
+trap 'kill "$busy_pid" 2>/dev/null || true; exec 9>&-' EXIT
+until lsof -t -- "$busy/.cargo-lock" 2>/dev/null | grep -q .; do sleep 0.2; done
+
+run_gc --remove-entry repos-finished-lane --remove-entry repos-busy-lane > "$tmp_root/named.txt" 2>&1
+if [[ -d "$storage/harn-target/repos-finished-lane" ]]; then
+  echo "named entry survived a real run" >&2
+  cat "$tmp_root/named.txt" >&2
+  exit 1
+fi
+if [[ ! -d "$busy" ]]; then
+  echo "a named entry with a live process must still be kept" >&2
+  cat "$tmp_root/named.txt" >&2
+  exit 1
+fi
+kill "$busy_pid" 2>/dev/null || true
+
+# A name matching nothing must say so; otherwise a typo reads as success.
+run_gc --remove-entry no-such-entry > "$tmp_root/named-miss.txt" 2>&1
+grep -Fq "matched no entry in any managed root: no-such-entry" "$tmp_root/named-miss.txt" || {
+  echo "an unmatched --remove-entry name was not reported" >&2
+  cat "$tmp_root/named-miss.txt" >&2
+  exit 1
+}
+
+# A name that could address a path outside the root is refused at parse time.
+if run_gc --remove-entry ../escape > "$tmp_root/named-bad.txt" 2>&1; then
+  echo "a path-bearing --remove-entry name was accepted" >&2
+  exit 1
+fi
+grep -Fq "invalid --remove-entry name" "$tmp_root/named-bad.txt" || {
+  echo "the refusal did not name the reason" >&2
+  cat "$tmp_root/named-bad.txt" >&2
+  exit 1
+}
+
 echo "prune_stale_targets_test: ok"
