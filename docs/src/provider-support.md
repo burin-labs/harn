@@ -90,7 +90,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Inception` | OpenAI-compatible chat completions | `inception:mercury-2` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | No | none | `low` | `not_recorded` |
-| `Meta` | OpenAI-compatible chat completions | `meta:muse-spark-1.2-contributor` | `text` | no | yes | `none` / `none` | none | yes | No | none | `high` | `not_recorded` |
+| `Meta` | OpenAI-compatible chat completions | `meta:muse-spark-1.2-contributor` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | No | none | `medium` | `not_recorded` |
 | `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
