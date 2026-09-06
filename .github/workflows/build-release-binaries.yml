@@ -2319,6 +2319,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Finalize GitHub release
+        if: needs.setup.outputs.build_mode != 'promote'
         # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
         # the real notes, and set the intentional channel selected by the tag.
         # Stable builds clear the temporary placeholder; prerelease builds keep
@@ -2338,3 +2339,14 @@ jobs:
             artifacts/*.zip
             artifacts/SHA256SUMS
             artifacts/release-assets.json
+
+      - name: Publish certified assets without replacement
+        if: needs.setup.outputs.build_mode == 'promote'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+          SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          PRERELEASE: ${{ needs.setup.outputs.is_prerelease }}
+          MAKE_LATEST: ${{ needs.setup.outputs.make_latest }}
+        run: |
+          "$RUNNER_TEMP/release-provenance-policy/publish_certified_release_assets.sh" "$GITHUB_REPOSITORY" "$REF" "$SOURCE_SHA" artifacts release-notes.md "$PRERELEASE" "$MAKE_LATEST"

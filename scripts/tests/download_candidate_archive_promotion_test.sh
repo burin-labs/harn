@@ -6,7 +6,7 @@ source "$root/scripts/lib/candidate_archive_contract.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export FIXTURE_DIR="$tmp"
-mkdir "$tmp/bin" "$tmp/files"
+mkdir -p "$tmp/bin" "$tmp/files/candidate-receipts"
 source_sha=1111111111111111111111111111111111111111
 policy=2222222222222222222222222222222222222222
 run=123
@@ -24,14 +24,16 @@ id=500
 for archive in "${EXPECTED_RELEASE_ARCHIVES[@]}"; do
   target="$(target_for_archive "$archive")"
   printf 'candidate bytes %s' "$target" > "$tmp/files/$archive"
-  (cd "$tmp/files" && zip -q "$tmp/$id.zip" "$archive")
-  add_inventory "$id" "harn-$target" "sha256:$(sha256_file "$tmp/$id.zip")"
   signing=not_applicable notarization=not_applicable
   if [[ "$target" == *apple-darwin ]]; then signing=signed; notarization=notarized; fi
   jq --arg target "$target" --arg archive "$archive" --arg digest "$(sha256_file "$tmp/files/$archive")" --arg signing "$signing" --arg notarization "$notarization" \
     '. + {($target):{archive:$archive,sha256:$digest,signingStatus:$signing,notarizationStatus:$notarization,attestationIdentity:"https://harnlang.com/attestations/release-archive/v1",runId:"123",runAttempt:"1"}}' \
     "$tmp/entries.json" > "$tmp/next.json"
   mv "$tmp/next.json" "$tmp/entries.json"
+  jq --arg target "$target" --arg source "$source_sha" --arg policy "$policy" \
+    '.[$target] + {schemaVersion:"harn.candidate_archive_receipt.v1",sourceCommit:$source,policyRevision:$policy,target:$target}' "$tmp/entries.json" > "$tmp/files/candidate-receipts/$target.json"
+  (cd "$tmp/files" && zip -q "$tmp/$id.zip" "$archive" "candidate-receipts/$target.json")
+  add_inventory "$id" "harn-$target" "sha256:$(sha256_file "$tmp/$id.zip")"
   id=$((id+1))
 done
 manifest_name="candidate-archive-manifest-$source_sha"
@@ -73,6 +75,19 @@ cp "$tmp/good-inventory.json" "$tmp/inventory.json"
 source_sha=3333333333333333333333333333333333333333
 reject wrong_source
 source_sha=1111111111111111111111111111111111111111
+cp "$tmp/500.zip" "$tmp/good-500.zip"
+receipt="$tmp/files/candidate-receipts/aarch64-apple-darwin.json"
+jq '.sourceCommit="3333333333333333333333333333333333333333"' "$receipt" > "$tmp/receipt-next.json"
+mv "$tmp/receipt-next.json" "$receipt"
+(cd "$tmp/files" && zip -q "$tmp/500.zip" candidate-receipts/aarch64-apple-darwin.json)
+jq --arg digest "sha256:$(sha256_file "$tmp/500.zip")" 'map(if .id == 500 then .digest=$digest else . end)' "$tmp/good-inventory.json" > "$tmp/inventory.json"
+reject wrong_receipt_source
+cp "$tmp/good-500.zip" "$tmp/500.zip"
+zip -qd "$tmp/500.zip" candidate-receipts/aarch64-apple-darwin.json
+jq --arg digest "sha256:$(sha256_file "$tmp/500.zip")" 'map(if .id == 500 then .digest=$digest else . end)' "$tmp/good-inventory.json" > "$tmp/inventory.json"
+reject missing_receipt
+cp "$tmp/good-500.zip" "$tmp/500.zip"
+cp "$tmp/good-inventory.json" "$tmp/inventory.json"
 printf corruption >> "$tmp/500.zip"
 reject corrupt_archive
 echo 'candidate download proof controls passed; zero workflow dispatches'

@@ -36,8 +36,21 @@ download_artifact() {
   digest="$(jq -er --arg id "$id" '.[] | select((.id | tostring) == $id) | .digest' "$scratch/artifacts.json")"
   gh api "repos/$repo/actions/artifacts/$id/zip" > "$scratch/$id.zip"
   [[ "sha256:$(sha256_file "$scratch/$id.zip")" == "$digest" ]] || { echo 'error: artifact ZIP digest mismatch' >&2; return 1; }
-  # Each canonical upload contains one flat file. Reject traversal and extras.
-  [[ "$(unzip -Z1 "$scratch/$id.zip")" == "$member" ]] || { echo 'error: unexpected artifact ZIP members' >&2; return 1; }
+  local target receipt
+  target="$(target_for_archive "$member")"
+  receipt="candidate-receipts/$target.json"
+  # Canonical uploads contain the archive and its producer receipt, no extras.
+  [[ "$(unzip -Z1 "$scratch/$id.zip" | LC_ALL=C sort)" == "$(printf '%s\n' "$member" "$receipt" | LC_ALL=C sort)" ]] || { echo 'error: unexpected artifact ZIP members' >&2; return 1; }
+  unzip -p "$scratch/$id.zip" "$receipt" > "$scratch/receipt.json"
+  jq -e --slurpfile manifest "$manifest_file" --arg target "$target" '
+    $manifest[0] as $m | $m.archives[$target] as $a |
+    .schemaVersion == "harn.candidate_archive_receipt.v1" and
+    .sourceCommit == $m.sourceCommit and .policyRevision == $m.policyRevision and
+    .target == $target and .archive == $a.archive and .sha256 == $a.sha256 and
+    .runId == $m.runId and .runAttempt == $a.runAttempt and
+    .signingStatus == $a.signingStatus and .notarizationStatus == $a.notarizationStatus and
+    .attestationIdentity == $a.attestationIdentity
+  ' "$scratch/receipt.json" >/dev/null || { echo 'error: archive receipt differs from certified manifest' >&2; return 1; }
   unzip -p "$scratch/$id.zip" "$member" > "$destination"
 }
 manifest_name="candidate-archive-manifest-$source_sha"

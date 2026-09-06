@@ -22,6 +22,7 @@ for source in \
   release_contract.json \
   release_contract.env \
   verify_release_archive_provenance.sh \
+  publish_certified_release_assets.sh \
   verify_release_tag_main_ancestry.sh \
   release_metadata.harn \
   release_withdrawals.harn \

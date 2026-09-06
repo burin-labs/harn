@@ -11,7 +11,7 @@ pub type ReleaseVersionContract = {
 }
 
 pub type ReleaseTagContract = {
-  anchor: "merged_main_commit",
+  anchor: "certified_candidate_commit",
   release_subject_template: "Release v{version}",
   candidate_trailer: "Harn-Release-Candidate",
 }
@@ -43,7 +43,7 @@ pub fn release_contract() -> ReleaseContract {
     },
     changelog: {published_heading: "top_version_heading", candidate_fragments: "must_be_folded"},
     tag: {
-      anchor: "merged_main_commit",
+      anchor: "certified_candidate_commit",
       release_subject_template: "Release v{version}",
       candidate_trailer: "Harn-Release-Candidate",
     },
@@ -52,6 +52,9 @@ pub fn release_contract() -> ReleaseContract {
         path: ".github/workflows/publish-release.yml",
         name: "Publish release",
         dispatch_inputs: [
+          "tag",
+          "expected_source_sha",
+          "expected_policy_sha",
           "bootstrap_new_crates",
           "skip_dry_run",
           "reaudit",
@@ -67,6 +70,13 @@ pub fn release_contract() -> ReleaseContract {
         path: ".github/workflows/build-release-binaries.yml",
         name: "Build release binaries",
         dispatch_inputs: [
+          "promote_only",
+          "candidate_archive_run_id",
+          "candidate_manifest_artifact_id",
+          "expected_manifest_digest",
+          "expected_source_sha",
+          "expected_archive_policy_sha",
+          "expected_policy_sha",
           "tag",
           "warm_cache_only",
           "force_rebuild",
@@ -96,6 +106,9 @@ pub fn release_contract() -> ReleaseContract {
           "Verify candidate source revision",
           "Check the distribution fuse",
           "Evaluate the binary-size growth signal",
+          "Download and verify certified candidate archive bytes",
+          "Verify release archive provenance",
+          "Publish certified assets without replacement",
         ],
       },
     },
@@ -137,7 +150,7 @@ pub fn release_contract_schema() {
       ),
       tag: schema_closed_object(
         {
-          anchor: schema_literal("merged_main_commit"),
+          anchor: schema_literal("certified_candidate_commit"),
           release_subject_template: schema_literal("Release v{version}"),
           candidate_trailer: schema_literal("Harn-Release-Candidate"),
         },
@@ -200,6 +213,11 @@ pub fn release_contract_source_errors(
     for input in workflow.dispatch_inputs {
       if !inputs.contains(input) {
         errors = errors + [workflow.path + " is missing dispatch input `" + input + "`"]
+      }
+    }
+    for input in inputs {
+      if !workflow.dispatch_inputs.contains(input) {
+        errors = errors + [workflow.path + " has undeclared dispatch input `" + input + "`"]
       }
     }
     const jobs = keys(document?.jobs)

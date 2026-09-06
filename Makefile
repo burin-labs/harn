@@ -680,6 +680,7 @@ test-pr-gate-scripts:
 	./scripts/tests/verify_release_archive_provenance_test.sh
 	./scripts/tests/candidate_archive_promotion_test.sh
 	./scripts/tests/download_candidate_archive_promotion_test.sh
+	./scripts/tests/publish_certified_release_assets_test.sh
 	./scripts/tests/certified_publication_inputs_test.sh
 	./scripts/tests/check_linux_glibc_floor_test.sh
 	./scripts/tests/release_version_test.sh
