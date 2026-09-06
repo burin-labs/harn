@@ -1361,3 +1361,139 @@ fn a_mechanism_that_injected_reports_that_it_did() {
         other => panic!("expected FeedbackInjected, got {other:?}"),
     }
 }
+
+// --- Dropped payload keys (harn#8217) -------------------------------------
+//
+// An unknown key in a host payload used to vanish: the emit succeeded, the run
+// succeeded, and the field was missing only for whoever read the timeline
+// afterwards. These pin that the boundary now says so, and — the part that can
+// pass vacuously — that it stays quiet when nothing was actually lost.
+
+fn dropped_key_details(
+    session_id: &str,
+    event_type: &str,
+    payload: &serde_json::Value,
+) -> Vec<String> {
+    let captured = crate::boundary::tests::CapturedEvents::install();
+    let _ = accepted_host_event(session_id, event_type, payload);
+    captured
+        .boundary_failures()
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::BoundaryFailure {
+                boundary,
+                kind,
+                detail,
+                ..
+            } if *boundary == crate::boundary::BoundaryId::HostEventIngest
+                && *kind == crate::boundary::BoundaryFailureKind::Dropped =>
+            {
+                Some(detail.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_payload_key_no_field_reads_is_reported_as_dropped() {
+    let details = dropped_key_details(
+        "drop-1",
+        "judge_started",
+        &json!({"iteration": 2, "trigger": "turn_end", "confidence_floor": 0.4}),
+    );
+    assert_eq!(details.len(), 1, "got: {details:?}");
+    assert!(
+        details[0].contains("confidence_floor") && details[0].contains("judge_started"),
+        "the report must name the key and the event: {details:?}"
+    );
+}
+
+#[test]
+fn a_payload_every_field_reads_reports_nothing() {
+    // The control for the test above. Without it, a reporter that fired on
+    // every key would look correct.
+    let details = dropped_key_details(
+        "drop-2",
+        "judge_started",
+        &json!({"iteration": 2, "trigger": "turn_end"}),
+    );
+    assert!(details.is_empty(), "clean payload reported: {details:?}");
+}
+
+#[test]
+fn an_arm_that_keeps_the_whole_payload_drops_nothing() {
+    let details = dropped_key_details(
+        "drop-3",
+        "typed_checkpoint",
+        &json!({"anything": 1, "at": "all", "nested": {"k": "v"}}),
+    );
+    assert!(
+        details.is_empty(),
+        "`typed_checkpoint` stores the payload whole: {details:?}"
+    );
+}
+
+#[test]
+fn a_key_folded_into_a_differently_named_field_is_not_a_drop() {
+    // `tool` becomes `tool_name` and `text` becomes `content`. A census that
+    // only asked "does an output key of this name exist" would call both lost.
+    let details = dropped_key_details(
+        "drop-4",
+        "missing_tool_call_nudge",
+        &json!({"iteration": 3, "tool": "read_file", "text": "call a tool"}),
+    );
+    assert!(details.is_empty(), "folded keys reported: {details:?}");
+}
+
+#[test]
+fn the_no_progress_emitter_reports_its_two_known_strays() {
+    // harn#8217 names these two: kept in the emitter deliberately, as the
+    // fields a later widening would want, and invisible until now.
+    let details = dropped_key_details(
+        "drop-5",
+        "no_progress_streak_nudge",
+        &json!({
+            "iteration": 4,
+            "content": "make progress",
+            "streak": 3,
+            "turns_since_progress": 3,
+            "has_tools": true,
+            "made_tool_calls": false,
+            "delivered": false,
+        }),
+    );
+    let mut named: Vec<&str> = ["has_tools", "made_tool_calls"]
+        .into_iter()
+        .filter(|key| details.iter().any(|detail| detail.contains(key)))
+        .collect();
+    named.sort_unstable();
+    assert_eq!(named, ["has_tools", "made_tool_calls"], "got: {details:?}");
+    assert_eq!(details.len(), 2, "only those two are lost: {details:?}");
+}
+
+#[test]
+fn an_explicit_null_is_not_reported_as_a_drop() {
+    // Every optional field skips serializing when absent, so a null round-trips
+    // to nothing through a field that does exist.
+    let details = dropped_key_details(
+        "drop-6",
+        "judge_started",
+        &json!({"iteration": 2, "trigger": serde_json::Value::Null}),
+    );
+    assert!(details.is_empty(), "null reported as lost: {details:?}");
+}
+
+#[test]
+fn a_dropped_key_is_reported_once_per_session_not_once_per_emit() {
+    let payload = json!({"iteration": 2, "confidence_floor": 0.4});
+    let captured = crate::boundary::tests::CapturedEvents::install();
+    for _ in 0..3 {
+        let _ = accepted_host_event("drop-7", "judge_started", &payload);
+    }
+    let reported = captured.boundary_failures().len();
+    assert_eq!(
+        reported, 1,
+        "expected one report for three emits, got {reported}"
+    );
+}
