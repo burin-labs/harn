@@ -1,0 +1,325 @@
+// std/agent/run_meter.harn
+//
+// One typed meter for the resource facts a cut rule may read.
+//
+// Two separations carry the whole contract:
+//
+//   Actual vs admission. A field's `role` says whether it is accounting truth
+//   ("actual": what the run has already spent) or an admission fact
+//   ("admission": the upper bound priced for the NEXT model call). A projected
+//   upper bound is never charged into actual usage, so a run stopped by a
+//   conservative projection still reports what it really spent.
+//
+//   Measured vs unmeasured. An observation is `exact`, `bounded`, or
+//   `unavailable`. Missing provider usage is `unavailable`, never a measured
+//   zero, so a predicate over it answers `indeterminate` instead of matching an
+//   inferred value.
+//
+// The registry below is the closed set of readable fields. A read of an
+// unregistered name is `unavailable`, and a write to one is refused.
+/**
+ * One field observation.
+ *
+ * `bounded` carries a closed interval the true value lies inside. A predicate
+ * decides from the interval, so a bound wide enough to straddle a threshold
+ * answers `indeterminate` rather than guessing an endpoint.
+ */
+pub type MeterObservation = {basis: "exact", value: float} \
+  | {basis: "bounded", lower: float, upper: float} \
+  | {basis: "unavailable", why: string}
+
+/** Whether a field is accounting truth or an admission-only projection. */
+pub type RunMeterFieldRole = "actual" | "admission"
+
+/** One registered meter field. */
+pub type RunMeterFieldSpec = {field: string, unit: string, role: RunMeterFieldRole}
+
+/** A run meter: registered field observations, keyed by field name. */
+pub type RunMeter = {observations: dict<string, MeterObservation>}
+
+const RUN_METER_FIELDS: list<RunMeterFieldSpec> = [
+  {field: "actual_cost_usd", unit: "usd", role: "actual"},
+  {field: "projected_next_call_cost_usd", unit: "usd", role: "admission"},
+  {field: "input_tokens", unit: "tokens", role: "actual"},
+  {field: "output_tokens", unit: "tokens", role: "actual"},
+  {field: "cache_read_tokens", unit: "tokens", role: "actual"},
+  {field: "cache_write_tokens", unit: "tokens", role: "actual"},
+  {field: "projected_next_call_input_tokens", unit: "tokens", role: "admission"},
+  {field: "projected_next_call_output_tokens", unit: "tokens", role: "admission"},
+  {field: "wall_ms", unit: "ms", role: "actual"},
+  {field: "turns", unit: "count", role: "actual"},
+  {field: "model_requests", unit: "count", role: "actual"},
+  {field: "tool_calls", unit: "count", role: "actual"},
+  {field: "provider_errors", unit: "count", role: "actual"},
+  {field: "verifier_completions", unit: "count", role: "actual"},
+]
+
+/**
+ * The closed set of readable meter fields, in registry order.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_fields() -> list<RunMeterFieldSpec> {
+  return RUN_METER_FIELDS
+}
+
+/**
+ * The registered spec for `field`, or nil when the name is not registered.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_field_spec(field: string) -> RunMeterFieldSpec? {
+  for spec in RUN_METER_FIELDS {
+    if spec.field == field {
+      return spec
+    }
+  }
+  return nil
+}
+
+/**
+ * Is `field` a registered meter field?
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_field_registered(field: string) -> bool {
+  return run_meter_field_spec(field) != nil
+}
+
+/**
+ * A digest of the field registry: name, unit, and role for every field, in
+ * registry order. A receipt carrying this digest is replayable against the
+ * exact vocabulary that produced it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_registry_digest() -> string {
+  let parts: list<string> = []
+  for spec in RUN_METER_FIELDS {
+    parts = parts + [spec.field + ":" + spec.unit + ":" + spec.role]
+  }
+  return "sha256:" + sha256_hex(parts.join("\n")).slice(0, 16)
+}
+
+/**
+ * An empty meter. Every registered field reads `unavailable` until observed.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_new() -> RunMeter {
+  return {observations: {}}
+}
+
+/**
+ * Read one field.
+ *
+ * An unset or unregistered field is `unavailable` with a reason, never a
+ * measured zero. The reason distinguishes the two cases so a caller reading a
+ * typo does not mistake it for a provider that reported nothing.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_read(meter: RunMeter, field: string) -> MeterObservation {
+  if !run_meter_field_registered(field) {
+    return {basis: "unavailable", why: "unregistered_field"}
+  }
+  const observed = meter.observations[field]
+  if observed == nil {
+    return {basis: "unavailable", why: "not_observed"}
+  }
+  return observed
+}
+
+/**
+ * Record one observation, returning the updated meter.
+ *
+ * Refuses an unregistered field name rather than growing the vocabulary at a
+ * call site.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_observe(
+  meter: RunMeter,
+  field: string,
+  observation: MeterObservation,
+) -> Result<RunMeter, string> {
+  if !run_meter_field_registered(field) {
+    return Err("run_meter: unregistered field " + field)
+  }
+  let next = meter.observations
+  next[field] = observation
+  return Ok({observations: next})
+}
+
+/**
+ * Record an exactly measured value.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_exact(meter: RunMeter, field: string, value: float) -> Result<RunMeter, string> {
+  return run_meter_observe(meter, field, {basis: "exact", value: value})
+}
+
+/**
+ * Record a closed interval the true value lies inside.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_bounded(
+  meter: RunMeter,
+  field: string,
+  lower: float,
+  upper: float,
+) -> Result<RunMeter, string> {
+  if upper < lower {
+    return Err("run_meter: " + field + " upper bound is below its lower bound")
+  }
+  return run_meter_observe(meter, field, {basis: "bounded", lower: lower, upper: upper})
+}
+
+/**
+ * Record that a field could not be measured, with the reason.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_unavailable(
+  meter: RunMeter,
+  field: string,
+  why: string,
+) -> Result<RunMeter, string> {
+  return run_meter_observe(meter, field, {basis: "unavailable", why: why})
+}
+
+/**
+ * Add `delta` to an `actual` field's cumulative total.
+ *
+ * This is the only way actual usage grows, and it refuses an `admission` field.
+ * A projection can therefore never be charged into accounting truth, which is
+ * the invariant behind reporting real spend beside the bound that denied a
+ * call. An unobserved actual field starts at zero because charging is itself
+ * the measurement; a field previously recorded `unavailable` stays
+ * `unavailable`, since a total that skipped an unmeasured span is not exact.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_charge(meter: RunMeter, field: string, delta: float) -> Result<RunMeter, string> {
+  const spec = run_meter_field_spec(field)
+  if spec == nil {
+    return Err("run_meter: unregistered field " + field)
+  }
+  if spec.role != "actual" {
+    return Err("run_meter: cannot charge " + field + " (role " + spec.role + ") into actual usage")
+  }
+  const current = meter.observations[field]
+  if current == nil {
+    return run_meter_exact(meter, field, delta)
+  }
+  match current.basis {
+    "exact" -> { return run_meter_exact(meter, field, current.value + delta) }
+    "bounded" -> { return run_meter_bounded(
+      meter,
+      field,
+      current.lower + delta,
+      current.upper + delta,
+    ) }
+    "unavailable" -> { return Ok(meter) }
+  }
+}
+
+/**
+ * Record the upper-bound cost priced for the next model call.
+ *
+ * Written to the `admission` field, so it never moves actual spend.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_project_next_call(meter: RunMeter, cost_usd: float) -> Result<RunMeter, string> {
+  return run_meter_exact(meter, "projected_next_call_cost_usd", cost_usd)
+}
+
+/**
+ * The largest value this observation can take, or nil when unmeasured.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn meter_observation_upper(observation: MeterObservation) -> float? {
+  match observation.basis {
+    "exact" -> { return observation.value }
+    "bounded" -> { return observation.upper }
+    "unavailable" -> { return nil }
+  }
+}
+
+/**
+ * The smallest value this observation can take, or nil when unmeasured.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn meter_observation_lower(observation: MeterObservation) -> float? {
+  match observation.basis {
+    "exact" -> { return observation.value }
+    "bounded" -> { return observation.lower }
+    "unavailable" -> { return nil }
+  }
+}
+
+/**
+ * Render one observation as a stable string for digests and receipts.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn meter_observation_render(observation: MeterObservation) -> string {
+  match observation.basis {
+    "exact" -> { return "exact(" + to_string(observation.value) + ")" }
+    "bounded" -> { return "bounded(" + to_string(observation.lower) + ","
+      + to_string(observation.upper)
+      + ")" }
+    "unavailable" -> { return "unavailable(" + observation.why + ")" }
+  }
+}
+
+/**
+ * A digest over every registered field's current observation, in registry
+ * order. Two meters with the same digest answer every predicate the same way.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn run_meter_digest(meter: RunMeter) -> string {
+  let parts: list<string> = []
+  for spec in RUN_METER_FIELDS {
+    parts = parts + [spec.field + "=" + meter_observation_render(run_meter_read(meter, spec.field))]
+  }
+  return "sha256:" + sha256_hex(parts.join("\n")).slice(0, 16)
+}
