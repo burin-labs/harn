@@ -238,6 +238,7 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         iteration: None,
         tool_name: None,
         turn_claimed_for_repair: None,
+        delivered: obj_opt_bool(payload, "delivered"),
     };
     let feedback_with_streak =
         |kind: &str, content: String, streak: Option<usize>| AgentEvent::FeedbackInjected {
@@ -245,9 +246,15 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             kind: kind.to_string(),
             content,
             streak,
-            iteration: None,
+            // The payload has always carried this; the projection dropped it,
+            // so a receipt could not be tied to the turn that caused it without
+            // parsing prose. `repair_feedback` below already read it.
+            iteration: obj_opt_usize(payload, "iteration"),
             tool_name: None,
-            turn_claimed_for_repair: None,
+            // Absent unless the mechanism says. A receipts-only mechanism says
+            // `false`; one that still injects says `true`; one that has not been
+            // taught the question stays `None` rather than claiming either.
+            delivered: obj_opt_bool(payload, "delivered"),
         };
     let repair_feedback =
         |kind: &str, content: String, tool_name: Option<String>| AgentEvent::FeedbackInjected {
@@ -258,6 +265,7 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             iteration: Some(obj_usize(payload, "iteration")),
             tool_name,
             turn_claimed_for_repair: Some(true),
+            delivered: obj_opt_bool(payload, "delivered"),
         };
     let feedback_content = |fallback: String| {
         first_non_empty_string(payload, &["content", "message", "text"]).unwrap_or(fallback)
@@ -614,6 +622,23 @@ fn obj_string(payload: &Value, key: &str) -> String {
 
 fn obj_usize(payload: &Value, key: &str) -> usize {
     payload.get(key).and_then(Value::as_u64).unwrap_or(0) as usize
+}
+
+/// A count the payload may simply not carry.
+///
+/// `obj_usize` answers 0 for an absent key, which is the right default for a
+/// counter and the wrong one for a correlator: iteration 0 is a real turn, so a
+/// row that never knew its iteration would claim the first one.
+fn obj_opt_usize(payload: &Value, key: &str) -> Option<usize> {
+    payload
+        .get(key)
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+}
+
+/// A yes/no the payload may simply not answer, kept apart from an explicit no.
+fn obj_opt_bool(payload: &Value, key: &str) -> Option<bool> {
+    payload.get(key).and_then(Value::as_bool)
 }
 
 fn obj_bool(payload: &Value, key: &str) -> bool {

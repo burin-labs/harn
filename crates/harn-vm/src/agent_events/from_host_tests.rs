@@ -1261,3 +1261,99 @@ fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
         other => panic!("expected SemanticCacheMiss, got {other:?}"),
     }
 }
+
+/// THE FALSIFIER. A receipt-only mechanism can now say nothing was delivered.
+///
+/// The no-progress streak still observes a stalled turn and still writes its
+/// row, but it injects nothing. Before this field the row could not say so: the
+/// variant is named for injection and could express nothing else, so the only
+/// signal was that a sibling injection row was missing. Reasoning from an absent
+/// row is a poor way to learn what a run did.
+#[test]
+fn a_receipt_only_mechanism_reports_that_nothing_was_delivered() {
+    let event = accepted_host_event(
+        "s1",
+        "no_progress_streak_nudge",
+        &json!({
+            "iteration": 9,
+            "content": "No progress last turn.",
+            "streak": 2,
+            "delivered": false,
+        }),
+    );
+    match event {
+        AgentEvent::FeedbackInjected {
+            delivered,
+            iteration,
+            ..
+        } => {
+            assert_eq!(
+                delivered,
+                Some(false),
+                "a mechanism that injected nothing must be able to say so"
+            );
+            assert_eq!(
+                iteration,
+                Some(9),
+                "the payload has always carried this; the projection used to drop it"
+            );
+        }
+        other => panic!("expected FeedbackInjected, got {other:?}"),
+    }
+}
+
+/// THE ABSENCE CONTROL, and the reason both fields are optional.
+///
+/// A mechanism that has not been taught the question must stay distinguishable
+/// from one that answered no. Defaulting `delivered` to `true` would relabel
+/// every historical row as delivered feedback, and defaulting it to `false`
+/// would relabel every real injection as silence. Iteration has the sharper
+/// version of the same trap: 0 is a real turn, so a row that never knew its
+/// iteration must not claim the first one.
+#[test]
+fn a_mechanism_that_answered_neither_question_reports_neither() {
+    let event = accepted_host_event(
+        "s1",
+        "no_progress_streak_nudge",
+        &json!({
+            "content": "No progress last turn.",
+            "streak": 2,
+        }),
+    );
+    match event {
+        AgentEvent::FeedbackInjected {
+            delivered,
+            iteration,
+            streak,
+            ..
+        } => {
+            assert_eq!(delivered, None, "silence is not an answer of false");
+            assert_eq!(iteration, None, "an unknown iteration is not iteration 0");
+            assert_eq!(streak, Some(2), "the fields that were answered still arrive");
+        }
+        other => panic!("expected FeedbackInjected, got {other:?}"),
+    }
+}
+
+/// THE DIRECTION CONTROL. A mechanism that did inject still says so.
+///
+/// If `delivered` could only ever be false or absent the field would be honest
+/// and useless, and no reader could tell a live corrective from a demoted one.
+#[test]
+fn a_mechanism_that_injected_reports_that_it_did() {
+    let event = accepted_host_event(
+        "s1",
+        "no_progress_streak_nudge",
+        &json!({
+            "content": "No progress last turn.",
+            "streak": 3,
+            "delivered": true,
+        }),
+    );
+    match event {
+        AgentEvent::FeedbackInjected { delivered, .. } => {
+            assert_eq!(delivered, Some(true));
+        }
+        other => panic!("expected FeedbackInjected, got {other:?}"),
+    }
+}
