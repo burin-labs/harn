@@ -133,7 +133,10 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
         match powershell_payload(&effective[1..]) {
             Some(Ok(script)) => collect_powershell(&script, depth + 1, analysis),
             Some(Err(())) => analysis.unresolved = true,
-            None if !shell_is_introspection_only(&effective[1..]) => analysis.unresolved = true,
+            None if !shell_is_introspection_only(&effective[1..]) => {
+                collect_path_words(&effective[1..], analysis);
+                analysis.unresolved = true;
+            }
             None => {}
         }
         return;
@@ -259,7 +262,10 @@ fn visit_powershell_command(
         match powershell_payload(&effective[1..]) {
             Some(Ok(script)) => collect_powershell(&script, depth + 1, analysis),
             Some(Err(())) => analysis.unresolved = true,
-            None => analysis.unresolved = true,
+            None => {
+                collect_path_words(&effective[1..], analysis);
+                analysis.unresolved = true;
+            }
         }
         return;
     }
@@ -720,7 +726,10 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         match powershell_payload(&effective[1..]) {
             Some(Ok(script)) => collect_powershell(&script, depth + 1, analysis),
             Some(Err(())) => analysis.unresolved = true,
-            None => analysis.unresolved = true,
+            None => {
+                collect_path_words(&effective[1..], analysis);
+                analysis.unresolved = true;
+            }
         }
         return;
     } else if matches!(executable, "cmd" | "cmd.exe") {
@@ -834,10 +843,11 @@ enum ArgumentExecution {
     /// Runtime input or shell state determines what gets executed.
     Opaque,
     /// A child boundary is exact only before any option parsing begins or
-    /// after an explicit `--`; all option-bearing forms remain opaque.
+    /// after options whose argument shape is known. Unknown options remain
+    /// opaque so they cannot silently shift the executable role.
     InputArgv,
     /// GNU Parallel's exact command operands form a shell command template.
-    /// Option-bearing forms remain opaque for the same reason as InputArgv.
+    /// Its known option forms use the same conservative boundary rule.
     InputShell,
     /// A literal shell program is carried by a command argument.
     ShellLiteral,
@@ -891,11 +901,7 @@ fn collect_argument_execution(
         }
         Some(ArgumentExecution::InputArgv) => {
             analysis.unresolved = true;
-            let child_index = match argv.get(1).map(String::as_str) {
-                Some("--") if argv.len() > 2 => Some(2),
-                Some(argument) if !argument.starts_with('-') => Some(1),
-                _ => None,
-            };
+            let child_index = input_command_start(ArgumentExecution::InputArgv, argv);
             if let Some(child_index) = child_index {
                 collect_path_words(&argv[1..child_index], analysis);
                 if !dynamic.get(child_index).copied().unwrap_or(true) {
@@ -909,11 +915,7 @@ fn collect_argument_execution(
         }
         Some(ArgumentExecution::InputShell) => {
             analysis.unresolved = true;
-            let start = match argv.get(1).map(String::as_str) {
-                Some("--") if argv.len() > 2 => Some(2),
-                Some(argument) if !argument.starts_with('-') => Some(1),
-                _ => None,
-            };
+            let start = input_command_start(ArgumentExecution::InputShell, argv);
             let Some(start) = start else {
                 collect_path_words(&argv[1..], analysis);
                 return;
@@ -955,6 +957,87 @@ fn collect_argument_execution(
         }
         None => collect_path_words(&argv[1..], analysis),
     }
+}
+
+#[derive(Clone, Copy)]
+enum CarrierOption {
+    Flag,
+    Value,
+}
+
+fn input_command_start(carrier: ArgumentExecution, argv: &[String]) -> Option<usize> {
+    let mut index = 1;
+    while index < argv.len() {
+        let option = argv[index].as_str();
+        if option == "--" {
+            return (index + 1 < argv.len()).then_some(index + 1);
+        }
+        if !option.starts_with('-') || option == "-" {
+            return Some(index);
+        }
+        let (kind, attached) = carrier_option(carrier, option)?;
+        index += 1;
+        if matches!(kind, CarrierOption::Value) && !attached {
+            if index >= argv.len() {
+                return None;
+            }
+            index += 1;
+        }
+    }
+    None
+}
+
+fn carrier_option(carrier: ArgumentExecution, option: &str) -> Option<(CarrierOption, bool)> {
+    let flag = match (carrier, option) {
+        (
+            ArgumentExecution::InputArgv,
+            "-0" | "--null" | "-p" | "--interactive" | "-r" | "--no-run-if-empty" | "-t"
+            | "--verbose" | "-x" | "--exit",
+        )
+        | (ArgumentExecution::InputShell, "--will-cite") => Some(CarrierOption::Flag),
+        _ => None,
+    };
+    if let Some(flag) = flag {
+        return Some((flag, false));
+    }
+    let value_options: &[&str] = match carrier {
+        ArgumentExecution::InputArgv => &[
+            "-E",
+            "--eof",
+            "-I",
+            "--replace",
+            "-L",
+            "--max-lines",
+            "-n",
+            "--max-args",
+            "-P",
+            "--max-procs",
+            "-s",
+            "--max-chars",
+        ],
+        ArgumentExecution::InputShell => &["-j", "--jobs"],
+        _ => return None,
+    };
+    for known in value_options {
+        if option == *known {
+            return Some((CarrierOption::Value, false));
+        }
+        if known.starts_with("--")
+            && option
+                .strip_prefix(known)
+                .is_some_and(|suffix| suffix.starts_with('='))
+        {
+            return Some((CarrierOption::Value, true));
+        }
+        if known.starts_with('-')
+            && !known.starts_with("--")
+            && option.starts_with(known)
+            && option.len() > known.len()
+        {
+            return Some((CarrierOption::Value, true));
+        }
+    }
+    None
 }
 
 fn collect_env_split_execution(

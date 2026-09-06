@@ -83,7 +83,9 @@ fn collect_wrapper_path_operands(
             (wrapper, option),
             ("env", "-C")
                 | ("sudo", "-D")
+                | ("sudo", "-R")
                 | ("sudo", "--chdir")
+                | ("sudo", "--chroot")
                 | ("time", "-o")
                 | ("time", "--output")
         );
@@ -98,6 +100,11 @@ fn collect_wrapper_path_operands(
         {
             operands.push(path.to_string());
         } else if let Some(path) = option
+            .strip_prefix("--chroot=")
+            .filter(|_| wrapper == "sudo")
+        {
+            operands.push(path.to_string());
+        } else if let Some(path) = option
             .strip_prefix("--output=")
             .filter(|_| wrapper == "time")
         {
@@ -107,6 +114,13 @@ fn collect_wrapper_path_operands(
                 let path = &option[offset + 2..];
                 if !path.is_empty() {
                     operands.push(path.to_string());
+                }
+            }
+        } else if wrapper == "sudo" {
+            for prefix in ["-D", "-R"] {
+                if let Some(path) = option.strip_prefix(prefix).filter(|path| !path.is_empty()) {
+                    operands.push(path.to_string());
+                    break;
                 }
             }
         }
@@ -360,6 +374,7 @@ pub(super) fn sudo_option_consumes_argument(option: &str) -> bool {
     matches!(
         option,
         "-C" | "-D"
+            | "-R"
             | "-g"
             | "-h"
             | "-p"
@@ -368,6 +383,7 @@ pub(super) fn sudo_option_consumes_argument(option: &str) -> bool {
             | "-u"
             | "--close-from"
             | "--chdir"
+            | "--chroot"
             | "--group"
             | "--host"
             | "--prompt"

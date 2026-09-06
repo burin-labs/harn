@@ -395,6 +395,16 @@ fn deterministic_scan_distinguishes_executable_paths_from_path_operands() {
         ctx(&["xargs", "--", "/bin/echo", "hi"]),
         ctx(&["xargs", "--", "sh", "-c", "/bin/echo hi"]),
         shell_ctx("find /tmp/work -exec sh -c '/bin/echo hi' \\;"),
+        shell_ctx("xargs -n 1 /bin/echo hi"),
+        shell_ctx("parallel -j 2 /bin/echo ::: hi"),
+        ctx(&["/usr/bin/pwsh", "-File", "script.ps1"]),
+        ctx(&["/usr/bin/pwsh", "script.ps1"]),
+        shell_ctx("pwsh -File script.ps1"),
+        shell_ctx("pwsh script.ps1"),
+        shell_ctx("sudo -R /tmp/work /bin/echo hi"),
+        shell_ctx("sudo -R/tmp/work /bin/echo hi"),
+        shell_ctx("sudo --chroot /tmp/work /bin/echo hi"),
+        shell_ctx("sudo --chroot=/tmp/work /bin/echo hi"),
     ] {
         let scan = command_risk_scan_json(&context, None);
         assert!(
@@ -416,6 +426,16 @@ fn deterministic_scan_distinguishes_executable_paths_from_path_operands() {
         ctx(&["env", "-C", "/etc", "/bin/echo", "hi"]),
         ctx(&["sudo", "-D", "/etc", "/bin/echo", "hi"]),
         ctx(&["time", "-o", "/etc/harn-time", "/bin/echo", "hi"]),
+        shell_ctx("xargs -n1 /bin/echo /bin/echo"),
+        shell_ctx("parallel --jobs=2 /bin/echo /bin/echo ::: hi"),
+        ctx(&["/usr/bin/pwsh", "-File", "/usr/bin/pwsh"]),
+        ctx(&["/usr/bin/pwsh", "/usr/bin/pwsh"]),
+        shell_ctx("pwsh -File /usr/bin/pwsh"),
+        shell_ctx("pwsh /usr/bin/pwsh"),
+        shell_ctx("sudo -R /bin/echo /bin/echo hi"),
+        shell_ctx("sudo -R/bin/echo /bin/echo hi"),
+        shell_ctx("sudo --chroot /bin/echo /bin/echo hi"),
+        shell_ctx("sudo --chroot=/bin/echo /bin/echo hi"),
     ] {
         let scan = command_risk_scan_json(&context, None);
         assert!(
