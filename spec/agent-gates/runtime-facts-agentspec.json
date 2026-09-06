@@ -1,13 +1,6 @@
 [
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
-    "expression": "registry?.tools",
-    "owner": "__judge_tool_entries",
-    "evidence": "Extracts the tool entries from the dictionary form of AgentSpec.tools; the alternative list form is returned directly. This is the registry payload, not another caller setting."
-  },
-  {
-    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "opts?._turn_end_judge_due",
     "owner": "__completion_policy_plan",
@@ -43,10 +36,52 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
+    "expression": "registry?.tools",
+    "owner": "__judge_tool_entries",
+    "evidence": "Extracts the tool entries from the dictionary form of AgentSpec.tools; the alternative list form is returned directly. This is the registry payload, not another caller setting."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "opts?._deadline_at_ms",
     "owner": "__judge_run_checkpoint",
     "evidence": "Computed from the resolved deadline contract in loop_foundation; not an independently selected deadline."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._context_overflow_recovery_attempt",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Measured overflow-recovery attempt recorded by loop_foundation and projected into llm_dispatch telemetry."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._final_wrapup",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Turn marker set by loop_turn_scope when invoking the final wrapup and read by dispatch telemetry."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._iteration",
+    "owner": "__dispatch_invoke_once",
+    "evidence": "Current iteration projected by loop_turn_options into the turn request; not a configured iteration ceiling."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._structured_output_prompt_fallback",
+    "owner": "agent_invoke_llm",
+    "evidence": "Dispatch lifecycle marker set after structured-output fallback; prevents repeating the fallback."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_opts?._truncation_auto_continue_attempt",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Measured truncation continuation attempt written by loop_foundation and projected into dispatch telemetry."
   },
   {
     "scope": "AgentSpec",
@@ -128,6 +163,34 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "loop_opts?._agent_loop_last_llm_route_patch_complete",
+    "owner": "__agent_loop_enable_equivalent_failover",
+    "evidence": "Derived provider/model route-patch completeness recorded by loop_turn_options and inspected by loop_support."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "loop_opts?._agent_loop_last_llm_route_patch_seen",
+    "owner": "__agent_loop_enable_equivalent_failover",
+    "evidence": "Derived route-patch presence recorded by loop_turn_options and inspected by loop_support."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "merged?._next_tool_claim_applied",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Receipt set by loop_support after projecting the next-tool claim into provider request options."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "merged?._output_contract_repair",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Repair-turn marker set by loop_turn_scope and consumed by loop_support; the output contract owns the requested schema."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
     "expression": "opts?._next_tool_claim",
     "owner": "__agent_loop_next_tool_output_contract",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
@@ -201,6 +264,20 @@
     "expression": "payload?.turn",
     "owner": "__agent_loop_fire_resume_continuity",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "opts?._mcp_delta_bootstrap",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Bootstrap result produced by mcp mounting and consumed by loop_turn_setup for newly mounted servers."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "turn_opts?._skill_activated_this_turn",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Computed activation result written by skills and consumed by loop_turn_setup."
   },
   {
     "scope": "AgentSpec",
@@ -393,10 +470,31 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "opts?.tools?.tools",
+    "owner": "__served_tool_groups",
+    "evidence": "Tool-registry payload projected during MCP tool admission; the tools setting owns this data."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "registry?.tools",
+    "owner": "__skill_scoped_tools",
+    "evidence": "Tool-registry payload projected during MCP tool admission; the tools setting owns this data."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
     "expression": "allowed.appending",
     "owner": "__stance_policy_patch",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+    "expression": "turn_opts?._read_only_stance_tools",
+    "owner": "agent_stance_apply",
+    "evidence": "Resolved tool names recorded by stance after applying the read-only tool policy."
   },
   {
     "scope": "AgentSpec",

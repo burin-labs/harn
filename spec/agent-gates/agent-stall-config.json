@@ -246,6 +246,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 341,
+        "reader": "agent_monologue_actuation_take_for_turn"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/stall_config.harn",
         "line": 473,
         "reader": "__agent_stall_config"

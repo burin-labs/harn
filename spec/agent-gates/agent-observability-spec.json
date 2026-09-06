@@ -18,8 +18,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no custom delta callback",
+    "evidence": "options_public.agent_options reads the optional callback and projects it into _on_delta without supplying one. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -58,6 +58,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_purpose_labels.harn",
         "line": 41,
         "reader": "__purpose_label_arm"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+        "line": 167,
+        "reader": "__agent_loop_turn_setup"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

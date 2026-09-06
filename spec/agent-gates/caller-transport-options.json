@@ -12,6 +12,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/caller_transport.harn",
         "line": 28,
         "reader": "__normalize_llm_caller_transport"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+        "line": 89,
+        "reader": "agent_prefill_eligibility"
       }
     ],
     "reason": "A caller must declare whether its transport preserves assistant prefill before the runner relies on that capability.",

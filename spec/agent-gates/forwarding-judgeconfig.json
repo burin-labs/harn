@@ -4,14 +4,28 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "__judge_stable_prefix(judge_cfg, opts, payload, system, schema)",
     "owner": "__judge_stable_prefix",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __judge_stable_prefix.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__judge_stable_prefix",
+        "parameter": "judge_cfg"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "__normalize_judge_config(judge_cfg)",
     "owner": "__normalize_judge_config",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __normalize_judge_config.value in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__normalize_judge_config",
+        "parameter": "value"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
@@ -25,55 +39,97 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_apply_llm_overrides(\n    base\n      + {\n        model: resolved_judge.model,\n        provider: judge_cfg?.provider ?? opts?.provider,\n        output: {schema: schema, strict: true, validation: \"error\"},\n        session_id: payload.session_id,\n        system: system,\n        mock_scope: base?.mock_scope ?? mock_scope,\n        _call_stage: \"verify\",\n      }\n      + completion_timeout_opts,\n    judge_cfg,\n  )",
     "owner": "__judge_apply_llm_overrides",
-    "evidence": "Consumer __judge_apply_llm_overrides.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_apply_llm_overrides.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__judge_apply_llm_overrides",
+        "parameter": "judge_cfg"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_provider_family(harness.llm, judge_cfg, opts)",
     "owner": "__judge_provider_family",
-    "evidence": "Consumer __judge_provider_family.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_provider_family.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__judge_provider_family",
+        "parameter": "judge_cfg"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_provider_family(llm, judge_cfg, opts)",
     "owner": "__judge_provider_family",
-    "evidence": "Consumer __judge_provider_family.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_provider_family.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__judge_provider_family",
+        "parameter": "judge_cfg"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_resolve_model(harness.llm, judge_cfg, opts)",
     "owner": "__judge_resolve_model",
-    "evidence": "Consumer __judge_resolve_model.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_resolve_model.judge_cfg in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__judge_resolve_model",
+        "parameter": "judge_cfg"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__normalize_judge_config(value)",
     "owner": "__normalize_judge_config",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __normalize_judge_config.value in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__normalize_judge_config",
+        "parameter": "value"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "type_of(value)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__normalize_judge_config(judge_cfg)",
     "owner": "__normalize_judge_config",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __normalize_judge_config.value in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for JudgeConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "JudgeConfig",
+        "function": "__normalize_judge_config",
+        "parameter": "value"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "type_of(judge_cfg)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   }
 ]

@@ -12,6 +12,16 @@
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "line": 96,
         "reader": "model-registry-key-domain"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 267,
+        "reader": "llm_equivalent_failover_enabled"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 303,
+        "reader": "llm_enable_equivalent_failover"
       }
     ],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
@@ -27,6 +37,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 228,
+        "reader": "explicit-routing-key-domain"
+      },
+      {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "line": 94,
         "reader": "model-registry-key-domain"
@@ -41,39 +56,20 @@
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
-    "name": "AgentSpec.family",
-    "reachability": "unknown",
-    "readers": [],
-    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
-    "expiry": "2026-09-13",
-    "kind": "configuration",
-    "layer": "runner",
     "name": "AgentSpec.ladder",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 226,
+        "reader": "explicit-routing-key-domain"
+      },
       {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "line": 98,
         "reader": "model-registry-key-domain"
       }
     ],
-    "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "dynamic: options pass through agent model normalization; provider/model catalog and llm_call own the omitted-value policy",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
-    "expiry": "2026-09-13",
-    "kind": "limit or threshold",
-    "layer": "runner",
-    "name": "AgentSpec.max_routes",
-    "reachability": "unknown",
-    "readers": [],
     "reason": "Public model/provider control rather than a recovery experiment; preserve until its owning API contract is reviewed.",
     "verdict": "KEEP-with-expiry"
   },
@@ -92,6 +88,16 @@
         "reader": "model-registry-key-domain"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 190,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 191,
+        "reader": "__compact_options"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_review.harn",
         "line": 19,
         "reader": "__agent_completion_review"
@@ -102,9 +108,34 @@
         "reader": "__judge_provider_family"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 128,
+        "reader": "__dispatch_emit_call_start"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "line": 57,
+        "reader": "agent_loop_run_settings"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
         "line": 98,
         "reader": "agent_loop_provider_failure"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 45,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 312,
+        "reader": "__agent_loop_enable_equivalent_failover"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 603,
+        "reader": "__agent_loop_with_llm_render_context"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
@@ -135,6 +166,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
         "line": 258,
         "reader": "__run_pre_turn_scope_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+        "line": 130,
+        "reader": "__agent_loop_turn_setup"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
@@ -170,6 +206,26 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
         "line": 290,
         "reader": "agent_session_record_usage"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 64,
+        "reader": "__tool_search_provider_has_native"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 65,
+        "reader": "__tool_search_provider_has_native"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 79,
+        "reader": "__tool_search_provider_has_native"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 80,
+        "reader": "__tool_search_provider_has_native"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -221,6 +277,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 225,
+        "reader": "explicit-routing-key-domain"
+      },
+      {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "line": 97,
         "reader": "model-registry-key-domain"
@@ -244,6 +305,16 @@
         "reader": "model-registry-key-domain"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 187,
+        "reader": "__compact_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+        "line": 188,
+        "reader": "__compact_options"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
         "line": 221,
         "reader": "__judge_provider_family"
@@ -254,9 +325,34 @@
         "reader": "__judge_run_checkpoint"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 127,
+        "reader": "__dispatch_emit_call_start"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_lifecycle.harn",
+        "line": 56,
+        "reader": "agent_loop_run_settings"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_provider_failure.harn",
         "line": 97,
         "reader": "agent_loop_provider_failure"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+        "line": 44,
+        "reader": "__agent_loop_run"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 311,
+        "reader": "__agent_loop_enable_equivalent_failover"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+        "line": 602,
+        "reader": "__agent_loop_with_llm_render_context"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
@@ -287,6 +383,11 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
         "line": 257,
         "reader": "__run_pre_turn_scope_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+        "line": 129,
+        "reader": "__agent_loop_turn_setup"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
@@ -322,6 +423,26 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
         "line": 289,
         "reader": "agent_session_record_usage"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 66,
+        "reader": "__tool_search_provider_has_native"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 79,
+        "reader": "__tool_search_provider_has_native"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 67,
+        "reader": "__tool_search_provider_has_native"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+        "line": 80,
+        "reader": "__tool_search_provider_has_native"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -360,6 +481,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 227,
+        "reader": "explicit-routing-key-domain"
+      },
+      {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "line": 93,
         "reader": "model-registry-key-domain"
@@ -377,6 +503,11 @@
     "name": "AgentSpec.routing",
     "reachability": "unknown",
     "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+        "line": 224,
+        "reader": "explicit-routing-key-domain"
+      },
       {
         "file": "crates/harn-builtin-meta/src/llm_options.rs",
         "line": 95,

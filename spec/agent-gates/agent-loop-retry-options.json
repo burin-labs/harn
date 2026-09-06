@@ -117,6 +117,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 243,
+        "reader": "__dispatch_invoke_once"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
         "line": 182,
         "reader": "__agent_loop_retry_with_default_predicate"

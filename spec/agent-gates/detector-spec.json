@@ -59,8 +59,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "3 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides hard_stop_after_trips only when supplied; stall_config defaults it to STALL_HARD_STOP_AFTER_TRIPS. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -82,8 +82,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; preserve native loop-detector defaults",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides repeat and ping-pong only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -123,8 +123,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "2.0",
-    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "3 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves no_progress_messages unchanged when absent; stall_config defaults it to STALL_NO_PROGRESS_MESSAGES. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -146,8 +146,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; preserve native no-progress default",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides no_progress_messages only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -164,8 +164,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "0.0; use the thin-history margin",
-    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "6 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves ping_pong_cycles unchanged when absent; stall_config defaults it to STALL_PING_PONG_CYCLES. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -187,8 +187,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "2.0",
-    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "4 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves repeat_same_observation unchanged when absent; stall_config defaults it to STALL_REPEAT_SAME_OBSERVATION. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -210,8 +210,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "0.0; use the thin-history margin",
-    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "absent; does not independently enable repair-aware detection",
+    "evidence": "stall_detectors.detector_spec_to_stall sets repair_aware only for an explicit same_diagnostic value; native stall configuration owns its own defaults. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -233,8 +233,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "2.0",
-    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "3 via the native stall configuration",
+    "evidence": "stall_detectors.detector_spec_to_stall leaves repeat_same_error unchanged when absent; stall_config defaults it to STALL_REPEAT_SAME_ERROR. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -256,8 +256,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "0.0; use the thin-history margin",
-    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "2.0",
+    "evidence": "stall_detectors.token_runaway_decision uses TOKEN_RUNAWAY_DEFAULT_SIGMA. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -279,8 +279,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "0.0; use the thin-history margin",
+    "evidence": "stall_detectors.token_runaway_resolve_cap uses a 0.6 relative margin when standard deviation is nonpositive. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -302,8 +302,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; preserve native stuck-detector defaults",
+    "evidence": "stall_detectors.detector_spec_to_stall overrides error/diagnostic behavior only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -320,8 +320,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no token-runaway post-turn overlay",
+    "evidence": "stall_detectors.unified_detectors_post_turn returns nil when token_runaway is absent. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",

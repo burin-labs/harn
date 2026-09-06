@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "name_aliases": {
+    "AgentSpec._llm_caller_transport": "AgentSpec.llm_caller_transport",
+    "AgentSpec._llm_retry": "AgentSpec.llm_retry",
+    "AgentSpec._input_guardrail": "AgentSpec.input_guardrail",
+    "AgentSpec._pre_turn_scope_classifier": "AgentSpec.pre_turn_scope_classifier",
     "AgentSpec._done_sentinel": "AgentSpec.done_sentinel",
     "AgentSpec.max_retries": "RateLimitOptions.max_retries",
     "AgentSpec.backoff_ms": "RateLimitOptions.backoff_ms",
@@ -15,6 +19,8 @@
     "AgentSpec._stop_after_successful_tools": "AgentSpec.stop_after_successful_tools"
   },
   "name_prefixes": [
+    {"from": "AgentSpec._llm_caller_transport.", "to": "AgentSpec.llm_caller_transport."},
+    {"from": "AgentSpec._llm_retry.", "to": "AgentLoopRetryOptions."},
     {"from": "AgentSpec.step_judge.", "to": "StepJudgeOptions."},
     {"from": "AgentSpec.budget.", "to": "AgentBudget."},
     {
@@ -60,6 +66,10 @@
   ],
   "repo": "harn",
   "entry_files": [
+    "spec/agent-gates/model-nested-options.json",
+    "spec/agent-gates/resume-routing-options.json",
+    "spec/agent-gates/skill-options.json",
+    "spec/agent-gates/compaction-options.json",
     "spec/agent-gates/caller-transport-options.json",
     "spec/agent-gates/agent-capability-spec.json",
     "spec/agent-gates/agent-context-spec.json",
@@ -109,6 +119,48 @@
     "spec/agent-gates/judge-model-overrides.json"
   ],
   "scopes": [
+    {
+      "id": "native-budget-envelope", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/cost.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"fields\") (#eq? @method \"get\"))",
+      "prefix": "AgentBudget.", "key_form": "literal"
+    },
+    {
+      "id": "native-equivalent-failover", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/helpers/options/routing.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"dict\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.equivalent_failover.", "key_form": "literal"
+    },
+    {
+      "id": "native-system-replacement", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/helpers/options/system_prompt.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"spec\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.system.", "key_form": "literal"
+    },
+    {
+      "id": "native-model-step-identity", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/routing.rs", "language": "rust",
+      "query": "((call_expression function: (identifier) @helper arguments: (arguments . (string_literal) @key)) (#eq? @helper \"non_nil\"))",
+      "prefix": "AgentSpec.models[].", "key_form": "literal"
+    },
+    {
+      "id": "native-model-step-overrides", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/routing.rs", "language": "rust",
+      "query": "((call_expression function: (identifier) @helper arguments: (arguments . (call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)))) (#eq? @helper \"parse_ladder_step_overrides\") (#eq? @receiver \"dict\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.models[].", "key_form": "literal"
+    },
+    {
+      "id": "explicit-routing-key-domain", "kind": "option",
+      "glob": "crates/harn-stdlib/src/stdlib/llm/options.harn", "language": "harn",
+      "query": "((const_binding name: (identifier) @domain value: (list_literal (string_literal) @key)) (#eq? @domain \"__LLM_EXPLICIT_ROUTING_KEYS\"))",
+      "prefix": "AgentSpec.", "key_form": "literal"
+    },
+    {
+      "id": "native-skill-match-options", "kind": "option",
+      "glob": "crates/harn-vm/src/llm/skill_score.rs", "language": "rust",
+      "query": "((call_expression function: (field_expression value: (identifier) @receiver field: (field_identifier) @method) arguments: (arguments (string_literal) @key)) (#eq? @receiver \"options\") (#eq? @method \"get\"))",
+      "prefix": "AgentSpec.skill_match.", "key_form": "literal"
+    },
     {
       "id": "workflow-loop-key-domain",
       "kind": "option",
@@ -256,6 +308,7 @@
   ],
   "binding_scopes": [],
   "forwarder_files": [
+    "spec/agent-gates/reviewed-turn-preparation.json",
     "spec/agent-gates/forwarding-agentspec-runner.json",
     "spec/agent-gates/native-provider-forwarding.json",
     "spec/agent-gates/reviewed-consumer-boundaries.json",
@@ -297,6 +350,8 @@
     }
   ],
   "binding_scope_files": [
+    "spec/agent-gates/bindings/skill-match.json",
+    "spec/agent-gates/bindings/compaction-options.json",
     "spec/agent-gates/bindings/caller-transport.json",
     "spec/agent-gates/bindings/token-runaway.json",
     "spec/agent-gates/bindings/judge-cadence.json",

@@ -36,6 +36,8 @@ pub type AgentGateForwarder = {
   expression: string,
   owner: string,
   evidence: string,
+  /** Local consumer origins whose removal would make this classification unsafe. */
+  consumers?: list<{scope: string, function: string, parameter: string, path?: list<string>}>,
 }
 
 /** Source boundary for one configuration owner. */
@@ -82,6 +84,27 @@ fn read_classifications(fs: HarnessFs, files: list<string>) -> AgentGateClassifi
     rows = rows + batch
   }
   return rows
+}
+
+fn validate_classified_consumers(
+  registry: AgentGateRegistry,
+  classifications: AgentGateClassifications,
+) {
+  for classification in classifications {
+    for consumer in classification.consumers ?? [] {
+      const covered = registry.binding_scopes.any(
+        fn(source) { return source.config.id == consumer.scope
+          && source.config.parameters.any(
+            fn(parameter) { return parameter.function == consumer.function
+              && parameter.name == consumer.parameter
+              && (parameter.path ?? []) == (consumer.path ?? []) },
+          ) },
+      )
+      if !covered {
+        throw "agent gate registry: missing classified consumer origin ${consumer.scope} ${consumer.function}(${consumer.parameter}) for ${classification.file} ${classification.expression}"
+      }
+    }
+  }
 }
 
 fn read_entries(fs: HarnessFs, registry: AgentGateRegistry) -> list<AgentGateEntry> {
@@ -243,11 +266,11 @@ pub fn agent_gate_reads(
     }
   }
   for file in owners_by_file.keys().sorted() {
-    const found = agent_gate_binding_scopes_reads(
-      {ast: harness.ast, fs: harness.fs},
-      file,
-      owners_by_file[file],
-    )
+    const owners = owners_by_file[file]
+    if owners == nil {
+      throw "agent gate registry: missing configuration owners for ${file}"
+    }
+    const found = agent_gate_binding_scopes_reads({ast: harness.ast, fs: harness.fs}, file, owners)
     observed_owners = observed_owners + found.owners
     observed_parameters = observed_parameters + found.parameters
     reads = reads + found.reads
@@ -532,6 +555,10 @@ pub fn agent_gate_audit(
     throw "agent gate registry: exactly one projection per layer is required"
   }
   const entries = read_entries(harness.fs, registry)
+  const forwarders = read_classifications(harness.fs, registry.forwarder_files)
+  const non_behavior = read_classifications(harness.fs, registry.non_behavior_files)
+  validate_classified_consumers(registry, forwarders)
+  validate_classified_consumers(registry, non_behavior)
   const reads = agent_gate_reads(
     {ast: harness.ast, fs: harness.fs, process: harness.process},
     registry,
@@ -539,8 +566,6 @@ pub fn agent_gate_audit(
   const flag_scopes = registry.scopes.filter(fn(scope) { return scope.kind == "flag" }).map(
     fn(scope) { return scope.id },
   )
-  const forwarders = read_classifications(harness.fs, registry.forwarder_files)
-  const non_behavior = read_classifications(harness.fs, registry.non_behavior_files)
   const findings = agent_gate_findings(entries, reads, forwarders, non_behavior, flag_scopes)
   let failures = findings.failures
   const observed = observed_entries(
@@ -554,8 +579,13 @@ pub fn agent_gate_audit(
     write_observed_entries(harness.fs, registry.entry_files, observed)
   } else {
     for index in range(0, len(entries)) {
-      if entries[index].readers != observed[index].readers {
-        failures = failures + ["stale readers " + entries[index].name]
+      const expected_entry = entries[index]
+      const observed_entry = observed[index]
+      if expected_entry == nil || observed_entry == nil {
+        throw "missing observed entry"
+      }
+      if expected_entry.readers != observed_entry.readers {
+        failures = failures + ["stale readers " + expected_entry.name]
       }
     }
   }

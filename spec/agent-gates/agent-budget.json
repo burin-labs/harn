@@ -9,6 +9,11 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-vm/src/llm/cost.rs",
+        "line": 319,
+        "reader": "get"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
         "line": 47,
         "reader": "agent_budget_post_call_stop_reason"

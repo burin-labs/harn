@@ -45,6 +45,16 @@
     "reachability": "unknown",
     "readers": [
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 145,
+        "reader": "__dispatch_structured_output_schema"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+        "line": 146,
+        "reader": "__dispatch_structured_output_schema"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
         "line": 165,
         "reader": "__agent_loop_output_contract"

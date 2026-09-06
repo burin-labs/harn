@@ -1,0 +1,222 @@
+[
+  {
+    "default": "absent; no per-call cost ceiling",
+    "evidence": "cost.parse_budget_fields sets this optional ceiling only when the nested field is present.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentBudget.max_cost_usd",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cost.rs",
+        "line": 316,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no input-token ceiling",
+    "evidence": "cost.parse_budget_fields sets this optional ceiling only when the nested field is present.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentBudget.max_input_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cost.rs",
+        "line": 322,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no output-token ceiling",
+    "evidence": "cost.parse_budget_fields sets this optional ceiling only when the nested field is present.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentBudget.max_output_tokens",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/cost.rs",
+        "line": 325,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "3",
+    "evidence": "helpers/options/routing.parse_equivalent_failover_option starts with DEFAULT_EQUIVALENT_FAILOVER_MAX_ROUTES.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.equivalent_failover.max_routes",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/routing.rs",
+        "line": 234,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "false in the native parser; true in the agent default failover object",
+    "evidence": "The native parser defaults false; llm/options.llm_enable_equivalent_failover explicitly injects true for the agent default.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.equivalent_failover.on_no_dispatch",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/routing.rs",
+        "line": 220,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "required nonempty string in each object step",
+    "evidence": "routing.parse_ladder_step_value rejects an object without a nonempty model.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.models[].model",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/routing.rs",
+        "line": 832,
+        "reader": "native-model-step-identity"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; inherited routing resolution",
+    "evidence": "routing.parse_ladder_step_value returns None when provider is missing, nil or blank.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.models[].provider",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/routing.rs",
+        "line": 838,
+        "reader": "native-model-step-identity"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no step label",
+    "evidence": "routing.parse_ladder_step_value returns None when label is missing, nil or blank.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.models[].label",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/routing.rs",
+        "line": 839,
+        "reader": "native-model-step-identity"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; no step overrides",
+    "evidence": "routing.parse_ladder_step_overrides returns None for missing or nil options and validates present keys against LADDER_STEP_OVERRIDE_KEYS.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.models[].options",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/routing.rs",
+        "line": 840,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; ignored by the native inline ladder parser",
+    "evidence": "Declared inside AgentModelSpec.models; routing.parse_ladder_step_value consumes only model, provider, label and options.",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.models[].family",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Remove a declared inline-ladder field that the native parser ignores.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "absent; ignored by the native inline ladder parser",
+    "evidence": "Declared inside AgentModelSpec.models; routing.parse_ladder_step_value consumes only model, provider, label and options.",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.models[].capabilities",
+    "reachability": "unknown",
+    "readers": [],
+    "reason": "Remove a declared inline-ladder field that the native parser ignores.",
+    "verdict": "DELETE"
+  },
+  {
+    "default": "required literal replace in the object form",
+    "evidence": "helpers/options/system_prompt rejects an exclusive replacement object without mode equal to replace.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.system.mode",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/system_prompt.rs",
+        "line": 109,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "required string in the object form",
+    "evidence": "helpers/options/system_prompt rejects an exclusive replacement object without string content.",
+    "expiry": "2026-09-13",
+    "kind": "nested option",
+    "layer": "runner",
+    "name": "AgentSpec.system.content",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-vm/src/llm/helpers/options/system_prompt.rs",
+        "line": 128,
+        "reader": "get"
+      }
+    ],
+    "reason": "Preserve the nested contract at the owning budget, routing or prompt assembler.",
+    "verdict": "KEEP-with-expiry"
+  }
+]

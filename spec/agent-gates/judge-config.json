@@ -212,8 +212,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; no requirement-specific contract",
+    "evidence": "completion_requirements.__completion_requirement_contract_checked returns nil for absent input or an empty requirements list. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",
@@ -275,8 +275,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "inherit the agent rubric, otherwise empty",
+    "evidence": "judge.__judge_stable_prefix resolves judge_cfg.rubric then opts.rubric then an empty string. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "stop decision",

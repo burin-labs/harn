@@ -4,6 +4,13 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn",
     "expression": "__purpose_label_instruction(config)",
     "owner": "__purpose_label_instruction",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __purpose_label_instruction.config in crates/harn-stdlib/src/stdlib/agent/purpose_labels.harn is an independently required binding origin for PurposeLabelConfig; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "PurposeLabelConfig",
+        "function": "__purpose_label_instruction",
+        "parameter": "config"
+      }
+    ]
   }
 ]

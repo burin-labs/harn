@@ -4,14 +4,28 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
     "expression": "__completion_gate_evaluate(runtime, payload, opts, facts_available)",
     "owner": "__completion_gate_evaluate",
-    "evidence": "Consumer __completion_gate_evaluate.opts in crates/harn-stdlib/src/stdlib/agent/completion_gate.harn is an independently required binding origin for CompletionGateOptions; its literal reads are audited under that owner."
+    "evidence": "Consumer __completion_gate_evaluate.opts in crates/harn-stdlib/src/stdlib/agent/completion_gate.harn is an independently required binding origin for CompletionGateOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CompletionGateOptions",
+        "function": "__completion_gate_evaluate",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "CompletionGateOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
     "expression": "__completion_gate_validate_options(opts)",
     "owner": "__completion_gate_validate_options",
-    "evidence": "Consumer __completion_gate_validate_options.opts in crates/harn-stdlib/src/stdlib/agent/completion_gate.harn is an independently required binding origin for CompletionGateOptions; its literal reads are audited under that owner."
+    "evidence": "Consumer __completion_gate_validate_options.opts in crates/harn-stdlib/src/stdlib/agent/completion_gate.harn is an independently required binding origin for CompletionGateOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CompletionGateOptions",
+        "function": "__completion_gate_validate_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "CompletionGateOptions",

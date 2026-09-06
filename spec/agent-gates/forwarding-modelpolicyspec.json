@@ -4,21 +4,42 @@
     "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
     "expression": "__workflow_agent_loop_options(config, model_policy, tool_format)",
     "owner": "__workflow_agent_loop_options",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __workflow_agent_loop_options.model_policy in crates/harn-stdlib/src/stdlib/workflow/options.harn is an independently required binding origin for ModelPolicySpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ModelPolicySpec",
+        "function": "__workflow_agent_loop_options",
+        "parameter": "model_policy"
+      }
+    ]
   },
   {
     "scope": "ModelPolicySpec",
     "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
     "expression": "__workflow_llm_options(config, model_policy, tool_format)",
     "owner": "__workflow_llm_options",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __workflow_llm_options.model_policy in crates/harn-stdlib/src/stdlib/workflow/options.harn is an independently required binding origin for ModelPolicySpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ModelPolicySpec",
+        "function": "__workflow_llm_options",
+        "parameter": "model_policy"
+      }
+    ]
   },
   {
     "scope": "ModelPolicySpec",
     "file": "crates/harn-stdlib/src/stdlib/workflow/options.harn",
     "expression": "__workflow_stage_tool_format(model_policy, host)",
     "owner": "__workflow_stage_tool_format",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __workflow_stage_tool_format.model_policy in crates/harn-stdlib/src/stdlib/workflow/options.harn is an independently required binding origin for ModelPolicySpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ModelPolicySpec",
+        "function": "__workflow_stage_tool_format",
+        "parameter": "model_policy"
+      }
+    ]
   },
   {
     "scope": "ModelPolicySpec",

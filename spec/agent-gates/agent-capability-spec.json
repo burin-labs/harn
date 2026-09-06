@@ -1,7 +1,7 @@
 [
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; inherit the current approval policy",
+    "evidence": "agent_session_host.session_policies installs an approval-policy override only when parse_approval_policy returns one. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -18,8 +18,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; inherit the current reviewer",
+    "evidence": "agent_session_host.session_policies pushes an approval reviewer only when an explicit value parses. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
     "layer": "runner",
@@ -36,8 +36,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; no additional autonomy budget",
+    "evidence": "llm.autonomy_budget.parse_autonomy_budget returns None for absent or nil autonomy_budget. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -99,8 +99,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; inherit the current permissions",
+    "evidence": "agent_session_host.session_policies installs dynamic permissions only when an explicit permission value parses. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -117,8 +117,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; inherit the current capability policy",
+    "evidence": "agent_session_host.session_policies installs a capability policy only when supplied, intersecting it with any outer policy. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -176,6 +176,11 @@
         "reader": "__with_mcp_tool_ceiling"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+        "line": 356,
+        "reader": "agent_monologue_actuation_take_for_turn"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
         "line": 75,
         "reader": "__stance_policy_patch"
@@ -184,6 +189,16 @@
         "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
         "line": 284,
         "reader": "agent_stance_prepare"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 316,
+        "reader": "agent_stance_apply"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
+        "line": 320,
+        "reader": "agent_stance_apply"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn",
@@ -210,14 +225,20 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; no injected progress tool",
+    "evidence": "progress.__agent_progress_tool_config returns nil for absent input; agent_progress_apply_options then returns the original options. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "boolean option",
     "layer": "runner",
     "name": "AgentSpec.progress_tool",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/progress.harn",
+        "line": 401,
+        "reader": "agent_progress_apply_options"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },

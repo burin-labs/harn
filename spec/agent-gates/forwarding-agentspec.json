@@ -2,247 +2,1307 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compact_options(opts, engine_strategy, keep_last)",
+    "owner": "__compact_options",
+    "evidence": "Consumer __compact_options.opts in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__compact_options",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compaction_enabled(opts)",
+    "owner": "__compaction_enabled",
+    "evidence": "Consumer __compaction_enabled.opts in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__compaction_enabled",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compaction_keep_last(opts)",
+    "owner": "__compaction_keep_last",
+    "evidence": "Consumer __compaction_keep_last.opts in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__compaction_keep_last",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "agent_reminder_providers_fire(agent, session.session_id, \"post_compact\", post_payload, opts)",
     "owner": "agent_reminder_providers_fire",
-    "evidence": "Consumer agent_reminder_providers_fire.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_reminder_providers_fire.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_reminder_providers_fire",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(cfg)",
+    "owner": "type_of",
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(policy_cfg)",
+    "owner": "type_of",
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
     "expression": "__budget_envelope(opts)",
     "owner": "__budget_envelope",
-    "evidence": "Consumer __budget_envelope.opts in crates/harn-stdlib/src/stdlib/agent/budget.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __budget_envelope.opts in crates/harn-stdlib/src/stdlib/agent/budget.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__budget_envelope",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
     "expression": "__completion_claim_requirement_ids(opts)",
     "owner": "__completion_claim_requirement_ids",
-    "evidence": "Consumer __completion_claim_requirement_ids.opts in crates/harn-stdlib/src/stdlib/agent/completion_claim.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __completion_claim_requirement_ids.opts in crates/harn-stdlib/src/stdlib/agent/completion_claim.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__completion_claim_requirement_ids",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_claim.harn",
     "expression": "__with_prompt_fragment(\n    opts + {tools: agent_completion_claim_tool(registry)},\n    {\n      id: \"completion_claim\",\n      source: \"std/agent/completion_claim\",\n      body: \"When the task is complete, call task_complete exactly once and by itself, after the tool calls it cites have finished. Cite recorded tool_call_id values in evidence_refs for every requirement. Required requirement_id values: \"\n        + json_stringify(requirement_ids)\n        + \". A tool-free final response remains available as a compatibility fallback.\",\n    },\n  )",
     "owner": "__with_prompt_fragment",
-    "evidence": "Consumer __with_prompt_fragment.agent_options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __with_prompt_fragment.agent_options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__with_prompt_fragment",
+        "parameter": "agent_options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_review.harn",
     "expression": "__agent_completion_review(llm, opts)",
     "owner": "__agent_completion_review",
-    "evidence": "Consumer __agent_completion_review.opts in crates/harn-stdlib/src/stdlib/agent/completion_review.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_completion_review.opts in crates/harn-stdlib/src/stdlib/agent/completion_review.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_completion_review",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "__agent_daemon_await_resumption(agent, session, opts, iteration, timeout)",
+    "owner": "__agent_daemon_await_resumption",
+    "evidence": "Consumer __agent_daemon_await_resumption.opts in crates/harn-stdlib/src/stdlib/agent/daemon.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_daemon_await_resumption",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "__agent_daemon_feedback(fs, wake, opts)",
+    "owner": "__agent_daemon_feedback",
+    "evidence": "Consumer __agent_daemon_feedback.opts in crates/harn-stdlib/src/stdlib/agent/daemon.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_daemon_feedback",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "__agent_daemon_raw_resume_conditions(opts, timeout_ms)",
+    "owner": "__agent_daemon_raw_resume_conditions",
+    "evidence": "Consumer __agent_daemon_raw_resume_conditions.opts in crates/harn-stdlib/src/stdlib/agent/daemon.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_daemon_raw_resume_conditions",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
     "expression": "__daemon_compaction_summary(opts)",
     "owner": "__daemon_compaction_summary",
-    "evidence": "Consumer __daemon_compaction_summary.opts in crates/harn-stdlib/src/stdlib/agent/daemon.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __daemon_compaction_summary.opts in crates/harn-stdlib/src/stdlib/agent/daemon.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__daemon_compaction_summary",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "agent_daemon_snapshot(agent, session, opts, \"idle\", iteration)",
+    "owner": "agent_daemon_snapshot",
+    "evidence": "Consumer agent_daemon_snapshot.opts in crates/harn-stdlib/src/stdlib/agent/daemon.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_daemon_snapshot",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "agent_reminder_providers_fire(agent, session.session_id, \"session_idle\", idle_payload, opts)",
+    "owner": "agent_reminder_providers_fire",
+    "evidence": "Consumer agent_reminder_providers_fire.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_reminder_providers_fire",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "daemon_timer_feedback_prompt(fs, opts)",
+    "owner": "daemon_timer_feedback_prompt",
+    "evidence": "Consumer daemon_timer_feedback_prompt.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "daemon_timer_feedback_prompt",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/daemon.harn",
+    "expression": "daemon_watch_feedback_prompt(fs, {changed_paths: changed_paths_text}, opts)",
+    "owner": "daemon_watch_feedback_prompt",
+    "evidence": "Consumer daemon_watch_feedback_prompt.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "daemon_watch_feedback_prompt",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "__completion_policy_plan(opts, stop_reason)",
     "owner": "__completion_policy_plan",
-    "evidence": "Consumer __completion_policy_plan.opts in crates/harn-stdlib/src/stdlib/agent/judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __completion_policy_plan.opts in crates/harn-stdlib/src/stdlib/agent/judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__completion_policy_plan",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
     "expression": "__judge_tool_entries(opts)",
     "owner": "__judge_tool_entries",
-    "evidence": "Consumer __judge_tool_entries.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_tool_entries.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__judge_tool_entries",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn",
     "expression": "__judge_tool_entry(opts, name)",
     "owner": "__judge_tool_entry",
-    "evidence": "Consumer __judge_tool_entry.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_tool_entry.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__judge_tool_entry",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_provider_family(harness.llm, judge_cfg, opts)",
     "owner": "__judge_provider_family",
-    "evidence": "Consumer __judge_provider_family.opts in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_provider_family.opts in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__judge_provider_family",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_provider_family(llm, judge_cfg, opts)",
     "owner": "__judge_provider_family",
-    "evidence": "Consumer __judge_provider_family.opts in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_provider_family.opts in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__judge_provider_family",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
     "expression": "__judge_resolve_model(harness.llm, judge_cfg, opts)",
     "owner": "__judge_resolve_model",
-    "evidence": "Consumer __judge_resolve_model.opts in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_resolve_model.opts in crates/harn-stdlib/src/stdlib/agent/judge_internals.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__judge_resolve_model",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_emit_call_start(harness.agent, llm_opts)",
+    "owner": "__dispatch_emit_call_start",
+    "evidence": "Consumer __dispatch_emit_call_start.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_emit_call_start",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_invoke_once(harness, message, turn_system, llm_opts)",
+    "owner": "__dispatch_invoke_once",
+    "evidence": "Consumer __dispatch_invoke_once.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_invoke_once",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_prompt_mode_request(harness, message, llm_opts, schema)",
+    "owner": "__dispatch_prompt_mode_request",
+    "evidence": "Consumer __dispatch_prompt_mode_request.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_prompt_mode_request",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_reject_empty_request(message, turn_system, llm_opts)",
+    "owner": "__dispatch_reject_empty_request",
+    "evidence": "Consumer __dispatch_reject_empty_request.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_reject_empty_request",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_reject_removed_options(llm_opts)",
+    "owner": "__dispatch_reject_removed_options",
+    "evidence": "Consumer __dispatch_reject_removed_options.options in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_reject_removed_options",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_request_has_payload(message, turn_system, llm_opts)",
+    "owner": "__dispatch_request_has_payload",
+    "evidence": "Consumer __dispatch_request_has_payload.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_request_has_payload",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "__dispatch_structured_output_schema(llm_opts)",
+    "owner": "__dispatch_structured_output_schema",
+    "evidence": "Consumer __dispatch_structured_output_schema.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_structured_output_schema",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "llm_call_options(llm_opts)",
+    "owner": "llm_call_options",
+    "evidence": "Consumer llm_call_options.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "llm_call_options",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "__agent_loop_fire_resume_continuity(harness.agent, initialized_session, opts)",
     "owner": "__agent_loop_fire_resume_continuity",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_loop_fire_resume_continuity.opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_fire_resume_continuity",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "agent_completion_claim_apply_options(options)",
     "owner": "agent_completion_claim_apply_options",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_completion_claim_apply_options.options in crates/harn-stdlib/src/stdlib/agent/completion_claim.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_completion_claim_apply_options",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "agent_lifecycle_tools(harness.agent, opts?.tools, opts)",
     "owner": "agent_lifecycle_tools",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_lifecycle_tools.options in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_lifecycle_tools",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "agent_scratchpad_init(harness.agent, initialized_session, opts)",
     "owner": "agent_scratchpad_init",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_scratchpad_init.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_scratchpad_init",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
     "expression": "agent_session_init(harness.agent, message, effective_system, opts)",
     "owner": "agent_session_init",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_session_init.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_session_init",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "__agent_loop_has_terminal_output_contract(opts)",
+    "owner": "__agent_loop_has_terminal_output_contract",
+    "evidence": "Consumer __agent_loop_has_terminal_output_contract.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_has_terminal_output_contract",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "__agent_loop_next_tool_output_contract(merged)",
+    "owner": "__agent_loop_next_tool_output_contract",
+    "evidence": "Consumer __agent_loop_next_tool_output_contract.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_next_tool_output_contract",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "__agent_loop_ordinary_turn_llm_options(merged)",
+    "owner": "__agent_loop_ordinary_turn_llm_options",
+    "evidence": "Consumer __agent_loop_ordinary_turn_llm_options.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_ordinary_turn_llm_options",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "agent_completion_prompt_bindings(llm, call_opts)",
+    "owner": "agent_completion_prompt_bindings",
+    "evidence": "Consumer agent_completion_prompt_bindings.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_completion_prompt_bindings",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "agent_refresh_tool_format_for_route(llm, call_opts)",
+    "owner": "agent_refresh_tool_format_for_route",
+    "evidence": "Consumer agent_refresh_tool_format_for_route.options in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_refresh_tool_format_for_route",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "llm_enable_equivalent_failover(llm_opts, changed_partial_route)",
+    "owner": "llm_enable_equivalent_failover",
+    "evidence": "Consumer llm_enable_equivalent_failover.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "llm_enable_equivalent_failover",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+    "expression": "agent_invoke_llm(\n      harness,\n      __agent_loop_output_contract_repair_prompt(schema, text),\n      nil,\n      repair_opts,\n    )",
+    "owner": "agent_invoke_llm",
+    "evidence": "Consumer agent_invoke_llm.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_invoke_llm",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+    "expression": "agent_invoke_llm(harness, message, turn_system, llm_opts)",
+    "owner": "agent_invoke_llm",
+    "evidence": "Consumer agent_invoke_llm.llm_opts in crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_invoke_llm",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+    "expression": "agent_session_record_usage(\n    harness.agent,\n    session.session_id,\n    call.value,\n    repair_opts,\n    iteration + 1,\n  )",
+    "owner": "agent_session_record_usage",
+    "evidence": "Consumer agent_session_record_usage.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_session_record_usage",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__agent_loop_build_turn_prompt(\n    harness,\n    session,\n    turn_llm_opts,\n    iteration_index,\n  )",
+    "owner": "__agent_loop_build_turn_prompt",
+    "evidence": "Consumer __agent_loop_build_turn_prompt.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_build_turn_prompt",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__agent_loop_effective_llm_options(harness.llm, opts)",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Consumer __agent_loop_effective_llm_options.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_effective_llm_options",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__agent_loop_enable_equivalent_failover(direct_llm_opts, primary_provider, primary_model, opts)",
+    "owner": "__agent_loop_enable_equivalent_failover",
+    "evidence": "Consumer __agent_loop_enable_equivalent_failover.loop_opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_enable_equivalent_failover",
+        "parameter": "llm_opts"
+      },
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_enable_equivalent_failover",
+        "parameter": "loop_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__run_input_guardrail(\n    harness.agent,\n    turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,\n    session,\n    message,\n    turn_llm_opts,\n    iteration_index,\n  )",
+    "owner": "__run_input_guardrail",
+    "evidence": "Consumer __run_input_guardrail.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__run_input_guardrail",
+        "parameter": "turn_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__run_pre_turn_scope_classifier(\n    harness.agent,\n    turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,\n    session,\n    message,\n    turn_llm_opts,\n    iteration_index,\n  )",
+    "owner": "__run_pre_turn_scope_classifier",
+    "evidence": "Consumer __run_pre_turn_scope_classifier.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__run_pre_turn_scope_classifier",
+        "parameter": "turn_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__turn_llm_opts(harness, session, turn_opts, iteration_index)",
+    "owner": "__turn_llm_opts",
+    "evidence": "Consumer __turn_llm_opts.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_llm_opts",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_apply_tool_surface_narrowing(turn_opts)",
+    "owner": "agent_apply_tool_surface_narrowing",
+    "evidence": "Consumer agent_apply_tool_surface_narrowing.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_apply_tool_surface_narrowing",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_autocompact_if_needed(harness.agent, session, turn_llm_opts)",
+    "owner": "agent_autocompact_if_needed",
+    "evidence": "Consumer agent_autocompact_if_needed.opts in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_autocompact_if_needed",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_direct_llm_options(\n    turn_llm_opts,\n    turn_prompt,\n    session.session_id,\n    iteration_index + 1,\n  )",
+    "owner": "agent_direct_llm_options",
+    "evidence": "Consumer agent_direct_llm_options.turn_llm_opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_direct_llm_options",
+        "parameter": "turn_llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_mcp_admit_bootstrap(turn_opts, mcp_delta)",
+    "owner": "agent_mcp_admit_bootstrap",
+    "evidence": "Consumer agent_mcp_admit_bootstrap.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_mcp_admit_bootstrap",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_mcp_mount_additional(harness.tools, session, opts, skill_mcp_specs)",
+    "owner": "agent_mcp_mount_additional",
+    "evidence": "Consumer agent_mcp_mount_additional.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_mcp_mount_additional",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_monologue_actuation_take_for_turn(\n    harness.agent,\n    harness.llm,\n    session.session_id,\n    iteration_index + 1,\n    stall_state.monologue_actuation,\n    turn_opts,\n    turn_llm_opts,\n    pending_prefill.prefill == \"\",\n    agent_tool_call_paradigm(harness.llm, turn_llm_opts),\n  )",
+    "owner": "agent_monologue_actuation_take_for_turn",
+    "evidence": "Consumer agent_monologue_actuation_take_for_turn.llm_options in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_monologue_actuation_take_for_turn",
+        "parameter": "turn_options"
+      },
+      {
+        "scope": "AgentSpec",
+        "function": "agent_monologue_actuation_take_for_turn",
+        "parameter": "llm_options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_prefill_eligibility(\n    harness.llm,\n    one_shot_prefill,\n    direct_llm_opts,\n  )",
+    "owner": "agent_prefill_eligibility",
+    "evidence": "Consumer agent_prefill_eligibility.options in crates/harn-stdlib/src/stdlib/agent/prefill.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_prefill_eligibility",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_reset_tool_surface_narrowing(opts)",
+    "owner": "agent_reset_tool_surface_narrowing",
+    "evidence": "Consumer agent_reset_tool_surface_narrowing.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_reset_tool_surface_narrowing",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_reset_tool_surface_narrowing(turn_opts)",
+    "owner": "agent_reset_tool_surface_narrowing",
+    "evidence": "Consumer agent_reset_tool_surface_narrowing.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_reset_tool_surface_narrowing",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_skills_match(harness.agent, session, iteration_opts, iteration_index)",
+    "owner": "agent_skills_match",
+    "evidence": "Consumer agent_skills_match.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_skills_match",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_stance_apply(turn_opts)",
+    "owner": "agent_stance_apply",
+    "evidence": "Consumer agent_stance_apply.turn_opts in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_stance_apply",
+        "parameter": "turn_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_tool_call_paradigm(harness.llm, turn_llm_opts)",
+    "owner": "agent_tool_call_paradigm",
+    "evidence": "Consumer agent_tool_call_paradigm.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_call_paradigm",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "agent_tool_search_inject_if_needed(harness.llm, turn_opts)",
+    "owner": "agent_tool_search_inject_if_needed",
+    "evidence": "Consumer agent_tool_search_inject_if_needed.opts in crates/harn-stdlib/src/stdlib/agent/tool_search.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_search_inject_if_needed",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)",
+    "owner": "llm_arm_one_shot_prefill",
+    "evidence": "Consumer llm_arm_one_shot_prefill.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "llm_arm_one_shot_prefill",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "__mcp_admit_tools(opts, result)",
+    "owner": "__mcp_admit_tools",
+    "evidence": "Consumer __mcp_admit_tools.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__mcp_admit_tools",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
     "expression": "__mcp_admit_tools(out, result)",
     "owner": "__mcp_admit_tools",
-    "evidence": "Consumer __mcp_admit_tools.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __mcp_admit_tools.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__mcp_admit_tools",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "__mcp_bootstrap_and_admit(tools, session, opts, delta)",
+    "owner": "__mcp_bootstrap_and_admit",
+    "evidence": "Consumer __mcp_bootstrap_and_admit.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__mcp_bootstrap_and_admit",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
     "expression": "__mcp_bootstrap_and_admit(tools, session, opts, specs)",
     "owner": "__mcp_bootstrap_and_admit",
-    "evidence": "Consumer __mcp_bootstrap_and_admit.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __mcp_bootstrap_and_admit.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__mcp_bootstrap_and_admit",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "__mcp_delta_specs(opts, requested_specs ?? [])",
+    "owner": "__mcp_delta_specs",
+    "evidence": "Consumer __mcp_delta_specs.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__mcp_delta_specs",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
+    "expression": "__mcp_mounted_server_ids(opts)",
+    "owner": "__mcp_mounted_server_ids",
+    "evidence": "Consumer __mcp_mounted_server_ids.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__mcp_mounted_server_ids",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
     "expression": "__with_mcp_tool_ceiling(opts + {tools: reg}, tools_added)",
     "owner": "__with_mcp_tool_ceiling",
-    "evidence": "Consumer __with_mcp_tool_ceiling.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __with_mcp_tool_ceiling.opts in crates/harn-stdlib/src/stdlib/agent/mcp.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__with_mcp_tool_ceiling",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "__agent_monologue_actuation_route_suppression(\n    llm,\n    actuation_prefill,\n    llm_options,\n  )",
+    "owner": "__agent_monologue_actuation_route_suppression",
+    "evidence": "Consumer __agent_monologue_actuation_route_suppression.options in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_monologue_actuation_route_suppression",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "agent_has_tools(turn_options)",
+    "owner": "agent_has_tools",
+    "evidence": "Consumer agent_has_tools.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_has_tools",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "agent_monologue_actuation_take(\n    agent,\n    llm,\n    session_id,\n    iteration,\n    state,\n    config,\n    agent_has_tools(turn_options),\n    llm_options,\n    prefill_available,\n    paradigm,\n    agent_tool_resolve_workspace_write_name(\n      turn_options?.tools,\n      turn_options?.policy,\n      config.write_tool,\n    ),\n  )",
+    "owner": "agent_monologue_actuation_take",
+    "evidence": "Consumer agent_monologue_actuation_take.llm_options in crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_monologue_actuation_take",
+        "parameter": "llm_options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "agent_prefill_eligibility(llm, prefill, options)",
+    "owner": "agent_prefill_eligibility",
+    "evidence": "Consumer agent_prefill_eligibility.options in crates/harn-stdlib/src/stdlib/agent/prefill.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_prefill_eligibility",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/monologue_actuation.harn",
+    "expression": "agent_render_tool_call_prefix(llm, commit_tool_name, llm_options)",
+    "owner": "agent_render_tool_call_prefix",
+    "evidence": "Consumer agent_render_tool_call_prefix.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_render_tool_call_prefix",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__capability_gap_event(\n      nil,\n      opts,\n      fallback,\n      route.unresolved_reason ?? \"unknown_route\",\n    )",
     "owner": "__capability_gap_event",
-    "evidence": "Consumer __capability_gap_event.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __capability_gap_event.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__capability_gap_event",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__capability_gap_event(pair, opts, fallback, \"unknown_route\")",
     "owner": "__capability_gap_event",
-    "evidence": "Consumer __capability_gap_event.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __capability_gap_event.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__capability_gap_event",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__explicit_provider(opts)",
     "owner": "__explicit_provider",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __explicit_provider.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__explicit_provider",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__explicit_tool_format(opts)",
     "owner": "__explicit_tool_format",
-    "evidence": "Consumer __explicit_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __explicit_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__explicit_tool_format",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "__tool_format_route(llm, opts)",
     "owner": "__tool_format_route",
-    "evidence": "Consumer __tool_format_route.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __tool_format_route.opts in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_format_route",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_formats.harn",
     "expression": "agent_tool_format_resolution(llm, options)",
     "owner": "agent_tool_format_resolution",
-    "evidence": "Consumer agent_tool_format_resolution.options in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_tool_format_resolution.options in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_format_resolution",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
+    "expression": "__agent_route_identity(llm, opts)",
+    "owner": "__agent_route_identity",
+    "evidence": "Consumer __agent_route_identity.opts in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_route_identity",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "__clear_tool_format_resolution(opts)",
     "owner": "__clear_tool_format_resolution",
-    "evidence": "Consumer __clear_tool_format_resolution.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __clear_tool_format_resolution.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__clear_tool_format_resolution",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "__stack_dict(base)",
     "owner": "__stack_dict",
-    "evidence": "Consumer __stack_dict.value in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __stack_dict.value in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__stack_dict",
+        "parameter": "value"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "__validate_agent_loop_callback_options(opts)",
     "owner": "__validate_agent_loop_callback_options",
-    "evidence": "Consumer __validate_agent_loop_callback_options.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __validate_agent_loop_callback_options.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__validate_agent_loop_callback_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "__validate_agent_loop_completion_options(opts)",
     "owner": "__validate_agent_loop_completion_options",
-    "evidence": "Consumer __validate_agent_loop_completion_options.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __validate_agent_loop_completion_options.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__validate_agent_loop_completion_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "__validate_removed_agent_loop_options(opts)",
     "owner": "__validate_removed_agent_loop_options",
-    "evidence": "Consumer __validate_removed_agent_loop_options.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __validate_removed_agent_loop_options.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__validate_removed_agent_loop_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "__with_resolved_tool_format(opts, resolution)",
     "owner": "__with_resolved_tool_format",
-    "evidence": "Consumer __with_resolved_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __with_resolved_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/options_validation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__with_resolved_tool_format",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "agent_apply_default_retry(harness, opts)",
     "owner": "agent_apply_default_retry",
-    "evidence": "Consumer agent_apply_default_retry.options in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_apply_default_retry.options in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_apply_default_retry",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "agent_tool_format_resolution(llm, opts)",
     "owner": "agent_tool_format_resolution",
-    "evidence": "Consumer agent_tool_format_resolution.options in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_tool_format_resolution.options in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_format_resolution",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/options_public.harn",
     "expression": "type_of(raw)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   },
   {
     "scope": "AgentSpec",
@@ -263,469 +1323,987 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
     "expression": "agent_scratchpad_options(opts)",
     "owner": "agent_scratchpad_options",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_scratchpad_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__arbitrate_stalled_toolless_turn(harness, session, opts, payload, verdict, text, iteration)",
     "owner": "__arbitrate_stalled_toolless_turn",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __arbitrate_stalled_toolless_turn.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__arbitrate_stalled_toolless_turn",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__classify_missing_tool_call(harness, session, text, opts, iteration)",
     "owner": "__classify_missing_tool_call",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __classify_missing_tool_call.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__classify_missing_tool_call",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__completion_result(opts, payload, \"natural\", verdict)",
     "owner": "__completion_result",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __completion_result.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__completion_result",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__completion_result(opts, payload, \"required_tools_satisfied\", verdict)",
     "owner": "__completion_result",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __completion_result.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__completion_result",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__completion_result(opts, payload, \"sentinel\", verdict)",
     "owner": "__completion_result",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __completion_result.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__completion_result",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__default_done_sentinel(opts)",
     "owner": "__default_done_sentinel",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __default_done_sentinel.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__default_done_sentinel",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__interpret_verdict(verdict, opts)",
     "owner": "__interpret_verdict",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __interpret_verdict.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__interpret_verdict",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__maybe_inject_action_nudge(harness, session, opts, false, text, iteration)",
     "owner": "__maybe_inject_action_nudge",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __maybe_inject_action_nudge.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__maybe_inject_action_nudge",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__maybe_inject_completion_confirmation(\n    harness.agent,\n    session,\n    opts,\n    false,\n    text,\n    iteration,\n  )",
     "owner": "__maybe_inject_completion_confirmation",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __maybe_inject_completion_confirmation.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__maybe_inject_completion_confirmation",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__maybe_inject_completion_confirmation(\n    harness.agent,\n    session,\n    opts,\n    has_tool_calls,\n    text,\n    iteration,\n  )",
     "owner": "__maybe_inject_completion_confirmation",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __maybe_inject_completion_confirmation.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__maybe_inject_completion_confirmation",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__missing_tool_call_recovery_classifier(harness, opts)",
     "owner": "__missing_tool_call_recovery_classifier",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __missing_tool_call_recovery_classifier.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__missing_tool_call_recovery_classifier",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__missing_tool_call_recovery_config(opts)",
     "owner": "__missing_tool_call_recovery_config",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __missing_tool_call_recovery_config.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__missing_tool_call_recovery_config",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__native_completion_context(opts, has_tool_calls, text)",
     "owner": "__native_completion_context",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __native_completion_context.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__native_completion_context",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__native_tool_text_completion(opts, false, text)",
     "owner": "__native_tool_text_completion",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __native_tool_text_completion.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__native_tool_text_completion",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__next_tool_claim(verdict, opts)",
     "owner": "__next_tool_claim",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __next_tool_claim.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__next_tool_claim",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__post_turn_callback_verdict(opts, payload)",
     "owner": "__post_turn_callback_verdict",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __post_turn_callback_verdict.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__post_turn_callback_verdict",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__post_turn_stop_needs_verify(verdict, _opts, stop_reason)",
     "owner": "__post_turn_stop_needs_verify",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __post_turn_stop_needs_verify.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__post_turn_stop_needs_verify",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__post_turn_verdict_result(harness.agent, session, opts, verdict)",
     "owner": "__post_turn_verdict_result",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __post_turn_verdict_result._opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__post_turn_verdict_result",
+        "parameter": "_opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__required_tools_text_completion(opts, false, text)",
     "owner": "__required_tools_text_completion",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __required_tools_text_completion.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__required_tools_text_completion",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__stop_after_successful_tools(opts, dispatch)",
     "owner": "__stop_after_successful_tools",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __stop_after_successful_tools.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__stop_after_successful_tools",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__text_family_toolless_turn(opts, has_tool_calls, text)",
     "owner": "__text_family_toolless_turn",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __text_family_toolless_turn.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__text_family_toolless_turn",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__tool_surface_claim_authority(opts)",
     "owner": "__tool_surface_claim_authority",
-    "evidence": "Consumer __tool_surface_claim_authority.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __tool_surface_claim_authority.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_claim_authority",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__tool_surface_claimable_names(opts)",
     "owner": "__tool_surface_claimable_names",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_claimable_names.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_claimable_names",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__tool_surface_current_names(opts)",
     "owner": "__tool_surface_current_names",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_current_names.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_current_names",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__tool_surface_narrowing_post_turn(harness.agent, session, llm_result, dispatch_results, opts)",
     "owner": "__tool_surface_narrowing_post_turn",
-    "evidence": "Configuration passed at argument 5. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_narrowing_post_turn.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_narrowing_post_turn",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__turn_end_condition_config(opts)",
     "owner": "__turn_end_condition_config",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __turn_end_condition_config.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_condition_config",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__turn_end_judge_due(opts, payload, true)",
     "owner": "__turn_end_judge_due",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __turn_end_judge_due.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_judge_due",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "__zero_tool_completion_context(opts, has_tool_calls, text)",
     "owner": "__zero_tool_completion_context",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __zero_tool_completion_context.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__zero_tool_completion_context",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "agent_completion_adjudicator_declared(opts, stop_reason)",
     "owner": "agent_completion_adjudicator_declared",
-    "evidence": "Consumer agent_completion_adjudicator_declared.opts in crates/harn-stdlib/src/stdlib/agent/judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_completion_adjudicator_declared.opts in crates/harn-stdlib/src/stdlib/agent/judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_completion_adjudicator_declared",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "agent_render_tool_call_exemplar(harness.llm, to_string(tool_name), [], opts)",
     "owner": "agent_render_tool_call_exemplar",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_render_tool_call_exemplar.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_render_tool_call_exemplar",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "agent_required_tools_missing_from_session(opts, successful)",
     "owner": "agent_required_tools_missing_from_session",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_required_tools_missing_from_session.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_required_tools_missing_from_session",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "agent_tool_call_paradigm(harness.llm, opts)",
     "owner": "agent_tool_call_paradigm",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_tool_call_paradigm.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_call_paradigm",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
     "expression": "agent_merge_llm_options(base, nested)",
     "owner": "agent_merge_llm_options",
-    "evidence": "Consumer agent_merge_llm_options.base in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_merge_llm_options.base in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_merge_llm_options",
+        "parameter": "base"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+    "expression": "agent_route_capabilities(llm, resolved)",
+    "owner": "agent_route_capabilities",
+    "evidence": "Consumer agent_route_capabilities.opts in crates/harn-stdlib/src/stdlib/agent/options_public.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_route_capabilities",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+    "expression": "llm_equivalent_failover_enabled(resolved)",
+    "owner": "llm_equivalent_failover_enabled",
+    "evidence": "Consumer llm_equivalent_failover_enabled.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "llm_equivalent_failover_enabled",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
+    "expression": "llm_has_explicit_routing_owner(resolved)",
+    "owner": "llm_has_explicit_routing_owner",
+    "evidence": "Consumer llm_has_explicit_routing_owner.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "llm_has_explicit_routing_owner",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prefill.harn",
     "expression": "type_of(options)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_apply_projection(agent, session.session_id, raw_messages, opts)",
     "owner": "__agent_apply_projection",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_apply_projection.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_apply_projection",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "__agent_completion_prompt_bindings(paradigm, options)",
+    "owner": "__agent_completion_prompt_bindings",
+    "evidence": "Consumer __agent_completion_prompt_bindings.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_completion_prompt_bindings",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_completion_prompt_bindings(paradigm, opts)",
     "owner": "__agent_completion_prompt_bindings",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_completion_prompt_bindings.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_completion_prompt_bindings",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_context_profile_fragments(opts)",
     "owner": "__agent_context_profile_fragments",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_context_profile_fragments.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_context_profile_fragments",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_decorate_turn_message(message, opts, session, iteration, index, timestamp)",
     "owner": "__agent_decorate_turn_message",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_decorate_turn_message.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_decorate_turn_message",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_done_sentinel(opts)",
     "owner": "__agent_done_sentinel",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_done_sentinel.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_done_sentinel",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_has_system_prompt_options(opts)",
     "owner": "__agent_has_system_prompt_options",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_has_system_prompt_options.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_has_system_prompt_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_json_tool_contract_prompt(harness.fs, harness.llm, opts)",
     "owner": "__agent_json_tool_contract_prompt",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_json_tool_contract_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_json_tool_contract_prompt",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_loop_contract_prompt(harness.fs, harness.llm, opts)",
     "owner": "__agent_loop_contract_prompt",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_loop_contract_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_contract_prompt",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_mcp_initialize_advisory_prompt(opts)",
     "owner": "__agent_mcp_initialize_advisory_prompt",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_mcp_initialize_advisory_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_mcp_initialize_advisory_prompt",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_native_tool_contract_prompt(harness.fs, harness.llm, opts)",
     "owner": "__agent_native_tool_contract_prompt",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_native_tool_contract_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_native_tool_contract_prompt",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_primary_system_text(harness.agent, session, opts)",
     "owner": "__agent_primary_system_text",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_primary_system_text.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_primary_system_text",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_projection_options(opts)",
     "owner": "__agent_projection_options",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_projection_options.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_projection_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_projection_with_scratchpad_barrier(\n    agent,\n    session_id,\n    projection_opts,\n    opts,\n  )",
     "owner": "__agent_projection_with_scratchpad_barrier",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_projection_with_scratchpad_barrier.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_projection_with_scratchpad_barrier",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_text_tool_contract_prompt(harness.fs, harness.llm, opts)",
     "owner": "__agent_text_tool_contract_prompt",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_text_tool_contract_prompt.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_text_tool_contract_prompt",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_tool_format(harness.llm, opts)",
     "owner": "__agent_tool_format",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_tool_format",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_tool_format(llm, options)",
     "owner": "__agent_tool_format",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_tool_format",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "__agent_tool_format(llm, opts)",
     "owner": "__agent_tool_format",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_tool_format.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_tool_format",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "agent_has_tools(opts)",
     "owner": "agent_has_tools",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_has_tools.opts in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_has_tools",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "agent_scratchpad_options(opts)",
     "owner": "agent_scratchpad_options",
-    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_scratchpad_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "agent_scratchpad_recitation_fragment(harness.agent, session, opts)",
     "owner": "agent_scratchpad_recitation_fragment",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_scratchpad_recitation_fragment.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_scratchpad_recitation_fragment",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "agent_tool_call_paradigm(llm, options)",
     "owner": "agent_tool_call_paradigm",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_tool_call_paradigm.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_call_paradigm",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "agent_tool_call_paradigm(llm, opts)",
     "owner": "agent_tool_call_paradigm",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_tool_call_paradigm.options in crates/harn-stdlib/src/stdlib/agent/preflight.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_call_paradigm",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "agent_tool_format(llm, opts)",
     "owner": "agent_tool_format",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_tool_format.options in crates/harn-stdlib/src/stdlib/agent/options_formats.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_tool_format",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "loop_until_done_system_prompt(\n    fs,\n    completion\n      + {\n        loop_until_done: loop_until_done,\n        exit_when_verified: opts?.exit_when_verified ?? false,\n        has_tools: agent_has_tools(opts),\n        calls_label: paradigm.call_noun + \"s\",\n        sentinel_active: sentinel != nil,\n        // Compatibility for prompt overrides written before the stable\n        // `done_sentinel_form` binding. The decision still comes from the one\n        // completion projection above.\n        plain_text_done: completion.done_sentinel_form != \"done_block\",\n      },\n    opts,\n  )",
     "owner": "loop_until_done_system_prompt",
-    "evidence": "Configuration passed at argument 3. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer loop_until_done_system_prompt.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "loop_until_done_system_prompt",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_action_native\",\n        {done_sentinel: done_sentinel},\n        opts,\n      )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_action_text\",\n        {done_sentinel: done_sentinel},\n        opts,\n      )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_native\",\n        {done_sentinel: done_sentinel},\n        opts,\n      )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_task_ledger\",\n        {done_sentinel: done_sentinel},\n        opts,\n      )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_text_response_protocol\",\n        {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(llm, opts).body_hint},\n        opts,\n      )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n    fs,\n    \"agent.tool_contract_json\",\n    {\n      done_sentinel: __agent_done_sentinel(opts),\n      body_hint: agent_tool_call_paradigm(llm, opts).body_hint,\n      expanded_schemas: __agent_tool_listing_prompt(opts.tools),\n    },\n    opts,\n  )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n    fs,\n    \"agent.tool_contract_native\",\n    {done_sentinel: __agent_done_sentinel(opts)},\n    opts,\n  )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(\n    fs,\n    \"agent.tool_contract_text\",\n    {\n      mode: \"text\",\n      native_mode: false,\n      require_action: turn_policy?.require_action_or_yield ?? opts?.require_action_or_yield\n        ?? false,\n      done_sentinel: done_sentinel,\n      include_task_ledger_help: opts?.task_ledger != nil,\n      tool_examples: turn_policy?.tool_examples ?? opts?.tool_examples ?? \"\",\n      shared_types: opts?.shared_types ?? \"\",\n      expanded_schemas: listing.expanded,\n      compact_schemas: listing.compact,\n      native_contract: render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_native\",\n        {done_sentinel: done_sentinel},\n        opts,\n      ),\n      action_native_contract: render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_action_native\",\n        {done_sentinel: done_sentinel},\n        opts,\n      ),\n      task_ledger_contract: render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_task_ledger\",\n        {done_sentinel: done_sentinel},\n        opts,\n      ),\n      text_response_protocol: render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_text_response_protocol\",\n        {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(llm, opts).body_hint},\n        opts,\n      ),\n      action_text_contract: render_agent_prompt_id(\n        fs,\n        \"agent.tool_contract_action_text\",\n        {done_sentinel: done_sentinel},\n        opts,\n      ),\n    },\n    opts,\n  )",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
@@ -739,35 +2317,98 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
     "expression": "__agent_options_are_direct_prompt_catalog(options)",
     "owner": "__agent_options_are_direct_prompt_catalog",
-    "evidence": "Consumer __agent_options_are_direct_prompt_catalog.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_options_are_direct_prompt_catalog.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_options_are_direct_prompt_catalog",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
     "expression": "__agent_prompt_overrides(options)",
     "owner": "__agent_prompt_overrides",
-    "evidence": "Consumer __agent_prompt_overrides.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_prompt_overrides.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_prompt_overrides",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
     "expression": "__agent_validate_prompt_overrides(options)",
     "owner": "__agent_validate_prompt_overrides",
-    "evidence": "Consumer __agent_validate_prompt_overrides.overrides in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_validate_prompt_overrides.overrides in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_validate_prompt_overrides",
+        "parameter": "overrides"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
     "expression": "agent_prompt_catalog(options)",
     "owner": "agent_prompt_catalog",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_prompt_catalog.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_prompt_catalog",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+    "expression": "render_agent_prompt_id(fs, \"agent.daemon_timer_feedback\", {}, options)",
+    "owner": "render_agent_prompt_id",
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
+    "expression": "render_agent_prompt_id(fs, \"agent.daemon_watch_feedback\", bindings, options)",
+    "owner": "render_agent_prompt_id",
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/prompts.harn",
     "expression": "render_agent_prompt_id(fs, \"agent.loop_contract\", bindings, options)",
     "owner": "render_agent_prompt_id",
-    "evidence": "Configuration passed at argument 4. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "render_agent_prompt_id",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
@@ -788,63 +2429,126 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
     "expression": "__agent_required_tools_emit_friction(agent, obs, result, opts, missing)",
     "owner": "__agent_required_tools_emit_friction",
-    "evidence": "Consumer __agent_required_tools_emit_friction.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_required_tools_emit_friction.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_required_tools_emit_friction",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
     "expression": "__agent_required_tools_friction_event(result, opts, missing)",
     "owner": "__agent_required_tools_friction_event",
-    "evidence": "Consumer __agent_required_tools_friction_event.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_required_tools_friction_event.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_required_tools_friction_event",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
     "expression": "__agent_required_tools_from_options(opts)",
     "owner": "__agent_required_tools_from_options",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_required_tools_from_options.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_required_tools_from_options",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/required_tools.harn",
     "expression": "agent_required_tools_missing_from_result(result, opts)",
     "owner": "agent_required_tools_missing_from_result",
-    "evidence": "Consumer agent_required_tools_missing_from_result.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_required_tools_missing_from_result.opts in crates/harn-stdlib/src/stdlib/agent/required_tools.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_required_tools_missing_from_result",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
     "expression": "__agent_loop_retry_config(opts)",
     "owner": "__agent_loop_retry_config",
-    "evidence": "Consumer __agent_loop_retry_config.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_loop_retry_config.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_retry_config",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
     "expression": "__retry_has_key(opts, \"llm_caller\")",
     "owner": "__retry_has_key",
-    "evidence": "Consumer __retry_has_key.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __retry_has_key.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__retry_has_key",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
     "expression": "__retry_has_key(opts, \"llm_retry\")",
     "owner": "__retry_has_key",
-    "evidence": "Consumer __retry_has_key.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __retry_has_key.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__retry_has_key",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
     "expression": "__retry_has_key(opts, \"retry\")",
     "owner": "__retry_has_key",
-    "evidence": "Consumer __retry_has_key.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __retry_has_key.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__retry_has_key",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/retry.harn",
     "expression": "__validate_agent_loop_retry(opts)",
     "owner": "__validate_agent_loop_retry",
-    "evidence": "Consumer __validate_agent_loop_retry.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __validate_agent_loop_retry.opts in crates/harn-stdlib/src/stdlib/agent/retry.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__validate_agent_loop_retry",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
@@ -858,35 +2562,420 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/scratchpad.harn",
     "expression": "agent_scratchpad_options(opts)",
     "owner": "agent_scratchpad_options",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer agent_scratchpad_options.opts in crates/harn-stdlib/src/stdlib/agent/scratchpad.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_scratchpad_options",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__active_from_context_profile(registry, tool_opts)",
+    "owner": "__active_from_context_profile",
+    "evidence": "Consumer __active_from_context_profile.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__active_from_context_profile",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__context_profile(opts)",
+    "owner": "__context_profile",
+    "evidence": "Consumer __context_profile.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__context_profile",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__context_profile_skill_bindings(opts)",
+    "owner": "__context_profile_skill_bindings",
+    "evidence": "Consumer __context_profile_skill_bindings.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__context_profile_skill_bindings",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__fresh_skill_projection_inputs(agent, session, opts, registry)",
+    "owner": "__fresh_skill_projection_inputs",
+    "evidence": "Consumer __fresh_skill_projection_inputs.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__fresh_skill_projection_inputs",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__host_skill_score_candidates(context, registry, opts)",
+    "owner": "__host_skill_score_candidates",
+    "evidence": "Consumer __host_skill_score_candidates.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__host_skill_score_candidates",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__load_skill_for_session(agent, session, opts, args)",
+    "owner": "__load_skill_for_session",
+    "evidence": "Consumer __load_skill_for_session.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__load_skill_for_session",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__match_config(opts)",
+    "owner": "__match_config",
+    "evidence": "Consumer __match_config.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__match_config",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__match_sticky(opts)",
+    "owner": "__match_sticky",
+    "evidence": "Consumer __match_sticky.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__match_sticky",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__match_strategy(opts)",
+    "owner": "__match_strategy",
+    "evidence": "Consumer __match_strategy.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__match_strategy",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__match_strategy_manual(opts)",
+    "owner": "__match_strategy_manual",
+    "evidence": "Consumer __match_strategy_manual.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__match_strategy_manual",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__match_top_n(opts)",
+    "owner": "__match_top_n",
+    "evidence": "Consumer __match_top_n.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__match_top_n",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__opts_with_active_skills(inputs.tool_opts, registry, inputs.profile_active)",
+    "owner": "__opts_with_active_skills",
+    "evidence": "Consumer __opts_with_active_skills.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__opts_with_active_skills",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__opts_with_active_skills(tool_opts, registry, active, activated_this_turn)",
+    "owner": "__opts_with_active_skills",
+    "evidence": "Consumer __opts_with_active_skills.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__opts_with_active_skills",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__opts_with_active_skills(tool_opts, registry, prev)",
+    "owner": "__opts_with_active_skills",
+    "evidence": "Consumer __opts_with_active_skills.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__opts_with_active_skills",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__record_matched(agent, session, tool_opts, iteration, scored)",
+    "owner": "__record_matched",
+    "evidence": "Consumer __record_matched.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__record_matched",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__score_candidates(agent, session, registry, tool_opts, iteration)",
+    "owner": "__score_candidates",
+    "evidence": "Consumer __score_candidates.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__score_candidates",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__served_tool_groups(opts)",
+    "owner": "__served_tool_groups",
+    "evidence": "Consumer __served_tool_groups.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__served_tool_groups",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__skill_catalog_always(opts)",
+    "owner": "__skill_catalog_always",
+    "evidence": "Consumer __skill_catalog_always.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__skill_catalog_always",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__skill_catalog_budget(opts)",
+    "owner": "__skill_catalog_budget",
+    "evidence": "Consumer __skill_catalog_budget.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__skill_catalog_budget",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__skill_catalog_limit(opts)",
+    "owner": "__skill_catalog_limit",
+    "evidence": "Consumer __skill_catalog_limit.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__skill_catalog_limit",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__skill_catalog_prompt(registry, opts, active)",
+    "owner": "__skill_catalog_prompt",
+    "evidence": "Consumer __skill_catalog_prompt.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__skill_catalog_prompt",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__skill_scoped_tools(opts, active)",
+    "owner": "__skill_scoped_tools",
+    "evidence": "Consumer __skill_scoped_tools.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__skill_scoped_tools",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__skills_registry(opts)",
+    "owner": "__skills_registry",
+    "evidence": "Consumer __skills_registry.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__skills_registry",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__top_active_from_scores(registry, scored, tool_opts)",
+    "owner": "__top_active_from_scores",
+    "evidence": "Consumer __top_active_from_scores.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__top_active_from_scores",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__with_load_skill_tool(agent, session, opts)",
+    "owner": "__with_load_skill_tool",
+    "evidence": "Consumer __with_load_skill_tool.opts in crates/harn-stdlib/src/stdlib/agent/skills.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__with_load_skill_tool",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/stall_checkpoint.harn",
     "expression": "__judge_tool_descriptor(opts, __tool_result_name(result))",
     "owner": "__judge_tool_descriptor",
-    "evidence": "Consumer __judge_tool_descriptor.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __judge_tool_descriptor.opts in crates/harn-stdlib/src/stdlib/agent/judge_evidence.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__judge_tool_descriptor",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
     "expression": "__stance_config(opts)",
     "owner": "__stance_config",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __stance_config.opts in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__stance_config",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
     "expression": "__stance_policy_patch(opts, escape_tool)",
     "owner": "__stance_policy_patch",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __stance_policy_patch.opts in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__stance_policy_patch",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/stance.harn",
     "expression": "__stance_register_escape_tool(harness, opts, cfg, session.session_id, grant_flag)",
     "owner": "__stance_register_escape_tool",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __stance_register_escape_tool.opts in crates/harn-stdlib/src/stdlib/agent/stance.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__stance_register_escape_tool",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
@@ -900,98 +2989,266 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/state.harn",
     "expression": "agent_reminder_providers_fire(\n    agent,\n    session_id,\n    \"on_budget_threshold\",\n    {\n      session: {id: session_id},\n      iteration: iteration,\n      input_tokens: input_tokens,\n      output_tokens: output_tokens,\n      tokens_used: totals?.tokens_used ?? 0,\n      cost_usd: totals?.cost_usd ?? 0.0,\n      provider: llm_result?.provider ?? opts?.provider ?? \"\",\n      model: llm_result?.model ?? opts?.model ?? \"\",\n    },\n    opts ?? {},\n  )",
     "owner": "agent_reminder_providers_fire",
-    "evidence": "Consumer agent_reminder_providers_fire.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer agent_reminder_providers_fire.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_reminder_providers_fire",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
     "expression": "__invoke(harness, judge_cfg, opts, payload)",
     "owner": "__invoke",
-    "evidence": "Consumer __invoke.opts in crates/harn-stdlib/src/stdlib/agent/step_judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __invoke.opts in crates/harn-stdlib/src/stdlib/agent/step_judge.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__invoke",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "__tool_search_build_tools(opts, state)",
+    "owner": "__tool_search_build_tools",
+    "evidence": "Consumer __tool_search_build_tools.opts in crates/harn-stdlib/src/stdlib/agent/tool_search.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_search_build_tools",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "__tool_search_client_requested(llm, opts)",
+    "owner": "__tool_search_client_requested",
+    "evidence": "Consumer __tool_search_client_requested.opts in crates/harn-stdlib/src/stdlib/agent/tool_search.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_search_client_requested",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "__tool_search_initial_state(opts)",
+    "owner": "__tool_search_initial_state",
+    "evidence": "Consumer __tool_search_initial_state.opts in crates/harn-stdlib/src/stdlib/agent/tool_search.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_search_initial_state",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/tool_search.harn",
+    "expression": "__tool_search_provider_has_native(llm, opts, cfg)",
+    "owner": "__tool_search_provider_has_native",
+    "evidence": "Consumer __tool_search_provider_has_native.opts in crates/harn-stdlib/src/stdlib/agent/tool_search.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_search_provider_has_native",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_claim_authority(opts)",
     "owner": "__tool_surface_claim_authority",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_claim_authority.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_claim_authority",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_current_entries(opts)",
     "owner": "__tool_surface_current_entries",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_current_entries.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_current_entries",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_current_names(opts)",
     "owner": "__tool_surface_current_names",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_current_names.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__tool_surface_current_names",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__agent_turn_end_judge_stall_cadence(opts)",
     "owner": "__agent_turn_end_judge_stall_cadence",
-    "evidence": "Consumer __agent_turn_end_judge_stall_cadence.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_turn_end_judge_stall_cadence.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_turn_end_judge_stall_cadence",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__turn_end_condition_config(opts)",
     "owner": "__turn_end_condition_config",
-    "evidence": "Consumer __turn_end_condition_config.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __turn_end_condition_config.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_condition_config",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__turn_end_judge_cadence(opts)",
     "owner": "__turn_end_judge_cadence",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __turn_end_judge_cadence.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_judge_cadence",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__turn_end_judge_loop_state(opts, completion_proposed)",
     "owner": "__turn_end_judge_loop_state",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __turn_end_judge_loop_state.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_judge_loop_state",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__turn_end_judge_under_cap(opts, cadence)",
     "owner": "__turn_end_judge_under_cap",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __turn_end_judge_under_cap.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_judge_under_cap",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
     "expression": "__turn_end_judge_when_due(opts, cadence, state)",
     "owner": "__turn_end_judge_when_due",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __turn_end_judge_when_due.opts in crates/harn-stdlib/src/stdlib/agent/turn_end.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__turn_end_judge_when_due",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
     "expression": "__agent_lifecycle_await_enabled(opts)",
     "owner": "__agent_lifecycle_await_enabled",
-    "evidence": "Consumer __agent_lifecycle_await_enabled.opts in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_lifecycle_await_enabled.opts in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_lifecycle_await_enabled",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
     "expression": "__agent_lifecycle_has_subagent_capability(base, opts)",
     "owner": "__agent_lifecycle_has_subagent_capability",
-    "evidence": "Consumer __agent_lifecycle_has_subagent_capability.opts in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __agent_lifecycle_has_subagent_capability.opts in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_lifecycle_has_subagent_capability",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
     "expression": "__llm_one_shot_prefill_options(options)",
     "owner": "__llm_one_shot_prefill_options",
-    "evidence": "Consumer __llm_one_shot_prefill_options.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner."
+    "evidence": "Consumer __llm_one_shot_prefill_options.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__llm_one_shot_prefill_options",
+        "parameter": "options"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "llm_has_explicit_routing_owner(base)",
+    "owner": "llm_has_explicit_routing_owner",
+    "evidence": "Consumer llm_has_explicit_routing_owner.options in crates/harn-stdlib/src/stdlib/llm/options.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "llm_has_explicit_routing_owner",
+        "parameter": "options"
+      }
+    ]
   },
   {
     "scope": "AgentSpec",

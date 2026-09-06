@@ -161,8 +161,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Static declaration/read only; downstream headless binding not observed.",
+    "default": "absent; session-store environment root, otherwise runtime state root",
+    "evidence": "stdlib.session_store.canonical_store_state_dir resolves explicit root, HARN_SESSION_STORE_ROOT, then runtime_paths.state_root(runtime_root_base()). Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -220,26 +220,38 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "empty configuration: catalog strategy, top_n 1, sticky true",
+    "evidence": "skills.__match_config defaults to an empty object; the strategy/top_n/sticky consumers supply these fallbacks. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.skill_match",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 294,
+        "reader": "__match_config"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "absent; no fallback skill registry",
+    "evidence": "skills.__skills_registry reads skill_registry before skills; __skills_entries returns an empty list for absent registry. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.skills",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 9,
+        "reader": "__skills_registry"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -318,14 +330,25 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "unknown: owning normalizer or provider/host fallback requires review",
-    "evidence": "Typed configuration declaration; no resolved runtime reader in current bounded pass. Dynamic forwarding remains possible.",
+    "default": "empty list",
+    "evidence": "skills skill-scoring input construction defaults working_files to an empty list. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
     "name": "AgentSpec.working_files",
     "reachability": "unknown",
-    "readers": [],
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 576,
+        "reader": "__score_candidates"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+        "line": 618,
+        "reader": "__record_matched"
+      }
+    ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   }

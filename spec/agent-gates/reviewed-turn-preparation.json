@@ -1,0 +1,126 @@
+[
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "__compaction_strategy_label(opts.compaction)",
+    "owner": "__compaction_strategy_label",
+    "evidence": "The compaction value is consumed under CompactionOptions by its registered strategy normalizer.",
+    "consumers": [
+      {
+        "scope": "CompactionOptions",
+        "function": "__compaction_strategy_label",
+        "parameter": "value"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "keys(options ?? {})",
+    "owner": "keys",
+    "evidence": "Dictionary key iteration copies names without selecting additional configuration keys; key-selection domains are audited separately."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/llm_dispatch.harn",
+    "expression": "{\n    message: prompt,\n    options: llm_opts\n      + {output: \"text\", _structured_output_prompt_fallback: true},\n  }",
+    "owner": "__dispatch_prompt_mode_request",
+    "evidence": "The request returns text-mode options to dispatch; the independently registered llm_opts origins audit dispatch consumers.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__dispatch_request_has_payload",
+        "parameter": "llm_opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "omit(opts, [\"output\"])",
+    "owner": "omit",
+    "evidence": "Dictionary projection removes the literal output field; it does not read an independent option value."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "render(harness, effective)",
+    "owner": "render",
+    "evidence": "The two local render callbacks either forward effective options into the registered prompt builders or ignore that parameter. Callback invocation reachability is unmeasured.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_build_turn_system_fragments",
+        "parameter": "opts"
+      },
+      {
+        "scope": "AgentSpec",
+        "function": "agent_build_turn_messages",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "{\n        action: \"break\",\n        opts: opts,\n        call_budget: call_budget,\n        stall_state: stall_state,\n        command_hold_cap_tokens: command_hold_cap_tokens,\n        iteration: iteration + 1,\n        final_status: \"input_guardrail\",\n        stop_reason: \"input_guardrail_tripwire\",\n      }",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Turn setup returns resolved options beside loop state; its registered normalizer exposes opts, turn_opts, turn_llm_opts and llm_opts on the receiving runner."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "{\n        action: \"break\",\n        opts: opts,\n        call_budget: call_budget,\n        stall_state: stall_state,\n        command_hold_cap_tokens: command_hold_cap_tokens,\n        iteration: iteration + 1,\n        final_status: \"scope_alert\",\n        stop_reason: \"out_of_scope\",\n      }",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Turn setup returns resolved options beside loop state; its registered normalizer exposes opts, turn_opts, turn_llm_opts and llm_opts on the receiving runner."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "{\n      action: \"proceed\",\n      opts: opts,\n      iteration: iteration,\n      call_budget: call_budget,\n      stall_state: stall_state,\n      command_hold_cap_tokens: command_hold_cap_tokens,\n      iteration_index: iteration_index,\n      monologue_actuation_prior_read_streak: monologue_actuation_prior_read_streak,\n      turn_opts: turn_opts,\n      turn_llm_opts: turn_llm_opts,\n      turn_prompt: turn_prompt,\n      llm_opts: llm_opts,\n    }",
+    "owner": "__agent_loop_turn_setup",
+    "evidence": "Turn setup returns resolved options beside loop state; its registered normalizer exposes opts, turn_opts, turn_llm_opts and llm_opts on the receiving runner."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "{tool_opts: tool_opts, profile_active: __active_from_context_profile(registry, tool_opts)}",
+    "owner": "__fresh_skill_projection_inputs",
+    "evidence": "The skill projection returns tool_opts beside active skill data; its registered normalizer exposes the tool_opts view."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "base[key]",
+    "owner": "llm_has_explicit_routing_owner",
+    "evidence": "The key iterates __LLM_EXPLICIT_ROUTING_KEYS, whose complete nonempty literal domain is audited by explicit-routing-key-domain."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "keys(base)",
+    "owner": "keys",
+    "evidence": "Dictionary key iteration copies names without selecting additional configuration keys; key-selection domains are audited separately."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/llm/options.harn",
+    "expression": "pick_keys(base, allowed, {drop_nil: true})",
+    "owner": "pick_keys",
+    "evidence": "The allowed names come from the authoritative LLM option registry, audited by model-registry-key-domain; underscore plumbing is copied unchanged."
+  },
+  {
+    "scope": "CompactionOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
+  },
+  {
+    "scope": "SkillMatch",
+    "file": "crates/harn-stdlib/src/stdlib/agent/skills.harn",
+    "expression": "__host_skill_score(context, matchable, __match_config(opts))",
+    "owner": "__host_skill_score",
+    "evidence": "Native skill_score reads strategy under the required native-skill-match-options scope; the host scoring result remains runtime data."
+  }
+]

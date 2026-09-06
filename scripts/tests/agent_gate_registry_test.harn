@@ -1,3 +1,4 @@
+import { AgentModelSpec } from "std/agent/options_types"
 import {
   AgentGateEntry,
   AgentGateRegistry,
@@ -5,6 +6,29 @@ import {
   agent_gate_findings,
   agent_gate_reads,
 } from "std/dev/agent_gates"
+
+type GateEntries = list<AgentGateEntry>
+
+@test
+pipeline test_model_setting_inventory_matches_compiled_top_level_shape(
+  harness: Harness,
+  task: unknown,
+) {
+  const root = path_join(harness.fs.source_dir(), "../../spec/agent-gates")
+  let actual: list<string> = []
+  for file in ["agent-model-spec.json", "agent-model-routing.json"] {
+    const entries = schema_expect(
+      json_parse(harness.fs.read_text(path_join(root, file))),
+      schema_of(GateEntries),
+    )
+    actual = actual + entries.map(fn(entry) { return entry.name })
+  }
+  const declared = schema_of(AgentModelSpec).properties.keys().map(
+    fn(name) { return "AgentSpec." + name },
+  )
+  assert(len(declared) > 0)
+  assert_eq(actual.sorted(), declared.sorted())
+}
 
 fn entry() -> AgentGateEntry {
   return {
@@ -254,6 +278,74 @@ pipeline test_binding_source_files_are_required_and_audited(harness: Harness, ta
 }
 
 @test
+pipeline test_classified_handoff_cannot_outlive_its_consumer_origin(harness: Harness) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-consumer-origin")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const source = path_join(dir, "source.harn")
+  const entries = path_join(dir, "entries.json")
+  const boundaries = path_join(dir, "boundaries.json")
+  const manifest = path_join(dir, "registry.json")
+  const caller = {function: "caller", name: "options"}
+  const consumer = {function: "helper", name: "settings"}
+  let binding = {
+    id: "options",
+    prefix: "options.",
+    types: [],
+    parameters: [caller, consumer],
+    normalizers: [],
+  }
+  let config = registry(source)
+  config.scopes = []
+  config.binding_scopes = [{glob: source, config: binding}]
+  config.entry_files = [entries]
+  config.forwarder_files = [boundaries]
+  config.projections = [
+    {layer: "runner", file: path_join(dir, "runner.md")},
+    {layer: "stop decision", file: path_join(dir, "stop.md")},
+    {layer: "stall handler", file: path_join(dir, "stall.md")},
+  ]
+  harness.fs.write_text(
+    source,
+    "fn caller(options: dict) { const enabled = options.enabled; return helper(options) }\n"
+      + "fn helper(settings: dict) { return settings.threshold }\n",
+  )
+  harness.fs.write_text(entries, json_stringify([entry(), entry() + {name: "options.threshold"}]))
+  harness.fs.write_text(
+    boundaries,
+    json_stringify(
+      [
+        {
+          scope: "options",
+          file: source,
+          expression: "helper(options)",
+          owner: "helper",
+          evidence: "Local helper consumes the configuration.",
+          consumers: [{scope: "options", function: "helper", parameter: "settings"}],
+        },
+      ],
+    ),
+  )
+  harness.fs.write_text(manifest, json_stringify(config))
+  const capabilities = {ast: harness.ast, fs: harness.fs, process: harness.process}
+  const baseline = agent_gate_audit(capabilities, manifest, true)
+  assert_eq(baseline.pending, 0)
+  assert_eq(baseline.reads, 3)
+  assert_eq(baseline.forwarded, 1)
+  binding.parameters = [caller]
+  config.binding_scopes = [{glob: source, config: binding}]
+  harness.fs.write_text(manifest, json_stringify(config))
+  let failure = ""
+  try {
+    agent_gate_audit(capabilities, manifest)
+  } catch (error) {
+    failure = to_string(error)
+  }
+  assert(contains(failure, "missing classified consumer origin options helper(settings)"))
+}
+
+@test
 pipeline test_stale_parameter_mapping_cannot_hide_configuration_reads(
   harness: Harness,
   task: unknown,
@@ -299,6 +391,14 @@ pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unkno
     schema_of(AgentGateRegistry),
   )
   const fixtures = {
+    "native-budget-envelope": "fn example() { let value = fields.get(\"__TEST_KEY__\"); }",
+    "native-equivalent-failover": "fn example() { let value = dict.get(\"__TEST_KEY__\"); }",
+    "native-system-replacement": "fn example() { let value = spec.get(\"__TEST_KEY__\"); }",
+    "native-model-step-identity": "fn example() { let value = non_nil(\"__TEST_KEY__\"); }",
+    "native-model-step-overrides":
+      "fn example() { let value = parse_ladder_step_overrides(dict.get(\"__TEST_KEY__\"), idx); }",
+    "explicit-routing-key-domain": "const __LLM_EXPLICIT_ROUTING_KEYS = [\"__TEST_KEY__\"]",
+    "native-skill-match-options": "fn example() { let value = options.get(\"__TEST_KEY__\"); }",
     "workflow-loop-key-domain": "fn example() { const loop_option_keys = [\"__TEST_KEY__\"] }",
     "model-registry-key-domain":
       "const LLM_CALL_OPTION_FIELDS: &[Field] = &[ShapeFieldDescriptor::optional(\"__TEST_KEY__\", TY_STRING)];",
@@ -348,9 +448,9 @@ pipeline test_repository_selectors_reject_new_keys(harness: Harness, task: unkno
     )
     assert_eq(len(baseline), 1)
     assert_eq(agent_gate_findings([allowed], baseline, []).failures, [])
+    // This is an intentionally absent fixture name, not a production env read.
     harness.fs.write_text(
       path,
-      // This is an intentionally absent fixture name, not a production env read.
       replace(fixtures[declared.id], "__TEST_KEY__", "HARN" + "_UNREGISTERED_CENSUS"),
     )
     const changed = agent_gate_reads(

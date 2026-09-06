@@ -4,28 +4,56 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "__compaction_instruction_mode(policy)",
     "owner": "__compaction_instruction_mode",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __compaction_instruction_mode.policy in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for CompactionPolicy; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CompactionPolicy",
+        "function": "__compaction_instruction_mode",
+        "parameter": "policy"
+      }
+    ]
   },
   {
     "scope": "CompactionPolicy",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "__compaction_policy_event_fields(policy)",
     "owner": "__compaction_policy_event_fields",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __compaction_policy_event_fields.policy in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for CompactionPolicy; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CompactionPolicy",
+        "function": "__compaction_policy_event_fields",
+        "parameter": "policy"
+      }
+    ]
   },
   {
     "scope": "CompactionPolicy",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "__compaction_policy_merge_fields(policy, opts)",
     "owner": "__compaction_policy_merge_fields",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __compaction_policy_merge_fields.policy in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for CompactionPolicy; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CompactionPolicy",
+        "function": "__compaction_policy_merge_fields",
+        "parameter": "policy"
+      }
+    ]
   },
   {
     "scope": "CompactionPolicy",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "__has_compaction_policy(policy)",
     "owner": "__has_compaction_policy",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __has_compaction_policy.policy in crates/harn-stdlib/src/stdlib/agent/autocompact.harn is an independently required binding origin for CompactionPolicy; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "CompactionPolicy",
+        "function": "__has_compaction_policy",
+        "parameter": "policy"
+      }
+    ]
   },
   {
     "scope": "CompactionPolicy",
@@ -39,13 +67,13 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "type_of(fields)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   },
   {
     "scope": "CompactionPolicy",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "type_of(policy)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   }
 ]

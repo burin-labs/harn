@@ -4,13 +4,27 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
     "expression": "__agent_lifecycle_await_enabled(opts)",
     "owner": "__agent_lifecycle_await_enabled",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_lifecycle_await_enabled.opts in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentLifecycleToolsOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentLifecycleToolsOptions",
+        "function": "__agent_lifecycle_await_enabled",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "AgentLifecycleToolsOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/workers.harn",
     "expression": "__agent_lifecycle_has_subagent_capability(base, opts)",
     "owner": "__agent_lifecycle_has_subagent_capability",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __agent_lifecycle_has_subagent_capability.opts in crates/harn-stdlib/src/stdlib/agent/workers.harn is an independently required binding origin for AgentLifecycleToolsOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "AgentLifecycleToolsOptions",
+        "function": "__agent_lifecycle_has_subagent_capability",
+        "parameter": "opts"
+      }
+    ]
   }
 ]

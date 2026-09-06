@@ -1,52 +1,10 @@
 [
   {
-    "scope": "CallerTransport",
-    "file": "crates/harn-stdlib/src/stdlib/agent/caller_transport.harn",
-    "expression": "type_of(value)",
-    "owner": "type_of",
-    "evidence": "Language type inspection cannot read configuration fields."
-  },
-  {
-    "scope": "TokenRunaway",
-    "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
-    "expression": "token_runaway_decision(config, obs)",
-    "owner": "token_runaway_decision",
-    "evidence": "The first parameter has an explicit TokenRunaway origin; its thresholds are audited independently."
-  },
-  {
-    "scope": "JudgeCadence",
-    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
-    "expression": "type_of(value)",
-    "owner": "type_of",
-    "evidence": "Language type inspection cannot read configuration fields."
-  },
-  {
-    "scope": "JudgeCadence",
-    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-    "expression": "__turn_end_judge_when_due(opts, cadence, state)",
-    "owner": "__turn_end_judge_when_due",
-    "evidence": "The cadence argument has a declared JudgeCadence origin; its when read is audited independently."
-  },
-  {
-    "scope": "JudgeCadence",
-    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-    "expression": "__turn_end_judge_every_due(cadence, turn_number)",
-    "owner": "__turn_end_judge_every_due",
-    "evidence": "The cadence argument has a declared JudgeCadence origin; its every read is audited independently."
-  },
-  {
-    "scope": "JudgeCadence",
-    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-    "expression": "__turn_end_judge_under_cap(opts, cadence)",
-    "owner": "__turn_end_judge_under_cap",
-    "evidence": "The cadence argument has a declared JudgeCadence origin; its max_invocations read is audited independently."
-  },
-  {
-    "scope": "JudgeCadence",
-    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
-    "expression": "__turn_end_judge_past_warmup(cadence, turn_number)",
-    "owner": "__turn_end_judge_past_warmup",
-    "evidence": "The cadence argument has a declared JudgeCadence origin; its min_iterations_before_first read is audited independently."
+    "scope": "AgentBudget",
+    "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
+    "expression": "agent.budget_pre_call_blocked(session.session_id, envelope)",
+    "owner": "agent.budget_pre_call_blocked",
+    "evidence": "Native turn_projection currently returns false without reading the envelope. AgentBudget.total_budget_usd records the inert pre-call boundary; the post-call reader is independently audited."
   },
   {
     "scope": "AgentLoopRetryOptions",
@@ -54,13 +12,6 @@
     "expression": "__opts_dict(opts)",
     "owner": "__opts_dict",
     "evidence": "The local helper returns dictionary input unchanged and otherwise returns an empty dictionary; its argument-preserving origin is declared and with_retry reads the result independently."
-  },
-  {
-    "scope": "AgentBudget",
-    "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
-    "expression": "agent.budget_pre_call_blocked(session.session_id, envelope)",
-    "owner": "agent.budget_pre_call_blocked",
-    "evidence": "Native turn_projection currently returns false without reading the envelope. AgentBudget.total_budget_usd records the inert pre-call boundary; the post-call reader is independently audited."
   },
   {
     "scope": "AgentSpec",
@@ -301,6 +252,13 @@
     "evidence": "The observation returns config beside measured state and warning; the observation normalizer declares the config view."
   },
   {
+    "scope": "CallerTransport",
+    "file": "crates/harn-stdlib/src/stdlib/agent/caller_transport.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Language type inspection cannot read configuration fields."
+  },
+  {
     "scope": "CompactionPolicy",
     "file": "crates/harn-stdlib/src/stdlib/agent/autocompact.harn",
     "expression": "compact_opts = compact_opts + {policy: policy}",
@@ -326,28 +284,68 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "agent_mcp_bootstrap_if_needed(harness.tools, session, opts)",
     "owner": "agent_mcp_bootstrap_if_needed",
-    "evidence": "Consumer agent_mcp_bootstrap_if_needed has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer agent_mcp_bootstrap_if_needed has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "agent_mcp_bootstrap_if_needed",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
   },
   {
     "scope": "IterationBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
     "expression": "__mcp_admit_tools(out, result)",
     "owner": "__mcp_admit_tools",
-    "evidence": "Consumer __mcp_admit_tools has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __mcp_admit_tools has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "__mcp_admit_tools",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
   },
   {
     "scope": "IterationBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
     "expression": "__mcp_bootstrap_and_admit(tools, session, opts, specs)",
     "owner": "__mcp_bootstrap_and_admit",
-    "evidence": "Consumer __mcp_bootstrap_and_admit has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __mcp_bootstrap_and_admit has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "__mcp_bootstrap_and_admit",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
   },
   {
     "scope": "IterationBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/mcp.harn",
     "expression": "__with_mcp_tool_ceiling(opts + {tools: reg}, tools_added)",
     "owner": "__with_mcp_tool_ceiling",
-    "evidence": "Consumer __with_mcp_tool_ceiling has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __with_mcp_tool_ceiling has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "IterationBudget",
+        "function": "__with_mcp_tool_ceiling",
+        "parameter": "opts",
+        "path": [
+          "iteration_budget"
+        ]
+      }
+    ]
   },
   {
     "scope": "IterationBudget",
@@ -369,6 +367,69 @@
     "expression": "{mode: raw}",
     "owner": "__normalize_iteration_budget",
     "evidence": "The mode shorthand becomes the existing IterationBudget.mode setting."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
+    "expression": "type_of(value)",
+    "owner": "type_of",
+    "evidence": "Language type inspection cannot read configuration fields."
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_every_due(cadence, turn_number)",
+    "owner": "__turn_end_judge_every_due",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its every read is audited independently.",
+    "consumers": [
+      {
+        "scope": "JudgeCadence",
+        "function": "__turn_end_judge_every_due",
+        "parameter": "cadence"
+      }
+    ]
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_past_warmup(cadence, turn_number)",
+    "owner": "__turn_end_judge_past_warmup",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its min_iterations_before_first read is audited independently.",
+    "consumers": [
+      {
+        "scope": "JudgeCadence",
+        "function": "__turn_end_judge_past_warmup",
+        "parameter": "cadence"
+      }
+    ]
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_under_cap(opts, cadence)",
+    "owner": "__turn_end_judge_under_cap",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its max_invocations read is audited independently.",
+    "consumers": [
+      {
+        "scope": "JudgeCadence",
+        "function": "__turn_end_judge_under_cap",
+        "parameter": "cadence"
+      }
+    ]
+  },
+  {
+    "scope": "JudgeCadence",
+    "file": "crates/harn-stdlib/src/stdlib/agent/turn_end.harn",
+    "expression": "__turn_end_judge_when_due(opts, cadence, state)",
+    "owner": "__turn_end_judge_when_due",
+    "evidence": "The cadence argument has a declared JudgeCadence origin; its when read is audited independently.",
+    "consumers": [
+      {
+        "scope": "JudgeCadence",
+        "function": "__turn_end_judge_when_due",
+        "parameter": "cadence"
+      }
+    ]
   },
   {
     "scope": "JudgeConfig",
@@ -445,14 +506,36 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
     "expression": "__invoke(harness, judge_cfg, opts, payload)",
     "owner": "__invoke",
-    "evidence": "Consumer __invoke has an explicit parameter origin for StepJudgeOptions at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __invoke has an explicit parameter origin for StepJudgeOptions at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "StepJudgeOptions",
+        "function": "__invoke",
+        "parameter": "judge_cfg"
+      },
+      {
+        "scope": "StepJudgeOptions",
+        "function": "__invoke",
+        "parameter": "opts",
+        "path": [
+          "step_judge"
+        ]
+      }
+    ]
   },
   {
     "scope": "StepJudgeOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/step_judge.harn",
     "expression": "__should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)",
     "owner": "__should_skip",
-    "evidence": "Consumer __should_skip has an explicit parameter origin for StepJudgeOptions at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __should_skip has an explicit parameter origin for StepJudgeOptions at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "StepJudgeOptions",
+        "function": "__should_skip",
+        "parameter": "judge_cfg"
+      }
+    ]
   },
   {
     "scope": "StepJudgeOptions",
@@ -460,6 +543,20 @@
     "expression": "{\n      judge_cfg: judge_cfg,\n      opts: opts,\n      payload: payload,\n      checkpoint_name: \"agent.step_judge\",\n      system: system,\n      user: user,\n      schema: schema,\n    }",
     "owner": "__invoke",
     "evidence": "The step checkpoint carries judge_cfg and opts; StepJudgeOptions and AgentSpec consumers have explicit nested origins and registered literal settings."
+  },
+  {
+    "scope": "TokenRunaway",
+    "file": "crates/harn-stdlib/src/stdlib/agent/stall_detectors.harn",
+    "expression": "token_runaway_decision(config, obs)",
+    "owner": "token_runaway_decision",
+    "evidence": "The first parameter has an explicit TokenRunaway origin; its thresholds are audited independently.",
+    "consumers": [
+      {
+        "scope": "TokenRunaway",
+        "function": "token_runaway_decision",
+        "parameter": "config"
+      }
+    ]
   },
   {
     "scope": "ToolSurfaceNarrowingOptions",
@@ -473,14 +570,28 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "__done_contract_judge_system(opts)",
     "owner": "__done_contract_judge_system",
-    "evidence": "Consumer __done_contract_judge_system has an explicit parameter origin for agent_done_contract at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __done_contract_judge_system has an explicit parameter origin for agent_done_contract at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "agent_done_contract",
+        "function": "__done_contract_judge_system",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "agent_done_contract",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "__done_contract_primary_prompt(opts)",
     "owner": "__done_contract_primary_prompt",
-    "evidence": "Consumer __done_contract_primary_prompt has an explicit parameter origin for agent_done_contract at the recorded nested path; its literal reads are audited independently."
+    "evidence": "Consumer __done_contract_primary_prompt has an explicit parameter origin for agent_done_contract at the recorded nested path; its literal reads are audited independently.",
+    "consumers": [
+      {
+        "scope": "agent_done_contract",
+        "function": "__done_contract_primary_prompt",
+        "parameter": "opts"
+      }
+    ]
   },
   {
     "scope": "agent_done_contract",

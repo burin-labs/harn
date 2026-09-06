@@ -4,34 +4,68 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/options_validation.harn",
     "expression": "type_of(value)",
     "owner": "type_of",
-    "evidence": "Configuration passed at argument 1. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Language type inspection reads the value kind and cannot introduce an option key."
   },
   {
     "scope": "ToolSurfaceNarrowingOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_current_entries(opts)",
     "owner": "__tool_surface_current_entries",
-    "evidence": "Consumer __tool_surface_current_entries.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner."
+    "evidence": "Consumer __tool_surface_current_entries.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ToolSurfaceNarrowingOptions",
+        "function": "__tool_surface_current_entries",
+        "parameter": "opts",
+        "path": [
+          "tool_surface_narrowing"
+        ]
+      }
+    ]
   },
   {
     "scope": "ToolSurfaceNarrowingOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_current_names(opts)",
     "owner": "__tool_surface_current_names",
-    "evidence": "Consumer __tool_surface_current_names.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner."
+    "evidence": "Consumer __tool_surface_current_names.opts in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ToolSurfaceNarrowingOptions",
+        "function": "__tool_surface_current_names",
+        "parameter": "opts",
+        "path": [
+          "tool_surface_narrowing"
+        ]
+      }
+    ]
   },
   {
     "scope": "ToolSurfaceNarrowingOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_entry_prunable(entry, config)",
     "owner": "__tool_surface_entry_prunable",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary."
+    "evidence": "Consumer __tool_surface_entry_prunable.config in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ToolSurfaceNarrowingOptions",
+        "function": "__tool_surface_entry_prunable",
+        "parameter": "config"
+      }
+    ]
   },
   {
     "scope": "ToolSurfaceNarrowingOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/tool_surface.harn",
     "expression": "__tool_surface_removed(candidate_entries, used, config)",
     "owner": "__tool_surface_removed",
-    "evidence": "Consumer __tool_surface_removed.config in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner."
+    "evidence": "Consumer __tool_surface_removed.config in crates/harn-stdlib/src/stdlib/agent/tool_surface.harn is an independently required binding origin for ToolSurfaceNarrowingOptions; its literal reads are audited under that owner.",
+    "consumers": [
+      {
+        "scope": "ToolSurfaceNarrowingOptions",
+        "function": "__tool_surface_removed",
+        "parameter": "config"
+      }
+    ]
   }
 ]
