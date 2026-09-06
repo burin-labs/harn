@@ -583,6 +583,22 @@ pub enum AgentEvent {
         /// distinct from an explicit `false` claim.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_claimed_for_repair: Option<bool>,
+        /// Whether this feedback actually reached the model.
+        ///
+        /// The variant is named for injection and, until this field existed,
+        /// could express nothing else, so every row it produced read as
+        /// feedback that was delivered. That became wrong when the no-progress
+        /// streak was demoted to receipts-only: it still observes a stalled
+        /// turn and still writes its row, but it injects nothing. The only
+        /// remaining signal was that a sibling injection row was missing, which
+        /// makes a reader reason from absence inside the very events people
+        /// consult to find out what a run did.
+        ///
+        /// `None` keeps historical rows and mechanisms that never answered
+        /// distinct from an explicit `false`, the same way
+        /// `turn_claimed_for_repair` does. It is NOT a synonym for delivered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivered: Option<bool>,
     },
     HostToolResult {
         session_id: String,
@@ -1347,6 +1363,7 @@ impl AgentEvent {
             iteration: None,
             tool_name: None,
             turn_claimed_for_repair: None,
+            delivered: None,
         }
     }
 

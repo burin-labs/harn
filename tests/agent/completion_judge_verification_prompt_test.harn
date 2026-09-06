@@ -1,0 +1,229 @@
+// Run: harn test tests/agent/completion_judge_verification_prompt_test.harn
+//
+// The deterministic verifier's reading is threaded onto the evidence snapshot
+// so a model judge is SHOWN the answer the runtime already computed. Every
+// existing fixture proves the reading is CARRIED — onto the payload, onto the
+// receipt, into the cap rule, into the skip predicate. None proves it is
+// DELIVERED: the one seam that puts it in front of the model is a conditional
+// block in `completion_judge_user.harn.prompt`, and deleting that block, or
+// renaming the field it reads, leaves every other test green.
+//
+// These fixtures read the judge's own model call out of the mock log and
+// assert on the text that reached it. The load-bearing control is the run with
+// no gate at all: the block is absent there, so the positive cases cannot be
+// satisfied by a template that renders the section unconditionally.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_calls, llm_done, with_llm_script } from "std/testing"
+
+/** The judge user prompt's own opening instruction; no other call carries it. */
+const JUDGE_MARKER = "Decide whether this agent loop may yield to the user now"
+
+/** The heading of the conditional block under test. */
+const VERIFICATION_HEADING = "Deterministic verification (established by the runtime, not by you)"
+
+/** A judge that refuses, so a call that happens is visible rather than silent. */
+fn __judge_refuses(detail: string) -> dict {
+  return {
+    text: json_stringify({verdict: "continue", detail: detail, gap_class: "failed_verification"}),
+  }
+}
+
+/** A gate reporting exactly the reading the case is about. */
+fn __gate_reporting(confirm: bool, reason: string, observed: string) {
+  return { _payload ->
+    {
+      confirm: confirm,
+      message: "gate",
+      reason: reason,
+      verification: {
+        oracle_expected: true,
+        command: "run the project checks",
+        observed: observed,
+        observed_at_evidence_index: nil,
+      },
+    }
+  }
+}
+
+fn __judge_calls(events: any) -> int {
+  return len(events.filter({ event -> event.type == "judge_started" }).to_list())
+}
+
+fn __completion_receipts(events: any) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+/**
+ * The text of the judge's model call.
+ *
+ * Selected by the judge prompt's own instruction rather than by position: the
+ * log also holds the agent's turns, and a positional read would silently move
+ * to a different call the first time the loop takes an extra iteration.
+ */
+fn __judge_prompt_text(calls: any) -> string {
+  const rendered = calls.map({ call -> json_stringify(call) }).filter(
+    { text -> text.contains(JUDGE_MARKER) },
+  )
+    .to_list()
+  assert(len(rendered) >= 1, "no judge call is present in the log, so there is no prompt to read")
+  return rendered[0]
+}
+
+fn __run_raw(harness: Harness, label: string, script: list, opts_extra: dict) {
+  return with_llm_script(
+    harness.llm,
+    script,
+    { ->
+      const session = label + "-" + harness.random.uuid()
+      const opts = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 2,
+        turn_end_condition: {provider: "mock", max_invocations: 1},
+      }
+        + opts_extra
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Make the requested change.", nil, opts) },
+      )
+      return {events: captured.events, calls: llm_calls(harness.llm)}
+    },
+  )
+}
+
+/**
+ * The same run, plus the judge prompt. Separate so a case that expects NO judge
+ * call does not fail inside the reader instead of on its own assertion.
+ */
+fn __run(harness: Harness, label: string, script: list, opts_extra: dict) {
+  const captured = __run_raw(harness, label, script, opts_extra)
+  return {events: captured.events, prompt: __judge_prompt_text(captured.calls)}
+}
+
+pipeline test_a_passed_verifier_reading_reaches_the_judges_prompt(harness: Harness, task: unknown) {
+  // A green verifier with no source write behind it. The typed-green terminal
+  // does not fire, so the judge is asked — and this is the case the prompt's
+  // prose exists for: `passed` is settled fact even when the bounded packet
+  // omits the verifying call.
+  const captured = __run(
+    harness,
+    "verification-prompt-passed",
+    [llm_done(), __judge_refuses("no artifact was produced"), llm_done()],
+    {verify_completion: __gate_reporting(true, "verified", "passed")},
+  )
+  assert(
+    __judge_calls(captured.events) >= 1,
+    "the judge must be reached for this to assert anything",
+  )
+  assert(captured.prompt.contains(VERIFICATION_HEADING), "the block is delivered")
+  assert(
+    captured.prompt.contains("verifier expected for this task: true"),
+    "the judge is told a verifier was declared, not merely that one ran",
+  )
+  assert(
+    captured.prompt.contains("verifier command: run the project checks"),
+    "the declared command reaches the judge",
+  )
+  assert(captured.prompt.contains("observed: passed"), "the positive reading reaches the judge")
+}
+
+pipeline test_a_run_with_no_gate_sends_no_verification_block(harness: Harness, task: unknown) {
+  // THE DIRECTION CONTROL. Without it every assertion above is also satisfied
+  // by a template that renders the section unconditionally, which would put a
+  // fabricated reading in front of the judge on exactly the runs that have none.
+  const captured = __run(
+    harness,
+    "verification-prompt-no-gate",
+    [llm_done(), __judge_refuses("nothing verified this run"), llm_done()],
+    {},
+  )
+  assert(__judge_calls(captured.events) >= 1, "with no gate the judge is the only authority")
+  assert(
+    !captured.prompt.contains(VERIFICATION_HEADING),
+    "a run with no deterministic reading shows the judge no verification section",
+  )
+  assert(
+    !captured.prompt.contains("verifier expected for this task"),
+    "no reading of any kind is asserted to a judge that has none",
+  )
+}
+
+pipeline test_an_unrun_verifier_is_delivered_rather_than_omitted(harness: Harness, task: unknown) {
+  // `not_run` and an absent block are two different statements: one says the
+  // gate looked and read nothing, the other says nothing looked. They must not
+  // collapse to the same prompt, or the judge cannot tell them apart.
+  const captured = __run(
+    harness,
+    "verification-prompt-not-run",
+    [llm_done(), __judge_refuses("run the verifier before finishing"), llm_done()],
+    {verify_completion: __gate_reporting(true, "no_workspace_write", "not_run")},
+  )
+  assert(__judge_calls(captured.events) >= 1, "an unverified path keeps the judge")
+  assert(captured.prompt.contains(VERIFICATION_HEADING), "the block is delivered on a null reading")
+  assert(
+    captured.prompt.contains("observed: not_run"),
+    "the judge is told the verifier did not run",
+  )
+}
+
+pipeline test_a_deterministic_veto_delivers_no_prompt_because_it_asks_nobody(
+  harness: Harness,
+  task: unknown,
+) {
+  // The other end of the delivery question, and the reason the `failed` branch
+  // of the prompt's vocabulary is not reachable this way. A vetoed deterministic
+  // verdict stops the policy from advancing, so no model judge is asked at all:
+  // the oracle already decided, and there is nothing left to ask. A fixture that
+  // expected a failed reading to reach a judge would be asserting a call the
+  // design deliberately does not make.
+  const captured = __run_raw(
+    harness,
+    "verification-prompt-veto",
+    [llm_done(), llm_done()],
+    {verify_completion: __gate_reporting(false, "failed_verification", "failed")},
+  )
+  assert_eq(__judge_calls(captured.events), 0)
+  const receipts = __completion_receipts(captured.events)
+  assert(len(receipts) >= 1, "the boundary was adjudicated")
+  assert_eq(receipts[0].action, "continue")
+  assert_eq(receipts[0].source, "deterministic")
+  assert_eq(
+    receipts[0].verification.observed,
+    "failed",
+    "the reading is still on the receipt for a later reader, even with no model in the loop",
+  )
+}
+
+pipeline test_the_verification_slot_judge_is_shown_the_same_reading(
+  harness: Harness,
+  task: unknown,
+) {
+  // The two judge slots read one payload, and the deterministic stage stamps it
+  // before either runs. This pins that ordering at the seam that consumes it,
+  // rather than trusting the stage list to stay in its current order.
+  const captured = __run(
+    harness,
+    "verification-prompt-slot",
+    [llm_done(), __judge_refuses("no artifact was produced"), llm_done()],
+    {
+      verify_completion: __gate_reporting(true, "verified", "passed"),
+      verify_completion_judge: {provider: "mock", max_invocations: 1},
+    },
+  )
+  assert(__judge_calls(captured.events) >= 1, "the verification slot's judge is asked")
+  assert(
+    captured.prompt.contains("observed: passed"),
+    "the first judge to run already has the deterministic reading",
+  )
+}
