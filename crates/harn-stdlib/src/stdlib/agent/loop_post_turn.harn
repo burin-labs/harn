@@ -23,7 +23,6 @@ import { agent_feedback_emit } from "std/agent/feedback"
 import { agent_evaluate_completion } from "std/agent/judge"
 import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result_status"
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
-import { __inject_feedback_with_tool_repair } from "std/agent/loop_tool_calls"
 import {
   AGENT_LOOP_REJECTED_TURN_MARKER,
   __agent_loop_pop_rejected_assistant_turn,
@@ -666,12 +665,46 @@ pub fn agent_loop_post_turn_transition(
         paradigm,
         made_tool_calls,
       )
-      __inject_feedback_with_tool_repair(
-        harness.agent,
-        session.session_id,
-        "no_progress_streak",
-        nudge_text,
-      )
+      // RECEIPTS ONLY. This streak observes; it does not steer. The injection
+      // that used to sit here is gone, and the receipt below is the whole
+      // mechanism now.
+      //
+      // Measured on a v0.10.130 agent run under a coding workload: this nudge fired
+      // 22 times in a 22-turn run, 22 of the run's 30 feedback injections, and
+      // the run still ended unverified. It never terminated anything — the judge
+      // cap did — so what those 22 turns bought was a near-identical paragraph
+      // re-entering the packet on every turn, crowding the evidence the
+      // completion judge is asked to read. A heuristic that cannot end a run and
+      // cannot be shown to redirect one is not paying for the context it costs.
+      //
+      // Removing the injection also removes the orphaned-tool_use repair that
+      // rode along inside it. That repair exists to keep an injected user turn
+      // from following an unpaired tool_use block, and this site only ever fired
+      // on turns that called no tool, so there was never a block here to orphan.
+      // Every other corrective still calls it for its own injection.
+      //
+      // What this is NOT: it is not the text-only nudge budget above, which
+      // shares the `max_nudges` number and DOES seal `stuck`. Two mechanisms,
+      // one config knob. That stop is untouched and has its own control below.
+      //
+      // WHAT A READER SEES, and what they cannot. This receipt is projected into
+      // the typed `FeedbackInjected` event, whose fields are fixed: kind,
+      // content, and streak survive; everything else in this payload is dropped
+      // on the way out, including a `delivered: false` flag that would have said
+      // the demotion out loud. So the receipt cannot name its own demotion, and
+      // the signal is the PAIR: before this change every firing wrote both a
+      // `no_progress_streak` row and a `no_progress_streak_nudge` row, and now
+      // it writes only the second. A timeline carrying the nudge row alone is a
+      // turn where the loop observed the stall and said nothing.
+      //
+      // That is a weaker receipt than it should be, and the fix belongs to the
+      // event schema rather than here: `FeedbackInjected` has no field for
+      // whether the feedback reached the model. Filed rather than smuggled in.
+      //
+      // `iteration`, `has_tools` and `made_tool_calls` are kept in the payload
+      // deliberately even though the projection drops them today. They are the
+      // fields a widened variant would want, and removing them would make the
+      // widening look like new instrumentation instead of a projection fix.
       agent_emit_event(
         harness.agent,
         session.session_id,

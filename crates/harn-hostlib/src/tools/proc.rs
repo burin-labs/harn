@@ -38,7 +38,7 @@ mod toolchain_path;
 
 pub(crate) use self::artifacts::{
     live_artifact_snapshot, live_artifact_tail, persist_artifacts, planned_artifact_paths,
-    register_live_artifacts, resolve_output_path, summarize_artifacts,
+    read_output, register_live_artifacts, summarize_artifacts,
 };
 
 static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
