@@ -895,7 +895,64 @@ fn check_toolchain() -> Vec<DoctorCheck> {
             blocks: &["build", "test", "release", "publish"],
         },
     ];
-    TOOLS.iter().map(ToolCheck::run).collect()
+    let mut checks: Vec<_> = TOOLS.iter().map(ToolCheck::run).collect();
+    if std::env::var("HARN_ALLOW_TOOLCHAIN_MISMATCH").as_deref() != Ok("1") {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if let Some(repo) = find_harn_repo_root(&cwd) {
+            enforce_repo_rustc_pin(&mut checks, &repo);
+        }
+    }
+    checks
+}
+
+fn enforce_repo_rustc_pin(checks: &mut [DoctorCheck], repo: &Path) {
+    let pin_path = repo.join("rust-toolchain.toml");
+    let pinned = fs::read_to_string(&pin_path)
+        .map_err(|error| format!("unable to read {}: {error}", pin_path.display()))
+        .and_then(|text| {
+            let parsed: toml::Value = toml::from_str(&text)
+                .map_err(|error| format!("invalid {}: {error}", pin_path.display()))?;
+            parsed
+                .get("toolchain")
+                .and_then(|toolchain| toolchain.get("channel"))
+                .and_then(toml::Value::as_str)
+                .filter(|channel| !channel.trim().is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| format!("{} has no toolchain.channel", pin_path.display()))
+        });
+    let Some(rustc) = checks
+        .iter_mut()
+        .find(|check| check.id == "rustc" && check.status == DoctorStatus::Ok)
+    else {
+        return;
+    };
+    let pinned = match pinned {
+        Ok(pinned) => pinned,
+        Err(error) => {
+            rustc.status = DoctorStatus::Fail;
+            rustc.detail = error;
+            return;
+        }
+    };
+    let Some(resolved) = rustc.detail.split_whitespace().nth(1).map(str::to_string) else {
+        rustc.status = DoctorStatus::Fail;
+        rustc.detail = format!("could not read a version from `{}`", rustc.detail);
+        return;
+    };
+    let rustc_path = which::which("rustc").unwrap_or_else(|_| PathBuf::from("rustc"));
+    apply_rustc_pin(rustc, &pinned, &resolved, &rustc_path);
+}
+
+fn apply_rustc_pin(check: &mut DoctorCheck, pinned: &str, resolved: &str, rustc_path: &Path) {
+    if pinned == resolved {
+        return;
+    }
+    check.status = DoctorStatus::Fail;
+    check.detail = format!(
+        "rust-toolchain.toml pins rustc {pinned} but {} resolves to {resolved}",
+        rustc_path.display()
+    );
+    check.fix_command = Some("put the rustup shim directory ahead of other Rust installs on PATH, then rerun harn doctor".to_string());
 }
 
 /// Checks optional but recommended developer tools. These never FAIL — every
@@ -1592,14 +1649,15 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_host_info, build_summary, check_event_log, check_hardware, check_manifest_from,
-        check_ollama_at, check_platform_capabilities, find_nearest_manifest,
+        apply_rustc_pin, build_host_info, build_summary, check_event_log, check_hardware,
+        check_manifest_from, check_ollama_at, check_platform_capabilities, find_nearest_manifest,
         format_trigger_metrics, read_manifest, stdlib_capability_matrix, target_doctor_checks,
         DoctorCheck, DoctorReport, DoctorStatus, HardwareSnapshot, SandboxProfile, TargetInfo,
         DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{HealthcheckDef, ProviderDef};
+    use std::path::Path;
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
@@ -1913,6 +1971,40 @@ pub fn on_new_issue(harness: Harness, event: TriggerEvent) {
         assert_eq!(info.harn_version, env!("CARGO_PKG_VERSION"));
         assert!(!info.process_sandbox.backend.is_empty());
         assert!(!info.process_sandbox.filesystem_mechanism.is_empty());
+    }
+
+    #[test]
+    fn rustc_pin_mismatch_is_a_failing_doctor_check() {
+        let mut check = DoctorCheck {
+            id: "rustc".to_string(),
+            status: DoctorStatus::Ok,
+            detail: "rustc 1.98.0 (example)".to_string(),
+            blocks: vec!["build", "test"],
+            ..Default::default()
+        };
+        apply_rustc_pin(
+            &mut check,
+            "1.95.0",
+            "1.98.0",
+            Path::new("/toolchain/bin/rustc"),
+        );
+
+        assert_eq!(check.status, DoctorStatus::Fail);
+        assert!(check.detail.contains("pins rustc 1.95.0"));
+        assert!(check.detail.contains("resolves to 1.98.0"));
+        assert_eq!(check.blocks, vec!["build", "test"]);
+    }
+
+    #[test]
+    fn matching_rustc_pin_remains_ok() {
+        let mut check = DoctorCheck {
+            id: "rustc".to_string(),
+            status: DoctorStatus::Ok,
+            detail: "rustc 1.95.0 (example)".to_string(),
+            ..Default::default()
+        };
+        apply_rustc_pin(&mut check, "1.95.0", "1.95.0", Path::new("rustc"));
+        assert_eq!(check.status, DoctorStatus::Ok);
     }
 
     #[test]
