@@ -137,4 +137,11 @@ if release_branch_is_canonical releases/v1.2.3-rc.0; then
   exit 1
 fi
 
+git -C "$tmp_repo" tag v1.3.0-rc.1
+git -C "$tmp_repo" tag not-a-release
+if [[ "$(cd "$tmp_repo" && release_latest_stable_tag)" != "v1.2.4" ]]; then
+  echo "release_version_test: latest stable tag selection accepted a prerelease or invalid tag" >&2
+  exit 1
+fi
+
 echo "release version projection tests passed"

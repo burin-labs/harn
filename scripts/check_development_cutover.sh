@@ -21,13 +21,9 @@ if [[ -z "$workspace_version" ]]; then
   exit 2
 fi
 
-latest_tag="$({
-  git tag --merged "$main_ref" --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-    | sed -n '1p'
-} || true)"
+latest_tag="$(release_latest_stable_tag || true)"
 if [[ -z "$latest_tag" ]]; then
-  echo "error: could not read a stable release tag merged into $main_ref" >&2
+  echo "error: could not read a stable release tag from the repository tag list" >&2
   exit 2
 fi
 
