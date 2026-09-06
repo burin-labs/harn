@@ -1472,3 +1472,18 @@ pub fn minimal_pr_capacity_errors(ci: dict, publish: dict) -> list<string> {
   }
   return errors
 }
+
+/** Keep the slow suite evacuable through the same paid-capacity switch. */
+pub fn e2e_elastic_capacity_errors(e2e: dict) -> list<string> {
+  const job = e2e?.jobs?.e2e ?? {}
+  let errors: list<string> = []
+  for field in [job?.["runs-on"], job?.env?.HARN_E2E_JOBS] {
+    if !contains(to_string(field ?? ""), "vars.${BLACKSMITH_ENABLE_VAR} == 'true'") {
+      errors = errors + ["e2e.yml:e2e must let ${BLACKSMITH_ENABLE_VAR} override owned Linux capacity"]
+    }
+  }
+  if !contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_8CPU_RUNNER) {
+    errors = errors + ["e2e.yml:e2e must route the paid override to ${BLACKSMITH_8CPU_RUNNER}"]
+  }
+  return errors
+}

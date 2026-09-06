@@ -28,6 +28,7 @@ pub import {
   ci_cache_policy_errors,
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
+  e2e_elastic_capacity_errors,
   minimal_pr_capacity_errors,
   release_aot_runner_errors,
   release_warm_cache_concurrency_errors,

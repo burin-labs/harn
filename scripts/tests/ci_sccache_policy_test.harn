@@ -1,5 +1,6 @@
 import {
   ci_linux_lane_policy_errors,
+  e2e_elastic_capacity_errors,
   producer_cache_save_reserve_minutes,
   producer_hosted_ceiling_minutes,
   windows_shared_cache_errors,
@@ -7,6 +8,16 @@ import {
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
+}
+
+@test
+pipeline test_e2e_paid_override_fails_when_runner_route_drops_switch(
+  harness: Harness,
+  task: unknown,
+) {
+  const invalid = {jobs: {e2e: {"runs-on": "ubuntu-latest", env: {HARN_E2E_JOBS: "4"}}}}
+  const errors = e2e_elastic_capacity_errors(invalid)
+  assert(errors.any(fn(error) { contains(error, "HARN_CI_ENABLE_BLACKSMITH_LINUX") }))
 }
 
 fn persistent_lane(

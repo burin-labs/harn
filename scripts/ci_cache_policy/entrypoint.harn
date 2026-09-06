@@ -86,6 +86,7 @@ pub fn run_ci_cache_policy(harness: Harness) {
     sccache_install_action_errors(sccache_install_action),
     ci_workflow_concurrency_errors(workflows["ci.yml"]),
     minimal_pr_capacity_errors(workflows["ci.yml"], workflows["publish-release.yml"]),
+    e2e_elastic_capacity_errors(workflows["e2e.yml"]),
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
     windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"]),
     windows_pr_native_feedback_errors(
