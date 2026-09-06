@@ -233,6 +233,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/options" => "stdlib/agent/options.harn",
     "agent/options_types" => "stdlib/agent/options_types.harn",
     "agent/options_formats" => "stdlib/agent/options_formats.harn",
+    "agent/options_surface" => "stdlib/agent/options_surface.harn",
     "agent/options_validation" => "stdlib/agent/options_validation.harn",
     "agent/options_public" => "stdlib/agent/options_public.harn",
     "agent/llm_dispatch" => "stdlib/agent/llm_dispatch.harn",

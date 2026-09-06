@@ -69,7 +69,6 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
           policy: read_only_ceiling(),
         },
       )
@@ -97,7 +96,6 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 3,
-          done_judge: nil,
           policy: read_only_ceiling(),
           approval_reviewer: { _ ->
             consulted = consulted + 1

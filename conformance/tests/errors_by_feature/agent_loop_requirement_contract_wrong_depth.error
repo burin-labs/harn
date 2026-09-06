@@ -1,0 +1,1 @@
+`requirement_contract` is not an option at the top level; it is read at `turn_end_condition.requirement_contract` or `verify_completion_judge.requirement_contract`

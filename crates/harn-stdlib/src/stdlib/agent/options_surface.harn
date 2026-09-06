@@ -1,0 +1,203 @@
+import { AgentPresetOptions } from "std/agent/options_types"
+
+/**
+ * The option surface, derived from the type that declares it.
+ *
+ * `agent_loop` options used to be read by lookup alone: each validator
+ * reached for the fields it knew about and nothing looked at what else was
+ * passed. A misspelled key and a real key at a depth where nothing reads it
+ * were both accepted in silence, and the run then reported exactly what a
+ * correctly configured run without that feature would report. The two are
+ * indistinguishable from the outside, which is how a probe measures the
+ * absence of the thing it was written to test.
+ *
+ * The allowed keys come from `schema_of(AgentPresetOptions)` rather than a list
+ * maintained beside the validators. A hand-written list is a second copy of
+ * the declaration and drifts from it exactly the way the per-validator field
+ * reads already have.
+ */
+
+/**
+ * Flatten a schema node into the branches that could describe a dict.
+ *
+ * An option's declared type is often a union (`bool | JudgeConfig`) or an
+ * intersection (`AgentSpec` itself). A key is legitimate if any branch
+ * declares it, so the branches are unioned rather than intersected: refusing
+ * a key some branch accepts would be a false rejection, and this check exists
+ * to be trusted.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_schema_branches(node: any) -> list<any> {
+  if type_of(node) != "dict" {
+    return []
+  }
+  let branches = [node]
+  for group in ["all_of", "any_of", "one_of", "union"] {
+    const value = node?[group]
+    if type_of(value) == "list" {
+      for item in value {
+        branches = branches + __option_schema_branches(item)
+      }
+    } else if type_of(value) == "dict" {
+      branches = branches + __option_schema_branches(value)
+    }
+  }
+  return branches
+}
+
+/**
+ * Every key any branch of this node declares as a property.
+ *
+ * An empty result means the node declares no properties at all, which is a
+ * free-form `dict` option rather than a typed shape. Nothing is known about
+ * its keys, so nothing about them can be refused.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_declared_keys(node: any) -> list<string> {
+  let names = []
+  for branch in __option_schema_branches(node) {
+    const properties = branch?.properties
+    if type_of(properties) == "dict" {
+      for name in keys(properties) {
+        names = names + [name]
+      }
+    }
+  }
+  return unique(names)
+}
+
+/**
+ * The schema for one child key, unioned across the branches that declare it.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_child_schema(node: any, key: string) -> any {
+  let found = []
+  for branch in __option_schema_branches(node) {
+    const properties = branch?.properties
+    if type_of(properties) == "dict" && contains(properties.keys(), key) {
+      found = found + [properties[key]]
+    }
+  }
+  if len(found) == 0 {
+    return nil
+  }
+  if len(found) == 1 {
+    return found[0]
+  }
+  return {union: found}
+}
+
+/**
+ * Every declared option path, as `[key, dotted path]` pairs.
+ *
+ * This is what makes a wrong-depth key debuggable. Knowing that
+ * `requirement_contract` is not a top-level option does not tell a caller
+ * that it belongs on the judge config, and the wrong-depth case is the one
+ * that cannot be worked out from a rejection alone.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_paths(node: any, path: string) -> list<list<string>> {
+  let pairs = []
+  for key in __option_declared_keys(node) {
+    const child_path = if path == "" {
+      key
+    } else {
+      path + "." + key
+    }
+    pairs = pairs + [[key, child_path]]
+    pairs = pairs + __option_paths(__option_child_schema(node, key), child_path)
+  }
+  return pairs
+}
+
+/**
+ * Where else this key is accepted, as a readable clause, or "" if nowhere.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __option_key_accepted_elsewhere(key: string, at_path: string) -> string {
+  let elsewhere = []
+  for pair in __option_paths(schema_of(AgentPresetOptions), "") {
+    const name = to_string(pair[0])
+    const full = to_string(pair[1])
+    if name == key && full != at_path {
+      elsewhere = elsewhere + ["`" + full + "`"]
+    }
+  }
+  elsewhere = unique(elsewhere)
+  if len(elsewhere) == 0 {
+    return ""
+  }
+  return "; it is read at " + join(elsewhere, " or ")
+}
+
+/**
+ * Refuse an option key nothing on the surface declares.
+ *
+ * A rejection rather than a report, unlike the host event payload census:
+ * there the emitters are inside the runtime and a refusal would kill a live
+ * path, while a misplaced option is a caller's own configuration and the
+ * caller is the one who can fix it. The whole failure here is a signal that
+ * was present and read as ordinary, so it has to stop the run.
+ *
+ * @effects: []
+ * @errors: [ValueError]
+ */
+fn __check_option_keys(value: any, node: any, path: string) {
+  if type_of(value) != "dict" {
+    return
+  }
+  const allowed = __option_declared_keys(node)
+  if len(allowed) == 0 {
+    return
+  }
+  for key in keys(value) {
+    // Runtime-internal plumbing. The stdlib writes these into an option dict
+    // itself — `std/agent/lanes` adds `_lane_verdict`, `std/workflow/stage`
+    // adds `_nested_kind` — and they arrive here as ordinary caller keys.
+    // Declaring them on the public type would advertise private plumbing as
+    // API. The cost is that a typo inside the underscore namespace is still
+    // accepted, which is a smaller surface than the one this check closes.
+    if starts_with(key, "_") {
+      continue
+    }
+    const here = if path == "" {
+      key
+    } else {
+      path + "." + key
+    }
+    if !contains(allowed, key) {
+      const at = if path == "" {
+        "the top level"
+      } else {
+        "`" + path + "`"
+      }
+      throw "agent_loop: `"
+        + key
+        + "` is not an option at "
+        + at
+        + __option_key_accepted_elsewhere(key, here)
+        + ". A key nothing reads is accepted in silence otherwise, and the run then reports what a run without that option would report."
+    }
+    __check_option_keys(value[key], __option_child_schema(node, key), here)
+  }
+}
+
+/**
+ * Validate supplied `agent_loop` options against the declared surface.
+ *
+ * @effects: []
+ * @errors: [ValueError]
+ */
+pub fn __validate_agent_loop_option_keys(opts: dict) {
+  __check_option_keys(opts, schema_of(AgentPresetOptions), "")
+}

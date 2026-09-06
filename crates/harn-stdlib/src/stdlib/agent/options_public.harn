@@ -5,6 +5,7 @@ import {
 } from "std/agent/caller_transport"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import "std/agent/options_formats"
+import { __validate_agent_loop_option_keys } from "std/agent/options_surface"
 import "std/agent/options_types"
 import "std/agent/options_validation"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
@@ -231,7 +232,10 @@ pub fn agent_options(options: AgentSpec = {}) -> AgentSpec {
  */
 pub fn agent_loop_options(harness: Harness, options: any = nil) {
   let opts = options ?? {}
+  // Removed options first: each has a message naming its replacement, which
+  // is more useful than "not an option".
   __validate_removed_agent_loop_options(opts)
+  __validate_agent_loop_option_keys(opts)
   __validate_agent_loop_completion_options(opts)
   __validate_agent_loop_callback_options(opts)
   const profile = opts?.profile ?? "tool_using"
