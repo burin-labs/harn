@@ -18,6 +18,9 @@ static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(||
 const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
 const MAX_DIRS_ENV: &str = "HARN_COMMAND_ARTIFACT_MAX_DIRS";
 const DEFAULT_RETENTION: Duration = Duration::from_hours(168);
+// Completed registrations are bounded per process, so N live processes may
+// retain up to N * this value. The shared sweep removes oldest unleased
+// directories under pressure; it never revokes another process's live lease.
 const DEFAULT_MAX_DIRS: usize = 512;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
@@ -46,6 +49,34 @@ struct CompletedArtifact {
     completed_at: SystemTime,
 }
 
+/// Releases a newly acquired active lease unless ownership is transferred to
+/// the completed or live artifact registry. Drop deliberately does not take
+/// the namespace lock: it is the last-resort cleanup when that lock caused the
+/// registration failure in the first place.
+struct ActiveArtifactLeaseGuard {
+    dir: Option<PathBuf>,
+}
+
+impl ActiveArtifactLeaseGuard {
+    fn new(artifacts: &CommandArtifacts) -> Self {
+        Self {
+            dir: artifact_dir(artifacts),
+        }
+    }
+
+    fn keep_registered(mut self) {
+        self.dir = None;
+    }
+}
+
+impl Drop for ActiveArtifactLeaseGuard {
+    fn drop(&mut self) {
+        if let Some(dir) = self.dir.take() {
+            release_artifact_lease(&dir);
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CommandArtifacts {
     pub(crate) output_path: PathBuf,
@@ -72,6 +103,7 @@ pub(crate) fn persist_artifacts(
     maybe_sweep_stale_artifacts(None);
     let artifacts = planned_artifact_paths(command_id);
     create_and_mark_artifacts_active(&artifacts)?;
+    let active_lease = ActiveArtifactLeaseGuard::new(&artifacts);
     let persisted = (|| -> Result<CommandArtifacts, HostlibError> {
         std::fs::write(&artifacts.stdout_path, stdout).map_err(|e| HostlibError::Backend {
             builtin: "hostlib_tools_run_command",
@@ -99,12 +131,9 @@ pub(crate) fn persist_artifacts(
     })();
     let artifacts = match persisted {
         Ok(artifacts) => artifacts,
-        Err(error) => {
-            mark_artifacts_inactive(&artifacts);
-            return Err(error);
-        }
+        Err(error) => return Err(error),
     };
-    register_completed_artifacts(command_id, handle_id, &artifacts)?;
+    register_completed_artifacts_with_guard(command_id, handle_id, &artifacts, active_lease)?;
     let current_dir = artifact_dir(&artifacts);
     maybe_sweep_stale_artifacts(current_dir.as_deref());
     Ok(artifacts)
@@ -117,6 +146,7 @@ pub(crate) fn register_live_artifacts(
     maybe_sweep_stale_artifacts(None);
     let artifacts = planned_artifact_paths(command_id);
     create_and_mark_artifacts_active(&artifacts)?;
+    let active_lease = ActiveArtifactLeaseGuard::new(&artifacts);
     let created = (|| -> Result<(), HostlibError> {
         std::fs::File::create(&artifacts.stdout_path).map_err(|e| HostlibError::Backend {
             builtin: "hostlib_tools_run_command",
@@ -133,10 +163,10 @@ pub(crate) fn register_live_artifacts(
         Ok(())
     })();
     if let Err(error) = created {
-        mark_artifacts_inactive(&artifacts);
         return Err(error);
     }
     register_artifacts(command_id, handle_id, &artifacts);
+    active_lease.keep_registered();
     let current_dir = artifact_dir(&artifacts);
     maybe_sweep_stale_artifacts(current_dir.as_deref());
     Ok(artifacts)
@@ -281,17 +311,48 @@ fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &Com
     }
 }
 
-fn register_completed_artifacts(
+fn register_completed_artifacts_with_guard(
     command_id: &str,
     handle_id: Option<&str>,
     artifacts: &CommandArtifacts,
+    active_lease: ActiveArtifactLeaseGuard,
+) -> Result<(), HostlibError> {
+    register_completed_artifacts_with_guard_options(
+        command_id,
+        handle_id,
+        artifacts,
+        active_lease,
+        max_artifact_dirs(),
+        ACTIVE_LEASE_LOCK_TIMEOUT,
+    )
+}
+
+fn register_completed_artifacts_with_guard_options(
+    command_id: &str,
+    handle_id: Option<&str>,
+    artifacts: &CommandArtifacts,
+    active_lease: ActiveArtifactLeaseGuard,
+    max_dirs: usize,
+    timeout: Duration,
+) -> Result<(), HostlibError> {
+    register_completed_artifacts_with_options(command_id, handle_id, artifacts, max_dirs, timeout)?;
+    active_lease.keep_registered();
+    Ok(())
+}
+
+fn register_completed_artifacts_with_options(
+    command_id: &str,
+    handle_id: Option<&str>,
+    artifacts: &CommandArtifacts,
+    max_dirs: usize,
+    timeout: Duration,
 ) -> Result<(), HostlibError> {
     let Some(dir) = artifact_dir(artifacts) else {
         register_artifacts(command_id, handle_id, artifacts);
         return Ok(());
     };
     let temp_dir = dir.parent().unwrap_or_else(|| Path::new("."));
-    with_artifact_namespace_lock(temp_dir, ACTIVE_LEASE_LOCK_TIMEOUT, || {
+    with_artifact_namespace_lock(temp_dir, timeout, || {
         let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
         store
             .by_id
@@ -305,7 +366,7 @@ fn register_completed_artifacts(
                 completed_at: SystemTime::now(),
             });
         }
-        retire_completed_artifacts_under_namespace(&mut store, max_artifact_dirs(), None);
+        retire_completed_artifacts_under_namespace(&mut store, max_dirs, None);
         Ok(())
     })
 }
@@ -431,14 +492,18 @@ fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
 }
 
 fn mark_artifact_dir_inactive_under_namespace(dir: &Path) {
+    release_artifact_lease(dir);
+    let _ = std::fs::remove_file(dir.join(ACTIVE_LEASE_FILE));
+}
+
+fn release_artifact_lease(dir: &Path) {
     if let Some(lease) = ACTIVE_ARTIFACT_LEASES
         .lock()
-        .expect("active command artifact lease store poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(dir)
     {
         let _ = lease.unlock();
     }
-    let _ = std::fs::remove_file(dir.join(ACTIVE_LEASE_FILE));
 }
 
 fn with_artifact_namespace_lock<T>(
@@ -751,6 +816,17 @@ mod tests {
         filetime::set_file_mtime(path, file_time).unwrap();
     }
 
+    fn artifacts_in(dir: &Path) -> CommandArtifacts {
+        CommandArtifacts {
+            output_path: dir.join("combined.txt"),
+            stdout_path: dir.join("stdout.txt"),
+            stderr_path: dir.join("stderr.txt"),
+            line_count: 0,
+            byte_count: 0,
+            output_sha256: String::new(),
+        }
+    }
+
     fn dead_pid() -> u32 {
         (900_000..=999_999)
             .find(|pid| {
@@ -901,6 +977,95 @@ mod tests {
             .to_string()
             .contains(&namespace_path.display().to_string()));
         assert!(!dir.exists(), "directory became visible before its lease");
+    }
+
+    #[test]
+    fn registration_failure_releases_active_lease_without_namespace_reacquisition() {
+        let temp = tempdir().unwrap();
+        let dir = artifact_dir(temp.path(), std::process::id(), 300, 1);
+        let artifacts = artifacts_in(&dir);
+        create_and_mark_artifacts_active_with_timeout(&artifacts, Duration::ZERO).unwrap();
+
+        let namespace_path = artifact_namespace_lease_path(temp.path());
+        let holder = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&namespace_path)
+            .unwrap();
+        holder.lock().unwrap();
+
+        let error = register_completed_artifacts_with_guard_options(
+            "command-registration-failure",
+            Some("handle-registration-failure"),
+            &artifacts,
+            ActiveArtifactLeaseGuard::new(&artifacts),
+            1,
+            Duration::ZERO,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains(&namespace_path.display().to_string()));
+        assert!(
+            !ACTIVE_ARTIFACT_LEASES
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains_key(&dir),
+            "failure guard must release without waiting for the held namespace lock"
+        );
+        let probe = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join(ACTIVE_LEASE_FILE))
+            .unwrap();
+        probe.try_lock().unwrap();
+        probe.unlock().unwrap();
+        drop(probe);
+        holder.unlock().unwrap();
+        drop(holder);
+    }
+
+    #[test]
+    fn completed_fifo_evicts_oldest_aliases_and_releases_its_lease() {
+        let temp = tempdir().unwrap();
+        let first_dir = artifact_dir(temp.path(), std::process::id(), 400, 1);
+        let second_dir = artifact_dir(temp.path(), std::process::id(), 400, 2);
+        let first = artifacts_in(&first_dir);
+        let second = artifacts_in(&second_dir);
+        create_and_mark_artifacts_active_with_timeout(&first, Duration::ZERO).unwrap();
+        create_and_mark_artifacts_active_with_timeout(&second, Duration::ZERO).unwrap();
+
+        let mut store = ArtifactRegistry::default();
+        store.by_id.insert("command-first".into(), first.clone());
+        store.by_id.insert("handle-first".into(), first.clone());
+        store.by_id.insert("command-second".into(), second.clone());
+        store.by_id.insert("handle-second".into(), second.clone());
+        store.completed.push_back(CompletedArtifact {
+            path: first_dir.clone(),
+            completed_at: SystemTime::UNIX_EPOCH,
+        });
+        store.completed.push_back(CompletedArtifact {
+            path: second_dir.clone(),
+            completed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+        });
+
+        retire_completed_artifacts_under_namespace(&mut store, 1, None);
+
+        assert!(!store.by_id.contains_key("command-first"));
+        assert!(!store.by_id.contains_key("handle-first"));
+        assert!(store.by_id.contains_key("command-second"));
+        assert!(store.by_id.contains_key("handle-second"));
+        assert_eq!(store.completed.len(), 1);
+        let active = ACTIVE_ARTIFACT_LEASES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(!active.contains_key(&first_dir));
+        assert!(active.contains_key(&second_dir));
+        drop(active);
+        mark_artifacts_inactive(&second);
     }
 
     #[test]
