@@ -425,6 +425,8 @@ pub type AgentLifecycleSpec = {
 
 /** Transcript, prompt, skill, and task-context extensions. */
 pub type AgentContextSpec = {
+  /** Initial user message content; omitted content uses the task text. */
+  initial_user_content?: string | list<dict>,
   /** Root for the canonical durable session store used by this run. */
   root?: string,
   transcript_projection?: string | dict,

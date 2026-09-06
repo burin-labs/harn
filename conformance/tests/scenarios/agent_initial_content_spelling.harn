@@ -29,10 +29,17 @@ pipeline default(harness: Harness) {
     {initial_user_content: "Canonical initial content."},
     "Canonical initial content.",
   )
-  assert_initial_content(
-    harness,
-    {initial_message_content: "Retired initial content."},
-    "Original task.",
-  )
+  let refused = false
+  try {
+    agent_loop(
+      harness,
+      "Original task.",
+      nil,
+      {provider: "mock", max_iterations: 1, initial_message_content: "Retired initial content."},
+    )
+  } catch (err) {
+    refused = contains(to_string(err), "initial_message_content")
+  }
+  assert(refused, "The retired spelling must be refused at the option boundary")
   harness.stdio.println("agent initial content spelling passed")
 }
