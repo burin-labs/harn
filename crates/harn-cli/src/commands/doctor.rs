@@ -23,6 +23,7 @@ use crate::package;
 mod next_step;
 mod process_sandbox;
 mod repo_checks;
+mod rust_toolchain;
 mod targets;
 
 use next_step::next_step_suggestion;
@@ -147,7 +148,7 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     let version_check = check_harn_version();
     let mut checks: Vec<DoctorCheck> = Vec::new();
     checks.push(version_check);
-    let toolchain = check_toolchain();
+    let toolchain = rust_toolchain::check_toolchain();
     checks.extend(toolchain.iter().cloned());
     checks.extend(check_dev_tools());
     checks.extend(check_protocol_artifacts());
@@ -869,33 +870,6 @@ impl ToolCheck {
         check.blocks = self.blocks.to_vec();
         check
     }
-}
-
-/// Checks the load-bearing toolchain — Rust + Cargo. These block every code
-/// workflow if missing, so they FAIL hard.
-fn check_toolchain() -> Vec<DoctorCheck> {
-    const TOOLS: &[ToolCheck] = &[
-        ToolCheck {
-            id: "rustc",
-            binary: "rustc",
-            version_args: &["--version"],
-            missing_status: DoctorStatus::Fail,
-            install_hint:
-                "https://rustup.rs (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh)",
-            docs_url: "https://www.rust-lang.org/tools/install",
-            blocks: &["build", "test", "release", "publish"],
-        },
-        ToolCheck {
-            id: "cargo",
-            binary: "cargo",
-            version_args: &["--version"],
-            missing_status: DoctorStatus::Fail,
-            install_hint: "https://rustup.rs",
-            docs_url: "https://doc.rust-lang.org/cargo/",
-            blocks: &["build", "test", "release", "publish"],
-        },
-    ];
-    TOOLS.iter().map(ToolCheck::run).collect()
 }
 
 /// Checks optional but recommended developer tools. These never FAIL — every

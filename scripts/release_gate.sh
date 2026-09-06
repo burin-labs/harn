@@ -442,8 +442,7 @@ run_generated_audit() {
   time_phase "language-spec drift" make check-language-spec
   time_phase "highlight drift" make check-highlight
   time_phase "CLI AOT drift" make check-cli-aot
-  time_phase "protocol artifact drift" \
-    make check-protocol-artifacts PROTOCOL_ARTIFACT_VERSION="$(current_version)"
+  time_phase "protocol artifact drift" make check-protocol-artifacts
   time_phase "connector schema drift" make check-connector-schemas
   time_phase "harness migration table drift" make check-harness-migrations
   time_phase "session bundle schema drift" make check-session-bundle-schema

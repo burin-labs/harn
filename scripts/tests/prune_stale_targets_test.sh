@@ -216,4 +216,114 @@ grep -Fq "invalid --remove-entry name" "$tmp_root/named-bad.txt" || {
   exit 1
 }
 
+# --- size ceiling ---------------------------------------------------------
+# Rank and age keep an entry however large the root grows, which is the whole
+# defect: a root can sit at any size with every rule reporting a pass. These
+# cases pin the ceiling AND the two things it must never override.
+size_root="$tmp_root/size"
+size_storage="$size_root/storage"
+size_repos="$size_root/repos"
+mkdir -p "$size_storage/harn-target" "$size_repos"
+
+# shellcheck disable=SC2119,SC2120  # called both with and without arguments
+run_size_gc() {
+  HARN_DEV_SETUP_STORAGE_ROOT="$size_storage" \
+    HARN_TARGET_GC_ROOTS="$size_repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" "$@"
+}
+
+# Three warm entries, each backed by a live worktree so rank and age keep them
+# all. 2 MiB apiece, so any ceiling below 6 MiB must bite.
+for n in old mid new; do
+  mkdir -p "$size_repos/$n"
+  git -C "$size_repos/$n" init -q 2>/dev/null || true
+  mkdir -p "$size_storage/harn-target/repos-$n"
+  dd if=/dev/zero of="$size_storage/harn-target/repos-$n/blob" bs=1024 count=2048 \
+    >/dev/null 2>&1
+done
+# Distinct activity stamps so "coldest first" has something to order by. The
+# stamp comes from the ENTRY DIRECTORY, not its contents, and writing the blob
+# above bumped it, so these have to land after the writes.
+touch -t 202001010000 "$size_storage/harn-target/repos-old"
+touch -t 202001020000 "$size_storage/harn-target/repos-mid"
+
+echo "the ceiling is off by default: an oversized root is left alone"
+run_size_gc > "$tmp_root/size-off.txt" 2>&1
+for n in old mid new; do
+  [[ -d "$size_storage/harn-target/repos-$n" ]] || {
+    echo "default run evicted repos-$n with no ceiling set" >&2
+    cat "$tmp_root/size-off.txt" >&2
+    exit 1
+  }
+done
+grep -Fq "size ceiling" "$tmp_root/size-off.txt" && {
+  echo "the size pass ran with no ceiling configured" >&2
+  exit 1
+}
+
+echo "a ceiling below the root size evicts coldest first until it fits"
+# 5 MiB: one 2 MiB entry must go, and it must be the oldest one.
+HARN_TARGET_GC_MAX_BYTES=5242880 run_size_gc > "$tmp_root/size-on.txt" 2>&1
+[[ ! -d "$size_storage/harn-target/repos-old" ]] || {
+  echo "the coldest entry survived the ceiling" >&2
+  cat "$tmp_root/size-on.txt" >&2
+  exit 1
+}
+for n in mid new; do
+  [[ -d "$size_storage/harn-target/repos-$n" ]] || {
+    echo "the ceiling evicted repos-$n past the point where the root fit" >&2
+    cat "$tmp_root/size-on.txt" >&2
+    exit 1
+  }
+done
+grep -Fq "over the size ceiling" "$tmp_root/size-on.txt" || {
+  echo "the eviction did not name the size ceiling as its reason" >&2
+  exit 1
+}
+
+echo "a ceiling above the root size changes nothing"
+HARN_TARGET_GC_MAX_BYTES=1073741824 run_size_gc > "$tmp_root/size-big.txt" 2>&1
+for n in mid new; do
+  [[ -d "$size_storage/harn-target/repos-$n" ]] || {
+    echo "a generous ceiling still evicted repos-$n" >&2
+    cat "$tmp_root/size-big.txt" >&2
+    exit 1
+  }
+done
+grep -Fq "over the size ceiling" "$tmp_root/size-big.txt" && {
+  echo "a generous ceiling still reported an eviction" >&2
+  exit 1
+}
+
+echo "a live process outranks the ceiling"
+: > "$size_storage/harn-target/repos-mid/.cargo-lock"
+exec 8<> "$size_storage/harn-target/repos-mid/.cargo-lock"
+sleep 60 <&8 &
+size_busy_pid=$!
+trap 'kill "$size_busy_pid" 2>/dev/null || true; exec 8>&-' EXIT
+until lsof -t -- "$size_storage/harn-target/repos-mid/.cargo-lock" 2>/dev/null | grep -q .; do
+  sleep 0.2
+done
+# 1 MiB is below even a single entry, so without the liveness guard the pass
+# would try to evict everything it can reach.
+HARN_TARGET_GC_MAX_BYTES=1048576 run_size_gc > "$tmp_root/size-live.txt" 2>&1
+[[ -d "$size_storage/harn-target/repos-mid" ]] || {
+  echo "the ceiling evicted an entry held by a live process" >&2
+  cat "$tmp_root/size-live.txt" >&2
+  exit 1
+}
+kill "$size_busy_pid" 2>/dev/null || true
+
+echo "a rejected ceiling value fails loudly instead of reading as unlimited"
+if HARN_TARGET_GC_MAX_BYTES=not-a-number run_size_gc > "$tmp_root/size-bad.txt" 2>&1; then
+  echo "a non-numeric ceiling was accepted" >&2
+  exit 1
+fi
+grep -Fq "HARN_TARGET_GC_MAX_BYTES must be a non-negative integer" "$tmp_root/size-bad.txt" || {
+  echo "the refusal did not name the reason" >&2
+  cat "$tmp_root/size-bad.txt" >&2
+  exit 1
+}
+
 echo "prune_stale_targets_test: ok"
