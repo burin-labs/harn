@@ -1,13 +1,11 @@
 import { agent_capture_events } from "std/agent/events"
-import { agent_loop } from "std/agent/loop"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { llm_tool_call, with_llm_script } from "std/testing"
+import { stall_checkpoint_fixture } from "./stall_checkpoint_fixture"
 
 /** Every step executes the real loop and carries its explicit checkpoint lifetime. */
 fn fixture(harness: Harness, enabled: bool, cap: int = 2) {
   const session = harness.agent.open()
   let executed = []
-  let checkpoint = nil
   const tools = tool_define(
     tool_registry(),
     "verify",
@@ -43,45 +41,20 @@ fn fixture(harness: Harness, enabled: bool, cap: int = 2) {
       },
     },
   )
+  const step = stall_checkpoint_fixture(
+    harness,
+    session,
+    registry,
+    {fresh_failure_grace: enabled, no_net_progress_hard_cap_after: cap},
+  )
   return {
     session: session,
     calls: fn() { return executed },
-    step: fn(name: string, value: string) {
-      const result = with_llm_script(
-        harness.llm,
-        [llm_tool_call(name, name == "verify" ? {failure: value} : {path: value}, value)],
-        { ->
-          agent_loop(
-            harness,
-            "Continue",
-            nil,
-            {
-              provider: "mock",
-              session_id: session,
-              tools: registry,
-              tool_format: "native",
-              max_iterations: 1,
-              stall_checkpoint: checkpoint,
-              stall_diagnostics: {
-                enabled: true,
-                fresh_failure_grace: enabled,
-                no_net_progress_extend_guard: true,
-                no_net_progress_hard_cap_after: cap,
-                repair_aware: false,
-                post_edit_reverify: false,
-                repeat_same_observation: 99,
-                repeat_same_error: 99,
-                repeat_success: 99,
-                ping_pong_cycles: 99,
-                hard_stop_after_trips: 99,
-              },
-            },
-          )
-        },
-      )
-      checkpoint = result.stall_checkpoint
-      return result
-    },
+    step: fn(name: string, value: string) { return step(
+      name,
+      name == "verify" ? {failure: value} : {path: value},
+      value,
+    ) },
   }
 }
 
@@ -95,13 +68,16 @@ pipeline test_fresh_failure_grace_defers_but_does_not_lose_the_cap(harness: Harn
         run.step("verify", "first")
         run.step("verify", "second")
         const boundary = run.step("look", "at-cap")
-      assert_eq(
-        boundary.stall_checkpoint.state.failing_verify_turns,
-        2,
-        "both actual typed failures must reach the canonical fold",
-      )
-      assert_eq(len(keys(boundary.stall_checkpoint.state.verify_signature_counts)), 2,
-        "the two failures must produce distinct canonical diagnostic signatures")
+        assert_eq(
+          boundary.stall_checkpoint.state.failing_verify_turns,
+          2,
+          "both actual typed failures must reach the canonical fold",
+        )
+        assert_eq(
+          len(keys(boundary.stall_checkpoint.state.verify_signature_counts)),
+          2,
+          "the two failures must produce distinct canonical diagnostic signatures",
+        )
         if !enabled {
           assert(
             boundary.stall_checkpoint.state.hard_stop,

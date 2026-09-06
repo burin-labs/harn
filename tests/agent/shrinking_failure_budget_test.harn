@@ -1,11 +1,8 @@
-import { agent_loop } from "std/agent/loop"
-import { AgentSpec } from "std/agent/options"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-import { llm_tool_call, with_llm_script } from "std/testing"
+import { stall_checkpoint_fixture } from "./stall_checkpoint_fixture"
 
 fn fixture(harness: Harness, enabled: bool, cap: int = 3) {
   const session = harness.agent.open()
-  let checkpoint = nil
   let executions = 0
   const tools = tool_define(
     tool_registry(),
@@ -33,6 +30,12 @@ fn fixture(harness: Harness, enabled: bool, cap: int = 3) {
     "Inspect source",
     {parameters: {}, annotations: {kind: "read"}, handler: { _ -> "source" }},
   )
+  const step = stall_checkpoint_fixture(
+    harness,
+    session,
+    registry,
+    {shrinking_failure_set_resets_budget: enabled, no_net_progress_hard_cap_after: cap},
+  )
   return {
     session: session,
     executions: fn() { return executions },
@@ -43,36 +46,7 @@ fn fixture(harness: Harness, enabled: bool, cap: int = 3) {
         complete: complete,
         status: status,
       }
-      const result = with_llm_script(
-        harness.llm,
-        [llm_tool_call(name, args)],
-        { ->
-          const options: AgentSpec = {
-            provider: "mock",
-            session_id: session,
-            tools: registry,
-            tool_format: "native",
-            max_iterations: 1,
-            stall_checkpoint: checkpoint,
-            stall_diagnostics: {
-              enabled: true,
-              shrinking_failure_set_resets_budget: enabled,
-              no_net_progress_extend_guard: true,
-              no_net_progress_hard_cap_after: cap,
-              repair_aware: false,
-              post_edit_reverify: false,
-              repeat_same_observation: 99,
-              repeat_same_error: 99,
-              repeat_success: 99,
-              ping_pong_cycles: 99,
-              hard_stop_after_trips: 99,
-            },
-          }
-          agent_loop(harness, "Continue", nil, options)
-        },
-      )
-      checkpoint = result.stall_checkpoint
-      return checkpoint.state
+      return step(name, args).stall_checkpoint.state
     },
   }
 }
