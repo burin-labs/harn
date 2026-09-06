@@ -734,7 +734,7 @@ fn initial_message_content_does_not_override_the_initial_message() {
     let mut opts = crate::value::DictMap::new();
     opts.insert(
         crate::value::intern_key("initial_message_content"),
-        VmValue::String("retired alias".into()),
+        crate::value::VmValue::String("retired alias".into()),
     );
 
     assert_eq!(
