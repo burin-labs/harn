@@ -280,13 +280,11 @@ pipeline test_worktree_refusal_requires_the_repository_to_own_admission(
     admitted.reason.contains("scripts/fleet-worktree-admit.ts"),
     "the refusal must name where this repository provides the command: " + admitted.reason,
   )
-
   const unadmitted = decision(codex_payload(creation), UNADMITTED)
   assert(
     unadmitted.allow,
     "a repository with no admission command must allow raw creation: " + unadmitted.reason,
   )
-
   // Everything else the guard refuses is unaffected by admission.
   assert(!decision(codex_payload("cargo test"), UNADMITTED).allow)
 }
@@ -319,15 +317,12 @@ pipeline test_admission_is_read_from_the_wrappers_measurement(harness: Harness, 
   assert(!unmeasured.available)
   assert(unmeasured.denial != "", "an unset checked flag must be a denial")
   assert(unmeasured.denial.contains(ADMISSION_CHECKED_ENV))
-
   const none_here = worktree_admission_reported("1", "")
   assert(!none_here.available)
   assert_eq(none_here.denial, "", "a measured absence is an answer, not a denial")
-
   const owned = worktree_admission_reported("1", "scripts/fleet-worktree-admit.ts")
   assert(owned.available)
   assert_eq(owned.command, "scripts/fleet-worktree-admit.ts")
-
   // A wrapper naming a path this policy does not know has drifted from it.
   // Refusing by name beats silently treating the rename as "no command here".
   const drifted = worktree_admission_reported("1", "scripts/renamed-admit.ts")
