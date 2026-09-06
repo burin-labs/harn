@@ -127,6 +127,21 @@ release_tag_is_canonical() {
   [[ "${1:-}" == v* ]] && release_version_is_canonical "${1#v}"
 }
 
+# Resolve publication identity from the repository's complete stable tag list.
+# A certified tag may name an immutable candidate that is not in main's
+# ancestry, so callers must not narrow this inventory with `--merged`.
+release_latest_stable_tag() {
+  local tag
+  while IFS= read -r tag; do
+    if release_tag_is_canonical "$tag" \
+      && ! release_version_is_prerelease "${tag#v}"; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done < <(git tag --list 'v*' --sort=-v:refname)
+  return 1
+}
+
 release_branch_is_canonical() {
   [[ "${1:-}" == release/v* ]] && release_version_is_canonical "${1#release/v}"
 }
