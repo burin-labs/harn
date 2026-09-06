@@ -102,7 +102,7 @@ impl ProcessSandboxOperation {
 /// cannot do better; what changes is that its uncertainty is now a field
 /// (`observability`) instead of something a consumer has to know by folklore.
 ///
-/// Consumed by the approval ladder to offer a re-exec with widened scope, which
+/// Projected into both the event stream and the command handler result, which
 /// is why `command` and `cwd` are mandatory and `refused_paths` is not: those
 /// two are known at spawn on every platform, and the path is not.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,9 +131,9 @@ impl ProcessSandboxRefusal {
 
     /// Emit the refusal as a structured event.
     ///
-    /// This is the carrier the approval ladder consumes to offer a re-exec with
-    /// widened scope, so it is emitted at the moment of classification rather
-    /// than reconstructed later from an error string.
+    /// This event-side projection is emitted at the moment of classification.
+    /// The command response carries the same typed record independently, so
+    /// neither consumer reconstructs it later from an error string.
     pub fn emit(&self) {
         let mut metadata = std::collections::BTreeMap::new();
         metadata.insert("schema".to_string(), serde_json::json!(self.schema));
