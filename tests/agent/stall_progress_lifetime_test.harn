@@ -99,7 +99,7 @@ pipeline test_completed_progress_is_folded_once_across_stage_handoffs(harness: H
   const sid = harness.agent.open()
   let handlers = []
   let observed = []
-  let checkpoint = nil
+  let checkpoint: any = nil
   const tools = tool_define(
     tool_registry(),
     "verify",
